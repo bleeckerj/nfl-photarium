@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 type SelectOption = {
   label: string;
@@ -15,6 +15,8 @@ type MonoSelectProps = {
   placeholder?: string;
   disabled?: boolean;
   className?: string;
+  searchable?: boolean;
+  searchPlaceholder?: string;
 };
 
 const cn = (...classes: Array<string | false | null | undefined>) =>
@@ -28,18 +30,32 @@ export default function MonoSelect({
   onChange,
   placeholder = 'Select…',
   disabled = false,
-  className
+  className,
+  searchable = false,
+  searchPlaceholder = 'Type to filter…'
 }: MonoSelectProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-  const selectedIndex = options.findIndex((opt) => opt.value === value);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const filteredOptions = useMemo(() => {
+    if (!searchable) {
+      return options;
+    }
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) {
+      return options;
+    }
+    return options.filter((option) => option.label.toLowerCase().includes(query));
+  }, [options, searchable, searchQuery]);
+  const selectedIndex = filteredOptions.findIndex((opt) => opt.value === value);
   const [highlightedIndex, setHighlightedIndex] = useState(
     selectedIndex >= 0 ? selectedIndex : 0
   );
 
   useEffect(() => {
     setHighlightedIndex(selectedIndex >= 0 ? selectedIndex : 0);
-  }, [selectedIndex, options.length]);
+  }, [selectedIndex, filteredOptions.length]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -53,27 +69,46 @@ export default function MonoSelect({
 
   const handleToggle = () => {
     if (disabled) return;
-    setOpen((prev) => !prev);
+    setOpen((prev) => {
+      const next = !prev;
+      if (next && searchable) {
+        setSearchQuery('');
+      }
+      return next;
+    });
   };
 
   const handleOptionSelect = (index: number) => {
-    const option = options[index];
+    const option = filteredOptions[index];
     if (!option || option.disabled) return;
     onChange(option.value);
     setOpen(false);
   };
 
   const moveHighlight = (direction: 1 | -1) => {
-    if (options.length === 0) return;
+    if (filteredOptions.length === 0) return;
     let nextIndex = highlightedIndex;
     do {
-      nextIndex = (nextIndex + direction + options.length) % options.length;
-    } while (options[nextIndex]?.disabled && nextIndex !== highlightedIndex);
+      nextIndex =
+        (nextIndex + direction + filteredOptions.length) % filteredOptions.length;
+    } while (filteredOptions[nextIndex]?.disabled && nextIndex !== highlightedIndex);
     setHighlightedIndex(nextIndex);
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
     if (disabled) return;
+    if (
+      searchable &&
+      event.key.length === 1 &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey
+    ) {
+      event.preventDefault();
+      setOpen(true);
+      setSearchQuery((prev) => `${prev}${event.key}`);
+      return;
+    }
     switch (event.key) {
       case 'ArrowDown':
         event.preventDefault();
@@ -111,7 +146,13 @@ export default function MonoSelect({
     }
   };
 
-  const selectedOption = options[selectedIndex];
+  useEffect(() => {
+    if (open && searchable) {
+      setTimeout(() => searchInputRef.current?.focus(), 0);
+    }
+  }, [open, searchable]);
+
+  const selectedOption = options.find((opt) => opt.value === value);
 
   return (
     <div ref={containerRef} className={cn('relative', className)}>
@@ -159,10 +200,23 @@ export default function MonoSelect({
           id={id ? `${id}-listbox` : undefined}
           className="absolute z-40 mt-1 w-full max-h-64 overflow-auto rounded-md border border-gray-200 bg-white shadow-xl"
         >
-          {options.length === 0 ? (
-            <div className="px-3 py-2 text-[0.9em] text-gray-400">No options available</div>
+          {searchable && (
+            <div className="sticky top-0 bg-white border-b border-gray-200 px-2 py-2">
+              <input
+                ref={searchInputRef}
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder={searchPlaceholder}
+                className="w-full border border-gray-200 rounded-md px-2 py-1 text-[0.85em] focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+          )}
+          {filteredOptions.length === 0 ? (
+            <div className="px-3 py-2 text-[0.9em] text-gray-400">
+              {options.length === 0 ? 'No options available' : 'No matches found'}
+            </div>
           ) : (
-            options.map((option, index) => (
+            filteredOptions.map((option, index) => (
               <button
                 type="button"
                 role="option"

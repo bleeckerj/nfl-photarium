@@ -13,6 +13,7 @@ You can push images into this service from other local tools (Astro, scripts, et
 | `tags` | ❌ | Comma-separated list (`landing, hero`). |
 | `description` | ❌ | Brief text description. |
 | `originalUrl` | ❌ | Reference URL of the source image. |
+| `parentId` | ❌ | Cloudflare image ID to treat this upload as a variant of. |
 
 **Sample response**
 
@@ -25,7 +26,8 @@ You can push images into this service from other local tools (Astro, scripts, et
    "uploaded": "2025-11-28T17:05:12.345Z",
    "folder": "astro-uploads",
    "tags": ["astro", "cloudflare"],
-   "description": "Hero image"
+   "description": "Hero image",
+   "parentId": "parent-image-id"
 }
 ```
 
@@ -73,6 +75,25 @@ console.log("Cloudflare URL:", result.url);
 ```
 
 The API response includes `url` (permanent Cloudflare delivery) and a `variants` array, so once the POST succeeds you immediately know which CDN link to use.
+
+### Parent + variant relationships
+
+Variants are ordinary Cloudflare images whose metadata includes a `variationParentId`. You can set that relationship in two ways:
+
+- **On upload**: include `parentId` in the `multipart/form-data` POST to `/api/upload/external`.
+- **After upload**: patch an existing image with `parentId` via `PATCH /api/images/{id}/update`.
+
+There is no app-level cap on how many variants a parent can have; the link is just a metadata field stored on each variant. The parent does not maintain a reverse list, so to find variants you filter images where `parentId` matches your chosen parent ID (e.g., by client-side filtering of `/api/images` results).
+
+**Example (assign a parent after upload)**
+
+```js
+await fetch(`/api/images/${variantId}/update`, {
+  method: 'PATCH',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ parentId: parentImageId })
+});
+```
 
 `POST /api/import` now tolerates responses whose `Content-Type` isn’t `image/*` as long as the URL path ends with a known image extension (`.jpg`, `.png`, `.webp`, etc.). The route infers the MIME from the extension and proceeds, so S3 links that stream `application/octet-stream` often upload without extra work. If the source URL lacks an image-like header or extension, download the bytes yourself, tag them with the desired MIME, and post directly to `/api/upload/external` so the upload still treats the blob as an image.
 

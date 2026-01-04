@@ -22,6 +22,7 @@ interface CloudflareImage {
   variants: string[];
   folder?: string;
   tags?: string[];
+  description?: string;
   aspectRatio?: string;
   dimensions?: { width: number; height: number };
   altTag?: string;
@@ -40,7 +41,8 @@ export interface ImageGalleryRef {
   refreshImages: () => void;
 }
 
-const PAGE_SIZE = 30;
+const DEFAULT_PAGE_SIZE = 30;
+const PAGE_SIZE_OPTIONS = [12, 24, 30, 48, 60, 90, 120];
 const HIDDEN_FOLDERS_STORAGE_KEY = 'galleryHiddenFolders';
 const HIDDEN_TAGS_STORAGE_KEY = 'galleryHiddenTags';
 const BROKEN_AUDIT_STORAGE_KEY = 'galleryBrokenAudit';
@@ -174,7 +176,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
         bulkFolderInput: '',
         bulkFolderMode: 'existing' as 'existing' | 'new',
         showDuplicatesOnly: false,
-        showBrokenOnly: false
+        showBrokenOnly: false,
+        pageSize: DEFAULT_PAGE_SIZE
       };
     }
     try {
@@ -192,7 +195,12 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
           filtersCollapsed?: boolean;
           showDuplicatesOnly?: boolean;
           showBrokenOnly?: boolean;
+          pageSize?: number;
         };
+        const rawPageSize = typeof parsed.pageSize === 'number' ? parsed.pageSize : DEFAULT_PAGE_SIZE;
+        const normalizedPageSize = PAGE_SIZE_OPTIONS.includes(rawPageSize)
+          ? rawPageSize
+          : DEFAULT_PAGE_SIZE;
         return {
           variant: typeof parsed.variant === 'string' ? parsed.variant : 'public',
           onlyCanonical: Boolean(parsed.onlyCanonical),
@@ -206,7 +214,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
           bulkFolderInput: typeof parsed.bulkFolderInput === 'string' ? parsed.bulkFolderInput : '',
           bulkFolderMode: parsed.bulkFolderMode === 'new' ? 'new' : 'existing',
           showDuplicatesOnly: Boolean(parsed.showDuplicatesOnly),
-          showBrokenOnly: Boolean(parsed.showBrokenOnly)
+          showBrokenOnly: Boolean(parsed.showBrokenOnly),
+          pageSize: normalizedPageSize
         };
       }
     } catch (error) {
@@ -225,7 +234,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
       bulkFolderInput: '',
       bulkFolderMode: 'existing',
       showDuplicatesOnly: false,
-      showBrokenOnly: false
+      showBrokenOnly: false,
+      pageSize: DEFAULT_PAGE_SIZE
     };
   };
 
@@ -259,6 +269,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [showDuplicatesOnly, setShowDuplicatesOnly] = useState<boolean>(storedPreferencesRef.current.showDuplicatesOnly ?? false);
   const [showBrokenOnly, setShowBrokenOnly] = useState<boolean>(storedPreferencesRef.current.showBrokenOnly ?? false);
+  const [pageSize, setPageSize] = useState<number>(storedPreferencesRef.current.pageSize ?? DEFAULT_PAGE_SIZE);
   const [brokenAudit, setBrokenAudit] = useState<BrokenAudit>(() => loadBrokenAuditFromStorage());
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditProgress, setAuditProgress] = useState({ checked: 0, total: 0 });
@@ -282,12 +293,13 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
         bulkFolderInput,
         bulkFolderMode,
         showDuplicatesOnly,
-        showBrokenOnly
+        showBrokenOnly,
+        pageSize
       }));
     } catch (error) {
       console.warn('Failed to save gallery prefs', error);
     }
-  }, [onlyCanonical, respectAspectRatio, selectedVariant, onlyWithVariants, selectedFolder, selectedTag, searchTerm, viewMode, filtersCollapsed, bulkFolderInput, bulkFolderMode, showDuplicatesOnly, showBrokenOnly]);
+  }, [onlyCanonical, respectAspectRatio, selectedVariant, onlyWithVariants, selectedFolder, selectedTag, searchTerm, viewMode, filtersCollapsed, bulkFolderInput, bulkFolderMode, showDuplicatesOnly, showBrokenOnly, pageSize]);
   useEffect(() => {
     persistHiddenFolders(hiddenFolders);
   }, [hiddenFolders]);
@@ -1256,17 +1268,17 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
     setHiddenFolders([]);
   }, []);
 
-  const totalPages = Math.max(1, Math.ceil(sortedImages.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(sortedImages.length / pageSize));
   const pageIndex = Math.min(currentPage, totalPages);
-  const pageSliceStart = (pageIndex - 1) * PAGE_SIZE;
-  const pageImages = sortedImages.slice(pageSliceStart, pageSliceStart + PAGE_SIZE);
-  const showPagination = sortedImages.length > PAGE_SIZE;
+  const pageSliceStart = (pageIndex - 1) * pageSize;
+  const pageImages = sortedImages.slice(pageSliceStart, pageSliceStart + pageSize);
+  const showPagination = sortedImages.length > pageSize;
   const hasResults = sortedImages.length > 0;
 
   useEffect(() => {
     setCurrentPage(1);
     scrollGalleryToTop();
-  }, [selectedFolder, selectedTag, searchTerm, onlyWithVariants, showDuplicatesOnly, showBrokenOnly, scrollGalleryToTop]);
+  }, [selectedFolder, selectedTag, searchTerm, onlyWithVariants, showDuplicatesOnly, showBrokenOnly, pageSize, scrollGalleryToTop]);
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -1292,8 +1304,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
 
   const getPageDateRangeLabel = (pageNumber: number) => {
     if (pageNumber < 1 || pageNumber > totalPages) return null;
-    const startIndex = (pageNumber - 1) * PAGE_SIZE;
-    const slice = sortedImages.slice(startIndex, startIndex + PAGE_SIZE);
+    const startIndex = (pageNumber - 1) * pageSize;
+    const slice = sortedImages.slice(startIndex, startIndex + pageSize);
     return formatDateRangeLabel(slice);
   };
 
@@ -1537,7 +1549,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
         >
           <div
             id="gallery-filter-controls"
-            className={`grid grid-cols-1 md:grid-cols-5 gap-4 p-4 bg-gray-50 rounded-lg items-end transition-opacity duration-300 ${filtersCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+            className={`grid grid-cols-1 md:grid-cols-6 gap-4 p-4 bg-gray-50 rounded-lg items-end transition-opacity duration-300 ${filtersCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
           >
             <div>
             <label htmlFor="search" className="block text-[0.7em] font-mono font-mono font-medum text-gray-700 mb-1">
@@ -1600,6 +1612,22 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
             />
           </div>
 
+          <div>
+            <label htmlFor="page-size-select" className="block text-[0.7em] font-mono font-mono font-medum text-gray-700 mb-1">
+              Per page
+            </label>
+            <MonoSelect
+              id="page-size-select"
+              value={String(pageSize)}
+              onChange={(nextValue) => {
+                const parsed = Number(nextValue);
+                setPageSize(PAGE_SIZE_OPTIONS.includes(parsed) ? parsed : DEFAULT_PAGE_SIZE);
+              }}
+              options={PAGE_SIZE_OPTIONS.map((size) => ({ value: String(size), label: String(size) }))}
+              className="w-full"
+            />
+          </div>
+
           <div className="flex flex-col gap-1 text-[0.7em] font-mono text-gray-700">
             <label htmlFor="canonical-filter" className="flex items-center gap-1 font-mono">
               <input
@@ -1652,7 +1680,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
               broken
             </label>
           </div>
-          <div className="md:col-span-5 flex flex-wrap items-center gap-3 text-[0.65rem] font-mono text-gray-600">
+          <div className="md:col-span-6 flex flex-wrap items-center gap-3 text-[0.65rem] font-mono text-gray-600">
             <button
               onClick={runBrokenAudit}
               disabled={auditLoading}
@@ -1676,7 +1704,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
             )}
           </div>
           {(auditLoading || auditEntries.length > 0) && (
-            <div className="md:col-span-5 rounded-md border border-gray-200 bg-white p-3 text-[0.65rem] font-mono text-gray-700">
+            <div className="md:col-span-6 rounded-md border border-gray-200 bg-white p-3 text-[0.65rem] font-mono text-gray-700">
               <div className="flex items-center justify-between">
                 <span>Audit log {auditEntries.length >= AUDIT_LOG_LIMIT ? `(last ${AUDIT_LOG_LIMIT})` : ''}</span>
                 {auditLoading && <span className="text-gray-500">Running…</span>}
@@ -1706,7 +1734,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
               </div>
             </div>
           )}
-          <div className="md:col-span-5">
+          <div className="md:col-span-6">
             <GalleryCommandBar
               hiddenFolders={hiddenFolders}
               hiddenTags={hiddenTags}
@@ -1718,6 +1746,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
               onHideTag={hideTagByName}
               onUnhideTag={unhideTagByName}
               onClearHiddenTags={clearHiddenTags}
+              onSelectFolder={setSelectedFolder}
               selectedTag={selectedTag}
               onSelectTag={setSelectedTag}
               onClearTagFilter={() => setSelectedTag('')}
@@ -1729,7 +1758,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
             />
           </div>
             {hiddenFolders.length > 0 && (
-              <div className="md:col-span-5 flex flex-wrap items-center gap-2 p-3 bg-white border border-gray-200 rounded-lg text-[0.65rem] font-mono text-gray-700">
+              <div className="md:col-span-6 flex flex-wrap items-center gap-2 p-3 bg-white border border-gray-200 rounded-lg text-[0.65rem] font-mono text-gray-700">
                 <span className="uppercase tracking-wide text-gray-500 text-[0.6rem]">Hidden folders</span>
                 {hiddenFolders.map(folder => (
                   <button
@@ -1751,7 +1780,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
               </div>
             )}
             {hiddenTags.length > 0 && (
-              <div className="md:col-span-5 flex flex-wrap items-center gap-2 p-3 bg-white border border-gray-200 rounded-lg text-[0.65rem] font-mono text-gray-700">
+              <div className="md:col-span-6 flex flex-wrap items-center gap-2 p-3 bg-white border border-gray-200 rounded-lg text-[0.65rem] font-mono text-gray-700">
                 <span className="uppercase tracking-wide text-gray-500 text-[0.6rem]">Hidden tags</span>
                 {hiddenTags.map(tag => (
                   <button

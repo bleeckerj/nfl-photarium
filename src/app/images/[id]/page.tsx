@@ -160,7 +160,7 @@ export default function ImageDetailPage() {
             .filter((img) => img.folder && img.folder.trim())
             .map((img) => String(img.folder))
         )
-      );
+      ).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
       setUniqueFolders(folders as string[]);
     },
     [id]
@@ -1468,6 +1468,16 @@ export default function ImageDetailPage() {
             <p className="text-xs text-gray-500 mt-1">
               Uploaded {new Date(image.uploaded).toLocaleString()}
             </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-gray-600">
+              <span className="text-gray-500">Image ID</span>
+              <span className="font-mono text-gray-800">{image.id}</span>
+              <button
+                onClick={async () => { await copyToClipboard(image.id, 'Image ID', 'Image ID copied'); }}
+                className="px-2 py-0.5 border border-gray-300 rounded hover:bg-gray-100 text-[10px]"
+              >
+                Copy
+              </button>
+            </div>
             <AspectRatioDisplay imageId={image.id} />
           </div>
 
@@ -1578,6 +1588,8 @@ export default function ImageDetailPage() {
                   options={detailFolderOptions}
                   className="w-full"
                   placeholder="[none]"
+                  searchable
+                  searchPlaceholder="Search folders…"
                 />
                 {folderSelect === '__create__' && (
                   <input

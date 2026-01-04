@@ -1,10 +1,12 @@
 export interface GalleryImage {
   id: string;
   filename: string;
+  displayName?: string;
   uploaded: string;
   variants: string[];
   folder?: string;
   tags?: string[];
+  description?: string;
   altTag?: string;
   parentId?: string;
   originalUrl?: string;
@@ -43,8 +45,10 @@ const matchesSearchFilter = (image: GalleryImage, searchTerm: string) => {
   const baseHaystacks = [
     normalize(image.id),
     normalize(image.filename),
+    normalize(image.displayName),
     normalize(image.folder),
     normalize(image.altTag),
+    normalize(image.description),
     normalize(image.originalUrl),
     normalize(image.originalUrlNormalized),
     ...(image.tags?.map(normalize) ?? []),
