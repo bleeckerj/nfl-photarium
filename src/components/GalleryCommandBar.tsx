@@ -158,11 +158,19 @@ export default function GalleryCommandBar({
         setStatusLine('Provide at least one folder to show.');
         return;
       }
+      const wantsNoFolder = requested.some((folder) => {
+        const normalized = folder.trim().toLowerCase();
+        return normalized === 'no-folder' || normalized === 'no folder';
+      });
+      const requestedFolders = requested.filter((folder) => {
+        const normalized = folder.trim().toLowerCase();
+        return normalized !== 'no-folder' && normalized !== 'no folder';
+      });
       const validSet = new Set(
-        requested.filter(folder => knownFolders.includes(folder))
+        requestedFolders.filter(folder => knownFolders.includes(folder))
       );
-      const missing = requested.filter(folder => !knownFolders.includes(folder));
-      if (validSet.size === 0) {
+      const missing = requestedFolders.filter(folder => !knownFolders.includes(folder));
+      if (validSet.size === 0 && !wantsNoFolder) {
         setStatusLine('None of those folders exist.');
         return;
       }
@@ -173,8 +181,16 @@ export default function GalleryCommandBar({
           onHideFolder(folder);
         }
       });
+      if (wantsNoFolder) {
+        onUnhideFolder('no-folder');
+      } else {
+        onHideFolder('no-folder');
+      }
       onSelectFolder('all');
-      const summary = Array.from(validSet).join(', ');
+      const summary = [
+        ...Array.from(validSet),
+        ...(wantsNoFolder ? ['no-folder'] : [])
+      ].join(', ');
       setStatusLine(
         missing.length
           ? `Showing only folders: ${summary}. Unknown: ${missing.join(', ')}.`

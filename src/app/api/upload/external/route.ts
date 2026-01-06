@@ -4,6 +4,7 @@ import sharp from 'sharp';
 import { transformApiImageToCached, upsertCachedImage } from '@/server/cloudflareImageCache';
 import { findDuplicatesByContentHash, findDuplicatesByOriginalUrl, toDuplicateSummary } from '@/server/duplicateDetector';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
+import { enforceCloudflareMetadataLimit } from '@/utils/cloudflareMetadata';
 import { extractExifSummary } from '@/utils/exif';
 
 const corsHeaders = {
@@ -142,7 +143,11 @@ export async function POST(request: NextRequest) {
       exif: exifSummary,
     };
 
-    const metadata = JSON.stringify(metadataPayload);
+    const { metadata: limitedMetadata, dropped } = enforceCloudflareMetadataLimit(metadataPayload);
+    if (dropped.length) {
+      logExternalIssue('Metadata trimmed to fit Cloudflare limits', { dropped });
+    }
+    const metadata = JSON.stringify(limitedMetadata);
 
     uploadFormData.append('metadata', metadata);
 
@@ -168,7 +173,7 @@ export async function POST(request: NextRequest) {
     }
 
     const imageData = result.result;
-    const baseMeta = imageData.meta ?? metadataPayload;
+    const baseMeta = imageData.meta ?? limitedMetadata;
     upsertCachedImage(
       transformApiImageToCached({
         id: imageData.id,
@@ -193,7 +198,11 @@ export async function POST(request: NextRequest) {
           variationParentId: cleanParentId,
           linkedAssetId: imageData.id,
         };
-        webpFormData.append('metadata', JSON.stringify(webpMetadata));
+        const { metadata: limitedWebpMetadata, dropped } = enforceCloudflareMetadataLimit(webpMetadata);
+        if (dropped.length) {
+          logExternalIssue('Metadata trimmed for webp variant', { dropped });
+        }
+        webpFormData.append('metadata', JSON.stringify(limitedWebpMetadata));
         const webpResponse = await fetch(
           `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1`,
           {
@@ -217,7 +226,7 @@ export async function POST(request: NextRequest) {
                 filename: webpResult.filename,
                 uploaded: webpResult.uploaded,
                 variants: webpResult.variants,
-                meta: webpResult.meta ?? webpMetadata
+                meta: webpResult.meta ?? limitedWebpMetadata
               })
             );
           }

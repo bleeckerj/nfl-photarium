@@ -11,10 +11,12 @@
     "count:folder": "node scripts/count-folder-images.mjs",
     "refresh:hash-cache": "node scripts/refresh-hash-cache.mjs",
     "diag:duplicates": "node scripts/diagnose-duplicates.mjs",
-    "audit:broken": "node scripts/audit-broken-images.mjs"
+    "audit:broken": "node scripts/audit-broken-images.mjs",
+    "watch:drop-off": "node scripts/watch-drop-off.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",
+    "adm-zip": "^0.5.16",
     "exif-reader": "^2.0.2",
     "lucide-react": "^0.545.0",
     "next": "15.5.4",
@@ -29,6 +31,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/adm-zip": "^0.5.7",
     "eslint": "^9",
     "eslint-config-next": "15.5.4",
     "tailwindcss": "^4",

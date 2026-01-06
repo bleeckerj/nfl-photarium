@@ -91,3 +91,58 @@ export function cleanString(value?: string | null): string | undefined {
 
   return trimmed;
 }
+
+const getMetadataByteSize = (payload: Record<string, unknown>) =>
+  Buffer.byteLength(JSON.stringify(payload), 'utf8');
+
+export function enforceCloudflareMetadataLimit(
+  payload: Record<string, unknown>,
+  limitBytes = 1024
+) {
+  let trimmed = { ...payload };
+  let size = getMetadataByteSize(trimmed);
+  const dropped: string[] = [];
+  const dropOrder = [
+    'exif',
+    'description',
+    'tags',
+    'originalUrlNormalized',
+    'originalUrl',
+    'folder',
+    'displayName',
+    'filename',
+    'contentHash',
+    'uploadedAt',
+    'type',
+    'size',
+    'variationParentId',
+    'linkedAssetId',
+    'variationSort'
+  ];
+
+  for (const key of dropOrder) {
+    if (size <= limitBytes) break;
+    if (Object.prototype.hasOwnProperty.call(trimmed, key)) {
+      delete trimmed[key];
+      dropped.push(key);
+      size = getMetadataByteSize(trimmed);
+    }
+  }
+
+  if (size > limitBytes) {
+    const stringKeys = Object.keys(trimmed).filter(
+      (key) => typeof trimmed[key] === 'string'
+    );
+    stringKeys.sort(
+      (a, b) => String(trimmed[b]).length - String(trimmed[a]).length
+    );
+    for (const key of stringKeys) {
+      if (size <= limitBytes) break;
+      delete trimmed[key];
+      dropped.push(key);
+      size = getMetadataByteSize(trimmed);
+    }
+  }
+
+  return { metadata: trimmed, dropped };
+}

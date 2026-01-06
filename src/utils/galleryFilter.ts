@@ -69,7 +69,10 @@ const matchesSearchFilter = (image: GalleryImage, searchTerm: string) => {
 
 const matchesHiddenFolderFilter = (image: GalleryImage, hiddenFolders?: string[]) => {
   if (!hiddenFolders || hiddenFolders.length === 0) return true;
-  if (!image.folder) return true;
+  const hiddenNoFolder = hiddenFolders.some(
+    (folder) => normalize(folder).replace(/\s+/g, '-') === 'no-folder'
+  );
+  if (!image.folder) return !hiddenNoFolder;
   return !hiddenFolders.includes(image.folder);
 };
 

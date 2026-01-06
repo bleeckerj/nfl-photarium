@@ -139,6 +139,25 @@ curl -X POST http://localhost:3000/api/upload/external \
    -F "tags=astro,cloudflare"
 ```
 
+## Drop-off Folder Watcher
+
+If you want a simple file-system watcher that uploads new images automatically, run:
+
+```bash
+npm run watch:drop-off
+```
+
+By default it watches `./drop-off`, uploads images to the `drop-off` folder with tag `found`, and then calls the ALT generator (`/api/images/:id/alt`). You can override behavior with environment variables:
+
+```env
+DROP_OFF_DIR=/absolute/path/to/watch
+DROP_OFF_BASE_URL=http://localhost:3000
+DROP_OFF_FOLDER=drop-off
+DROP_OFF_TAGS=found
+DROP_OFF_STATE_FILE=/absolute/path/to/.watcher-state.json
+DROP_OFF_PROCESS_EXISTING=true
+```
+
 ### Astro Integration Example
 
 Below is an Astro component snippet that adds a button below each thumbnail. Clicking the button fetches the image blob in the **browser**, builds `FormData`, and posts it to the external API. (Astro can stay static—this script runs client-side.)

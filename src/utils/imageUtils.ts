@@ -13,7 +13,7 @@ export const IMAGE_VARIANTS: ImageVariant[] = [
   { name: 'small', value: 'w=300', description: 'Small (300px width)', width: 300 },
   { name: 'medium', value: 'w=600', description: 'Medium (600px width)', width: 600 },
   { name: 'large', value: 'w=900', description: 'Large (900px width)', width: 900 },
-  { name: 'xlarge', value: 'w=1230', description: 'Extra Large (1230px width)', width: 1230 },
+  { name: 'xlarge', value: 'w=1200', description: 'Extra Large (1200px width)', width: 1200 },
   { name: 'thumbnail', value: 'w=150', description: 'Thumbnail size (150px width)', width: 150 },
 ];
 
@@ -79,7 +79,7 @@ export function getResponsiveSrcSet(imageId: string, accountHash?: string): stri
     { width: 300, descriptor: '300w' },
     { width: 600, descriptor: '600w' },
     { width: 900, descriptor: '900w' },
-    { width: 1230, descriptor: '1230w' },
+    { width: 1200, descriptor: '1200w' },
   ];
 
   return sizes

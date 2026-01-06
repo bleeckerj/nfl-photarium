@@ -3,7 +3,7 @@
 import React, { CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { getMultipleImageUrls, getCloudflareImageUrl } from '@/utils/imageUtils';
+import { getMultipleImageUrls, getCloudflareImageUrl, IMAGE_VARIANTS } from '@/utils/imageUtils';
 import { useToast } from '@/components/Toast';
 import { Sparkles, RotateCcw, RotateCw, ChevronUp, ChevronDown, GripVertical } from 'lucide-react';
 import FolderManagerButton from '@/components/FolderManagerButton';
@@ -35,6 +35,14 @@ interface CloudflareImage {
 }
 
 const DEFAULT_LIST_VARIANT = 'original';
+const VARIANT_DIMENSIONS = new Map(IMAGE_VARIANTS.map(variant => [variant.name, variant.width]));
+
+type BulkUpdateFailure = {
+  id: string;
+  name: string;
+  error?: string;
+  reason?: 'metadata' | 'network' | 'unknown';
+};
 
 const ensureWebpFormat = (inputUrl: string) => {
   const parts = inputUrl.split('?');
@@ -42,6 +50,35 @@ const ensureWebpFormat = (inputUrl: string) => {
   const params = new URLSearchParams(parts[1] || '');
   params.set('format', 'webp');
   return `${base}?${params.toString()}`;
+};
+const getVariantWidthLabel = (variant: string) => {
+  const width = VARIANT_DIMENSIONS.get(variant);
+  if (!width) {
+    return null;
+  }
+  return `${width}px`;
+};
+
+const isMetadataLimitError = (message?: string) => {
+  if (!message) return false;
+  const lowered = message.toLowerCase();
+  return (
+    lowered.includes('metadata') &&
+    (lowered.includes('too large') ||
+      lowered.includes('size') ||
+      lowered.includes('limit') ||
+      lowered.includes('exceed') ||
+      lowered.includes('maximum'))
+  );
+};
+
+const formatFailureNames = (failures: BulkUpdateFailure[]) => {
+  const names = failures.map((failure) => failure.name);
+  const preview = names.slice(0, 3).join(', ');
+  if (names.length <= 3) {
+    return preview;
+  }
+  return `${preview} +${names.length - 3} more`;
 };
 
 const formatEntriesAsYaml = (entries: { url: string; altText: string }[]) => {
@@ -75,8 +112,12 @@ export default function ImageDetailPage() {
   const [altLoadingMap, setAltLoadingMap] = useState<Record<string, boolean>>({});
   const [bulkDescriptionApplying, setBulkDescriptionApplying] = useState(false);
   const [bulkAltApplying, setBulkAltApplying] = useState(false);
+  const [bulkFolderApplying, setBulkFolderApplying] = useState(false);
+  const [bulkTagsAppending, setBulkTagsAppending] = useState(false);
+  const [bulkTagsReplacing, setBulkTagsReplacing] = useState(false);
   const [variationPage, setVariationPage] = useState(1);
   const [adoptPage, setAdoptPage] = useState(1);
+  const [listVariant, setListVariant] = useState(DEFAULT_LIST_VARIANT);
   const VARIATION_PAGE_SIZE = 12;
   const ADOPT_PAGE_SIZE = 12;
   const [hoverPreview, setHoverPreview] = useState<{
@@ -97,7 +138,9 @@ export default function ImageDetailPage() {
   } = useDropzone({
     onDrop: onVariantDrop,
     accept: {
-      'image/*': ['.jpeg', '.jpg', '.png', '.gif', '.webp', '.svg']
+      'image/*': ['.jpeg', '.jpg', '.png', '.gif', '.webp', '.svg'],
+      'application/zip': ['.zip'],
+      'application/x-zip-compressed': ['.zip']
     },
     multiple: true
   });
@@ -308,6 +351,8 @@ export default function ImageDetailPage() {
       const haystack = [
         img.filename,
         img.folder,
+        img.description,
+        img.altTag,
         ...(img.tags || []),
       ]
         .filter(Boolean)
@@ -327,6 +372,15 @@ export default function ImageDetailPage() {
   const variants = useMemo(
     () => (id ? getMultipleImageUrls(id, ['thumbnail','small','medium','large','xlarge','original']) : {}),
     [id]
+  );
+
+  const listVariantOptions = useMemo(
+    () =>
+      IMAGE_VARIANTS.map((variant) => ({
+        value: variant.name,
+        label: variant.width ? `${variant.name} (${variant.width}px)` : variant.name
+      })),
+    []
   );
 
   const originalDeliveryUrl = useMemo(
@@ -406,6 +460,24 @@ export default function ImageDetailPage() {
     originalUrlInput,
     tagsInput
   ]);
+
+  const effectiveParentFolder = useMemo(() => {
+    const selected =
+      folderSelect === '__create__'
+        ? newFolderInput.trim()
+        : folderSelect?.trim();
+    return cleanString(selected);
+  }, [folderSelect, newFolderInput]);
+
+  const parentTags = useMemo(() => {
+    if (!tagsInput) {
+      return [];
+    }
+    return tagsInput
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+  }, [tagsInput]);
 
   const exifEntries = useMemo(() => {
     const exif = image?.exif;
@@ -711,13 +783,13 @@ export default function ImageDetailPage() {
       return;
     }
     const buildEntry = (img: CloudflareImage) => ({
-      url: ensureWebpFormat(getCloudflareImageUrl(img.id, DEFAULT_LIST_VARIANT)),
+      url: ensureWebpFormat(getCloudflareImageUrl(img.id, listVariant)),
       altText: img.altTag || ''
     });
     const entries = [buildEntry(image), ...displayedVariations.map(buildEntry)];
     const payload = formatEntriesAsYaml(entries);
     await copyToClipboard(payload, undefined, 'Variant list copied');
-  }, [copyToClipboard, displayedVariations, image]);
+  }, [copyToClipboard, displayedVariations, image, listVariant]);
 
   const persistVariationOrder = useCallback(
     async (nextOrder: string[], changedIds: string[]) => {
@@ -1132,6 +1204,9 @@ export default function ImageDetailPage() {
     try {
       const defaultFolder = childUploadFolder.trim() || image?.folder || '';
       const defaultTags = childUploadTags.trim() || (image?.tags ? image.tags.join(', ') : '');
+      let successCount = 0;
+      const failures: { filename: string; error: string }[] = [];
+      const skipped: { filename: string; reason: string }[] = [];
       for (const file of childUploadFiles) {
         const formData = new FormData();
         formData.append('file', file);
@@ -1145,12 +1220,39 @@ export default function ImageDetailPage() {
         });
         const payload = await response.json();
         if (!response.ok) {
-          throw new Error(payload.error || 'Upload failed');
+          failures.push({
+            filename: file.name,
+            error: payload.error || 'Upload failed'
+          });
+          continue;
+        }
+        if (payload && Array.isArray(payload.results)) {
+          successCount += payload.results.length;
+          if (Array.isArray(payload.failures)) {
+            failures.push(...payload.failures);
+          }
+          if (Array.isArray(payload.skipped)) {
+            skipped.push(...payload.skipped);
+          }
+        } else {
+          successCount += 1;
         }
       }
-      toast.push('Variation upload complete');
+      if (successCount > 0) {
+        toast.push(`Uploaded ${successCount} variation(s)`);
+        await refreshImageList();
+      } else {
+        toast.push('No variations uploaded');
+      }
+      if (failures.length) {
+        const failureNames: BulkUpdateFailure[] = failures.map(item => ({ id: item.filename, name: item.filename }));
+        toast.push(`Failed: ${formatFailureNames(failureNames)}`);
+      }
+      if (skipped.length) {
+        const skippedNames: BulkUpdateFailure[] = skipped.map(item => ({ id: item.filename, name: item.filename }));
+        toast.push(`Skipped: ${formatFailureNames(skippedNames)}`);
+      }
       setChildUploadFiles([]);
-      await refreshImageList();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to upload variation';
       toast.push(message);
@@ -1351,6 +1453,208 @@ export default function ImageDetailPage() {
       setBulkAltApplying(false);
     }
   }, [altTextInput, variationChildren, isChildImage, toast, id]);
+
+  const applyFolderToVariations = useCallback(async () => {
+    if (isChildImage) {
+      return;
+    }
+    if (!variationChildren.length) {
+      toast.push('No variations to update');
+      return;
+    }
+    if (!effectiveParentFolder) {
+      toast.push('Parent has no folder set');
+      return;
+    }
+    setBulkFolderApplying(true);
+    try {
+      type BulkUpdateResult =
+        | { ok: true; id: string }
+        | ({ ok: false } & BulkUpdateFailure);
+      const results: BulkUpdateResult[] = await Promise.all(
+        variationChildren.map(async (child) => {
+          try {
+            const res = await fetch(`/api/images/${child.id}/update`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ folder: effectiveParentFolder })
+            });
+            const payload = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              const errorMessage = payload?.error || 'Failed to update folder';
+              return {
+                ok: false,
+                id: child.id,
+                name: child.filename || child.id,
+                error: errorMessage,
+                reason: isMetadataLimitError(errorMessage) ? 'metadata' : 'unknown'
+              };
+            }
+            return { ok: true, id: child.id };
+          } catch (err) {
+            console.error('Bulk folder apply error', err);
+            return {
+              ok: false,
+              id: child.id,
+              name: child.filename || child.id,
+              error: 'Network error',
+              reason: 'network'
+            };
+          }
+        })
+      );
+
+      const failures = results.filter((result): result is BulkUpdateFailure => !result.ok);
+      const successIds = new Set(results.filter((result) => result.ok).map((result) => result.id));
+      if (successIds.size) {
+        setAllImages((prev) =>
+          prev.map((img) => (successIds.has(img.id) ? { ...img, folder: effectiveParentFolder } : img))
+        );
+      }
+
+      if (failures.length) {
+        const metadataFailures = failures.filter((failure) => failure.reason === 'metadata');
+        if (metadataFailures.length) {
+          console.warn('Metadata too large for variations:', metadataFailures);
+          toast.push(
+            `Metadata too large for ${metadataFailures.length} variation(s): ${formatFailureNames(metadataFailures)}`
+          );
+        }
+        const otherFailures = failures.filter((failure) => failure.reason !== 'metadata');
+        if (otherFailures.length) {
+          toast.push(`Failed to update ${otherFailures.length} variation(s)`);
+        }
+        const successCount = variationChildren.length - failures.length;
+        if (successCount) {
+          toast.push(`Updated ${successCount}/${variationChildren.length} variations`);
+        }
+      } else {
+        toast.push(`Folder applied to ${variationChildren.length} variations`);
+      }
+    } catch (err) {
+      console.error('Failed to bulk apply folder', err);
+      toast.push('Failed to apply folder to variations');
+    } finally {
+      setBulkFolderApplying(false);
+    }
+  }, [effectiveParentFolder, isChildImage, toast, variationChildren]);
+
+  const applyTagsToVariations = useCallback(
+    async (mode: 'append' | 'replace') => {
+      if (isChildImage) {
+        return;
+      }
+      if (!variationChildren.length) {
+        toast.push('No variations to update');
+        return;
+      }
+      if (mode === 'append' && parentTags.length === 0) {
+        toast.push('No parent tags to append');
+        return;
+      }
+
+      if (mode === 'append') {
+        setBulkTagsAppending(true);
+      } else {
+        setBulkTagsReplacing(true);
+      }
+
+      try {
+        type BulkUpdateResult =
+          | { ok: true; id: string; tags: string[] }
+          | ({ ok: false } & BulkUpdateFailure);
+        const results: BulkUpdateResult[] = await Promise.all(
+          variationChildren.map(async (child) => {
+            const existingTags = Array.isArray(child.tags) ? child.tags : [];
+            const nextTags =
+              mode === 'append'
+                ? Array.from(new Set([...existingTags, ...parentTags].map((tag) => tag.trim()).filter(Boolean)))
+                : [...parentTags];
+            try {
+              const res = await fetch(`/api/images/${child.id}/update`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tags: nextTags })
+              });
+              const payload = await res.json().catch(() => ({}));
+              if (!res.ok) {
+                const errorMessage = payload?.error || 'Failed to update tags';
+                return {
+                  ok: false,
+                  id: child.id,
+                  name: child.filename || child.id,
+                  error: errorMessage,
+                  reason: isMetadataLimitError(errorMessage) ? 'metadata' : 'unknown'
+                };
+              }
+              return { ok: true, id: child.id, tags: nextTags };
+            } catch (err) {
+              console.error('Bulk tags apply error', err);
+              return {
+                ok: false,
+                id: child.id,
+                name: child.filename || child.id,
+                error: 'Network error',
+                reason: 'network'
+              };
+            }
+          })
+        );
+
+        const failures = results.filter((result): result is BulkUpdateFailure => !result.ok);
+        const tagsById = new Map(
+          results.filter((result): result is { ok: true; id: string; tags: string[] } => result.ok).map((result) => [
+            result.id,
+            result.tags
+          ])
+        );
+
+        if (tagsById.size) {
+          setAllImages((prev) =>
+            prev.map((img) => {
+              const nextTags = tagsById.get(img.id);
+              if (!nextTags) return img;
+              return { ...img, tags: nextTags };
+            })
+          );
+        }
+
+        if (failures.length) {
+          const metadataFailures = failures.filter((failure) => failure.reason === 'metadata');
+          if (metadataFailures.length) {
+            console.warn('Metadata too large for variations:', metadataFailures);
+            toast.push(
+              `Metadata too large for ${metadataFailures.length} variation(s): ${formatFailureNames(metadataFailures)}`
+            );
+          }
+          const otherFailures = failures.filter((failure) => failure.reason !== 'metadata');
+          if (otherFailures.length) {
+            toast.push(`Failed to update ${otherFailures.length} variation(s)`);
+          }
+          const successCount = variationChildren.length - failures.length;
+          if (successCount) {
+            toast.push(`Updated ${successCount}/${variationChildren.length} variations`);
+          }
+        } else {
+          toast.push(
+            mode === 'append'
+              ? `Tags appended to ${variationChildren.length} variations`
+              : `Tags replaced on ${variationChildren.length} variations`
+          );
+        }
+      } catch (err) {
+        console.error('Failed to bulk apply tags', err);
+        toast.push('Failed to apply tags to variations');
+      } finally {
+        if (mode === 'append') {
+          setBulkTagsAppending(false);
+        } else {
+          setBulkTagsReplacing(false);
+        }
+      }
+    },
+    [isChildImage, parentTags, toast, variationChildren]
+  );
 
   if (!id) {
     return (
@@ -1599,17 +1903,54 @@ export default function ImageDetailPage() {
                     placeholder="Type new folder name"
                   />
                 )}
+                {hasVariations && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+                    <button
+                      onClick={applyFolderToVariations}
+                      disabled={bulkFolderApplying || !effectiveParentFolder}
+                      className="px-2 py-1 border border-gray-300 rounded text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      {bulkFolderApplying ? 'Applying…' : 'Apply folder to variations'}
+                    </button>
+                    {!effectiveParentFolder && (
+                      <span className="text-gray-500">Set a folder to enable.</span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
             <div id="tags-section">
-              <p className="text-xs font-mono font-medum text-gray-700">Tags</p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-mono font-medum text-gray-700">Tags</p>
+                {hasVariations && (
+                  <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                    <button
+                      onClick={() => applyTagsToVariations('append')}
+                      disabled={bulkTagsAppending || parentTags.length === 0}
+                      className="px-2 py-1 border border-gray-300 rounded text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      {bulkTagsAppending ? 'Appending…' : 'Append to variations'}
+                    </button>
+                    <button
+                      onClick={() => applyTagsToVariations('replace')}
+                      disabled={bulkTagsReplacing}
+                      className="px-2 py-1 border border-gray-300 rounded text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      {bulkTagsReplacing ? 'Replacing…' : 'Replace on variations'}
+                    </button>
+                  </div>
+                )}
+              </div>
               <input
                 value={tagsInput}
                 onChange={(e) => setTagsInput(e.target.value)}
                 className="w-full border border-gray-300 rounded-md px-3 py-2 text-xs mt-2"
                 placeholder="Comma-separated tags"
               />
+              {hasVariations && parentTags.length === 0 && (
+                <p className="text-[10px] text-gray-500 mt-1">Add tags to enable appending.</p>
+              )}
             </div>
 
             <div id="name-section">
@@ -1693,23 +2034,28 @@ export default function ImageDetailPage() {
             <div id="variant-links-section">
               <p className="text-xs font-mono font-medum text-gray-700">Available variants</p>
               <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {Object.entries(variants).map(([variant, url]) => (
-                  <div key={variant} className="flex items-center justify-between p-2 border rounded">
-                    <div>
-                      <div className="text-xs font-mono font-semibold text-gray-900 capitalize">{variant}</div>
-                      <div className="text-xs text-gray-500 truncate max-w-xs break-all">{url}</div>
+                {Object.entries(variants).map(([variant, url]) => {
+                  const widthLabel = getVariantWidthLabel(String(variant));
+                  return (
+                    <div key={variant} className="flex flex-col gap-2 p-2 border rounded sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="text-xs font-mono font-semibold text-gray-900 capitalize flex items-center gap-2">
+                          <span>{variant}</span>
+                          {widthLabel && <span className="text-gray-400 normal-case">{widthLabel}</span>}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                        <a href={url} target="_blank" rel="noreferrer" className="text-xs text-blue-600">Open</a>
+                        <button
+                          onClick={async (event) => { await handleCopyUrl(event, url, String(variant), image.altTag); }}
+                          className="px-2 py-1 bg-blue-100 hover:bg-blue-200 active:bg-blue-300 rounded text-xs font-medium cursor-pointer transition transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-300"
+                        >
+                          Copy
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <a href={url} target="_blank" rel="noreferrer" className="text-xs text-blue-600">Open</a>
-                      <button
-                        onClick={async (event) => { await handleCopyUrl(event, url, String(variant), image.altTag); }}
-                        className="px-2 py-1 bg-blue-100 hover:bg-blue-200 active:bg-blue-300 rounded text-xs font-medium cursor-pointer transition transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-300"
-                      >
-                        Copy
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
               <p className="text-[10px] text-gray-500 mt-2">Tip: Shift+Copy adds ALT text.</p>
             </div>
@@ -1806,6 +2152,18 @@ export default function ImageDetailPage() {
                       </p>
                       {!isChildImage && (
                         <>
+                        <div className="flex items-center gap-2">
+                          <label htmlFor="copy-list-variant" className="text-[11px] text-gray-500">
+                            List size
+                          </label>
+                          <MonoSelect
+                            id="copy-list-variant"
+                            value={listVariant}
+                            onChange={setListVariant}
+                            options={listVariantOptions}
+                            className="w-32 text-[11px]"
+                          />
+                        </div>
                         <button
                           onClick={handleCopyList}
                           className="px-2 py-1 text-[11px] border border-gray-300 rounded-md text-blue-600 hover:bg-blue-50"
@@ -2123,6 +2481,7 @@ export default function ImageDetailPage() {
                     <div>
                       <h3 className="text-xs font-mono font-medum text-gray-800">Upload a new variation</h3>
                       <p className="text-xs text-gray-600">Files automatically inherit this image's folder and tags.</p>
+                      <p className="text-[11px] text-gray-500">.zip uploads are supported.</p>
                     </div>
                   </div>
                   <div
@@ -2130,8 +2489,8 @@ export default function ImageDetailPage() {
                     className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors cursor-pointer ${isVariantDragActive ? 'border-blue-500 bg-blue-100' : 'border-gray-300 bg-white hover:border-gray-400'}`}
                   >
                     <input {...getVariantInputProps()} />
-                    <p className="text-xs font-mono text-gray-900 mb-1">Drag & drop images here</p>
-                    <p className="text-[11px] text-gray-500">or click to browse files</p>
+                    <p className="text-xs font-mono text-gray-900 mb-1">Drag & drop images or a .zip here</p>
+                    <p className="text-[11px] text-gray-500">or click to browse files (.zip supported)</p>
                   </div>
                   <div className="text-[11px] text-gray-600 bg-white/70 border border-gray-200 rounded-md p-2">
                     <p>Folder: <span className="font-mono">{childUploadFolder || image.folder || '[none]'}</span></p>
@@ -2230,39 +2589,45 @@ export default function ImageDetailPage() {
                 </button>
               </div>
               <div id="variant-size-modal" className="p-3 max-h-80 overflow-auto">
-                {variantEntries.map(([variant, url]) => (
-                  <div key={variant} className="flex items-center justify-between gap-2 py-2 border-b border-gray-100 last:border-b-0">
-                    <div className="flex-1 min-w-0 mr-3">
-                      <div className="text-xs font-mono font-semibold text-gray-900 capitalize">{variant}</div>
-                      <div className="text-xs text-gray-500 truncate">{String(url)}</div>
+                {variantEntries.map(([variant, url]) => {
+                  const widthLabel = getVariantWidthLabel(variant);
+                  return (
+                    <div key={variant} className="flex items-center justify-between gap-2 py-2 border-b border-gray-100 last:border-b-0">
+                      <div className="flex-1 min-w-0 mr-3">
+                        <div className="text-xs font-mono font-semibold text-gray-900 capitalize flex items-center gap-2">
+                          <span>{variant}</span>
+                          {widthLabel && <span className="text-gray-400 normal-case">{widthLabel}</span>}
+                        </div>
+                        <div className="text-xs text-gray-500 truncate">{String(url)}</div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={async (event) => {
+                            await handleCopyVariantList(event, variant, String(url));
+                          }}
+                          className="px-3 py-1 bg-blue-100 hover:bg-blue-200 active:bg-blue-300 rounded text-xs font-medium flex-shrink-0 cursor-pointer transition transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-300"
+                        >
+                          Copy
+                        </button>
+                        <button
+                          onClick={async () => {
+                            try {
+                              const downloadName = formatDownloadFileName(target.filename || image.filename || 'image');
+                              await downloadImageToFile(String(url), downloadName);
+                              toast.push('Download started');
+                            } catch (error) {
+                              console.error('Failed to download variant', error);
+                              toast.push('Failed to download image');
+                            }
+                          }}
+                          className="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded text-xs font-medium flex-shrink-0 cursor-pointer"
+                        >
+                          Download
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={async (event) => {
-                          await handleCopyVariantList(event, variant, String(url));
-                        }}
-                        className="px-3 py-1 bg-blue-100 hover:bg-blue-200 active:bg-blue-300 rounded text-xs font-medium flex-shrink-0 cursor-pointer transition transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-300"
-                      >
-                        Copy
-                      </button>
-                      <button
-                        onClick={async () => {
-                          try {
-                            const downloadName = formatDownloadFileName(target.filename || image.filename || 'image');
-                            await downloadImageToFile(String(url), downloadName);
-                            toast.push('Download started');
-                          } catch (error) {
-                            console.error('Failed to download variant', error);
-                            toast.push('Failed to download image');
-                          }
-                        }}
-                        className="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded text-xs font-medium flex-shrink-0 cursor-pointer"
-                      >
-                        Download
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
               <div className="px-3 pb-3 text-[10px] text-gray-500">Tip: Shift+Copy adds ALT text.</div>
             </div>

@@ -5,7 +5,7 @@ This project uses Cloudflare Images transformations to serve multiple sizes of t
 - Small (300px): Good for email thumbnails, small preview images in newsletters, and avatars.
 - Medium (600px): Good for in-body email images and small website hero images on mobile.
 - Large (900px): Good for main website content images and medium-resolution displays.
-- X-Large (1230px): Good for large hero images and high-resolution content where quality matters.
+- X-Large (1200px): Good for large hero images and high-resolution content where quality matters.
 - Original: Full resolution copy — use sparingly (downloads, print, or when quality is critical).
 
 Usage guidance:
@@ -18,7 +18,7 @@ Example (copyable):
 - Small: `https://imagedelivery.net/{ACCOUNT_HASH}/{IMAGE_ID}/w=300`
 - Medium: `https://imagedelivery.net/{ACCOUNT_HASH}/{IMAGE_ID}/w=600`
 - Large: `https://imagedelivery.net/{ACCOUNT_HASH}/{IMAGE_ID}/w=900`
-- X-Large: `https://imagedelivery.net/{ACCOUNT_HASH}/{IMAGE_ID}/w=1230`
+- X-Large: `https://imagedelivery.net/{ACCOUNT_HASH}/{IMAGE_ID}/w=1200`
 - Original: `https://imagedelivery.net/{ACCOUNT_HASH}/{IMAGE_ID}/public`
 
 Considerations:

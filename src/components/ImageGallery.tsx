@@ -7,7 +7,7 @@ import Link from 'next/link';
 import MonoSelect from './MonoSelect';
 import GalleryCommandBar from './GalleryCommandBar';
 import FolderManagerButton from './FolderManagerButton';
-import { getCloudflareImageUrl, getMultipleImageUrls } from '@/utils/imageUtils';
+import { getCloudflareImageUrl, getMultipleImageUrls, IMAGE_VARIANTS } from '@/utils/imageUtils';
 import { useToast } from './Toast';
 import { useImageAspectRatio } from '@/hooks/useImageAspectRatio';
 import HoverPreview from './HoverPreview';
@@ -47,6 +47,7 @@ const HIDDEN_FOLDERS_STORAGE_KEY = 'galleryHiddenFolders';
 const HIDDEN_TAGS_STORAGE_KEY = 'galleryHiddenTags';
 const BROKEN_AUDIT_STORAGE_KEY = 'galleryBrokenAudit';
 const AUDIT_LOG_LIMIT = 200;
+const VARIANT_DIMENSIONS = new Map(IMAGE_VARIANTS.map(variant => [variant.name, variant.width]));
 
 type BrokenAudit = {
   checkedAt?: string;
@@ -1011,6 +1012,13 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
   const getVariantUrls = (image: CloudflareImage) => {
     return getMultipleImageUrls(image.id, VARIANT_PRESETS);
   };
+  const getVariantWidthLabel = (variant: string) => {
+    const width = VARIANT_DIMENSIONS.get(variant);
+    if (!width) {
+      return null;
+    }
+    return `${width}px`;
+  };
 
   const uniqueFolders = useMemo(() => {
     const folderNames = images
@@ -1170,7 +1178,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
       { value: 'w=300', label: 'Small (300px)' },
       { value: 'w=600', label: 'Medium (600px)' },
       { value: 'w=900', label: 'Large (900px)' },
-      { value: 'w=1230', label: 'X-Large (1230px)' },
+      { value: 'w=1200', label: 'X-Large (1200px)' },
       { value: 'w=150', label: 'Thumbnail-ish (150px)' }
     ],
     []
@@ -1368,8 +1376,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
   return (
     <div id="image-gallery-card" ref={galleryTopRef} className="overscroll-none bg-white rounded-lg shadow-lg p-6">
       <div
-        ref={galleryTopRef}
-        id="gallery-filter-bar"
+        id="gallery-top-bar"
         className="sticky top-0 z-20 -m-6 mb-6 p-6 pb-4 bg-white/95 backdrop-blur rounded-t-lg border-b border-gray-100"
       >
         <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
@@ -1508,300 +1515,300 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
             </button>
           </div>
         )}
+      </div>
 
-        {duplicateGroupCount > 0 && (
-          <div className="mb-4 flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-[0.65rem] font-mono text-amber-900">
-            <div>
-              Found {duplicateGroupCount} duplicate group{duplicateGroupCount === 1 ? '' : 's'} affecting {duplicateImageCount} image{duplicateImageCount === 1 ? '' : 's'} (must match both original URL and content hash).
+      {duplicateGroupCount > 0 && (
+        <div className="mb-4 flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-[0.65rem] font-mono text-amber-900">
+          <div>
+            Found {duplicateGroupCount} duplicate group{duplicateGroupCount === 1 ? '' : 's'} affecting {duplicateImageCount} image{duplicateImageCount === 1 ? '' : 's'} (must match both original URL and content hash).
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setShowDuplicatesOnly(prev => !prev)}
+              className="px-3 py-1 rounded-md border border-amber-300 bg-white text-amber-900 hover:bg-amber-100 transition"
+            >
+              {showDuplicatesOnly ? 'Show all images' : 'Show duplicates only'}
+            </button>
+            <button
+              onClick={selectDuplicateImages}
+              className="px-3 py-1 rounded-md border border-amber-300 bg-amber-100 text-amber-900 hover:bg-amber-200 transition"
+            >
+              Select all duplicates
+            </button>
+            <button
+              onClick={() => selectDuplicatesKeepSingle('newest')}
+              className="px-3 py-1 rounded-md border border-amber-300 bg-amber-100 text-amber-900 hover:bg-amber-200 transition"
+            >
+              Select duplicates (keep newest)
+            </button>
+            <button
+              onClick={() => selectDuplicatesKeepSingle('oldest')}
+              className="px-3 py-1 rounded-md border border-amber-300 bg-amber-100 text-amber-900 hover:bg-amber-200 transition"
+            >
+              Select duplicates (keep oldest)
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div
+        className={`overflow-hidden transition-[max-height] duration-300 ease-in-out ${filtersCollapsed ? 'max-h-0' : 'max-h-[1200px]'}`}
+        aria-hidden={filtersCollapsed}
+      >
+        <div
+          id="gallery-filter-controls"
+          className={`grid grid-cols-1 md:grid-cols-6 gap-4 p-4 bg-gray-50 rounded-lg items-end transition-opacity duration-300 ${filtersCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+        >
+          <div>
+          <label htmlFor="search" className="block text-[0.7em] font-mono font-mono font-medum text-gray-700 mb-1">
+            Search
+          </label>
+          <input
+            id="search"
+            type="text"
+            placeholder="Search files, tags, folders..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full border border-gray-300 rounded-md px-3 py-2 text-[0.7em] font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+        
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <label htmlFor="folder-filter" className="block text-[0.7em] font-mono font-mono font-medum text-gray-700">
+              Folder
+            </label>
+            <FolderManagerButton onFoldersChanged={handleFoldersChanged} size="sm" label="Manage" />
+          </div>
+          <MonoSelect
+            id="folder-filter"
+            value={selectedFolder}
+            onChange={setSelectedFolder}
+            options={folderFilterOptions}
+            className="w-full"
+          />
+        </div>
+        
+        <div>
+          <label htmlFor="tag-filter" className="block text-[0.7em] font-mono font-mono font-medum text-gray-700 mb-1">
+            Tag
+          </label>
+          <input
+            id="tag-filter"
+            list="tag-filter-list"
+            value={selectedTag}
+            onChange={(e) => setSelectedTag(e.target.value)}
+            placeholder="All tags"
+            className="w-full border border-gray-300 rounded-md px-3 py-2 text-[0.7em] font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <datalist id="tag-filter-list">
+            {uniqueTags.map(tag => (
+              <option key={tag} value={tag} />
+            ))}
+          </datalist>
+        </div>
+        <div>
+          <label htmlFor="variant-select" className="block text-[0.7em] font-mono font-mono font-medum text-gray-700 mb-1">
+            Image Size
+          </label>
+          <MonoSelect
+            id="variant-select"
+            value={selectedVariant}
+            onChange={setSelectedVariant}
+            options={variantOptions}
+            className="w-full"
+          />
+        </div>
+
+        <div>
+          <label htmlFor="page-size-select" className="block text-[0.7em] font-mono font-mono font-medum text-gray-700 mb-1">
+            Per page
+          </label>
+          <MonoSelect
+            id="page-size-select"
+            value={String(pageSize)}
+            onChange={(nextValue) => {
+              const parsed = Number(nextValue);
+              setPageSize(PAGE_SIZE_OPTIONS.includes(parsed) ? parsed : DEFAULT_PAGE_SIZE);
+            }}
+            options={PAGE_SIZE_OPTIONS.map((size) => ({ value: String(size), label: String(size) }))}
+            className="w-full"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1 text-[0.7em] font-mono text-gray-700">
+          <label htmlFor="canonical-filter" className="flex items-center gap-1 font-mono">
+            <input
+              id="canonical-filter"
+              type="checkbox"
+              checked={onlyCanonical}
+              onChange={(e) => setOnlyCanonical(e.target.checked)}
+              className="h-3 w-3 font-mono text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            canonical
+          </label>
+          <label htmlFor="aspect-filter" className="flex items-center gap-1 font-mono">
+            <input
+              id="aspect-filter"
+              type="checkbox"
+              checked={respectAspectRatio}
+              onChange={(e) => setRespectAspectRatio(e.target.checked)}
+              className="h-3 w-3 font-mono text-[0.7em] font-mono text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            aspect
+          </label>
+          <label htmlFor="variants-filter" className="flex items-center gap-1 font-mono">
+            <input
+              id="variants-filter"
+              type="checkbox"
+              checked={onlyWithVariants}
+              onChange={(e) => setOnlyWithVariants(e.target.checked)}
+              className="h-3 w-3 font-mono text-[0.7em] font-mono text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            parents
+          </label>
+          <label htmlFor="duplicates-filter" className="flex items-center gap-1 font-mono">
+            <input
+              id="duplicates-filter"
+              type="checkbox"
+              checked={showDuplicatesOnly}
+              onChange={(e) => setShowDuplicatesOnly(e.target.checked)}
+              className="h-3 w-3 font-mono text-[0.7em] font-mono text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            duplicates
+          </label>
+          <label htmlFor="broken-filter" className="flex items-center gap-1 font-mono">
+            <input
+              id="broken-filter"
+              type="checkbox"
+              checked={showBrokenOnly}
+              onChange={(e) => setShowBrokenOnly(e.target.checked)}
+              className="h-3 w-3 font-mono text-[0.7em] font-mono text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            broken
+          </label>
+        </div>
+        <div className="md:col-span-6 flex flex-wrap items-center gap-3 text-[0.65rem] font-mono text-gray-600">
+          <button
+            onClick={runBrokenAudit}
+            disabled={auditLoading}
+            className="inline-flex items-center gap-2 px-3 py-1 border border-gray-300 rounded-md bg-white hover:bg-gray-100 disabled:opacity-50"
+          >
+            <AlertTriangle className="h-3 w-3" />
+            {auditLoading ? 'Auditing…' : 'Audit broken URLs'}
+          </button>
+          <span>
+            Broken: {brokenAudit.ids.length}
+          </span>
+          {brokenAudit.checkedAt && (
+            <span>
+              Last audit: {new Date(brokenAudit.checkedAt).toLocaleString()}
+            </span>
+          )}
+          {(auditLoading || auditProgress.checked > 0) && (
+            <span>
+              Checked: {auditProgress.checked}/{auditProgress.total}
+            </span>
+          )}
+        </div>
+        {(auditLoading || auditEntries.length > 0) && (
+          <div className="md:col-span-6 rounded-md border border-gray-200 bg-white p-3 text-[0.65rem] font-mono text-gray-700">
+            <div className="flex items-center justify-between">
+              <span>Audit log {auditEntries.length >= AUDIT_LOG_LIMIT ? `(last ${AUDIT_LOG_LIMIT})` : ''}</span>
+              {auditLoading && <span className="text-gray-500">Running…</span>}
             </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => setShowDuplicatesOnly(prev => !prev)}
-                className="px-3 py-1 rounded-md border border-amber-300 bg-white text-amber-900 hover:bg-amber-100 transition"
-              >
-                {showDuplicatesOnly ? 'Show all images' : 'Show duplicates only'}
-              </button>
-              <button
-                onClick={selectDuplicateImages}
-                className="px-3 py-1 rounded-md border border-amber-300 bg-amber-100 text-amber-900 hover:bg-amber-200 transition"
-              >
-                Select all duplicates
-              </button>
-              <button
-                onClick={() => selectDuplicatesKeepSingle('newest')}
-                className="px-3 py-1 rounded-md border border-amber-300 bg-amber-100 text-amber-900 hover:bg-amber-200 transition"
-              >
-                Select duplicates (keep newest)
-              </button>
-              <button
-                onClick={() => selectDuplicatesKeepSingle('oldest')}
-                className="px-3 py-1 rounded-md border border-amber-300 bg-amber-100 text-amber-900 hover:bg-amber-200 transition"
-              >
-                Select duplicates (keep oldest)
-              </button>
+            <div className="mt-2 h-1 w-full rounded-full bg-gray-100">
+              <div
+                className="h-1 rounded-full bg-blue-500 transition-[width]"
+                style={{
+                  width: auditProgress.total
+                    ? `${Math.min(100, (auditProgress.checked / auditProgress.total) * 100)}%`
+                    : '0%'
+                }}
+              />
+            </div>
+            <div className="mt-2 max-h-40 overflow-y-auto space-y-1">
+              {auditEntries.map((entry) => (
+                <div key={`${entry.id}-${entry.url ?? ''}-${entry.status ?? ''}`} className="flex items-start justify-between gap-2">
+                  <div className="text-gray-600">
+                    <div>{entry.id}</div>
+                    <div className="text-gray-400">{entry.filename ?? '[no filename]'}</div>
+                  </div>
+                  <span className="text-gray-500">
+                    {entry.status ?? '—'} {entry.reason ?? ''}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
         )}
-
-        <div
-          className={`overflow-hidden transition-[max-height] duration-300 ease-in-out ${filtersCollapsed ? 'max-h-0' : 'max-h-[1200px]'}`}
-          aria-hidden={filtersCollapsed}
-        >
-          <div
-            id="gallery-filter-controls"
-            className={`grid grid-cols-1 md:grid-cols-6 gap-4 p-4 bg-gray-50 rounded-lg items-end transition-opacity duration-300 ${filtersCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
-          >
-            <div>
-            <label htmlFor="search" className="block text-[0.7em] font-mono font-mono font-medum text-gray-700 mb-1">
-              Search
-            </label>
-            <input
-              id="search"
-              type="text"
-              placeholder="Search files, tags, folders..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-[0.7em] font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label htmlFor="folder-filter" className="block text-[0.7em] font-mono font-mono font-medum text-gray-700">
-                Folder
-              </label>
-              <FolderManagerButton onFoldersChanged={handleFoldersChanged} size="sm" label="Manage" />
-            </div>
-            <MonoSelect
-              id="folder-filter"
-              value={selectedFolder}
-              onChange={setSelectedFolder}
-              options={folderFilterOptions}
-              className="w-full"
-            />
-          </div>
-          
-          <div>
-            <label htmlFor="tag-filter" className="block text-[0.7em] font-mono font-mono font-medum text-gray-700 mb-1">
-              Tag
-            </label>
-            <input
-              id="tag-filter"
-              list="tag-filter-list"
-              value={selectedTag}
-              onChange={(e) => setSelectedTag(e.target.value)}
-              placeholder="All tags"
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-[0.7em] font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            <datalist id="tag-filter-list">
-              {uniqueTags.map(tag => (
-                <option key={tag} value={tag} />
+        <div className="md:col-span-6">
+          <GalleryCommandBar
+            hiddenFolders={hiddenFolders}
+            hiddenTags={hiddenTags}
+            knownFolders={uniqueFolders}
+            knownTags={uniqueTags}
+            onHideFolder={hideFolderByName}
+            onUnhideFolder={unhideFolderByName}
+            onClearHidden={clearHiddenFolders}
+            onHideTag={hideTagByName}
+            onUnhideTag={unhideTagByName}
+            onClearHiddenTags={clearHiddenTags}
+            onSelectFolder={setSelectedFolder}
+            selectedTag={selectedTag}
+            onSelectTag={setSelectedTag}
+            onClearTagFilter={() => setSelectedTag('')}
+            showParentsOnly={onlyWithVariants}
+            onSetParentsOnly={setOnlyWithVariants}
+            currentPage={pageIndex}
+            totalPages={totalPages}
+            onGoToPage={goToPageNumber}
+          />
+        </div>
+          {hiddenFolders.length > 0 && (
+            <div className="md:col-span-6 flex flex-wrap items-center gap-2 p-3 bg-white border border-gray-200 rounded-lg text-[0.65rem] font-mono text-gray-700">
+              <span className="uppercase tracking-wide text-gray-500 text-[0.6rem]">Hidden folders</span>
+              {hiddenFolders.map(folder => (
+                <button
+                  key={folder}
+                  onClick={() => unhideFolderByName(folder)}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-900 text-white hover:bg-black transition"
+                  title="Unhide folder"
+                >
+                  {folder}
+                  <span aria-hidden="true">×</span>
+                </button>
               ))}
-            </datalist>
-          </div>
-          <div>
-            <label htmlFor="variant-select" className="block text-[0.7em] font-mono font-mono font-medum text-gray-700 mb-1">
-              Image Size
-            </label>
-            <MonoSelect
-              id="variant-select"
-              value={selectedVariant}
-              onChange={setSelectedVariant}
-              options={variantOptions}
-              className="w-full"
-            />
-          </div>
-
-          <div>
-            <label htmlFor="page-size-select" className="block text-[0.7em] font-mono font-mono font-medum text-gray-700 mb-1">
-              Per page
-            </label>
-            <MonoSelect
-              id="page-size-select"
-              value={String(pageSize)}
-              onChange={(nextValue) => {
-                const parsed = Number(nextValue);
-                setPageSize(PAGE_SIZE_OPTIONS.includes(parsed) ? parsed : DEFAULT_PAGE_SIZE);
-              }}
-              options={PAGE_SIZE_OPTIONS.map((size) => ({ value: String(size), label: String(size) }))}
-              className="w-full"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1 text-[0.7em] font-mono text-gray-700">
-            <label htmlFor="canonical-filter" className="flex items-center gap-1 font-mono">
-              <input
-                id="canonical-filter"
-                type="checkbox"
-                checked={onlyCanonical}
-                onChange={(e) => setOnlyCanonical(e.target.checked)}
-                className="h-3 w-3 font-mono text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-              />
-              canonical
-            </label>
-            <label htmlFor="aspect-filter" className="flex items-center gap-1 font-mono">
-              <input
-                id="aspect-filter"
-                type="checkbox"
-                checked={respectAspectRatio}
-                onChange={(e) => setRespectAspectRatio(e.target.checked)}
-                className="h-3 w-3 font-mono text-[0.7em] font-mono text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-              />
-              aspect
-            </label>
-            <label htmlFor="variants-filter" className="flex items-center gap-1 font-mono">
-              <input
-                id="variants-filter"
-                type="checkbox"
-                checked={onlyWithVariants}
-                onChange={(e) => setOnlyWithVariants(e.target.checked)}
-                className="h-3 w-3 font-mono text-[0.7em] font-mono text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-              />
-              parents
-            </label>
-            <label htmlFor="duplicates-filter" className="flex items-center gap-1 font-mono">
-              <input
-                id="duplicates-filter"
-                type="checkbox"
-                checked={showDuplicatesOnly}
-                onChange={(e) => setShowDuplicatesOnly(e.target.checked)}
-                className="h-3 w-3 font-mono text-[0.7em] font-mono text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-              />
-              duplicates
-            </label>
-            <label htmlFor="broken-filter" className="flex items-center gap-1 font-mono">
-              <input
-                id="broken-filter"
-                type="checkbox"
-                checked={showBrokenOnly}
-                onChange={(e) => setShowBrokenOnly(e.target.checked)}
-                className="h-3 w-3 font-mono text-[0.7em] font-mono text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-              />
-              broken
-            </label>
-          </div>
-          <div className="md:col-span-6 flex flex-wrap items-center gap-3 text-[0.65rem] font-mono text-gray-600">
-            <button
-              onClick={runBrokenAudit}
-              disabled={auditLoading}
-              className="inline-flex items-center gap-2 px-3 py-1 border border-gray-300 rounded-md bg-white hover:bg-gray-100 disabled:opacity-50"
-            >
-              <AlertTriangle className="h-3 w-3" />
-              {auditLoading ? 'Auditing…' : 'Audit broken URLs'}
-            </button>
-            <span>
-              Broken: {brokenAudit.ids.length}
-            </span>
-            {brokenAudit.checkedAt && (
-              <span>
-                Last audit: {new Date(brokenAudit.checkedAt).toLocaleString()}
-              </span>
-            )}
-            {(auditLoading || auditProgress.checked > 0) && (
-              <span>
-                Checked: {auditProgress.checked}/{auditProgress.total}
-              </span>
-            )}
-          </div>
-          {(auditLoading || auditEntries.length > 0) && (
-            <div className="md:col-span-6 rounded-md border border-gray-200 bg-white p-3 text-[0.65rem] font-mono text-gray-700">
-              <div className="flex items-center justify-between">
-                <span>Audit log {auditEntries.length >= AUDIT_LOG_LIMIT ? `(last ${AUDIT_LOG_LIMIT})` : ''}</span>
-                {auditLoading && <span className="text-gray-500">Running…</span>}
-              </div>
-              <div className="mt-2 h-1 w-full rounded-full bg-gray-100">
-                <div
-                  className="h-1 rounded-full bg-blue-500 transition-[width]"
-                  style={{
-                    width: auditProgress.total
-                      ? `${Math.min(100, (auditProgress.checked / auditProgress.total) * 100)}%`
-                      : '0%'
-                  }}
-                />
-              </div>
-              <div className="mt-2 max-h-40 overflow-y-auto space-y-1">
-                {auditEntries.map((entry) => (
-                  <div key={`${entry.id}-${entry.url ?? ''}-${entry.status ?? ''}`} className="flex items-start justify-between gap-2">
-                    <div className="text-gray-600">
-                      <div>{entry.id}</div>
-                      <div className="text-gray-400">{entry.filename ?? '[no filename]'}</div>
-                    </div>
-                    <span className="text-gray-500">
-                      {entry.status ?? '—'} {entry.reason ?? ''}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <button
+                onClick={clearHiddenFolders}
+                className="ml-auto text-[0.6rem] uppercase tracking-wide text-blue-600 hover:text-blue-700"
+              >
+                Clear all
+              </button>
             </div>
           )}
-          <div className="md:col-span-6">
-            <GalleryCommandBar
-              hiddenFolders={hiddenFolders}
-              hiddenTags={hiddenTags}
-              knownFolders={uniqueFolders}
-              knownTags={uniqueTags}
-              onHideFolder={hideFolderByName}
-              onUnhideFolder={unhideFolderByName}
-              onClearHidden={clearHiddenFolders}
-              onHideTag={hideTagByName}
-              onUnhideTag={unhideTagByName}
-              onClearHiddenTags={clearHiddenTags}
-              onSelectFolder={setSelectedFolder}
-              selectedTag={selectedTag}
-              onSelectTag={setSelectedTag}
-              onClearTagFilter={() => setSelectedTag('')}
-              showParentsOnly={onlyWithVariants}
-              onSetParentsOnly={setOnlyWithVariants}
-              currentPage={pageIndex}
-              totalPages={totalPages}
-              onGoToPage={goToPageNumber}
-            />
-          </div>
-            {hiddenFolders.length > 0 && (
-              <div className="md:col-span-6 flex flex-wrap items-center gap-2 p-3 bg-white border border-gray-200 rounded-lg text-[0.65rem] font-mono text-gray-700">
-                <span className="uppercase tracking-wide text-gray-500 text-[0.6rem]">Hidden folders</span>
-                {hiddenFolders.map(folder => (
-                  <button
-                    key={folder}
-                    onClick={() => unhideFolderByName(folder)}
-                    className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-900 text-white hover:bg-black transition"
-                    title="Unhide folder"
-                  >
-                    {folder}
-                    <span aria-hidden="true">×</span>
-                  </button>
-                ))}
+          {hiddenTags.length > 0 && (
+            <div className="md:col-span-6 flex flex-wrap items-center gap-2 p-3 bg-white border border-gray-200 rounded-lg text-[0.65rem] font-mono text-gray-700">
+              <span className="uppercase tracking-wide text-gray-500 text-[0.6rem]">Hidden tags</span>
+              {hiddenTags.map(tag => (
                 <button
-                  onClick={clearHiddenFolders}
-                  className="ml-auto text-[0.6rem] uppercase tracking-wide text-blue-600 hover:text-blue-700"
+                  key={tag}
+                  onClick={() => unhideTagByName(tag)}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-900 text-white hover:bg-black transition"
+                  title="Unhide tag"
                 >
-                  Clear all
+                  {tag}
+                  <span aria-hidden="true">×</span>
                 </button>
-              </div>
-            )}
-            {hiddenTags.length > 0 && (
-              <div className="md:col-span-6 flex flex-wrap items-center gap-2 p-3 bg-white border border-gray-200 rounded-lg text-[0.65rem] font-mono text-gray-700">
-                <span className="uppercase tracking-wide text-gray-500 text-[0.6rem]">Hidden tags</span>
-                {hiddenTags.map(tag => (
-                  <button
-                    key={tag}
-                    onClick={() => unhideTagByName(tag)}
-                    className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-900 text-white hover:bg-black transition"
-                    title="Unhide tag"
-                  >
-                    {tag}
-                    <span aria-hidden="true">×</span>
-                  </button>
-                ))}
-                <button
-                  onClick={clearHiddenTags}
-                  className="ml-auto text-[0.6rem] uppercase tracking-wide text-blue-600 hover:text-blue-700"
-                >
-                  Clear all
-                </button>
-              </div>
-            )}
-          </div>
+              ))}
+              <button
+                onClick={clearHiddenTags}
+                className="ml-auto text-[0.6rem] uppercase tracking-wide text-blue-600 hover:text-blue-700"
+              >
+                Clear all
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -2304,36 +2311,42 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
                 </button>
               </div>
               <div className="p-3 max-h-80 overflow-auto">
-                {Object.entries(getVariantUrls(modalImage)).map(([variant, url]) => (
-                  <div key={variant} className="flex items-center justify-between gap-2 py-2 border-b border-gray-100 last:border-b-0">
-                    <div className="flex-1 min-w-0 mr-3">
-                      <div className="text-[0.7em] font-mono font-mono font-semibold text-gray-900 capitalize">{variant}</div>
-                      <div className="text-[0.7em] font-mono text-gray-500 truncate">{String(url)}</div>
+                {Object.entries(getVariantUrls(modalImage)).map(([variant, url]) => {
+                  const widthLabel = getVariantWidthLabel(variant);
+                  return (
+                    <div key={variant} className="flex items-center justify-between gap-2 py-2 border-b border-gray-100 last:border-b-0">
+                      <div className="flex-1 min-w-0 mr-3">
+                        <div className="text-[0.7em] font-mono font-mono font-semibold text-gray-900 capitalize flex items-center gap-2">
+                          <span>{variant}</span>
+                          {widthLabel && <span className="text-gray-400 normal-case">{widthLabel}</span>}
+                        </div>
+                        <div className="text-[0.7em] font-mono text-gray-500 truncate">{String(url)}</div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            await handleCopyUrl(e, String(url), variant, modalImage.altTag);
+                            setOpenCopyMenu(null);
+                          }}
+                          className="px-3 py-1 bg-blue-100 hover:bg-blue-200 active:bg-blue-300 rounded text-[0.7em] font-mono font-medium flex-shrink-0 cursor-pointer transition transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-300"
+                        >
+                          Copy
+                        </button>
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            await downloadVariantToFile(String(url), modalImage.filename);
+                          }}
+                          className="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded text-[0.7em] font-mono font-medium flex-shrink-0 cursor-pointer"
+                          title="Download"
+                        >
+                          Download
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          await handleCopyUrl(e, String(url), variant, modalImage.altTag);
-                          setOpenCopyMenu(null);
-                        }}
-                        className="px-3 py-1 bg-blue-100 hover:bg-blue-200 active:bg-blue-300 rounded text-[0.7em] font-mono font-medium flex-shrink-0 cursor-pointer transition transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-300"
-                      >
-                        Copy
-                      </button>
-                      <button
-                        onClick={async (e) => {
-                          e.stopPropagation();
-                          await downloadVariantToFile(String(url), modalImage.filename);
-                        }}
-                        className="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded text-[0.7em] font-mono font-medium flex-shrink-0 cursor-pointer"
-                        title="Download"
-                      >
-                        Download
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
               <div className="px-3 pb-3 text-[0.7em] font-mono text-gray-500">Tip: Shift+Copy adds ALT text.</div>
             </div>

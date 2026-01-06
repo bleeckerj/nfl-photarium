@@ -1,13 +1,48 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createHash } from 'crypto';
 import sharp from 'sharp';
+import AdmZip from 'adm-zip';
 import { transformApiImageToCached, upsertCachedImage } from '@/server/cloudflareImageCache';
 import { findDuplicatesByContentHash, findDuplicatesByOriginalUrl, toDuplicateSummary } from '@/server/duplicateDetector';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
+import { enforceCloudflareMetadataLimit } from '@/utils/cloudflareMetadata';
 import { extractExifSummary } from '@/utils/exif';
 
 const logIssue = (message: string, details?: Record<string, unknown>) => {
   console.warn('[upload] ' + message, details);
+};
+
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_ZIP_BYTES = 100 * 1024 * 1024;
+const SUPPORTED_IMAGE_TYPES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'image/svg+xml'
+]);
+const MIME_BY_EXTENSION: Record<string, string> = {
+  '.jpeg': 'image/jpeg',
+  '.jpg': 'image/jpeg',
+  '.png': 'image/png',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml'
+};
+
+const isZipFile = (file: File) =>
+  file.type === 'application/zip' || file.type === 'application/x-zip-compressed' || file.name.toLowerCase().endsWith('.zip');
+
+const getMimeTypeFromFilename = (filename: string) => {
+  const lower = filename.toLowerCase();
+  const match = Object.keys(MIME_BY_EXTENSION).find((ext) => lower.endsWith(ext));
+  return match ? MIME_BY_EXTENSION[match] : undefined;
+};
+
+const normalizeFilename = (filename: string) => {
+  const parts = filename.split(/[\\/]/);
+  return parts[parts.length - 1] || filename;
 };
 
 export async function POST(request: NextRequest) {
@@ -34,25 +69,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate file type
-    if (!file.type.startsWith('image/')) {
-      logIssue('Rejected non-image upload', { filename: file.name, type: file.type });
-      return NextResponse.json(
-        { error: 'File must be an image' },
-        { status: 400 }
-      );
-    }
-
-    // Validate file size (max 10MB)
-    const maxSize = 10 * 1024 * 1024; // 10MB
-    if (file.size > maxSize) {
-      logIssue('Rejected oversized upload', { filename: file.name, bytes: file.size, limit: maxSize });
-      return NextResponse.json(
-        { error: 'File size must be less than 10MB' },
-        { status: 400 }
-      );
-    }
-
     const computeContentHash = (payload: Buffer) =>
       createHash('sha256').update(payload).digest('hex');
 
@@ -68,36 +84,11 @@ export async function POST(request: NextRequest) {
     const cleanTags = tags && tags.trim() ? tags.trim().split(',').map(t => t.trim()).filter(t => t) : [];
     const cleanDescription = description && description.trim() && description !== 'undefined' ? description.trim() : undefined;
     const cleanOriginalUrl = originalUrl && originalUrl.trim() && originalUrl !== 'undefined' ? originalUrl.trim() : undefined;
-    const normalizedOriginalUrl = normalizeOriginalUrl(cleanOriginalUrl);
     const parentIdValue = typeof parentIdRaw === 'string' ? parentIdRaw.trim() : '';
     const cleanParentId = parentIdValue && parentIdValue !== 'undefined' ? parentIdValue : undefined;
 
-    let duplicateMatches: Awaited<ReturnType<typeof findDuplicatesByOriginalUrl>> = [];
-    if (normalizedOriginalUrl) {
-      duplicateMatches = await findDuplicatesByOriginalUrl(normalizedOriginalUrl);
-      if (duplicateMatches.length) {
-        console.warn('[upload] Duplicate original URL detected', {
-          originalUrl: cleanOriginalUrl,
-          duplicateIds: duplicateMatches.map(match => match.id),
-          folders: duplicateMatches.map(match => match.folder || null)
-        });
-        return NextResponse.json(
-          {
-            error: `Duplicate original URL "${cleanOriginalUrl}" detected`,
-            duplicates: duplicateMatches.map(toDuplicateSummary)
-          },
-          { status: 409 }
-        );
-      }
-    }
-
-    // Convert file to buffer and shrink if necessary
-    const bytes = await file.arrayBuffer();
-    const originalBuffer = Buffer.from(bytes);
-    let buffer = originalBuffer;
-
     const shrinkIfNeeded = async (input: Buffer, type: string): Promise<Buffer> => {
-      if (input.byteLength <= maxSize) {
+      if (input.byteLength <= MAX_IMAGE_BYTES) {
         return input;
       }
       const transformer = sharp(input).rotate();
@@ -110,187 +101,360 @@ export async function POST(request: NextRequest) {
       const resized = transformer.resize(Math.round(width * scale), Math.round(height * scale), { fit: 'inside' });
       const format = type.includes('png') ? 'png' : 'jpeg';
       const encoded = await resized.toFormat(format, { quality: 85 }).toBuffer();
-      if (encoded.byteLength <= maxSize) {
+      if (encoded.byteLength <= MAX_IMAGE_BYTES) {
         return encoded;
       }
       return resized.toFormat(format, { quality: 70 }).toBuffer();
     };
 
-    buffer = await shrinkIfNeeded(buffer, file.type);
-    const contentHash = computeContentHash(buffer);
-    const exifSummary = await extractExifSummary(originalBuffer);
+    type UploadSuccess = {
+      id: string;
+      filename: string;
+      url: string;
+      variants: string[];
+      uploaded: string;
+      folder?: string;
+      tags: string[];
+      description?: string;
+      originalUrl?: string;
+      parentId?: string;
+      linkedAssetId?: string;
+      webpVariantId?: string;
+    };
+    type UploadFailure = {
+      filename: string;
+      error: string;
+      reason?: 'invalid-type' | 'too-large' | 'duplicate' | 'upload' | 'unsupported';
+    };
+    type DuplicateMatches = Awaited<ReturnType<typeof findDuplicatesByOriginalUrl>>;
 
-    if (!normalizedOriginalUrl) {
-      duplicateMatches = await findDuplicatesByContentHash(contentHash);
-      if (duplicateMatches.length) {
-        console.warn('[upload] Duplicate content hash detected', {
-          contentHash,
-          duplicateIds: duplicateMatches.map(match => match.id),
-          folders: duplicateMatches.map(match => match.folder || null)
-        });
-        return NextResponse.json(
-          {
-            error: 'Duplicate image content detected',
-            duplicates: duplicateMatches.map(toDuplicateSummary)
-          },
-          { status: 409 }
-        );
+    const uploadSingleImage = async ({
+      buffer,
+      originalBuffer,
+      fileName,
+      fileType,
+      fileSize,
+    }: {
+      buffer: Buffer;
+      originalBuffer: Buffer;
+      fileName: string;
+      fileType: string;
+      fileSize: number;
+    }): Promise<{ ok: true; data: UploadSuccess } | { ok: false; error: string; status: number; reason?: UploadFailure['reason']; duplicates?: DuplicateMatches }> => {
+      if (!SUPPORTED_IMAGE_TYPES.has(fileType)) {
+        logIssue('Rejected non-image upload', { filename: fileName, type: fileType });
+        return { ok: false, error: 'File must be an image', status: 400, reason: 'invalid-type' };
       }
-    }
 
-    // Upload to Cloudflare Images
-    const uploadFormData = new FormData();
-    uploadFormData.append('file', new Blob([buffer], { type: file.type }), file.name);
+      if (fileSize > MAX_IMAGE_BYTES) {
+        logIssue('Rejected oversized upload', { filename: fileName, bytes: fileSize, limit: MAX_IMAGE_BYTES });
+        return { ok: false, error: 'File size must be less than 10MB', status: 400, reason: 'too-large' };
+      }
 
-    // Add metadata including organization info
-    const metadataPayload: Record<string, unknown> = {
-      filename: file.name,
-      displayName: file.name,
-      uploadedAt: new Date().toISOString(),
-      size: file.size,
-      type: file.type,
-      folder: cleanFolder,
-      tags: cleanTags,
-      description: cleanDescription,
-      originalUrl: cleanOriginalUrl,
-      originalUrlNormalized: normalizedOriginalUrl,
-      contentHash,
-      variationParentId: cleanParentId,
-      exif: exifSummary,
+      const normalizedName = normalizeFilename(fileName);
+      const normalizedOriginalUrl = normalizeOriginalUrl(cleanOriginalUrl);
+      let duplicateMatches: DuplicateMatches = [];
+      if (normalizedOriginalUrl) {
+        duplicateMatches = await findDuplicatesByOriginalUrl(normalizedOriginalUrl);
+        if (duplicateMatches.length) {
+          console.warn('[upload] Duplicate original URL detected', {
+            originalUrl: cleanOriginalUrl,
+            duplicateIds: duplicateMatches.map(match => match.id),
+            folders: duplicateMatches.map(match => match.folder || null)
+          });
+          return {
+            ok: false,
+            error: `Duplicate original URL "${cleanOriginalUrl}" detected`,
+            status: 409,
+            reason: 'duplicate',
+            duplicates: duplicateMatches
+          };
+        }
+      }
+
+      let finalBuffer = await shrinkIfNeeded(buffer, fileType);
+      const contentHash = computeContentHash(finalBuffer);
+      const exifSummary = await extractExifSummary(originalBuffer);
+
+      if (!normalizedOriginalUrl) {
+        duplicateMatches = await findDuplicatesByContentHash(contentHash);
+        if (duplicateMatches.length) {
+          console.warn('[upload] Duplicate content hash detected', {
+            contentHash,
+            duplicateIds: duplicateMatches.map(match => match.id),
+            folders: duplicateMatches.map(match => match.folder || null)
+          });
+          return {
+            ok: false,
+            error: 'Duplicate image content detected',
+            status: 409,
+            reason: 'duplicate',
+            duplicates: duplicateMatches
+          };
+        }
+      }
+
+      const uploadFormData = new FormData();
+      uploadFormData.append('file', new Blob([finalBuffer], { type: fileType }), normalizedName);
+
+      const metadataPayload: Record<string, unknown> = {
+        filename: normalizedName,
+        displayName: normalizedName,
+        uploadedAt: new Date().toISOString(),
+        size: fileSize,
+        type: fileType,
+        folder: cleanFolder,
+        tags: cleanTags,
+        description: cleanDescription,
+        originalUrl: cleanOriginalUrl,
+        originalUrlNormalized: normalizedOriginalUrl,
+        contentHash,
+        variationParentId: cleanParentId,
+        exif: exifSummary,
+      };
+
+      const { metadata: limitedMetadata, dropped } = enforceCloudflareMetadataLimit(metadataPayload);
+      if (dropped.length) {
+        logIssue('Metadata trimmed to fit Cloudflare limits', { dropped });
+      }
+      uploadFormData.append('metadata', JSON.stringify(limitedMetadata));
+
+      const cloudflareResponse = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiToken}`,
+          },
+          body: uploadFormData,
+        }
+      );
+
+      const result = await cloudflareResponse.json();
+
+      if (!cloudflareResponse.ok) {
+        console.error('Cloudflare API error:', result);
+        return {
+          ok: false,
+          error: result.errors?.[0]?.message || 'Failed to upload to Cloudflare',
+          status: cloudflareResponse.status,
+          reason: 'upload'
+        };
+      }
+
+      const imageData = result.result;
+      const baseMeta = imageData.meta ?? limitedMetadata;
+      const primaryCached = transformApiImageToCached({
+        id: imageData.id,
+        filename: imageData.filename,
+        uploaded: imageData.uploaded,
+        variants: imageData.variants,
+        meta: baseMeta
+      });
+      upsertCachedImage(primaryCached);
+
+      let webpVariantId: string | undefined;
+      if (fileType === 'image/svg+xml') {
+        try {
+          const webpBuffer = await sharp(finalBuffer).webp({ quality: 85 }).toBuffer();
+          const webpName = normalizedName.replace(/\.svg$/i, '') + '.webp';
+          const webpFormData = new FormData();
+          webpFormData.append('file', new Blob([webpBuffer], { type: 'image/webp' }), webpName);
+          const webpMetadataPayload = {
+            ...metadataPayload,
+            filename: webpName,
+            displayName: webpName,
+            variationParentId: cleanParentId,
+            linkedAssetId: imageData.id,
+          };
+          const { metadata: limitedWebpMetadata, dropped } = enforceCloudflareMetadataLimit(webpMetadataPayload);
+          if (dropped.length) {
+            logIssue('Metadata trimmed for webp variant', { dropped });
+          }
+          webpFormData.append('metadata', JSON.stringify(limitedWebpMetadata));
+          const webpResponse = await fetch(
+            `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1`,
+            {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${apiToken}`,
+              },
+              body: webpFormData,
+            }
+          );
+          const webpJson = await webpResponse.json();
+          if (!webpResponse.ok) {
+            console.error('Cloudflare WebP upload error:', webpJson);
+          } else {
+            const webpResult = webpJson.result;
+            webpVariantId = webpResult?.id;
+            if (webpResult) {
+              const cachedVariant = transformApiImageToCached({
+                id: webpResult.id,
+                filename: webpResult.filename,
+                uploaded: webpResult.uploaded,
+                variants: webpResult.variants,
+                meta: webpResult.meta ?? limitedWebpMetadata
+              });
+              upsertCachedImage(cachedVariant);
+            }
+          }
+        } catch (err) {
+          console.error('Failed to convert SVG to WebP', err);
+        }
+      }
+
+      if (webpVariantId) {
+        const updatedMetadata = {
+          ...metadataPayload,
+          linkedAssetId: webpVariantId,
+          updatedAt: new Date().toISOString(),
+        };
+        const { metadata: limitedUpdatedMetadata, dropped } = enforceCloudflareMetadataLimit(updatedMetadata);
+        if (dropped.length) {
+          logIssue('Metadata trimmed for linked asset update', { dropped });
+        }
+        try {
+          const patchResp = await fetch(
+            `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${imageData.id}`,
+            {
+              method: 'PATCH',
+              headers: {
+                'Authorization': `Bearer ${apiToken}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ metadata: limitedUpdatedMetadata }),
+            }
+          );
+          if (!patchResp.ok) {
+            const patchJson = await patchResp.json();
+            console.error('Failed to patch SVG metadata', patchJson);
+          } else {
+            const updatedPrimary = transformApiImageToCached({
+              id: imageData.id,
+              filename: imageData.filename,
+              uploaded: imageData.uploaded,
+              variants: imageData.variants,
+              meta: updatedMetadata
+            });
+            upsertCachedImage(updatedPrimary);
+          }
+        } catch (err) {
+          console.error('Failed to patch SVG metadata', err);
+        }
+      }
+
+      return {
+        ok: true,
+        data: {
+          id: imageData.id,
+          filename: normalizedName,
+          url: imageData.variants.find((v: string) => v.includes('public')) || imageData.variants[0],
+          variants: imageData.variants,
+          uploaded: new Date().toISOString(),
+          folder: cleanFolder,
+          tags: cleanTags,
+          description: cleanDescription,
+          originalUrl: cleanOriginalUrl,
+          parentId: cleanParentId,
+          linkedAssetId: webpVariantId,
+          webpVariantId,
+        }
+      };
     };
 
-    const metadata = JSON.stringify(metadataPayload);
-    uploadFormData.append('metadata', metadata);
-
-    const cloudflareResponse = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiToken}`,
-        },
-        body: uploadFormData,
+    if (isZipFile(file)) {
+      if (file.size > MAX_ZIP_BYTES) {
+        logIssue('Rejected oversized zip upload', { filename: file.name, bytes: file.size, limit: MAX_ZIP_BYTES });
+        return NextResponse.json(
+          { error: 'Zip file size must be less than 100MB' },
+          { status: 400 }
+        );
       }
-    );
 
-    const result = await cloudflareResponse.json();
+      const zipBuffer = Buffer.from(await file.arrayBuffer());
+      const zip = new AdmZip(zipBuffer);
+      const entries = zip.getEntries();
+      const results: UploadSuccess[] = [];
+      const failures: UploadFailure[] = [];
+      const skipped: { filename: string; reason: string }[] = [];
 
-    if (!cloudflareResponse.ok) {
-      console.error('Cloudflare API error:', result);
+      for (const entry of entries) {
+        if (entry.isDirectory) {
+          continue;
+        }
+        const entryName = normalizeFilename(entry.entryName);
+        const entryType = getMimeTypeFromFilename(entryName);
+        if (!entryType || !SUPPORTED_IMAGE_TYPES.has(entryType)) {
+          skipped.push({ filename: entryName, reason: 'Not an image file' });
+          continue;
+        }
+
+        const entryBuffer = entry.getData();
+        const outcome = await uploadSingleImage({
+          buffer: entryBuffer,
+          originalBuffer: entryBuffer,
+          fileName: entryName,
+          fileType: entryType,
+          fileSize: entryBuffer.byteLength
+        });
+
+        if (outcome.ok) {
+          results.push(outcome.data);
+        } else {
+          failures.push({
+            filename: entryName,
+            error: outcome.error,
+            reason: outcome.reason ?? 'upload'
+          });
+        }
+      }
+
+      if (results.length === 0 && failures.length === 0) {
+        return NextResponse.json(
+          { error: 'No supported images found in zip' },
+          { status: 400 }
+        );
+      }
+
+      return NextResponse.json({
+        results,
+        failures,
+        skipped,
+        successCount: results.length,
+        failureCount: failures.length,
+        skippedCount: skipped.length,
+        isZip: true
+      });
+    }
+
+    const fileType = file.type || getMimeTypeFromFilename(file.name) || '';
+    const fileBuffer = Buffer.from(await file.arrayBuffer());
+    const outcome = await uploadSingleImage({
+      buffer: fileBuffer,
+      originalBuffer: fileBuffer,
+      fileName: file.name,
+      fileType,
+      fileSize: file.size
+    });
+
+    if (!outcome.ok) {
+      if (outcome.reason === 'duplicate') {
+        return NextResponse.json(
+          {
+            error: outcome.error,
+            duplicates: outcome.duplicates ? outcome.duplicates.map(toDuplicateSummary) : []
+          },
+          { status: outcome.status }
+        );
+      }
       return NextResponse.json(
-        { error: result.errors?.[0]?.message || 'Failed to upload to Cloudflare' },
-        { status: cloudflareResponse.status }
+        { error: outcome.error },
+        { status: outcome.status }
       );
     }
 
-    const imageData = result.result;
-    const baseMeta = imageData.meta ?? metadataPayload;
-    const primaryCached = transformApiImageToCached({
-      id: imageData.id,
-      filename: imageData.filename,
-      uploaded: imageData.uploaded,
-      variants: imageData.variants,
-      meta: baseMeta
-    });
-    upsertCachedImage(primaryCached);
-
-    let webpVariantId: string | undefined;
-    if (file.type === 'image/svg+xml') {
-      try {
-        const webpBuffer = await sharp(buffer).webp({ quality: 85 }).toBuffer();
-        const webpName = file.name.replace(/\.svg$/i, '') + '.webp';
-        const webpFormData = new FormData();
-        webpFormData.append('file', new Blob([webpBuffer], { type: 'image/webp' }), webpName);
-        const webpMetadataPayload = {
-          ...metadataPayload,
-          filename: webpName,
-          displayName: webpName,
-          variationParentId: cleanParentId,
-          linkedAssetId: imageData.id,
-        };
-        webpFormData.append('metadata', JSON.stringify(webpMetadataPayload));
-        const webpResponse = await fetch(
-          `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1`,
-          {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${apiToken}`,
-            },
-            body: webpFormData,
-          }
-        );
-        const webpJson = await webpResponse.json();
-        if (!webpResponse.ok) {
-          console.error('Cloudflare WebP upload error:', webpJson);
-        } else {
-          const webpResult = webpJson.result;
-          webpVariantId = webpResult?.id;
-          if (webpResult) {
-            const cachedVariant = transformApiImageToCached({
-              id: webpResult.id,
-              filename: webpResult.filename,
-              uploaded: webpResult.uploaded,
-              variants: webpResult.variants,
-              meta: webpResult.meta ?? webpMetadataPayload
-            });
-            upsertCachedImage(cachedVariant);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to convert SVG to WebP', err);
-      }
-    }
-
-    if (webpVariantId) {
-      const updatedMetadata = {
-        ...metadataPayload,
-        linkedAssetId: webpVariantId,
-        updatedAt: new Date().toISOString(),
-      };
-      try {
-        const patchResp = await fetch(
-          `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${imageData.id}`,
-          {
-            method: 'PATCH',
-            headers: {
-              'Authorization': `Bearer ${apiToken}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ metadata: updatedMetadata }),
-          }
-        );
-        if (!patchResp.ok) {
-          const patchJson = await patchResp.json();
-          console.error('Failed to patch SVG metadata', patchJson);
-        } else {
-          const updatedPrimary = transformApiImageToCached({
-            id: imageData.id,
-            filename: imageData.filename,
-            uploaded: imageData.uploaded,
-            variants: imageData.variants,
-            meta: updatedMetadata
-          });
-          upsertCachedImage(updatedPrimary);
-        }
-      } catch (err) {
-        console.error('Failed to patch SVG metadata', err);
-      }
-    }
-
-    return NextResponse.json({
-      id: imageData.id,
-      filename: file.name,
-      url: imageData.variants.find((v: string) => v.includes('public')) || imageData.variants[0],
-      variants: imageData.variants,
-      uploaded: new Date().toISOString(),
-      folder: cleanFolder,
-      tags: cleanTags,
-      description: cleanDescription,
-      originalUrl: cleanOriginalUrl,
-      parentId: cleanParentId,
-      linkedAssetId: webpVariantId,
-      webpVariantId,
-    });
+    return NextResponse.json(outcome.data);
 
   } catch (error) {
     console.error('Upload error:', error);

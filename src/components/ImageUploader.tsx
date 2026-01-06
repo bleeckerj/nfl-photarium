@@ -5,6 +5,7 @@ import { useDropzone } from "react-dropzone";
 import { Upload, X, CheckCircle, AlertCircle } from "lucide-react";
 import clsx from "clsx";
 import MonoSelect from "./MonoSelect";
+import { normalizeOriginalUrl } from "@/utils/urlNormalization";
 
 interface UploadedImage {
   id: string;
@@ -16,6 +17,12 @@ interface UploadedImage {
   tags?: string[];
   description?: string;
   originalUrl?: string;
+  file?: File;
+  folderInput?: string;
+  tagsInput?: string;
+  descriptionInput?: string;
+  originalUrlInput?: string;
+  parentId?: string;
 }
 
 interface ImageUploaderProps {
@@ -23,8 +30,12 @@ interface ImageUploaderProps {
 }
 
 interface QueuedFile {
+  id: string;
   file: File;
   originalUrl?: string;
+  folder?: string;
+  tags?: string;
+  description?: string;
 }
 
 interface GalleryImageSummary {
@@ -46,7 +57,16 @@ const base64ToFile = (base64: string, filename: string, mimeType: string) => {
 
 const MAX_BYTES = 10 * 1024 * 1024;
 
+const isZipFile = (file: File) => (
+  file.type === 'application/zip' ||
+  file.type === 'application/x-zip-compressed' ||
+  file.name.toLowerCase().endsWith('.zip')
+);
+
+const isImageFile = (file: File) => file.type.startsWith('image/');
+
 const shrinkImageFile = async (file: File): Promise<File> => {
+  if (!isImageFile(file)) return file;
   if (file.size <= MAX_BYTES) return file;
   const imageBitmap = await createImageBitmap(file);
   const canvas = document.createElement('canvas');
@@ -74,7 +94,7 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFolder, setSelectedFolder] = useState<string>("");
   const [newFolder, setNewFolder] = useState<string>("");
-  const [tags, setTags] = useState<string>("");
+  const [tags, setTags] = useState<string>("found");
   const [description, setDescription] = useState<string>("");
   const [originalUrl, setOriginalUrl] = useState<string>("");
   const [folders, setFolders] = useState<string[]>([
@@ -89,6 +109,58 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
   const [importUrl, setImportUrl] = useState('');
   const [importLoading, setImportLoading] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  const [expandedQueueMetadata, setExpandedQueueMetadata] = useState<Record<string, boolean>>({});
+
+  const createQueueId = useCallback(
+    () =>
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : Math.random().toString(36).slice(2),
+    []
+  );
+
+  const updateQueuedFile = useCallback((id: string, updates: Partial<QueuedFile>) => {
+    setQueuedFiles((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, ...updates } : item))
+    );
+  }, []);
+
+  const estimateMetadataBytes = useCallback((payload: Record<string, unknown>) => {
+    const filtered = Object.fromEntries(
+      Object.entries(payload).filter(([, value]) => value !== undefined && value !== "")
+    );
+    const json = JSON.stringify(filtered);
+    return new TextEncoder().encode(json).length;
+  }, []);
+
+  const buildMetadataEstimate = useCallback(
+    (
+      item: QueuedFile,
+      overrides: { folder?: string; tags?: string; description?: string; originalUrl?: string }
+    ) => {
+      const normalizedOriginalUrl = normalizeOriginalUrl(overrides.originalUrl);
+      const tagList = overrides.tags
+        ? overrides.tags
+            .split(',')
+            .map((tag) => tag.trim())
+            .filter(Boolean)
+        : undefined;
+      return estimateMetadataBytes({
+        filename: item.file.name,
+        displayName: item.file.name,
+        uploadedAt: new Date().toISOString(),
+        size: item.file.size,
+        type: item.file.type,
+        folder: overrides.folder || undefined,
+        tags: tagList,
+        description: overrides.description || undefined,
+        originalUrl: overrides.originalUrl || undefined,
+        originalUrlNormalized: normalizedOriginalUrl,
+        variationParentId: selectedParentId || undefined
+      });
+    },
+    [estimateMetadataBytes, selectedParentId]
+  );
 
   const formatUploadErrorMessage = useCallback((response: Response, payload: unknown) => {
     if (response.status === 409 && payload && typeof payload === 'object' && 'duplicates' in payload) {
@@ -194,32 +266,61 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
       const folderToUse = resolveFolder();
 
       // Create initial entries for all files
-      const initialImages: UploadedImage[] = filesToUpload.map(({ file }) => ({
-        id: Math.random().toString(36).substring(7),
-        url: "",
-        filename: file.name,
-        status: "uploading" as const,
-      }));
+      const initialImages: UploadedImage[] = filesToUpload.map((entry) => {
+        const originalUrlToSend =
+          entry.originalUrl !== undefined ? entry.originalUrl : originalUrl.trim() || '';
+        const folderToSend = entry.folder !== undefined ? entry.folder : folderToUse;
+        const tagsToSend = entry.tags !== undefined ? entry.tags : tags;
+        const descriptionToSend = entry.description !== undefined ? entry.description : description;
 
-      setUploadedImages((prev) => [...prev, ...initialImages]);
+        return {
+          id: entry.id,
+          url: "",
+          filename: entry.file.name,
+          status: "uploading" as const,
+          file: entry.file,
+          folderInput: folderToSend,
+          tagsInput: tagsToSend,
+          descriptionInput: descriptionToSend,
+          originalUrlInput: originalUrlToSend || undefined,
+          parentId: selectedParentId || undefined
+        };
+      });
+
+      setUploadedImages((prev) => {
+        const ids = new Set(initialImages.map((item) => item.id));
+        return [...prev.filter((img) => !ids.has(img.id)), ...initialImages];
+      });
 
       // Upload each file
       for (let i = 0; i < filesToUpload.length; i++) {
-        const { file, originalUrl: queuedOriginalUrl } = filesToUpload[i];
-        const imageId = initialImages[i].id;
-        const originalUrlToSend = queuedOriginalUrl ?? (originalUrl.trim() || '');
+        const {
+          file,
+          originalUrl: queuedOriginalUrl,
+          folder: queuedFolder,
+          tags: queuedTags,
+          description: queuedDescription,
+          id: queuedId
+        } = filesToUpload[i];
+        const imageId = queuedId;
+        const originalUrlToSend =
+          queuedOriginalUrl !== undefined ? queuedOriginalUrl : originalUrl.trim() || '';
+        const folderToSend = queuedFolder !== undefined ? queuedFolder : folderToUse;
+        const tagsToSend = queuedTags !== undefined ? queuedTags : tags;
+        const descriptionToSend =
+          queuedDescription !== undefined ? queuedDescription : description;
 
         try {
           const formData = new FormData();
           formData.append("file", file);
-          if (folderToUse) {
-            formData.append("folder", folderToUse);
+          if (folderToSend && folderToSend.trim()) {
+            formData.append("folder", folderToSend.trim());
           }
-          if (tags && tags.trim()) {
-            formData.append("tags", tags.trim());
+          if (tagsToSend && tagsToSend.trim()) {
+            formData.append("tags", tagsToSend.trim());
           }
-          if (description && description.trim()) {
-            formData.append("description", description.trim());
+          if (descriptionToSend && descriptionToSend.trim()) {
+            formData.append("description", descriptionToSend.trim());
           }
           if (originalUrlToSend) {
             formData.append("originalUrl", originalUrlToSend);
@@ -236,31 +337,84 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
           const result = await response.json();
 
           if (response.ok) {
-            setUploadedImages((prev) =>
-              prev.map((img) =>
-                img.id === imageId
-                  ? {
-                      ...img,
-                      status: "success",
-                      url: result.url,
-                      folder: folderToUse || undefined,
-                      tags: tags
-                        .trim()
-                        ? tags.trim().split(",").map((t) => t.trim())
-                        : [],
-                      description: description || undefined,
-                      originalUrl: originalUrlToSend || undefined,
-                    }
-                  : img
-              )
-            );
+            if (result && typeof result === 'object' && Array.isArray((result as { results?: unknown }).results)) {
+              const zipResult = result as {
+                results: Array<{
+                  id: string;
+                  filename: string;
+                  url: string;
+                  folder?: string;
+                  tags?: string[];
+                  description?: string;
+                  originalUrl?: string;
+                }>;
+                failures?: Array<{ filename: string; error: string }>;
+                skipped?: Array<{ filename: string; reason: string }>;
+              };
+              const successEntries: UploadedImage[] = zipResult.results.map((item) => ({
+                id: item.id,
+                url: item.url,
+                filename: item.filename,
+                status: "success",
+                folder: item.folder,
+                tags: item.tags,
+                description: item.description,
+                originalUrl: item.originalUrl
+              }));
+              const failureEntries: UploadedImage[] = (zipResult.failures || []).map((item) => ({
+                id: Math.random().toString(36).substring(7),
+                url: "",
+                filename: item.filename,
+                status: "error",
+                error: item.error
+              }));
+              const skippedEntries: UploadedImage[] = (zipResult.skipped || []).map((item) => ({
+                id: Math.random().toString(36).substring(7),
+                url: "",
+                filename: item.filename,
+                status: "error",
+                error: item.reason
+              }));
+              setUploadedImages((prev) => [
+                ...prev.filter((img) => img.id !== imageId),
+                ...successEntries,
+                ...failureEntries,
+                ...skippedEntries
+              ]);
 
-            // Call the callback to refresh the gallery after a short delay
-            // This ensures Cloudflare has processed the image
-            if (onImageUploaded) {
-              setTimeout(() => {
-                onImageUploaded();
-              }, 500);
+              if (onImageUploaded && successEntries.length > 0) {
+                setTimeout(() => {
+                  onImageUploaded();
+                }, 500);
+              }
+            } else {
+              setUploadedImages((prev) =>
+                prev.map((img) =>
+                  img.id === imageId
+                    ? {
+                        ...img,
+                        status: "success",
+                        url: result.url,
+                        folder: folderToSend || undefined,
+                        tags: tagsToSend
+                          .trim()
+                          ? tagsToSend.trim().split(",").map((t) => t.trim())
+                          : [],
+                        description: descriptionToSend || undefined,
+                        originalUrl: originalUrlToSend || undefined,
+                        file: undefined,
+                      }
+                    : img
+                )
+              );
+
+              // Call the callback to refresh the gallery after a short delay
+              // This ensures Cloudflare has processed the image
+              if (onImageUploaded) {
+                setTimeout(() => {
+                  onImageUploaded();
+                }, 500);
+              }
             }
           } else {
             const errorMessage = formatUploadErrorMessage(response, result);
@@ -295,7 +449,7 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
       // Clear form inputs after successful upload
       setSelectedFolder("");
       setNewFolder("");
-      setTags("");
+      setTags("found");
       setDescription("");
       setOriginalUrl("");
       setSelectedParentId("");
@@ -305,11 +459,16 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
 
   // Handle drag and drop - either queue or upload immediately
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
-    const resizedPromises = acceptedFiles.map(async (file) => await shrinkImageFile(file));
+    const resizedPromises = acceptedFiles.map(async (file) => {
+      if (isZipFile(file)) {
+        return file;
+      }
+      return shrinkImageFile(file);
+    });
     const resizedFiles = await Promise.all(resizedPromises);
     setQueuedFiles((prev) => [
       ...prev,
-      ...resizedFiles.map((file) => ({ file }))
+      ...resizedFiles.map((file) => ({ id: createQueueId(), file }))
     ]);
   }, []);
 
@@ -319,8 +478,12 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
       const processed: QueuedFile[] = [];
       for (const item of queuedFiles) {
         processed.push({
-          file: await shrinkImageFile(item.file),
-          originalUrl: item.originalUrl
+          file: isZipFile(item.file) ? item.file : await shrinkImageFile(item.file),
+          id: item.id,
+          originalUrl: item.originalUrl,
+          folder: item.folder,
+          tags: item.tags,
+          description: item.description
         });
       }
       uploadFiles(processed);
@@ -337,6 +500,8 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
     onDrop,
     accept: {
       "image/*": [".jpeg", ".jpg", ".png", ".gif", ".webp"],
+      "application/zip": [".zip"],
+      "application/x-zip-compressed": [".zip"]
     },
     multiple: true,
   });
@@ -344,6 +509,24 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
   const removeImage = (id: string) => {
     setUploadedImages((prev) => prev.filter((img) => img.id !== id));
   };
+
+  const handleRetryUpload = useCallback(
+    (image: UploadedImage) => {
+      if (!image.file) {
+        return;
+      }
+      const retryItem: QueuedFile = {
+        id: image.id,
+        file: image.file,
+        originalUrl: image.originalUrlInput ?? image.originalUrl,
+        folder: image.folderInput,
+        tags: image.tagsInput,
+        description: image.descriptionInput
+      };
+      uploadFiles([retryItem]);
+    },
+    [uploadFiles]
+  );
 
   const copyToClipboard = async (url: string) => {
     try {
@@ -399,7 +582,10 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
       }
       const file = base64ToFile(String(data.data), String(data.name), String(data.type));
       const sourceUrl = String(data.originalUrl || importUrl.trim());
-      setQueuedFiles((prev) => [...prev, { file, originalUrl: sourceUrl }]);
+      setQueuedFiles((prev) => [
+        ...prev,
+        { id: createQueueId(), file, originalUrl: sourceUrl }
+      ]);
       if (!originalUrl.trim()) {
         setOriginalUrl(sourceUrl);
       }
@@ -535,9 +721,11 @@ A long list of filenames is not user friendly and essentially useless for select
         <input {...getInputProps()} />
         <Upload className="mx-auto h-8 w-8 text-gray-400 mb-4" />
         <p className="text-xs font-mono font-medium text-gray-900 mb-2">
-          {isUploading ? "Uploading..." : isDragActive ? "Drop images here" : "Drag & drop images here"}
+          {isUploading ? "Uploading..." : isDragActive ? "Drop images or a .zip here" : "Drag & drop images or a .zip here"}
         </p>
-        <p className="text-xs font-mono text-gray-500">{isUploading ? "Please wait while your images are being uploaded" : "or click to select files"}</p>
+        <p className="text-xs font-mono text-gray-500">
+          {isUploading ? "Please wait while your images are being uploaded" : "or click to select files (.zip supported)"}
+        </p>
       </div>
 
       <div className="mt-4 p-4 border border-dashed rounded-lg bg-white/60">
@@ -594,18 +782,157 @@ A long list of filenames is not user friendly and essentially useless for select
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-            {queuedFiles.map((item, index) => (
-              <div key={`${item.file.name}-${index}`} className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            {queuedFiles.map((item) => {
+              const hasCustomFolder = item.folder !== undefined;
+              const hasCustomTags = item.tags !== undefined;
+              const hasCustomDescription = item.description !== undefined;
+              const hasCustomOriginalUrl = item.originalUrl !== undefined;
+              const previewFolder = selectedFolder.trim()
+                ? selectedFolder.trim()
+                : newFolder.trim()
+                  ? newFolder.trim().toLowerCase().replace(/\s+/g, "-")
+                  : "";
+              const effectiveFolder = hasCustomFolder ? item.folder || "" : previewFolder;
+              const effectiveTags = hasCustomTags ? item.tags || "" : tags;
+              const effectiveDescription = hasCustomDescription ? item.description || "" : description;
+              const effectiveOriginalUrl = hasCustomOriginalUrl ? item.originalUrl || "" : originalUrl;
+              const metadataExpanded = Boolean(expandedQueueMetadata[item.id]);
+              const metadataBytes = buildMetadataEstimate(item, {
+                folder: effectiveFolder,
+                tags: effectiveTags,
+                description: effectiveDescription,
+                originalUrl: effectiveOriginalUrl
+              });
+              const metadataOverLimit = metadataBytes >= 1024;
+
+              return (
+              <div key={item.id} className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
                 <p className="text-xs font-mono font-medium text-gray-900 truncate">{item.file.name}</p>
                 <p className="text-xs text-gray-500">{(item.file.size / 1024 / 1024).toFixed(2)} MB</p>
-                {item.originalUrl && (
-                  <p className="text-[11px] text-gray-600 truncate" title={item.originalUrl}>🔗 {item.originalUrl}</p>
+                {effectiveOriginalUrl && (
+                  <p className="text-[11px] text-gray-600 truncate" title={effectiveOriginalUrl}>
+                    🔗 {effectiveOriginalUrl}
+                  </p>
                 )}
-                <button onClick={() => setQueuedFiles((prev) => prev.filter((_, i) => i !== index))} className="mt-1 text-xs text-red-600 hover:text-red-800" disabled={isUploading}>
-                  Remove
-                </button>
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedQueueMetadata((prev) => ({
+                        ...prev,
+                        [item.id]: !metadataExpanded
+                      }))
+                    }
+                    className="text-[11px] text-blue-600 hover:text-blue-800"
+                  >
+                    {metadataExpanded ? "Hide metadata" : "Show metadata"}
+                  </button>
+                  <button
+                    onClick={() => setQueuedFiles((prev) => prev.filter((entry) => entry.id !== item.id))}
+                    className="text-xs text-red-600 hover:text-red-800"
+                    disabled={isUploading}
+                  >
+                    Remove
+                  </button>
+                </div>
+                {metadataExpanded && (
+                  <div className="mt-2 border-t border-blue-200 pt-2 space-y-2">
+                    <div className="space-y-1">
+                      <p className="text-[11px] text-gray-600">Folder: {effectiveFolder || "—"}</p>
+                      <p className="text-[11px] text-gray-600">Tags: {effectiveTags || "—"}</p>
+                      <p className="text-[11px] text-gray-600">Description: {effectiveDescription || "—"}</p>
+                      <p className="text-[11px] text-gray-600">
+                        Original URL: {effectiveOriginalUrl || "—"}
+                      </p>
+                      {selectedParentId && (
+                        <p className="text-[11px] text-gray-600">
+                          Parent ID: {selectedParentId}
+                        </p>
+                      )}
+                      <p className={clsx("text-[11px]", metadataOverLimit ? "text-red-600" : "text-gray-600")}>
+                        Estimated metadata size: {metadataBytes} bytes
+                      </p>
+                      <p className="text-[10px] text-gray-500">
+                        Estimate excludes content hash and EXIF fields added server-side.
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="block text-[11px] text-gray-700">
+                        Override folder
+                        <input
+                          type="text"
+                          value={item.folder ?? ""}
+                          onChange={(e) => updateQueuedFile(item.id, { folder: e.target.value })}
+                          placeholder={previewFolder || "No folder"}
+                          className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => updateQueuedFile(item.id, { folder: undefined })}
+                          className="mt-1 text-[10px] text-blue-600 hover:text-blue-800"
+                        >
+                          Use global folder
+                        </button>
+                      </label>
+                      <label className="block text-[11px] text-gray-700">
+                        Override tags
+                        <input
+                          type="text"
+                          value={item.tags ?? ""}
+                          onChange={(e) => updateQueuedFile(item.id, { tags: e.target.value })}
+                          placeholder={tags || "No tags"}
+                          className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => updateQueuedFile(item.id, { tags: undefined })}
+                          className="mt-1 text-[10px] text-blue-600 hover:text-blue-800"
+                        >
+                          Use global tags
+                        </button>
+                      </label>
+                      <label className="block text-[11px] text-gray-700">
+                        Override description
+                        <input
+                          type="text"
+                          value={item.description ?? ""}
+                          onChange={(e) => updateQueuedFile(item.id, { description: e.target.value })}
+                          placeholder={description || "No description"}
+                          className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => updateQueuedFile(item.id, { description: undefined })}
+                          className="mt-1 text-[10px] text-blue-600 hover:text-blue-800"
+                        >
+                          Use global description
+                        </button>
+                      </label>
+                      <label className="block text-[11px] text-gray-700">
+                        Override original URL
+                        <input
+                          type="text"
+                          value={item.originalUrl ?? ""}
+                          onChange={(e) => updateQueuedFile(item.id, { originalUrl: e.target.value })}
+                          placeholder={originalUrl || "No original URL"}
+                          className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => updateQueuedFile(item.id, { originalUrl: undefined })}
+                          className="mt-1 text-[10px] text-blue-600 hover:text-blue-800"
+                        >
+                          Use global original URL
+                        </button>
+                      </label>
+                      <p className="text-[10px] text-gray-500">
+                        Leave a field blank to omit it for this file.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
-            ))}
+            )})}
           </div>
         </div>
       )}
@@ -635,7 +962,22 @@ A long list of filenames is not user friendly and essentially useless for select
                         {image.url}
                       </button>
                     )}
-                    {image.status === "error" && <p className="text-xs text-red-600">{image.error}</p>}
+                    {image.status === "error" && (
+                      <div className="space-y-1">
+                        <p className="text-xs text-red-600">{image.error}</p>
+                        <button
+                          type="button"
+                          onClick={() => handleRetryUpload(image)}
+                          disabled={!image.file || isUploading}
+                          className={clsx(
+                            "text-[11px] text-blue-600 hover:text-blue-800",
+                            (!image.file || isUploading) && "opacity-50 cursor-not-allowed"
+                          )}
+                        >
+                          Retry upload
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
                 <button onClick={() => removeImage(image.id)} className="flex-shrink-0 text-gray-400 hover:text-gray-600">

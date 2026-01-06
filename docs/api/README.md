@@ -43,7 +43,7 @@ Response:
         "https://imagedelivery.net/<hash>/<id>/w=300?format=webp",
         "https://imagedelivery.net/<hash>/<id>/w=600?format=webp",
         "https://imagedelivery.net/<hash>/<id>/w=900?format=webp",
-        "https://imagedelivery.net/<hash>/<id>/w=1230?format=webp",
+        "https://imagedelivery.net/<hash>/<id>/w=1200?format=webp",
         "https://imagedelivery.net/<hash>/<id>/w=150?format=webp"
       ]
     }
