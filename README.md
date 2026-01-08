@@ -7,7 +7,7 @@
 **Self-hosted image management** for teams and creators.  
 Upload, organize, and distribute images via Cloudflare's global CDN.
 
-[Quick Start](#quick-start) · [API Docs](./EXTERNAL_UPLOAD_API.md) · [Configuration](./docs/namespace.md) · [GitHub](https://github.com/bleeckerj/nfl-photarium)
+[Quick Start](#quick-start) · [API Docs](./EXTERNAL_UPLOAD_API.md) · [Configuration](./docs/namespace.md) · [Website](https://bleeckerj.github.io/nfl-photarium/) · [GitHub](https://github.com/bleeckerj/nfl-photarium)
 
 ---
 

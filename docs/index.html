@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photarium — Self-Hosted Image Management</title>
+    <style>
+        @font-face {
+            font-family: 'Warbler Display';
+            src: url('../fonts/warbler/WarblerDisplayV1.2-Regular.woff2') format('woff2');
+            font-weight: 400;
+            font-style: normal;
+        }
+
+        @font-face {
+            font-family: 'Warbler Display';
+            src: url('../fonts/warbler/WarblerDisplayV1.2-Italic.woff2') format('woff2');
+            font-weight: 400;
+            font-style: italic;
+        }
+
+        @font-face {
+            font-family: 'Warbler Banner';
+            src: url('../fonts/warbler/WarblerBannerV1.2-Regular.woff2') format('woff2');
+            font-weight: 400;
+            font-style: normal;
+        }
+
+        @font-face {
+            font-family: 'Warbler Text';
+            src: url('../fonts/warbler/WarblerTextV1.2-Regular.woff2') format('woff2');
+            font-weight: 400;
+            font-style: normal;
+        }
+
+        @font-face {
+            font-family: 'Warbler Text';
+            src: url('../fonts/warbler/WarblerTextV1.2-Bold.woff2') format('woff2');
+            font-weight: 700;
+            font-style: normal;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg: #f9f7f4;
+            --text-dark: #1a1a1a;
+            --text-light: #666;
+            --accent: #8b7355;
+            --border: #e8e4e0;
+        }
+
+        body {
+            font-family: 'Warbler Text', -apple-system, BlinkMacSystemFont, sans-serif;
+            color: var(--text-dark);
+            background: var(--bg);
+            line-height: 1.6;
+            font-size: 16px;
+        }
+
+        a {
+            color: var(--accent);
+            text-decoration: none;
+            transition: opacity 0.2s;
+        }
+
+        a:hover {
+            opacity: 0.7;
+        }
+
+        /* Header / Navigation */
+        header {
+            border-bottom: 1px solid var(--border);
+            background: white;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        nav {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 1.5rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-family: 'Warbler Display', serif;
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+            list-style: none;
+        }
+
+        .nav-links a {
+            font-size: 0.95rem;
+            color: var(--text-dark);
+        }
+
+        .nav-links a:hover {
+            color: var(--accent);
+        }
+
+        /* Hero */
+        .hero {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 6rem 2rem;
+            text-align: center;
+        }
+
+        .hero h1 {
+            font-family: 'Warbler Display', serif;
+            font-size: 3.5rem;
+            font-weight: 700;
+            line-height: 1.1;
+            margin-bottom: 1rem;
+            letter-spacing: -0.02em;
+        }
+
+        .hero p {
+            font-size: 1.25rem;
+            color: var(--text-light);
+            max-width: 600px;
+            margin: 0 auto 2rem;
+            line-height: 1.5;
+        }
+
+        .cta-buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            margin-bottom: 3rem;
+        }
+
+        .btn {
+            padding: 0.875rem 2rem;
+            border-radius: 4px;
+            font-weight: 600;
+            transition: all 0.2s;
+            border: 1px solid var(--border);
+            display: inline-block;
+        }
+
+        .btn-primary {
+            background: var(--text-dark);
+            color: white;
+            border-color: var(--text-dark);
+        }
+
+        .btn-primary:hover {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--text-dark);
+        }
+
+        .btn-secondary:hover {
+            background: var(--border);
+        }
+
+        .hero-image {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08);
+        }
+
+        /* Features */
+        .features {
+            background: white;
+            border-top: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+            padding: 4rem 2rem;
+        }
+
+        .features-container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .features h2 {
+            font-family: 'Warbler Display', serif;
+            font-size: 2rem;
+            margin-bottom: 3rem;
+            text-align: center;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 2rem;
+        }
+
+        .feature {
+            padding: 1.5rem;
+        }
+
+        .feature h3 {
+            font-family: 'Warbler Banner', serif;
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+
+        .feature p {
+            color: var(--text-light);
+            font-size: 0.95rem;
+        }
+
+        /* Getting Started */
+        .getting-started {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 4rem 2rem;
+        }
+
+        .getting-started h2 {
+            font-family: 'Warbler Display', serif;
+            font-size: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .steps {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .step {
+            border-left: 3px solid var(--accent);
+            padding-left: 1.5rem;
+        }
+
+        .step-number {
+            font-family: 'Warbler Display', serif;
+            font-size: 2.5rem;
+            color: var(--accent);
+            line-height: 1;
+            margin-bottom: 0.5rem;
+        }
+
+        .step h3 {
+            font-family: 'Warbler Banner', serif;
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .step p {
+            color: var(--text-light);
+            font-size: 0.95rem;
+        }
+
+        code {
+            background: #f0ebe6;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 0.9rem;
+        }
+
+        .highlight {
+            background: #fff9f0;
+            padding: 1.5rem;
+            border-radius: 4px;
+            border-left: 3px solid var(--accent);
+            margin-top: 2rem;
+        }
+
+        .highlight a {
+            font-weight: 600;
+        }
+
+        /* Footer */
+        footer {
+            background: white;
+            border-top: 1px solid var(--border);
+            padding: 2rem;
+            text-align: center;
+            color: var(--text-light);
+            font-size: 0.9rem;
+        }
+
+        footer a {
+            color: var(--accent);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .hero h1 {
+                font-size: 2.5rem;
+            }
+
+            .hero p {
+                font-size: 1rem;
+            }
+
+            .nav-links {
+                gap: 1rem;
+                font-size: 0.9rem;
+            }
+
+            .cta-buttons {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .btn {
+                width: 100%;
+                max-width: 250px;
+            }
+
+            .features-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <nav>
+            <div class="logo">Photarium</div>
+            <ul class="nav-links">
+                <li><a href="#features">Features</a></li>
+                <li><a href="#getting-started">Get Started</a></li>
+                <li><a href="https://github.com/bleeckerj/nfl-photarium">GitHub</a></li>
+                <li><a href="https://github.com/bleeckerj/nfl-photarium#documentation">Docs</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main>
+        <section class="hero">
+            <h1>Self-Hosted Image Management</h1>
+            <p>Upload, organize, and distribute images via Cloudflare's global CDN. No vendor lock-in. Your infrastructure.</p>
+            <div class="cta-buttons">
+                <a href="https://github.com/bleeckerj/nfl-photarium" class="btn btn-primary">Get Started</a>
+                <a href="https://github.com/bleeckerj/nfl-photarium#features" class="btn btn-secondary">Learn More</a>
+            </div>
+            <img src="https://imagedelivery.net/gaLGizR3kCgx5yRLtiRIOw/3e6c9eae-a4bb-45f2-da37-f99ac9be3900/w=1200?format=webp" alt="Photarium interface" class="hero-image">
+        </section>
+
+        <section class="features" id="features">
+            <div class="features-container">
+                <h2>Designed for Teams</h2>
+                <div class="features-grid">
+                    <div class="feature">
+                        <h3>Upload & Organize</h3>
+                        <p>Drag-and-drop interface with folders, tags, and bulk operations.</p>
+                    </div>
+                    <div class="feature">
+                        <h3>Search & Filter</h3>
+                        <p>Find images by name, folder, tag, or date range instantly.</p>
+                    </div>
+                    <div class="feature">
+                        <h3>Dual View Modes</h3>
+                        <p>Grid view for browsing, list view for bulk operations and metadata.</p>
+                    </div>
+                    <div class="feature">
+                        <h3>Smart Pagination</h3>
+                        <p>Date-aware page controls with sticky filters and quick navigation.</p>
+                    </div>
+                    <div class="feature">
+                        <h3>AI-Generated ALT Text</h3>
+                        <p>Auto-generate accessible descriptions with GPT-4o mini integration.</p>
+                    </div>
+                    <div class="feature">
+                        <h3>Image Variants</h3>
+                        <p>Automatic responsive sizing: thumbnail, medium, large, public.</p>
+                    </div>
+                    <div class="feature">
+                        <h3>External API</h3>
+                        <p>Upload programmatically from Astro, Node scripts, or any HTTP client.</p>
+                    </div>
+                    <div class="feature">
+                        <h3>Namespace Isolation</h3>
+                        <p>Logical separation for multi-tenant or multi-app deployments.</p>
+                    </div>
+                    <div class="feature">
+                        <h3>CDN Delivery</h3>
+                        <p>Lightning-fast global distribution via Cloudflare's trusted network.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="getting-started" id="getting-started">
+            <h2>Get Started in Minutes</h2>
+            <div class="steps">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <h3>Create Cloudflare Account</h3>
+                    <p><a href="https://dash.cloudflare.com/sign-up">Sign up free</a>, then <a href="https://dash.cloudflare.com/?to=/:account/images/getting-started">enable Cloudflare Images</a>.</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <h3>Clone & Install</h3>
+                    <p><code>git clone https://github.com/bleeckerj/nfl-photarium.git</code> and <code>npm install</code>.</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <h3>Add Credentials</h3>
+                    <p>Copy <code>.env.example</code> to <code>.env.local</code> and add your Cloudflare details.</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">4</div>
+                    <h3>Run Locally</h3>
+                    <p><code>npm run dev</code> and open <code>http://localhost:3000</code>.</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">5</div>
+                    <h3>Deploy Anywhere</h3>
+                    <p>Deploy to Vercel, Railway, Render, or any Node.js host.</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">6</div>
+                    <h3>Start Managing</h3>
+                    <p>Upload images, organize with folders and tags, copy CDN URLs.</p>
+                </div>
+            </div>
+
+            <div class="highlight">
+                <strong>100k free images per month</strong> with Cloudflare's free tier. Perfect for small teams, creators, and side projects.
+            </div>
+
+            <div class="highlight">
+                <a href="https://github.com/bleeckerj/nfl-photarium">View full documentation and examples on GitHub →</a>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>Photarium is open source and self-hosted. <a href="https://github.com/bleeckerj/nfl-photarium">View on GitHub</a></p>
+        <p>Built with Next.js, Tailwind CSS, and Cloudflare Images</p>
+    </footer>
+</body>
+</html>

@@ -1,0 +1,10 @@
+# GitHub Pages Configuration
+# This file enables GitHub Pages for the Photarium project
+
+# Enable GitHub Pages in repository settings:
+# 1. Go to Settings → Pages
+# 2. Set Source to "Deploy from a branch"
+# 3. Select "main" branch and "/docs" folder
+# 4. Click Save
+
+# The site will be available at: https://bleeckerj.github.io/nfl-photarium/
