@@ -21,7 +21,7 @@ export async function PATCH(
 
     const { id: imageId } = await params;
     const body = await request.json();
-    const { folder, tags, description, originalUrl, parentId, displayName, altTag, variationSort } = body;
+    const { folder, tags, description, originalUrl, sourceUrl, parentId, displayName, altTag, variationSort } = body;
     
     if (!imageId) {
       return NextResponse.json(
@@ -34,6 +34,7 @@ export async function PATCH(
     const tagsProvided = Object.prototype.hasOwnProperty.call(body, 'tags');
     const descriptionProvided = Object.prototype.hasOwnProperty.call(body, 'description');
     const originalUrlProvided = Object.prototype.hasOwnProperty.call(body, 'originalUrl');
+    const sourceUrlProvided = Object.prototype.hasOwnProperty.call(body, 'sourceUrl');
     const displayNameProvided = Object.prototype.hasOwnProperty.call(body, 'displayName');
     const altTagProvided = Object.prototype.hasOwnProperty.call(body, 'altTag');
     const variationSortProvided = Object.prototype.hasOwnProperty.call(body, 'variationSort');
@@ -46,6 +47,7 @@ export async function PATCH(
           ? ''
           : undefined;
     const cleanOriginalUrl = cleanString(typeof originalUrl === 'string' ? originalUrl : undefined);
+    const cleanSourceUrl = cleanString(typeof sourceUrl === 'string' ? sourceUrl : undefined);
     const cleanDisplayName = cleanString(typeof displayName === 'string' ? displayName : undefined);
     const cleanAltTag = cleanString(typeof altTag === 'string' ? altTag : undefined);
     const cleanVariationSort = (() => {
@@ -118,6 +120,11 @@ export async function PATCH(
       metadata.originalUrlNormalized = normalizeOriginalUrl(cleanOriginalUrl) ?? '';
     }
 
+    if (sourceUrlProvided) {
+      metadata.sourceUrl = cleanSourceUrl ?? '';
+      metadata.sourceUrlNormalized = normalizeOriginalUrl(cleanSourceUrl) ?? '';
+    }
+
     if (displayNameProvided) {
       metadata.displayName = cleanDisplayName ?? '';
     }
@@ -165,6 +172,7 @@ export async function PATCH(
     const finalTags = Array.isArray(metadataPayload.tags) ? metadataPayload.tags : [];
     const finalDescription = metadataPayload.description as string | undefined;
     const finalOriginalUrl = metadataPayload.originalUrl as string | undefined;
+    const finalSourceUrl = metadataPayload.sourceUrl as string | undefined;
     const finalDisplayName =
       (metadataPayload.displayName as string | undefined) ?? fetchedImageResult.result.filename;
     const finalAltTag = metadataPayload.altTag as string | undefined;
@@ -187,6 +195,7 @@ export async function PATCH(
       tags: finalTags,
       description: finalDescription,
       originalUrl: finalOriginalUrl,
+      sourceUrl: finalSourceUrl,
       displayName: finalDisplayName,
       parentId: finalParentId,
       altTag: finalAltTag,

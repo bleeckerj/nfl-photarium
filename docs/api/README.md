@@ -16,10 +16,11 @@ Parameters:
 
 | Param            | Type    | Description                                                                 |
 |------------------|---------|-----------------------------------------------------------------------------|
-| `search`         | string  | Free text. Matches filename, folder, alt text, tags, original URL, variants |
+| `search`         | string  | Free text. Matches filename, folder, alt text, tags, original/source URLs, variants |
 | `folder`         | string  | Exact folder name. Use `all` for everything, `no-folder` for unfiled items  |
 | `tag`            | string  | Exact tag                                                                  |
 | `onlyCanonical`  | boolean | `true` to only return parent (non-variant) images                          |
+| `namespace`      | string  | Optional namespace filter (defaults to `IMAGE_NAMESPACE`)                  |
 
 
 Response:
@@ -35,6 +36,8 @@ Response:
       "tags": ["ghostwriter", "case-study"],
       "description": "Short blurb…",
       "originalUrl": "/images/projects/2025/ghostwriter/…",
+      "sourceUrl": "https://example.com/projects/ghostwriter",
+      "namespace": "app-a",
       "altTag": "Two typewriter screens…",
       "parentId": null,
       "linkedAssetId": "…",

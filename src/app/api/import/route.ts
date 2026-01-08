@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { extractSnagx } from '@/utils/snagx';
+import path from 'path';
 
 const MAX_SIZE = 10 * 1024 * 1024; // 10MB to match uploader
 
@@ -55,6 +57,32 @@ const getFilenameFromUrl = (url: string, mimeType?: string | null) => {
   return `remote-image-${Date.now()}.${extension}`;
 };
 
+const buildSnagxDescription = (
+  captureDate?: string,
+  metadata?: Record<string, unknown>
+) => {
+  const details: string[] = [];
+  if (captureDate) {
+    details.push(`CaptureDate: ${captureDate}`);
+  }
+  if (metadata) {
+    const { CaptureDate, ...rest } = metadata;
+    if (Object.keys(rest).length > 0) {
+      details.push(`Snagx metadata: ${JSON.stringify(rest)}`);
+    }
+  }
+  return details.join(' | ');
+};
+
+const hasSnagxExtension = (value: string) => {
+  try {
+    const parsed = new URL(value);
+    return path.extname(parsed.pathname).toLowerCase() === '.snagx';
+  } catch {
+    return value.toLowerCase().includes('.snagx');
+  }
+};
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -70,29 +98,58 @@ export async function POST(request: NextRequest) {
 
     const rawContentType = response.headers.get('content-type') ?? '';
     const normalizedType = rawContentType.split(';')[0].trim().toLowerCase();
+    const isSnagx = hasSnagxExtension(sourceUrl) || normalizedType === 'application/octet-stream' || normalizedType === 'application/zip';
+
     const inferredContentType =
       (normalizedType && normalizedType.startsWith('image/')
         ? normalizedType
         : undefined) ?? getMimeFromExtension(sourceUrl);
-    if (!inferredContentType) {
+    if (!inferredContentType && !isSnagx) {
       return NextResponse.json({ error: 'URL must point to an image' }, { status: 400 });
     }
 
     const arrayBuffer = await response.arrayBuffer();
-    if (arrayBuffer.byteLength > MAX_SIZE) {
+
+    const buffer = Buffer.from(arrayBuffer);
+    let finalBuffer = buffer;
+    let finalType = inferredContentType || 'image/png';
+    let filename = getFilenameFromUrl(sourceUrl, inferredContentType);
+    let captureDate: string | undefined;
+    let snagxMetadata: Record<string, unknown> | undefined;
+    let snagxDescription: string | undefined;
+
+    if (isSnagx) {
+      try {
+        const extracted = extractSnagx(buffer, filename);
+        finalBuffer = extracted.buffer;
+        finalType = 'image/png';
+        filename = extracted.filename;
+        captureDate = extracted.captureDate;
+        snagxMetadata = extracted.metadata;
+        snagxDescription = buildSnagxDescription(captureDate, snagxMetadata);
+      } catch (error) {
+        return NextResponse.json(
+          { error: 'Failed to extract image from .snagx file' },
+          { status: 400 }
+        );
+      }
+    }
+
+    if (finalBuffer.byteLength > MAX_SIZE) {
       return NextResponse.json({ error: 'Remote image exceeds 10MB limit' }, { status: 400 });
     }
 
-    const buffer = Buffer.from(arrayBuffer);
-    const base64 = buffer.toString('base64');
-    const filename = getFilenameFromUrl(sourceUrl, inferredContentType);
+    const base64 = finalBuffer.toString('base64');
 
     return NextResponse.json({
       name: filename,
-      type: inferredContentType,
-      size: buffer.length,
+      type: finalType,
+      size: finalBuffer.length,
       data: base64,
       originalUrl: sourceUrl,
+      captureDate,
+      snagxMetadata,
+      snagxDescription
     });
   } catch (error) {
     console.error('Import image error:', error);

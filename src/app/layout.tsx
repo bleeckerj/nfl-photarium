@@ -3,8 +3,8 @@ import "./globals.css";
 import { ToastProvider } from '@/components/Toast';
 
 export const metadata: Metadata = {
-  title: "Cloudflare Image Uploader",
-  description: "Upload and manage images for email blasts and websites using Cloudflare Images",
+  title: "Photarium",
+  description: "An elegant image management platform powered by Cloudflare Images",
 };
 
 export default function RootLayout({
@@ -14,7 +14,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="overscroll-none">
-      <body className="overscroll-none">
+      <body className="overscroll-none" suppressHydrationWarning>
         <ToastProvider>
           {children}
         </ToastProvider>

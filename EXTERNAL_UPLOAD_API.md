@@ -12,7 +12,9 @@ You can push images into this service from other local tools (Astro, scripts, et
 | `folder` | ❌ | Optional folder name (e.g., `astro-uploads`). |
 | `tags` | ❌ | Comma-separated list (`landing, hero`). |
 | `description` | ❌ | Brief text description. |
-| `originalUrl` | ❌ | Reference URL of the source image. |
+| `originalUrl` | ❌ | Reference URL of the asset (used for duplicate detection). |
+| `sourceUrl` | ❌ | Page or site where the asset was found. |
+| `namespace` | ❌ | Optional namespace override (defaults to `IMAGE_NAMESPACE`). |
 | `parentId` | ❌ | Cloudflare image ID to treat this upload as a variant of. |
 
 **Sample response**
@@ -27,6 +29,8 @@ You can push images into this service from other local tools (Astro, scripts, et
    "folder": "astro-uploads",
    "tags": ["astro", "cloudflare"],
    "description": "Hero image",
+   "sourceUrl": "https://example.com/page",
+   "namespace": "app-a",
    "parentId": "parent-image-id"
 }
 ```
@@ -65,6 +69,8 @@ formData.append("file", buffer, {
 });
 formData.append("folder", "astro-uploads");
 formData.append("originalUrl", importData.originalUrl);
+formData.append("sourceUrl", "https://example.com/page");
+formData.append("namespace", "app-a");
 
 const uploadResponse = await fetch("http://localhost:3000/api/upload/external", {
   method: "POST",

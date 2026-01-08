@@ -17,6 +17,7 @@ type MonoSelectProps = {
   className?: string;
   searchable?: boolean;
   searchPlaceholder?: string;
+  size?: 'sm' | 'md';
 };
 
 const cn = (...classes: Array<string | false | null | undefined>) =>
@@ -32,7 +33,8 @@ export default function MonoSelect({
   disabled = false,
   className,
   searchable = false,
-  searchPlaceholder = 'Type to filter…'
+  searchPlaceholder = 'Type to filter…',
+  size = 'md'
 }: MonoSelectProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -161,7 +163,8 @@ export default function MonoSelect({
         id={id}
         name={name}
         className={cn(
-          'w-full border border-gray-300 rounded-md px-3 py-2 text-[0.9em] flex items-center justify-between gap-2 bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500',
+          'w-full border border-gray-300 rounded-md flex items-center justify-between gap-2 bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono',
+          size === 'sm' ? 'px-2 py-0.5 text-[0.7em] min-h-[20px]' : 'px-3 py-2 text-[0.9em]',
           disabled && 'opacity-50 cursor-not-allowed'
         )}
         aria-haspopup="listbox"
@@ -224,7 +227,8 @@ export default function MonoSelect({
                 aria-selected={option.value === value}
                 disabled={option.disabled}
                 className={cn(
-                  'w-full text-left px-3 py-2 text-[0.9em] font-mono transition',
+                  'w-full text-left px-3 py-2 font-mono transition',
+                  size === 'sm' ? 'text-[0.8em]' : 'text-[0.9em]',
                   option.disabled
                     ? 'text-gray-400 cursor-not-allowed'
                     : option.value === value

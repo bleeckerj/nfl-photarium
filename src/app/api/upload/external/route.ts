@@ -5,6 +5,7 @@ import { transformApiImageToCached, upsertCachedImage } from '@/server/cloudflar
 import { findDuplicatesByContentHash, findDuplicatesByOriginalUrl, toDuplicateSummary } from '@/server/duplicateDetector';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { enforceCloudflareMetadataLimit } from '@/utils/cloudflareMetadata';
+import { extractSnagx } from '@/utils/snagx';
 import { extractExifSummary } from '@/utils/exif';
 
 const corsHeaders = {
@@ -47,7 +48,8 @@ export async function POST(request: NextRequest) {
       ));
     }
 
-    if (!file.type.startsWith('image/')) {
+    const isSnagx = file.name.toLowerCase().endsWith('.snagx');
+    if (!isSnagx && !file.type.startsWith('image/')) {
       logExternalIssue('Rejected non-image upload', { filename: file.name, type: file.type });
       return withCors(NextResponse.json(
         { error: 'File must be an image' },
@@ -56,7 +58,7 @@ export async function POST(request: NextRequest) {
     }
 
     const maxSize = 10 * 1024 * 1024;
-    if (file.size > maxSize) {
+    if (!isSnagx && file.size > maxSize) {
       logExternalIssue('Rejected oversized upload', { filename: file.name, bytes: file.size, limit: maxSize });
       return withCors(NextResponse.json(
         { error: 'File size must be less than 10MB' },
@@ -71,6 +73,8 @@ export async function POST(request: NextRequest) {
     const tags = formData.get('tags') as string;
     const description = formData.get('description') as string;
     const originalUrl = formData.get('originalUrl') as string;
+    const sourceUrl = formData.get('sourceUrl') as string;
+    const namespace = formData.get('namespace') as string;
     const parentIdRaw = formData.get('parentId');
 
     const cleanFolder = folder && folder.trim() && folder !== 'undefined' ? folder.trim() : undefined;
@@ -78,12 +82,17 @@ export async function POST(request: NextRequest) {
     const cleanDescription = description && description.trim() && description !== 'undefined' ? description.trim() : undefined;
     const cleanOriginalUrl = originalUrl && originalUrl.trim() && originalUrl !== 'undefined' ? originalUrl.trim() : undefined;
     const normalizedOriginalUrl = normalizeOriginalUrl(cleanOriginalUrl);
+    const cleanSourceUrl = sourceUrl && sourceUrl.trim() && sourceUrl !== 'undefined' ? sourceUrl.trim() : undefined;
+    const normalizedSourceUrl = normalizeOriginalUrl(cleanSourceUrl);
+    const cleanNamespace = namespace && namespace.trim() && namespace !== 'undefined' ? namespace.trim() : undefined;
+    const defaultNamespace = process.env.IMAGE_NAMESPACE || process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || undefined;
+    const effectiveNamespace = cleanNamespace || defaultNamespace;
     const parentIdValue = typeof parentIdRaw === 'string' ? parentIdRaw.trim() : '';
     const cleanParentId = parentIdValue && parentIdValue !== 'undefined' ? parentIdValue : undefined;
 
     let duplicateMatches: Awaited<ReturnType<typeof findDuplicatesByOriginalUrl>> = [];
     if (normalizedOriginalUrl) {
-      duplicateMatches = await findDuplicatesByOriginalUrl(normalizedOriginalUrl);
+      duplicateMatches = await findDuplicatesByOriginalUrl(normalizedOriginalUrl, effectiveNamespace);
       if (duplicateMatches.length) {
         console.warn('[upload/external] Duplicate original URL detected', {
           originalUrl: cleanOriginalUrl,
@@ -102,12 +111,38 @@ export async function POST(request: NextRequest) {
 
     const bytes = await file.arrayBuffer();
     const originalBuffer = Buffer.from(bytes);
-    const buffer = originalBuffer;
-    const contentHash = computeContentHash(buffer);
-    const exifSummary = await extractExifSummary(originalBuffer);
+    let workingBuffer = originalBuffer;
+    let workingType = file.type;
+    let workingName = file.name;
+
+    if (isSnagx) {
+      try {
+        const extracted = extractSnagx(originalBuffer, file.name);
+        workingBuffer = extracted.buffer;
+        workingType = 'image/png';
+        workingName = extracted.filename;
+      } catch (error) {
+        logExternalIssue('Failed to extract .snagx image', { filename: file.name });
+        return withCors(NextResponse.json(
+          { error: 'Failed to extract image from .snagx file' },
+          { status: 400 }
+        ));
+      }
+    }
+
+    if (workingBuffer.byteLength > maxSize) {
+      logExternalIssue('Rejected oversized extracted image', { filename: workingName, bytes: workingBuffer.byteLength, limit: maxSize });
+      return withCors(NextResponse.json(
+        { error: 'File size must be less than 10MB' },
+        { status: 400 }
+      ));
+    }
+
+    const contentHash = computeContentHash(workingBuffer);
+    const exifSummary = await extractExifSummary(workingBuffer);
 
     if (!normalizedOriginalUrl) {
-      duplicateMatches = await findDuplicatesByContentHash(contentHash);
+      duplicateMatches = await findDuplicatesByContentHash(contentHash, effectiveNamespace);
       if (duplicateMatches.length) {
         console.warn('[upload/external] Duplicate content hash detected', {
           contentHash,
@@ -125,19 +160,22 @@ export async function POST(request: NextRequest) {
     }
 
     const uploadFormData = new FormData();
-    uploadFormData.append('file', new Blob([buffer], { type: file.type }), file.name);
+    uploadFormData.append('file', new Blob([workingBuffer], { type: workingType }), workingName);
 
     const metadataPayload: Record<string, unknown> = {
-      filename: file.name,
-      displayName: file.name,
+      filename: workingName,
+      displayName: workingName,
       uploadedAt: new Date().toISOString(),
-      size: file.size,
-      type: file.type,
+      size: workingBuffer.byteLength,
+      type: workingType,
       folder: cleanFolder,
       tags: cleanTags,
       description: cleanDescription,
       originalUrl: cleanOriginalUrl,
       originalUrlNormalized: normalizedOriginalUrl,
+      sourceUrl: cleanSourceUrl,
+      sourceUrlNormalized: normalizedSourceUrl,
+      namespace: effectiveNamespace,
       contentHash,
       variationParentId: cleanParentId,
       exif: exifSummary,
@@ -275,7 +313,7 @@ export async function POST(request: NextRequest) {
 
     return withCors(NextResponse.json({
       id: imageData.id,
-      filename: file.name,
+      filename: workingName,
       url: imageData.variants.find((v: string) => v.includes('public')) || imageData.variants[0],
       variants: imageData.variants,
       uploaded: new Date().toISOString(),
@@ -283,6 +321,8 @@ export async function POST(request: NextRequest) {
       tags: cleanTags,
       description: cleanDescription,
       originalUrl: cleanOriginalUrl,
+      sourceUrl: cleanSourceUrl,
+      namespace: effectiveNamespace,
       parentId: cleanParentId,
       linkedAssetId: webpVariantId,
       webpVariantId,

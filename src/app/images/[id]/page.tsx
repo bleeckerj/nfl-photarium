@@ -13,6 +13,7 @@ import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { useDropzone } from 'react-dropzone';
 import { downloadImageToFile, formatDownloadFileName } from '@/utils/downloadUtils';
 import { useImageAspectRatio } from '@/hooks/useImageAspectRatio';
+import QRCode from 'qrcode';
 
 import { useParams } from 'next/navigation';
 
@@ -26,6 +27,9 @@ interface CloudflareImage {
   description?: string;
   originalUrl?: string;
   originalUrlNormalized?: string;
+  sourceUrl?: string;
+  sourceUrlNormalized?: string;
+  namespace?: string;
   contentHash?: string;
   altTag?: string;
   exif?: Record<string, string | number>;
@@ -151,7 +155,12 @@ export default function ImageDetailPage() {
   const [descriptionInput, setDescriptionInput] = useState('');
   const [descriptionGenerating, setDescriptionGenerating] = useState(false);
   const [originalUrlInput, setOriginalUrlInput] = useState('');
+  const [sourceUrlInput, setSourceUrlInput] = useState('');
   const [displayNameInput, setDisplayNameInput] = useState('');
+  const [shareBaseUrl, setShareBaseUrl] = useState('');
+  const [shareVariant, setShareVariant] = useState('large');
+  const [shareQrDataUrl, setShareQrDataUrl] = useState('');
+  const [namespace, setNamespace] = useState('');
   const [saving, setSaving] = useState(false);
   const [uniqueFolders, setUniqueFolders] = useState<string[]>([]);
   const [newFolderInput, setNewFolderInput] = useState('');
@@ -171,6 +180,29 @@ export default function ImageDetailPage() {
     setVariationPage(1);
   }, [image?.id, image?.parentId]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const stored = window.localStorage.getItem('shareBaseUrl');
+    setShareBaseUrl(stored || window.location.origin);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const stored = window.localStorage.getItem('imageNamespace');
+    const envDefault = process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || '';
+    if (stored === '__none__') {
+      setNamespace('');
+    } else {
+      setNamespace(stored || envDefault);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!shareBaseUrl) return;
+    window.localStorage.setItem('shareBaseUrl', shareBaseUrl);
+  }, [shareBaseUrl]);
+
   const syncImages = useCallback(
     (imagesData: CloudflareImage[]) => {
       setAllImages(imagesData);
@@ -182,6 +214,7 @@ export default function ImageDetailPage() {
         setDescriptionInput(found.description || '');
         setAltTextInput(found.altTag || '');
         setOriginalUrlInput(found.originalUrl || '');
+        setSourceUrlInput(found.sourceUrl || '');
         setDisplayNameInput(found.displayName || found.filename || '');
         setReassignParentId(found.parentId || '');
         setChildUploadFolder(found.folder || '');
@@ -192,6 +225,7 @@ export default function ImageDetailPage() {
         setDescriptionInput('');
         setAltTextInput('');
         setOriginalUrlInput('');
+        setSourceUrlInput('');
         setDisplayNameInput('');
         setReassignParentId('');
         setChildUploadFolder('');
@@ -214,7 +248,12 @@ export default function ImageDetailPage() {
       return;
     }
     try {
-      const response = await fetch('/api/images');
+      const url = namespace === ''
+        ? `/api/images?namespace=__none__`
+        : namespace
+          ? `/api/images?namespace=${encodeURIComponent(namespace)}`
+          : '/api/images';
+      const response = await fetch(url);
       const data = await response.json();
       if (Array.isArray(data.images)) {
         syncImages(data.images);
@@ -222,7 +261,7 @@ export default function ImageDetailPage() {
     } catch (error) {
       console.error('Failed to refresh images', error);
     }
-  }, [syncImages, id]);
+  }, [syncImages, id, namespace]);
 
   useEffect(() => {
     let mounted = true;
@@ -232,7 +271,12 @@ export default function ImageDetailPage() {
         if (!id) {
           return;
         }
-        const res = await fetch('/api/images');
+        const url = namespace === ''
+          ? `/api/images?namespace=__none__`
+          : namespace
+            ? `/api/images?namespace=${encodeURIComponent(namespace)}`
+            : '/api/images';
+        const res = await fetch(url);
         const data = await res.json();
         if (!mounted) return;
         if (Array.isArray(data.images)) {
@@ -247,7 +291,7 @@ export default function ImageDetailPage() {
     return () => {
       mounted = false;
     };
-  }, [id, syncImages]);
+  }, [id, namespace, syncImages]);
 
   const variationChildren = useMemo(
     () => (id ? allImages.filter((img) => img.parentId === id) : []),
@@ -374,6 +418,15 @@ export default function ImageDetailPage() {
     [id]
   );
 
+  const shareVariantOptions = useMemo(
+    () =>
+      IMAGE_VARIANTS.map((variant) => ({
+        value: variant.name,
+        label: variant.width ? `${variant.name} (${variant.width}px)` : variant.name
+      })),
+    []
+  );
+
   const listVariantOptions = useMemo(
     () =>
       IMAGE_VARIANTS.map((variant) => ({
@@ -387,6 +440,42 @@ export default function ImageDetailPage() {
     () => (id ? getCloudflareImageUrl(id, 'original') : ''),
     [id]
   );
+
+  const shareUrl = useMemo(() => {
+    if (!id) return '';
+    if (!shareBaseUrl.trim()) return '';
+    try {
+      const url = new URL(`/api/images/${id}/share`, shareBaseUrl.trim());
+      if (shareVariant) {
+        url.searchParams.set('variant', shareVariant);
+      }
+      return url.toString();
+    } catch {
+      return '';
+    }
+  }, [id, shareBaseUrl, shareVariant]);
+
+  useEffect(() => {
+    if (!shareUrl) {
+      setShareQrDataUrl('');
+      return;
+    }
+    let cancelled = false;
+    QRCode.toDataURL(shareUrl, { margin: 1, width: 220 })
+      .then((dataUrl) => {
+        if (!cancelled) {
+          setShareQrDataUrl(dataUrl);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setShareQrDataUrl('');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [shareUrl]);
 
   const heroRotationStyle = useMemo<CSSProperties>(
     () => ({
@@ -421,6 +510,9 @@ export default function ImageDetailPage() {
       description: image?.description ?? '',
       originalUrl: image?.originalUrl,
       originalUrlNormalized: image?.originalUrlNormalized,
+      sourceUrl: image?.sourceUrl,
+      sourceUrlNormalized: image?.sourceUrlNormalized,
+      namespace: image?.namespace,
       contentHash: image?.contentHash,
       altTag: image?.altTag ?? '',
       displayName: image?.displayName ?? image?.filename,
@@ -440,6 +532,9 @@ export default function ImageDetailPage() {
     const cleanedOriginalUrl = cleanString(originalUrlInput);
     metadata.originalUrl = cleanedOriginalUrl ?? '';
     metadata.originalUrlNormalized = normalizeOriginalUrl(cleanedOriginalUrl) ?? '';
+    const cleanedSourceUrl = cleanString(sourceUrlInput);
+    metadata.sourceUrl = cleanedSourceUrl ?? '';
+    metadata.sourceUrlNormalized = normalizeOriginalUrl(cleanedSourceUrl) ?? '';
     const cleanedDisplayName = cleanString(displayNameInput);
     metadata.displayName = cleanedDisplayName ?? '';
     const cleanAltTag = cleanString(altTextInput) ?? '';
@@ -458,6 +553,7 @@ export default function ImageDetailPage() {
     image,
     newFolderInput,
     originalUrlInput,
+    sourceUrlInput,
     tagsInput
   ]);
 
@@ -906,6 +1002,7 @@ export default function ImageDetailPage() {
     setDescriptionInput(image.description || '');
     setAltTextInput(image.altTag || '');
     setOriginalUrlInput(image.originalUrl || '');
+    setSourceUrlInput(image.sourceUrl || '');
     setDisplayNameInput(image.displayName || image.filename || '');
   }, [image]);
 
@@ -919,11 +1016,13 @@ export default function ImageDetailPage() {
         ? (newFolderInput.trim() || undefined)
         : (folderSelect === '' ? undefined : folderSelect);
       const cleanedOriginalUrl = cleanString(originalUrlInput);
+      const cleanedSourceUrl = cleanString(sourceUrlInput);
       const payload = {
         folder: finalFolder,
         tags: tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(Boolean) : [],
         description: descriptionInput,
         originalUrl: cleanedOriginalUrl ?? '',
+        sourceUrl: cleanedSourceUrl ?? '',
         displayName: cleanString(displayNameInput) ?? '',
         altTag: cleanString(altTextInput) ?? '',
       };
@@ -935,7 +1034,7 @@ export default function ImageDetailPage() {
       const body = await res.json() as CloudflareImage;
       if (res.ok) {
         toast.push('Metadata updated');
-        setImage(prev => prev ? ({ ...prev, folder: body.folder, tags: body.tags, description: body.description, originalUrl: body.originalUrl, displayName: body.displayName, altTag: body.altTag }) : prev);
+        setImage(prev => prev ? ({ ...prev, folder: body.folder, tags: body.tags, description: body.description, originalUrl: body.originalUrl, sourceUrl: body.sourceUrl, displayName: body.displayName, altTag: body.altTag }) : prev);
         await refreshImageList();
       } else {
         toast.push(body.error || 'Failed to update metadata');
@@ -955,6 +1054,7 @@ export default function ImageDetailPage() {
     image,
     newFolderInput,
     originalUrlInput,
+    sourceUrlInput,
     refreshImageList,
     tagsInput,
     toast
@@ -2009,6 +2109,99 @@ export default function ImageDetailPage() {
                     >
                       Copy
                     </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div id="source-url-section">
+              <p className="text-xs font-mono font-medum text-gray-700">Source URL</p>
+              <div className="flex items-center gap-3 mt-2">
+                <input
+                  value={sourceUrlInput}
+                  onChange={(e) => setSourceUrlInput(e.target.value)}
+                  className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-xs"
+                  placeholder="Page or site URL"
+                />
+                <button
+                  onClick={async () => { await copyToClipboard(sourceUrlInput || '', 'Source'); }}
+                  className="px-3 py-1 bg-blue-600 text-white rounded text-xs cursor-pointer transition transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-300"
+                  disabled={!sourceUrlInput}
+                >
+                  Copy
+                </button>
+              </div>
+              <div className="mt-3 space-y-1 text-[11px] font-mono text-gray-600">
+                <div className="flex items-center gap-2">
+                  <span className="text-gray-700">Normalized:</span>
+                  <span className="truncate" title={image?.sourceUrlNormalized || '—'}>
+                    {image?.sourceUrlNormalized || '—'}
+                  </span>
+                  {image?.sourceUrlNormalized && (
+                    <button
+                      onClick={async () => { await copyToClipboard(image.sourceUrlNormalized as string, 'Normalized URL'); }}
+                      className="px-2 py-0.5 border border-gray-300 rounded hover:bg-gray-100 text-[10px]"
+                    >
+                      Copy
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div id="share-section" className="space-y-3">
+              <p className="text-xs font-mono font-medum text-gray-700">Share (QR)</p>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex-1 space-y-2">
+                  <label className="block text-[11px] text-gray-600">
+                    Share base URL
+                    <input
+                      value={shareBaseUrl}
+                      onChange={(e) => setShareBaseUrl(e.target.value)}
+                      className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-xs"
+                      placeholder="http://192.168.x.x:3000"
+                    />
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <label className="text-[11px] text-gray-600">Share size</label>
+                    <MonoSelect
+                      id="share-variant"
+                      value={shareVariant}
+                      onChange={setShareVariant}
+                      options={shareVariantOptions}
+                      className="w-40 text-[11px]"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={shareUrl}
+                      readOnly
+                      className="flex-1 border border-gray-200 rounded-md px-3 py-2 text-xs bg-gray-50 text-gray-600"
+                      placeholder="Share URL"
+                    />
+                    <button
+                      onClick={async () => { if (shareUrl) await copyToClipboard(shareUrl, 'Share'); }}
+                      className="px-3 py-1 bg-blue-600 text-white rounded text-xs cursor-pointer transition transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-300"
+                      disabled={!shareUrl}
+                    >
+                      Copy
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-gray-500">
+                    Use your network URL (from `next dev`) so your phone can reach it.
+                  </p>
+                </div>
+                <div className="flex items-center justify-center w-full sm:w-auto">
+                  {shareQrDataUrl ? (
+                    <img
+                      src={shareQrDataUrl}
+                      alt="Share QR code"
+                      className="w-[140px] h-[140px] border border-gray-200 rounded-md bg-white"
+                    />
+                  ) : (
+                    <div className="w-[140px] h-[140px] border border-dashed border-gray-200 rounded-md flex items-center justify-center text-[10px] text-gray-400">
+                      QR unavailable
+                    </div>
                   )}
                 </div>
               </div>

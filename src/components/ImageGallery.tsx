@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, forwardRef, useImperativeHandle, useMemo, CSSProperties, useRef, useCallback } from 'react';
-import { Trash2, Copy, ExternalLink, Sparkles, Layers, AlertTriangle } from 'lucide-react';
+import { Trash2, Copy, ExternalLink, Sparkles, Layers, AlertTriangle, Settings } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import MonoSelect from './MonoSelect';
@@ -30,11 +30,15 @@ interface CloudflareImage {
   linkedAssetId?: string;
   originalUrl?: string;
   originalUrlNormalized?: string;
+  sourceUrl?: string;
+  sourceUrlNormalized?: string;
   contentHash?: string;
 }
 
 interface ImageGalleryProps {
   refreshTrigger?: number;
+  namespace?: string;
+  onNamespaceChange?: (value: string) => void;
 }
 
 export interface ImageGalleryRef {
@@ -161,7 +165,8 @@ const persistBrokenAudit = (audit: BrokenAudit) => {
   }
 };
 
-const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTrigger }, ref) => {
+const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
+  ({ refreshTrigger, namespace, onNamespaceChange }, ref) => {
   const getStoredPreferences = () => {
     if (typeof window === 'undefined') {
       return {
@@ -276,7 +281,69 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
   const [auditProgress, setAuditProgress] = useState({ checked: 0, total: 0 });
   const [auditEntries, setAuditEntries] = useState<AuditLogEntry[]>([]);
   const [refreshingCache, setRefreshingCache] = useState(false);
+  const [namespaceSettingsOpen, setNamespaceSettingsOpen] = useState(false);
+  const [namespaceDraft, setNamespaceDraft] = useState(namespace ?? '');
+  const [namespaceSelectValue, setNamespaceSelectValue] = useState('');
   const utilityButtonClasses = 'text-[0.65rem] font-mono px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 transition';
+
+  useEffect(() => {
+    const next = namespace ?? '';
+    setNamespaceDraft(next);
+    setNamespaceSelectValue(next || '');
+  }, [namespace]);
+
+  const namespaceOptions = useMemo(() => {
+    const rawSeen = new Set(images.map((image) => image.namespace).filter(Boolean));
+    const envDefault = process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || '';
+    const knownRaw = process.env.NEXT_PUBLIC_KNOWN_NAMESPACES || '';
+    
+    // Explicitly known items
+    const defaults = new Set<string>();
+    if (envDefault) defaults.add(envDefault);
+    
+    // Configured known items
+    const known = new Set<string>();
+    knownRaw.split(',').map(s => s.trim()).filter(Boolean).forEach(s => {
+      // Don't duplicate if it's already the default
+      if (!defaults.has(s)) known.add(s);
+    });
+
+    // Discovered from current image set
+    const discovered = new Set<string>();
+    rawSeen.forEach(s => {
+      if (!defaults.has(s) && !known.has(s)) {
+        discovered.add(s);
+      }
+    });
+
+    const options = [
+      { value: '', label: '(no namespace)' },
+    ];
+
+    if (defaults.size > 0) {
+      defaults.forEach(val => options.push({ value: val, label: `${val} (default)` }));
+    }
+
+    if (known.size > 0) {
+      const sorted = Array.from(known).sort();
+      sorted.forEach(val => options.push({ value: val, label: val }));
+    }
+
+    if (discovered.size > 0) {
+      const sorted = Array.from(discovered).sort();
+      sorted.forEach(val => options.push({ value: val, label: `${val} (discovered)` }));
+    }
+
+    options.push({ value: '__custom__', label: 'Enter manually...' });
+
+    // Ensure the currently selected one is present if it wasn't covered above
+    if (namespace && !options.some((opt) => opt.value === namespace) && namespace !== '__custom__') {
+       // Check if we haven't added it (it might be __none__ which maps to '')
+       options.splice(options.length - 1, 0, { value: namespace, label: namespace });
+    }
+
+    return options;
+  }, [images, namespace]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -357,6 +424,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
   const [showPreview, setShowPreview] = useState(false);
   const [utilityExpanded, setUtilityExpanded] = useState(false);
   const galleryTopRef = useRef<HTMLDivElement | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const scrollGalleryToTop = useCallback(() => {
     if (typeof window === 'undefined') {
@@ -378,16 +446,31 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
     }
   }, []);
 
-  useEffect(() => {
-    fetchImages();
-  }, []);
-
   // Refresh when refreshTrigger changes
   useEffect(() => {
     if (refreshTrigger && refreshTrigger > 0) {
       fetchImages({ silent: true }); // Silent refresh
     }
   }, [refreshTrigger]);
+
+  const prevNamespaceRef = useRef(namespace);
+
+  useEffect(() => {
+    // Reset filters when namespace changes to avoid "empty" views due to stale filters
+    if (prevNamespaceRef.current !== namespace) {
+      setSelectedFolder('all');
+      setSelectedTag('');
+      setSearchTerm('');
+      setOnlyCanonical(false); // Disable "Parents Only" as it might hide orphaned variants in the new namespace
+      prevNamespaceRef.current = namespace;
+    }
+
+    // Cancel any pending request for the previous namespace
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    fetchImages();
+  }, [namespace]);
 
   // Expose the refresh function via ref
   useImperativeHandle(ref, () => ({
@@ -398,6 +481,12 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
     silent = false,
     forceRefresh = false
   }: { silent?: boolean; forceRefresh?: boolean } = {}) => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     if (!silent) {
       setLoading(true);
     }
@@ -405,18 +494,31 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
       setRefreshingCache(true);
     }
     try {
-      const url = forceRefresh ? '/api/images?refresh=1' : '/api/images';
-      const response = await fetch(url);
+      const params = new URLSearchParams();
+      if (forceRefresh) {
+        params.set('refresh', '1');
+      }
+      if (namespace === '') {
+        params.set('namespace', '__none__');
+      } else if (namespace) {
+        params.set('namespace', namespace);
+      }
+      const query = params.toString();
+      const url = query ? `/api/images?${query}` : '/api/images';
+      const response = await fetch(url, { signal: controller.signal });
       const data = await response.json();
       if (response.ok) {
         setImages(data.images || []);
       }
     } catch (error) {
+      if ((error as Error).name === 'AbortError') return;
       console.error('Failed to fetch images:', error);
     } finally {
-      setLoading(false);
-      if (forceRefresh) {
-        setRefreshingCache(false);
+      if (abortControllerRef.current === controller) {
+        setLoading(false);
+        if (forceRefresh) {
+          setRefreshingCache(false);
+        }
       }
     }
   };
@@ -1379,18 +1481,21 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
         id="gallery-top-bar"
         className="sticky top-0 z-20 -m-6 mb-6 p-6 pb-4 bg-white/95 backdrop-blur rounded-t-lg border-b border-gray-100"
       >
-        <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
-          <div>
+        <div className="flex flex-col gap-3 mb-4">
+          <div id="first-row-controls" className="flex flex-wrap items-center justify-between gap-4">
+            <div>
             <p className="text-[0.7em] font-mono font-mono text-gray-900">
               Image Gallery ({filteredWithVariants.length}/{images.length})
             </p>
+            {namespace && (
+              <p className="font-mono text-[0.7em] text-gray-500">Namespace: {namespace}</p>
+            )}
             {showPagination && currentPageRangeLabel && (
               <p className="font-mono text-[0.7em] font-mono text-gray-500">
                 Showing uploads from {currentPageRangeLabel}
               </p>
             )}
           </div>
-          <div className="flex items-center gap-2">
             {showPagination && (
               <div className="flex items-center gap-2 text-[0.7em] font-mono text-gray-600">
                 <button
@@ -1446,41 +1551,71 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
                 </button>
               </div>
             )}
-            <button
-              onClick={() => setBulkSelectionMode(prev => !prev)}
-              className="px-3 py-1 text-[0.7em] font-mono border border-gray-200 rounded-md hover:bg-gray-100 transition"
-              aria-pressed={bulkSelectionMode}
-            >
-              {bulkSelectionMode ? 'Done selecting' : 'Select images'}
-            </button>
-            <button
-              onClick={() => setFiltersCollapsed(prev => !prev)}
-              className="px-3 py-1 text-[0.7em] font-mono border border-gray-200 rounded-md hover:bg-gray-100 transition"
-              aria-pressed={!filtersCollapsed}
-            >
-              {filtersCollapsed ? 'Show filters' : 'Hide filters'}
-            </button>
-            <button
-              onClick={clearFilters}
-              disabled={!hasActiveFilters}
-              className="px-3 py-1 text-[0.7em] font-mono border border-gray-200 rounded-md hover:bg-gray-100 transition disabled:opacity-50"
-            >
-              Clear filters
-            </button>
-            <button
-              onClick={() => fetchImages({ forceRefresh: true })}
-              disabled={refreshingCache}
-              className="px-3 py-1 text-[0.7em] font-mono border border-gray-200 rounded-md hover:bg-gray-100 transition disabled:opacity-50"
-              title="Refresh the server-side Cloudflare cache"
-            >
-              {refreshingCache ? 'Refreshing…' : 'Refresh cache'}
-            </button>
-            <button
-              onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
-              className="px-3 py-1 text-[0.7em] font-mono bg-gray-100 hover:bg-gray-200 rounded-md"
-            >
-              {viewMode === 'grid' ? '📋 List' : '🔲 Grid'}
-            </button>
+          </div>
+          <div id="second-row-controls" className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setBulkSelectionMode(prev => !prev)}
+                className="px-3 py-1 text-[0.7em] font-mono border border-gray-200 rounded-md hover:bg-gray-100 transition"
+                aria-pressed={bulkSelectionMode}
+              >
+                {bulkSelectionMode ? 'Done selecting' : 'Select images'}
+              </button>
+              <button
+                onClick={() => setFiltersCollapsed(prev => !prev)}
+                className="px-3 py-1 text-[0.7em] font-mono border border-gray-200 rounded-md hover:bg-gray-100 transition"
+                aria-pressed={!filtersCollapsed}
+              >
+                {filtersCollapsed ? 'Show filters' : 'Hide filters'}
+              </button>
+              <button
+                onClick={clearFilters}
+                disabled={!hasActiveFilters}
+                className="px-3 py-1 text-[0.7em] font-mono border border-gray-200 rounded-md hover:bg-gray-100 transition disabled:opacity-50"
+              >
+                Clear filters
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 bg-gray-100/50 rounded-md px-2 py-0.5">
+                <label htmlFor="page-size-toolbar" className="text-[0.65rem] font-mono text-gray-500 whitespace-nowrap">
+                  Gallery Size:
+                </label>
+                <MonoSelect
+                  id="page-size-toolbar"
+                  value={String(pageSize)}
+                  onChange={(nextValue) => {
+                    const parsed = Number(nextValue);
+                    setPageSize(PAGE_SIZE_OPTIONS.includes(parsed) ? parsed : DEFAULT_PAGE_SIZE);
+                  }}
+                  options={PAGE_SIZE_OPTIONS.map((size) => ({ value: String(size), label: String(size) }))}
+                  className="w-18"
+                  size='sm'
+                />
+              </div>
+              <button
+                onClick={() => fetchImages({ forceRefresh: true })}
+                disabled={refreshingCache}
+                className="px-3 py-1 text-[0.7em] font-mono border border-gray-200 rounded-md hover:bg-gray-100 transition disabled:opacity-50"
+                title="Refresh the server-side Cloudflare cache"
+              >
+                {refreshingCache ? 'Refreshing…' : 'Refresh cache'}
+              </button>
+              <button
+                onClick={() => setNamespaceSettingsOpen(true)}
+                className="px-3 py-1 text-[0.7em] font-mono border border-gray-200 rounded-md hover:bg-gray-100 transition flex items-center gap-2"
+                title="Namespace settings"
+              >
+                <Settings className="h-3 w-3" />
+                Namespace
+              </button>
+              <button
+                onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
+                className="px-3 py-1 text-[0.7em] font-mono bg-gray-100 hover:bg-gray-200 rounded-md"
+              >
+                {viewMode === 'grid' ? '📋 List' : '🔲 Grid'}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1586,6 +1721,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
             onChange={setSelectedFolder}
             options={folderFilterOptions}
             className="w-full"
+            size="sm"
           />
         </div>
         
@@ -1617,26 +1753,11 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
             onChange={setSelectedVariant}
             options={variantOptions}
             className="w-full"
+            size="sm"
           />
         </div>
 
-        <div>
-          <label htmlFor="page-size-select" className="block text-[0.7em] font-mono font-mono font-medum text-gray-700 mb-1">
-            Per page
-          </label>
-          <MonoSelect
-            id="page-size-select"
-            value={String(pageSize)}
-            onChange={(nextValue) => {
-              const parsed = Number(nextValue);
-              setPageSize(PAGE_SIZE_OPTIONS.includes(parsed) ? parsed : DEFAULT_PAGE_SIZE);
-            }}
-            options={PAGE_SIZE_OPTIONS.map((size) => ({ value: String(size), label: String(size) }))}
-            className="w-full"
-          />
-        </div>
-
-        <div className="flex flex-col gap-1 text-[0.7em] font-mono text-gray-700">
+        <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-[0.7em] font-mono text-gray-700">
           <label htmlFor="canonical-filter" className="flex items-center gap-1 font-mono">
             <input
               id="canonical-filter"
@@ -2127,7 +2248,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
                 >
                   <Link
                     href={`/images/${image.id}`}
-                    className="w-16 h-16 relative bg-gray-100 rounded-lg overflow-hidden flex-shrink-0 cursor-pointer"
+                    className="w-32 h-32 relative bg-gray-100 rounded-lg overflow-hidden flex-shrink-0 cursor-pointer"
                     onMouseEnter={(e) => handleMouseEnter(image.id, e)}
                     onMouseMove={(e) => handleMouseMove(image.id, e)}
                     onMouseLeave={handleMouseLeave}
@@ -2354,6 +2475,83 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
         );
       })()}
 
+      {namespaceSettingsOpen && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/40 z-[100000]"
+            onClick={() => setNamespaceSettingsOpen(false)}
+          />
+          <div className="fixed left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 w-80 bg-white rounded-lg shadow-xl z-[100001] text-[0.75em] font-mono text-gray-800 border">
+            <div className="flex items-center justify-between p-3 border-b">
+              <div className="text-[0.8em] font-mono font-medium">Namespace</div>
+              <button
+                onClick={() => setNamespaceSettingsOpen(false)}
+                className="px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded text-[0.75em] font-mono"
+                title="Close"
+              >
+                ×
+              </button>
+            </div>
+            <div className="p-3 space-y-3">
+              <label className="block text-[0.75em] text-gray-600">
+                Namespace
+                <div className="mt-1 space-y-2">
+                  <MonoSelect
+                    id="namespace-select"
+                    value={namespaceSelectValue}
+                    onChange={(value) => {
+                      setNamespaceSelectValue(value);
+                      if (value === '__custom__') {
+                        return;
+                      }
+                      setNamespaceDraft(value);
+                      onNamespaceChange?.(value);
+                      setNamespaceSettingsOpen(false);
+                    }}
+                    options={namespaceOptions}
+                    className="w-full"
+                    size="sm"
+                  />
+                  <input
+                    value={namespaceDraft}
+                    onChange={(e) => {
+                      setNamespaceDraft(e.target.value);
+                      setNamespaceSelectValue('__custom__');
+                    }}
+                    placeholder="Custom namespace (optional)"
+                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-[0.85em] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    disabled={namespaceSelectValue !== '__custom__'}
+                  />
+                </div>
+              </label>
+              <p className="text-[0.7em] text-gray-500">
+                Only images in this namespace are shown and used for duplicate checks.
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-2 p-3 border-t">
+              <button
+                onClick={() => setNamespaceSettingsOpen(false)}
+                className="px-3 py-1 border border-gray-300 rounded-md text-gray-600 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const next = namespaceSelectValue === '__custom__'
+                    ? namespaceDraft.trim()
+                    : namespaceSelectValue;
+                  onNamespaceChange?.(next);
+                  setNamespaceSettingsOpen(false);
+                }}
+                className="px-3 py-1 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
       {/* Edit Modal */}
       {editingImage && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -2374,6 +2572,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
                     onChange={setEditFolderSelect}
                     options={editFolderOptions}
                     className="w-full"
+                    size="sm"
                   />
                   {editFolderSelect === '__create__' && (
                     <input
@@ -2451,6 +2650,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(({ refreshTr
                         options={bulkFolderOptions}
                         className="w-full"
                         placeholder="[none]"
+                        size="sm"
                       />
                       <p className="text-[0.6rem] text-gray-500">
                         Choose an existing folder or pick “Create new folder…” to type a new name.

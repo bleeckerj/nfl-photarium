@@ -19,20 +19,23 @@ export const toDuplicateSummary = (image: CachedCloudflareImage): DuplicateSumma
   url: image.variants?.[0]
 });
 
-export async function findDuplicatesByOriginalUrl(originalUrl: string) {
+export async function findDuplicatesByOriginalUrl(originalUrl: string, namespace?: string) {
   const normalized = normalizeOriginalUrl(originalUrl);
   if (!normalized) {
     return [];
   }
   const images = await getCachedImages();
   return images.filter((img) => {
+    if (namespace && img.namespace !== namespace) {
+      return false;
+    }
     const existingNormalized =
       img.originalUrlNormalized ?? normalizeOriginalUrl(img.originalUrl);
     return existingNormalized === normalized;
   });
 }
 
-export async function findDuplicatesByContentHash(contentHash: string) {
+export async function findDuplicatesByContentHash(contentHash: string, namespace?: string) {
   const normalizeHash = (value?: string | null) => {
     const trimmed = (value ?? '').trim().toLowerCase();
     return /^[a-f0-9]{64}$/.test(trimmed) ? trimmed : undefined;
@@ -43,5 +46,10 @@ export async function findDuplicatesByContentHash(contentHash: string) {
     return [];
   }
   const images = await getCachedImages();
-  return images.filter((img) => normalizeHash(img.contentHash) === normalized);
+  return images.filter((img) => {
+    if (namespace && img.namespace !== namespace) {
+      return false;
+    }
+    return normalizeHash(img.contentHash) === normalized;
+  });
 }

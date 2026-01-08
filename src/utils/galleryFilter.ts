@@ -11,6 +11,8 @@ export interface GalleryImage {
   parentId?: string;
   originalUrl?: string;
   originalUrlNormalized?: string;
+  sourceUrl?: string;
+  sourceUrlNormalized?: string;
 }
 
 export interface GalleryFilterOptions {
@@ -51,6 +53,8 @@ const matchesSearchFilter = (image: GalleryImage, searchTerm: string) => {
     normalize(image.description),
     normalize(image.originalUrl),
     normalize(image.originalUrlNormalized),
+    normalize(image.sourceUrl),
+    normalize(image.sourceUrlNormalized),
     ...(image.tags?.map(normalize) ?? []),
     ...(image.variants?.map(normalize) ?? [])
   ].filter(Boolean);

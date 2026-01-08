@@ -1,7 +1,8 @@
 {
-  "name": "cloud-flare-image-handler",
+  "name": "photarium",
   "version": "0.1.0",
   "private": true,
+  "description": "An elegant image management platform powered by Cloudflare Images",
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build --turbopack",
@@ -12,7 +13,8 @@
     "refresh:hash-cache": "node scripts/refresh-hash-cache.mjs",
     "diag:duplicates": "node scripts/diagnose-duplicates.mjs",
     "audit:broken": "node scripts/audit-broken-images.mjs",
-    "watch:drop-off": "node scripts/watch-drop-off.mjs"
+    "watch:drop-off": "node scripts/watch-drop-off.mjs",
+    "namespace:backfill": "node scripts/backfill-namespace.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",
@@ -20,6 +22,7 @@
     "exif-reader": "^2.0.2",
     "lucide-react": "^0.545.0",
     "next": "15.5.4",
+    "qrcode": "^1.5.3",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-dropzone": "^14.3.8",

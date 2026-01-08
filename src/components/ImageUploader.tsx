@@ -17,25 +17,30 @@ interface UploadedImage {
   tags?: string[];
   description?: string;
   originalUrl?: string;
+  sourceUrl?: string;
   file?: File;
   folderInput?: string;
   tagsInput?: string;
   descriptionInput?: string;
   originalUrlInput?: string;
+  sourceUrlInput?: string;
   parentId?: string;
 }
 
 interface ImageUploaderProps {
   onImageUploaded?: () => void;
+  namespace?: string;
 }
 
 interface QueuedFile {
   id: string;
   file: File;
   originalUrl?: string;
+  sourceUrl?: string;
   folder?: string;
   tags?: string;
   description?: string;
+  captureDate?: string;
 }
 
 interface GalleryImageSummary {
@@ -89,7 +94,7 @@ const shrinkImageFile = async (file: File): Promise<File> => {
   return file;
 };
 
-export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
+export default function ImageUploader({ onImageUploaded, namespace }: ImageUploaderProps) {
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFolder, setSelectedFolder] = useState<string>("");
@@ -97,6 +102,7 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
   const [tags, setTags] = useState<string>("found");
   const [description, setDescription] = useState<string>("");
   const [originalUrl, setOriginalUrl] = useState<string>("");
+  const [sourceUrl, setSourceUrl] = useState<string>("");
   const [folders, setFolders] = useState<string[]>([
     "email-campaigns",
     "website-images",
@@ -136,9 +142,10 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
   const buildMetadataEstimate = useCallback(
     (
       item: QueuedFile,
-      overrides: { folder?: string; tags?: string; description?: string; originalUrl?: string }
+      overrides: { folder?: string; tags?: string; description?: string; originalUrl?: string; sourceUrl?: string }
     ) => {
       const normalizedOriginalUrl = normalizeOriginalUrl(overrides.originalUrl);
+      const normalizedSourceUrl = normalizeOriginalUrl(overrides.sourceUrl);
       const tagList = overrides.tags
         ? overrides.tags
             .split(',')
@@ -156,10 +163,13 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
         description: overrides.description || undefined,
         originalUrl: overrides.originalUrl || undefined,
         originalUrlNormalized: normalizedOriginalUrl,
+        sourceUrl: overrides.sourceUrl || undefined,
+        sourceUrlNormalized: normalizedSourceUrl,
+        namespace: namespace || undefined,
         variationParentId: selectedParentId || undefined
       });
     },
-    [estimateMetadataBytes, selectedParentId]
+    [estimateMetadataBytes, namespace, selectedParentId]
   );
 
   const formatUploadErrorMessage = useCallback((response: Response, payload: unknown) => {
@@ -269,6 +279,8 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
       const initialImages: UploadedImage[] = filesToUpload.map((entry) => {
         const originalUrlToSend =
           entry.originalUrl !== undefined ? entry.originalUrl : originalUrl.trim() || '';
+        const sourceUrlToSend =
+          entry.sourceUrl !== undefined ? entry.sourceUrl : sourceUrl.trim() || '';
         const folderToSend = entry.folder !== undefined ? entry.folder : folderToUse;
         const tagsToSend = entry.tags !== undefined ? entry.tags : tags;
         const descriptionToSend = entry.description !== undefined ? entry.description : description;
@@ -283,6 +295,7 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
           tagsInput: tagsToSend,
           descriptionInput: descriptionToSend,
           originalUrlInput: originalUrlToSend || undefined,
+          sourceUrlInput: sourceUrlToSend || undefined,
           parentId: selectedParentId || undefined
         };
       });
@@ -297,6 +310,7 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
         const {
           file,
           originalUrl: queuedOriginalUrl,
+          sourceUrl: queuedSourceUrl,
           folder: queuedFolder,
           tags: queuedTags,
           description: queuedDescription,
@@ -305,6 +319,8 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
         const imageId = queuedId;
         const originalUrlToSend =
           queuedOriginalUrl !== undefined ? queuedOriginalUrl : originalUrl.trim() || '';
+        const sourceUrlToSend =
+          queuedSourceUrl !== undefined ? queuedSourceUrl : sourceUrl.trim() || '';
         const folderToSend = queuedFolder !== undefined ? queuedFolder : folderToUse;
         const tagsToSend = queuedTags !== undefined ? queuedTags : tags;
         const descriptionToSend =
@@ -324,6 +340,12 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
           }
           if (originalUrlToSend) {
             formData.append("originalUrl", originalUrlToSend);
+          }
+          if (sourceUrlToSend) {
+            formData.append("sourceUrl", sourceUrlToSend);
+          }
+          if (namespace) {
+            formData.append("namespace", namespace);
           }
           if (selectedParentId) {
             formData.append("parentId", selectedParentId);
@@ -347,6 +369,7 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
                   tags?: string[];
                   description?: string;
                   originalUrl?: string;
+                  sourceUrl?: string;
                 }>;
                 failures?: Array<{ filename: string; error: string }>;
                 skipped?: Array<{ filename: string; reason: string }>;
@@ -359,7 +382,8 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
                 folder: item.folder,
                 tags: item.tags,
                 description: item.description,
-                originalUrl: item.originalUrl
+                originalUrl: item.originalUrl,
+                sourceUrl: item.sourceUrl
               }));
               const failureEntries: UploadedImage[] = (zipResult.failures || []).map((item) => ({
                 id: Math.random().toString(36).substring(7),
@@ -402,6 +426,7 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
                           : [],
                         description: descriptionToSend || undefined,
                         originalUrl: originalUrlToSend || undefined,
+                        sourceUrl: sourceUrlToSend || undefined,
                         file: undefined,
                       }
                     : img
@@ -452,9 +477,10 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
       setTags("found");
       setDescription("");
       setOriginalUrl("");
+      setSourceUrl("");
       setSelectedParentId("");
     },
-    [selectedFolder, newFolder, folders, tags, description, originalUrl, selectedParentId, onImageUploaded, fetchFolders, formatUploadErrorMessage]
+    [selectedFolder, newFolder, folders, tags, description, originalUrl, sourceUrl, namespace, selectedParentId, onImageUploaded, fetchFolders, formatUploadErrorMessage]
   );
 
   // Handle drag and drop - either queue or upload immediately
@@ -468,9 +494,14 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
     const resizedFiles = await Promise.all(resizedPromises);
     setQueuedFiles((prev) => [
       ...prev,
-      ...resizedFiles.map((file) => ({ id: createQueueId(), file }))
+      ...resizedFiles.map((file) => {
+        const lowerName = file.name.toLowerCase();
+        const isSnagx = lowerName.endsWith('.snagx');
+        const tagOverride = isZipFile(file) ? 'zip' : isSnagx ? 'snagx' : undefined;
+        return { id: createQueueId(), file, tags: tagOverride };
+      })
     ]);
-  }, []);
+  }, [createQueueId]);
 
   // Manual upload button handler
   const handleManualUpload = async () => {
@@ -500,7 +531,8 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
     onDrop,
     accept: {
       "image/*": [".jpeg", ".jpg", ".png", ".gif", ".webp"],
-      "application/zip": [".zip"],
+      "application/octet-stream": [".snagx"],
+      "application/zip": [".zip", ".snagx"],
       "application/x-zip-compressed": [".zip"]
     },
     multiple: true,
@@ -519,6 +551,7 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
         id: image.id,
         file: image.file,
         originalUrl: image.originalUrlInput ?? image.originalUrl,
+        sourceUrl: image.sourceUrlInput ?? image.sourceUrl,
         folder: image.folderInput,
         tags: image.tagsInput,
         description: image.descriptionInput
@@ -582,9 +615,20 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
       }
       const file = base64ToFile(String(data.data), String(data.name), String(data.type));
       const sourceUrl = String(data.originalUrl || importUrl.trim());
+      const descriptionFromSnagx = typeof data.snagxDescription === 'string' && data.snagxDescription.trim()
+        ? data.snagxDescription.trim()
+        : '';
+      const tagsFromSnagx = data.snagxDescription || data.captureDate ? 'snagx' : undefined;
       setQueuedFiles((prev) => [
         ...prev,
-        { id: createQueueId(), file, originalUrl: sourceUrl }
+        {
+          id: createQueueId(),
+          file,
+          originalUrl: sourceUrl,
+          description: descriptionFromSnagx || undefined,
+          captureDate: typeof data.captureDate === 'string' ? data.captureDate : undefined,
+          tags: tagsFromSnagx
+        }
       ]);
       if (!originalUrl.trim()) {
         setOriginalUrl(sourceUrl);
@@ -680,7 +724,21 @@ export default function ImageUploader({ onImageUploaded }: ImageUploaderProps) {
             onChange={(e) => setOriginalUrl(e.target.value)}
             className="w-full border border-gray-300 rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
-          <p className="text-xs text-gray-500 mt-1">Reference to the original source URL</p>
+          <p className="text-xs text-gray-500 mt-1">Asset URL used for duplicate detection</p>
+        </div>
+        <div>
+          <label htmlFor="source-url-input" className="block text-xs font-mono font-medium text-gray-700 mb-2">
+            Source URL (Optional)
+          </label>
+          <input
+            id="source-url-input"
+            type="url"
+            placeholder="https://example.com/page-or-collection"
+            value={sourceUrl}
+            onChange={(e) => setSourceUrl(e.target.value)}
+            className="w-full border border-gray-300 rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <p className="text-xs text-gray-500 mt-1">Where the image was found (page or site)</p>
         </div>
       </div>
 {/*  Not sure how you thought it ever made sense to show a huge list of filenames here...Leave this commented out
@@ -781,12 +839,13 @@ A long list of filenames is not user friendly and essentially useless for select
             </div>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 gap-3">
             {queuedFiles.map((item) => {
               const hasCustomFolder = item.folder !== undefined;
               const hasCustomTags = item.tags !== undefined;
               const hasCustomDescription = item.description !== undefined;
               const hasCustomOriginalUrl = item.originalUrl !== undefined;
+              const hasCustomSourceUrl = item.sourceUrl !== undefined;
               const previewFolder = selectedFolder.trim()
                 ? selectedFolder.trim()
                 : newFolder.trim()
@@ -796,17 +855,19 @@ A long list of filenames is not user friendly and essentially useless for select
               const effectiveTags = hasCustomTags ? item.tags || "" : tags;
               const effectiveDescription = hasCustomDescription ? item.description || "" : description;
               const effectiveOriginalUrl = hasCustomOriginalUrl ? item.originalUrl || "" : originalUrl;
+              const effectiveSourceUrl = hasCustomSourceUrl ? item.sourceUrl || "" : sourceUrl;
               const metadataExpanded = Boolean(expandedQueueMetadata[item.id]);
               const metadataBytes = buildMetadataEstimate(item, {
                 folder: effectiveFolder,
                 tags: effectiveTags,
                 description: effectiveDescription,
-                originalUrl: effectiveOriginalUrl
+                originalUrl: effectiveOriginalUrl,
+                sourceUrl: effectiveSourceUrl
               });
               const metadataOverLimit = metadataBytes >= 1024;
 
               return (
-              <div key={item.id} className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <div key={item.id} className="p-3 bg-blue-50 border border-blue-200 rounded-lg w-full">
                 <p className="text-xs font-mono font-medium text-gray-900 truncate">{item.file.name}</p>
                 <p className="text-xs text-gray-500">{(item.file.size / 1024 / 1024).toFixed(2)} MB</p>
                 {effectiveOriginalUrl && (
@@ -838,14 +899,31 @@ A long list of filenames is not user friendly and essentially useless for select
                 {metadataExpanded && (
                   <div className="mt-2 border-t border-blue-200 pt-2 space-y-2">
                     <div className="space-y-1">
-                      <p className="text-[11px] text-gray-600">Folder: {effectiveFolder || "—"}</p>
-                      <p className="text-[11px] text-gray-600">Tags: {effectiveTags || "—"}</p>
-                      <p className="text-[11px] text-gray-600">Description: {effectiveDescription || "—"}</p>
-                      <p className="text-[11px] text-gray-600">
+                      <p className="text-[11px] text-gray-600 truncate" title={effectiveFolder || "—"}>
+                        Folder: {effectiveFolder || "—"}
+                      </p>
+                      <p className="text-[11px] text-gray-600 truncate" title={effectiveTags || "—"}>
+                        Tags: {effectiveTags || "—"}
+                      </p>
+                      <p className="text-[11px] text-gray-600 truncate" title={effectiveDescription || "—"}>
+                        Description: {effectiveDescription || "—"}
+                      </p>
+                      <p className="text-[11px] text-gray-600 truncate" title={effectiveOriginalUrl || "—"}>
                         Original URL: {effectiveOriginalUrl || "—"}
                       </p>
+                      <p className="text-[11px] text-gray-600 truncate" title={effectiveSourceUrl || "—"}>
+                        Source URL: {effectiveSourceUrl || "—"}
+                      </p>
+                      <p className="text-[11px] text-gray-600 truncate" title={namespace || "—"}>
+                        Namespace: {namespace || "—"}
+                      </p>
+                      {item.captureDate && (
+                        <p className="text-[11px] text-gray-600 truncate" title={item.captureDate}>
+                          Capture date: {item.captureDate}
+                        </p>
+                      )}
                       {selectedParentId && (
-                        <p className="text-[11px] text-gray-600">
+                        <p className="text-[11px] text-gray-600 truncate" title={selectedParentId}>
                           Parent ID: {selectedParentId}
                         </p>
                       )}
@@ -925,6 +1003,23 @@ A long list of filenames is not user friendly and essentially useless for select
                           Use global original URL
                         </button>
                       </label>
+                      <label className="block text-[11px] text-gray-700">
+                        Override source URL
+                        <input
+                          type="text"
+                          value={item.sourceUrl ?? ""}
+                          onChange={(e) => updateQueuedFile(item.id, { sourceUrl: e.target.value })}
+                          placeholder={sourceUrl || "No source URL"}
+                          className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => updateQueuedFile(item.id, { sourceUrl: undefined })}
+                          className="mt-1 text-[10px] text-blue-600 hover:text-blue-800"
+                        >
+                          Use global source URL
+                        </button>
+                      </label>
                       <p className="text-[10px] text-gray-500">
                         Leave a field blank to omit it for this file.
                       </p>
@@ -955,6 +1050,9 @@ A long list of filenames is not user friendly and essentially useless for select
                     {image.description && <p className="text-xs text-gray-500">📝 {image.description}</p>}
                     {image.originalUrl && (
                       <p className="text-xs text-gray-500">🔗 <a href={image.originalUrl} target="_blank" rel="noreferrer" className="underline">Original</a></p>
+                    )}
+                    {image.sourceUrl && (
+                      <p className="text-xs text-gray-500">🔗 <a href={image.sourceUrl} target="_blank" rel="noreferrer" className="underline">Source</a></p>
                     )}
                     {image.tags && image.tags.length > 0 && <p className="text-xs text-gray-500">🏷️ {image.tags.join(", ")}</p>}
                     {image.status === "success" && image.url && (

@@ -19,6 +19,9 @@ export interface CachedCloudflareImage {
   description?: string;
   originalUrl?: string;
   originalUrlNormalized?: string;
+  sourceUrl?: string;
+  sourceUrlNormalized?: string;
+  namespace?: string;
   contentHash?: string;
   altTag?: string;
   displayName?: string;
@@ -83,6 +86,20 @@ const transformImage = (image: CloudflareImageApiResponse): CachedCloudflareImag
       : undefined;
   const normalizedOriginalUrl =
     cleanOriginalUrlNormalized ?? normalizeOriginalUrl(cleanOriginalUrl);
+  const cleanSourceUrl =
+    parsedMeta.sourceUrl && parsedMeta.sourceUrl !== 'undefined'
+      ? parsedMeta.sourceUrl
+      : undefined;
+  const cleanSourceUrlNormalized =
+    parsedMeta.sourceUrlNormalized && parsedMeta.sourceUrlNormalized !== 'undefined'
+      ? parsedMeta.sourceUrlNormalized
+      : undefined;
+  const normalizedSourceUrl =
+    cleanSourceUrlNormalized ?? normalizeOriginalUrl(cleanSourceUrl);
+  const cleanNamespace =
+    parsedMeta.namespace && parsedMeta.namespace !== 'undefined'
+      ? parsedMeta.namespace
+      : undefined;
   const cleanAltTag =
     parsedMeta.altTag && parsedMeta.altTag !== 'undefined' ? parsedMeta.altTag : undefined;
   const displayName =
@@ -120,6 +137,9 @@ const transformImage = (image: CloudflareImageApiResponse): CachedCloudflareImag
     description: cleanDescription,
     originalUrl: cleanOriginalUrl,
     originalUrlNormalized: normalizedOriginalUrl,
+    sourceUrl: cleanSourceUrl,
+    sourceUrlNormalized: normalizedSourceUrl,
+    namespace: cleanNamespace,
     contentHash: cleanContentHash,
     altTag: cleanAltTag,
     displayName: displayName ?? image.filename || parsedMeta.filename || undefined,
