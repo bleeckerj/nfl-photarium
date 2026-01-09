@@ -42,6 +42,26 @@ No vendor lock-in. Run it on your own infrastructure.
 - **CDN Delivery** — Lightning-fast global distribution via Cloudflare's network
 - **Dark-mode Ready** — Responsive design, works on desktop and mobile
 
+### Deep Control & Variants
+
+![Image Detail View](docs/images/2026-01-08_18-26-58.png)
+
+Every image includes a powerful detail view for granular control:
+
+- **Metadata Management**: Edit title, folder, description, and tags while preserving original EXIF data.
+- **Variant Assignment**: Designate specific images as variants (e.g., "Thumbnail," "Social Share") of a parent image. This keeps your library clean by grouping related assets under a single "master" image while serving optimized versions for specific contexts.
+- **Accessibility**: Generate and edit ALT text to ensure your assets are accessible everywhere.
+
+### Organized Gallery Management
+
+![Photarium Gallery View](docs/images/2026-01-08_18-32-51.png)
+
+The main gallery offers a clean, efficient way to browse and organize thousands of assets:
+
+- **Smart Filtering**: Drill down by matching folders, tags, or specific time ranges.
+- **Sticky Controls**: Filter/Sort bar stays pinned to the top, so you never lose context while scrolling deep lists.
+- **Quick Actions**: Hover over any image for instant access to copy URL, edit metadata, or download.
+
 ---
 
 ## Requirements
