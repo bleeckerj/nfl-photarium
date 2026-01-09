@@ -44,7 +44,7 @@ No vendor lock-in. Run it on your own infrastructure.
 
 ### Deep Control & Variants
 
-![Image Detail View](docs/images/2026-01-08_18-26-58_900px.webp.png)
+![Image Detail View](docs/images/2026-01-08_18-26-58_900px.webp)
 
 Every image includes a powerful detail view for granular control:
 
