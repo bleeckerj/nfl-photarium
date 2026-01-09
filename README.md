@@ -196,7 +196,53 @@ DROP_OFF_TAGS=found
 
 **Self-hosted** — Run on your own server, Vercel, Railway, or any Node.js host  
 **Stateless** — All metadata stored in Cloudflare; no database required  
-**Namespace-aware** — Isolate images across projects or teams on one account
+**Namespace-aware** — Isolate images across projects or teams on one account  
+**Plugin-based** — Extensible architecture for custom file type handlers
+
+---
+
+## Extending Photarium
+
+### Custom File Type Support
+
+Photarium includes a plugin architecture for handling different file formats. Built-in plugins support:
+
+- **`.snagx`** — Snagit screenshot archives (extracts PNG + metadata)
+- **`.zip`** — Generic ZIP archives (extracts all images)
+
+Want to support `.psd`, `.heic`, or custom archive formats? Create a plugin:
+
+```typescript
+// src/plugins/customPlugin.ts
+import { PackagePlugin } from '@/plugins';
+
+export const customPlugin: PackagePlugin = {
+  name: 'My Custom Format',
+  extensions: ['.custom'],
+  mimeTypes: ['application/x-custom'],
+  
+  canHandle(filename: string) {
+    return filename.toLowerCase().endsWith('.custom');
+  },
+
+  async extract(input) {
+    // Extract assets and return metadata
+    return { assets: [...], tagOverride: 'custom' };
+  }
+};
+```
+
+Then register it in `src/plugins/index.ts`:
+
+```typescript
+registry.register(customPlugin);
+```
+
+**Full guide:** [Plugin Architecture](./docs/plugins.md)
+
+---
+
+## Architecture
 
 ---
 
@@ -271,6 +317,7 @@ npm run lint
 - **[External API](./EXTERNAL_UPLOAD_API.md)** — Full API reference and examples
 - **[Image Variants](./docs/variants.md)** — Responsive image sizing
 - **[Remote Hash Cache](./docs/remote-hash-cache.md)** — Distributed duplicate detection
+- **[Plugin Architecture](./docs/plugins.md)** — Extend Photarium with custom file type handlers
 
 ---
 
