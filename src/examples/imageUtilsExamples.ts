@@ -21,7 +21,7 @@ console.log('Large image:', largeUrl);
 console.log('Original image:', originalUrl);
 
 // Get multiple sizes at once
-const allSizes = getMultipleImageUrls(imageId, ['small', 'medium', 'large', 'original']);
+const allSizes = getMultipleImageUrls(imageId, ['small', 'medium', 'large', 'full']);
 console.log('All sizes:', allSizes);
 
 // Get custom transformations

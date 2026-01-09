@@ -207,8 +207,12 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         const normalizedPageSize = PAGE_SIZE_OPTIONS.includes(rawPageSize)
           ? rawPageSize
           : DEFAULT_PAGE_SIZE;
+        const storedVariant = typeof parsed.variant === 'string' ? parsed.variant : 'full';
+        const normalizedVariant = storedVariant === 'public' || storedVariant === 'original'
+          ? 'full'
+          : storedVariant;
         return {
-          variant: typeof parsed.variant === 'string' ? parsed.variant : 'public',
+          variant: normalizedVariant,
           onlyCanonical: Boolean(parsed.onlyCanonical),
           respectAspectRatio: Boolean(parsed.respectAspectRatio),
           onlyWithVariants: Boolean(parsed.onlyWithVariants),
@@ -228,7 +232,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       console.warn('Failed to parse gallery preferences', error);
     }
     return {
-      variant: 'public',
+      variant: 'full',
       onlyCanonical: false,
       respectAspectRatio: false,
       onlyWithVariants: false,
@@ -1109,7 +1113,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     );
   };
 
-  const VARIANT_PRESETS = ['small', 'medium', 'large', 'xlarge', 'original', 'thumbnail'];
+  const VARIANT_PRESETS = ['small', 'medium', 'large', 'xlarge', 'full', 'thumbnail'];
 
   const getVariantUrls = (image: CloudflareImage) => {
     return getMultipleImageUrls(image.id, VARIANT_PRESETS);
@@ -1276,7 +1280,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
 
   const variantOptions = useMemo(
     () => [
-      { value: 'public', label: 'Original (Full Size)' },
+      { value: 'full', label: 'Full (No Resize)' },
       { value: 'w=300', label: 'Small (300px)' },
       { value: 'w=600', label: 'Medium (600px)' },
       { value: 'w=900', label: 'Large (900px)' },

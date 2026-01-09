@@ -10,6 +10,7 @@ export interface ImageVariant {
 // Predefined image variants for easy use
 export const IMAGE_VARIANTS: ImageVariant[] = [
   { name: 'original', value: 'public', description: 'Original full size', width: undefined },
+  { name: 'full', value: 'full', description: 'Full size (no resizing)', width: undefined },
   { name: 'small', value: 'w=300', description: 'Small (300px width)', width: 300 },
   { name: 'medium', value: 'w=600', description: 'Medium (600px width)', width: 600 },
   { name: 'large', value: 'w=900', description: 'Large (900px width)', width: 900 },
@@ -56,7 +57,7 @@ export function getCloudflareImageUrl(
  */
 export function getMultipleImageUrls(
   imageId: string,
-  variants: string[] = ['small', 'medium', 'large', 'original'],
+  variants: string[] = ['small', 'medium', 'large', 'full'],
   accountHash?: string
 ): Record<string, string> {
   const urls: Record<string, string> = {};

@@ -44,7 +44,7 @@ No vendor lock-in. Run it on your own infrastructure.
 
 ### Deep Control & Variants
 
-![Image Detail View](docs/images/2026-01-08_18-26-58.png)
+![Image Detail View](docs/images/2026-01-08_18-26-58_900px.webp.png)
 
 Every image includes a powerful detail view for granular control:
 
@@ -54,7 +54,7 @@ Every image includes a powerful detail view for granular control:
 
 ### Organized Gallery Management
 
-![Photarium Gallery View](docs/images/2026-01-08_18-32-51.png)
+![Photarium Gallery View](docs/images/2026-01-08_18-32-51_900px.webp)
 
 The main gallery offers a clean, efficient way to browse and organize thousands of assets:
 

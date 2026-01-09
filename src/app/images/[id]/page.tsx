@@ -38,7 +38,7 @@ interface CloudflareImage {
   variationSort?: number;
 }
 
-const DEFAULT_LIST_VARIANT = 'original';
+const DEFAULT_LIST_VARIANT = 'full';
 const VARIANT_DIMENSIONS = new Map(IMAGE_VARIANTS.map(variant => [variant.name, variant.width]));
 
 type BulkUpdateFailure = {
@@ -414,13 +414,13 @@ export default function ImageDetailPage() {
   }, [filteredAdoptableImages, adoptPage]);
 
   const variants = useMemo(
-    () => (id ? getMultipleImageUrls(id, ['thumbnail','small','medium','large','xlarge','original']) : {}),
+    () => (id ? getMultipleImageUrls(id, ['thumbnail','small','medium','large','xlarge','full']) : {}),
     [id]
   );
 
   const shareVariantOptions = useMemo(
     () =>
-      IMAGE_VARIANTS.map((variant) => ({
+      IMAGE_VARIANTS.filter((variant) => variant.name !== 'original').map((variant) => ({
         value: variant.name,
         label: variant.width ? `${variant.name} (${variant.width}px)` : variant.name
       })),
@@ -429,7 +429,7 @@ export default function ImageDetailPage() {
 
   const listVariantOptions = useMemo(
     () =>
-      IMAGE_VARIANTS.map((variant) => ({
+      IMAGE_VARIANTS.filter((variant) => variant.name !== 'original').map((variant) => ({
         value: variant.name,
         label: variant.width ? `${variant.name} (${variant.width}px)` : variant.name
       })),
@@ -2750,7 +2750,7 @@ export default function ImageDetailPage() {
         };
 
         const variantEntries = Object.entries(
-          getMultipleImageUrls(target.id, ['thumbnail','small','medium','large','xlarge','original'])
+          getMultipleImageUrls(target.id, ['thumbnail','small','medium','large','xlarge','full'])
         ).map(([variantName, variantUrl]) => [variantName, ensureWebpFormat(variantUrl)] as [string, string]);
 
         const handleCopyVariantList = async (
