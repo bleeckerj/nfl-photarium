@@ -290,14 +290,83 @@
         footer {
             background: white;
             border-top: 1px solid var(--border);
-            padding: 2rem;
+            padding: 5rem 2rem;
             text-align: center;
-            color: var(--text-light);
-            font-size: 0.9rem;
+            color: var(--text-dark);
         }
 
-        footer a {
+        .footer-content {
+            max-width: 900px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 2.5rem;
+            align-items: center;
+        }
+
+        .footer-cta {
+            font-family: 'Warbler Banner', serif;
+            font-size: 1.1rem;
+            line-height: 1.8;
+        }
+
+        .footer-cta a {
+            color: var(--text-dark);
+            text-decoration: underline;
+            text-underline-offset: 4px;
+            transition: color 0.2s;
+        }
+        
+        .footer-cta a:hover {
             color: var(--accent);
+        }
+
+        .nfl-logo img {
+            width: 100px;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+        }
+
+        .social-icons {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 1.25rem;
+            margin: 0.5rem 0;
+        }
+
+        .social-icons img {
+            width: 24px;
+            height: 24px;
+            opacity: 0.6;
+            transition: all 0.2s;
+        }
+
+        .social-icons a:hover img {
+            opacity: 1;
+            transform: translateY(-2px);
+        }
+
+        .project-credits {
+            font-size: 0.85rem;
+            color: var(--text-light);
+            border-top: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+            padding: 2rem 0;
+            width: 100%;
+        }
+
+        .copyright {
+            font-size: 0.7rem;
+            color: #999;
+            line-height: 1.6;
+            font-style: italic;
+        }
+
+        .copyright a {
+            color: #999;
+            text-decoration: underline;
         }
 
         /* Responsive */
@@ -445,8 +514,71 @@
     </main>
 
     <footer>
-        <p>Photarium is open source and self-hosted. <a href="https://github.com/bleeckerj/nfl-photarium">View on GitHub</a></p>
-        <p>Built with Next.js, Tailwind CSS, and Cloudflare Images</p>
+        <div class="footer-content">
+            <!-- CTA Links -->
+            <div class="footer-cta">
+                <a href="https://nearfuturelaboratory.com/newsletter/">Subscribe to the newsletter</a> ✼
+                <span style='margin-left: 1.5rem'></span> <a href="https://nearfuturelaboratory.com/connect/">Schedule a consultation call</a> ✼ 
+            </div>
+
+            <!-- NFL Logo -->
+            <div class="nfl-logo">
+                <a href="https://nearfuturelaboratory.com">
+                    <img src="https://imagedelivery.net/gaLGizR3kCgx5yRLtiRIOw/e666aac1-5728-4012-6860-4fe945321f00/w=150?format=webp" alt="Near Future Laboratory">
+                </a>
+            </div>
+
+            <!-- Social Icons -->
+            <div class="social-icons">
+                <a href="https://github.com/bleeckerj" title="Personal GitHub">
+                    <img src="https://img.icons8.com/ios-glyphs/24/000000/github.png" alt="GitHub">
+                </a>
+                <a href="https://github.com/nearfuturelaboratory" title="Near Future Laboratory GitHub">
+                    <img src="https://img.icons8.com/ios-glyphs/24/000000/github.png" alt="NFL GitHub">
+                </a>
+                <a href="https://podcasts.apple.com/us/podcast/near-future-laboratory-podcast/id1546452193" title="Podcast">
+                    <img src="https://img.icons8.com/?size=24&id=ZsAN3pzKcy09&format=png" alt="Podcast">
+                </a>
+                <a href="https://open.spotify.com/show/1vHzwGE5J19LvXSo8M93MM" title="Spotify">
+                    <img src="https://img.icons8.com/ios-glyphs/24/000000/spotify.png" alt="Spotify">
+                </a>
+                <a href="https://instagram.com/darthjulian" title="Personal Instagram">
+                    <img src="https://img.icons8.com/ios-glyphs/24/000000/instagram-new.png" alt="Instagram">
+                </a>
+                <a href="https://instagram.com/nearfuturelaboratory" title="Company Instagram">
+                    <img src="https://img.icons8.com/ios-glyphs/24/000000/instagram-new.png" alt="NFL Instagram">
+                </a>
+                <a href="https://linkedin.com/in/julianbleecker" title="Personal LinkedIn">
+                    <img src="https://img.icons8.com/ios-glyphs/24/000000/linkedin.png" alt="LinkedIn">
+                </a>
+                <a href="https://www.linkedin.com/company/near-future-laboratory/" title="Company LinkedIn">
+                    <img src="https://img.icons8.com/ios-glyphs/24/000000/linkedin.png" alt="NFL LinkedIn">
+                </a>
+                <a href="https://youtube.com/@nearfuturelaboratory" title="YouTube">
+                    <img src="https://img.icons8.com/ios-glyphs/24/000000/youtube-play.png" alt="YouTube">
+                </a>
+                <a href="https://patreon.com/nearfuturelaboratory" title="Patreon">
+                    <img src="https://img.icons8.com/ios-glyphs/24/000000/discord.png" alt="Discord">
+                </a>
+                <a href="https://newsletter.substack.com" title="Substack">
+                    <img src="https://img.icons8.com/?size=100&id=kcZe5woKzcQY&format=png&color=000000" alt="Substack">
+                </a>
+            </div>
+
+            <!-- Project Credits -->
+            <div class="project-credits">
+                <p>Photarium is open source and self-hosted. <a href="https://github.com/bleeckerj/nfl-photarium">View on GitHub</a></p>
+                <p>Built with Next.js, Tailwind CSS, and Cloudflare Images</p>
+            </div>
+
+            <!-- Copyright -->
+            <div class="copyright">
+                <p>Content © 2026 Near Future Laboratory Venice Beach, California United States</p>
+                <br>
+                <p>Software is released under the MIT License</p>
+                <p>Icons by <a href="https://icons8.com">Icons8</a></p>
+            </div>
+        </div>
     </footer>
 </body>
 </html>
