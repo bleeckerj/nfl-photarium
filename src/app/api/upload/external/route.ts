@@ -27,6 +27,14 @@ export async function OPTIONS() {
 
 export async function POST(request: NextRequest) {
   try {
+    // 0. Feature Flag: Check if API is disabled
+    if (process.env.DISABLE_EXTERNAL_API === 'true') {
+      return withCors(NextResponse.json(
+        { error: 'External upload API is disabled by configuration.' },
+        { status: 403 }
+      ));
+    }
+
     const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
     const apiToken = process.env.CLOUDFLARE_API_TOKEN;
     

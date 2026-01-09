@@ -16,7 +16,7 @@ Upload, organize, and distribute images via Cloudflare's global CDN.
 > **⚠️ SECURITY WARNING**: Photarium is currently designed for **local usage only** (running on your own machine or a secured internal network).
 > The external upload API endpoint (`/api/upload/external`) currently has **NO authentication** and accepts uploads from any source.
 > Do not deploy this to a public URL (like Vercel, Netlify, or a public VPS) without first adding authentication middleware or securing access at the network level.
-> *Securing this API is a high-priority item on our roadmap.*
+> *Securing this API might be a high-priority item on our roadmap? If there were a roadmap, really? But at the moment I run this entirely locally, at or very close to localhost and the only person who might hack me has four paws, so I'm not super concerned..but you should be if you intend to run this anywhere you are not certain has some security in front of that endpoint.*
 
 Photarium is a lightweight, self-hosted web application that turns Cloudflare Images into a complete asset management system. Perfect for:
 
