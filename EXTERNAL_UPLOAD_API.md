@@ -3,6 +3,7 @@
 You can push images into this service from other local tools (Astro, scripts, etc.) via the new endpoint:
 
 - **Endpoint**: `POST http://localhost:3000/api/upload/external`
+- **Authentication**: `Authorization: Bearer <API_SECRET>` (Required if `API_SECRET` is set in `.env`)
 - **CORS**: Open to any origin (handy for local multi-port setups)
 - **Content-Type**: `multipart/form-data`
 

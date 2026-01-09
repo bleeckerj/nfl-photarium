@@ -13,10 +13,10 @@ Upload, organize, and distribute images via Cloudflare's global CDN.
 
 ## What is Photarium?
 
-> **⚠️ SECURITY WARNING**: Photarium is currently designed for **local usage only** (running on your own machine or a secured internal network).
-> The external upload API endpoint (`/api/upload/external`) currently has **NO authentication** and accepts uploads from any source.
-> Do not deploy this to a public URL (like Vercel, Netlify, or a public VPS) without first adding authentication middleware or securing access at the network level.
-> *Securing this API is a high-priority item on our roadmap.*
+> **⚠️ SECURITY WARNING**: Photarium is currently designed for **local usage only**.
+> The external upload API endpoint (`/api/upload/external`) has **NO authentication by default**.
+> To secure it, you **MUST** set the `API_SECRET` environment variable in your `.env` file.
+> Until you set this variable, do not deploy this to a public URL.
 
 Photarium is a lightweight, self-hosted web application that turns Cloudflare Images into a complete asset management system. Perfect for:
 
@@ -35,7 +35,7 @@ No vendor lock-in. Run it on your own infrastructure.
 - **Search & Filter** — Find images by name, folder, tag, or date range
 - **Dual View Modes** — Grid view for visual browsing, list view for bulk operations
 - **Smart Pagination** — Date-aware page controls with sticky filters
-- **AI-Generated ALT Text** — Auto-generate accessible descriptions (via GPT-4o mini)
+- **AI-Generated ALT Text** — Auto-generate accessible descriptions (via GPT-4o mini — bring your own OpenAI key!)
 - **Image Variants** — Automatic responsive sizing (thumbnail, medium, large, public)
 - **External API** — Programmatic upload from Astro, Node scripts, or any HTTP client
 - **Namespace Support** — Logical isolation for multi-tenant or multi-app setups
@@ -52,7 +52,7 @@ Before you start, you'll need:
 - **A Cloudflare account** (free tier available)
   - [Create a free account →](https://dash.cloudflare.com/sign-up)
   - [Enable Cloudflare Images →](https://dash.cloudflare.com/?to=/:account/images/getting-started) (100k images/month, free)
-- **Optional:** OpenAI API key for AI ALT text generation
+- **Optional:** Bring your own OpenAI API key for AI ALT text generation
 
 ---
 

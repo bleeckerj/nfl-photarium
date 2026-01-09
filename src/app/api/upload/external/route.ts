@@ -27,6 +27,20 @@ export async function OPTIONS() {
 
 export async function POST(request: NextRequest) {
   try {
+    // 1. Security Check: API Secret (Authorization: Bearer <secret>)
+    const apiSecret = process.env.API_SECRET;
+    if (apiSecret) {
+      const authHeader = request.headers.get('Authorization');
+      const token = authHeader?.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
+      
+      if (!token || token !== apiSecret) {
+        return withCors(NextResponse.json(
+          { error: 'Unauthorized: Invalid or missing API secret' },
+          { status: 401 }
+        ));
+      }
+    }
+
     const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
     const apiToken = process.env.CLOUDFLARE_API_TOKEN;
     
