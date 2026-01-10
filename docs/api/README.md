@@ -20,7 +20,7 @@ Parameters:
 | `folder`         | string  | Exact folder name. Use `all` for everything, `no-folder` for unfiled items  |
 | `tag`            | string  | Exact tag                                                                  |
 | `onlyCanonical`  | boolean | `true` to only return parent (non-variant) images                          |
-| `namespace`      | string  | Optional namespace filter (defaults to `IMAGE_NAMESPACE`)                  |
+| `namespace`      | string  | Optional namespace filter (defaults to `IMAGE_NAMESPACE`, use `__all__` for all) |
 
 
 Response:

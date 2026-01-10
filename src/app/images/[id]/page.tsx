@@ -192,6 +192,8 @@ export default function ImageDetailPage() {
     const envDefault = process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || '';
     if (stored === '__none__') {
       setNamespace('');
+    } else if (stored === '__all__') {
+      setNamespace('__all__');
     } else {
       setNamespace(stored || envDefault);
     }
@@ -250,9 +252,11 @@ export default function ImageDetailPage() {
     try {
       const url = namespace === ''
         ? `/api/images?namespace=__none__`
-        : namespace
-          ? `/api/images?namespace=${encodeURIComponent(namespace)}`
-          : '/api/images';
+        : namespace === '__all__'
+          ? `/api/images?namespace=__all__`
+          : namespace
+            ? `/api/images?namespace=${encodeURIComponent(namespace)}`
+            : '/api/images';
       const response = await fetch(url);
       const data = await response.json();
       if (Array.isArray(data.images)) {
@@ -273,9 +277,11 @@ export default function ImageDetailPage() {
         }
         const url = namespace === ''
           ? `/api/images?namespace=__none__`
-          : namespace
-            ? `/api/images?namespace=${encodeURIComponent(namespace)}`
-            : '/api/images';
+          : namespace === '__all__'
+            ? `/api/images?namespace=__all__`
+            : namespace
+              ? `/api/images?namespace=${encodeURIComponent(namespace)}`
+              : '/api/images';
         const res = await fetch(url);
         const data = await res.json();
         if (!mounted) return;

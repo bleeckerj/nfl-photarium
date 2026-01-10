@@ -15,7 +15,8 @@
     "diag:duplicates": "node scripts/diagnose-duplicates.mjs",
     "audit:broken": "node scripts/audit-broken-images.mjs",
     "watch:drop-off": "node scripts/watch-drop-off.mjs",
-    "namespace:backfill": "node scripts/backfill-namespace.mjs"
+    "namespace:backfill": "node scripts/backfill-namespace.mjs",
+    "namespace:scan": "node scripts/scan-namespaces.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

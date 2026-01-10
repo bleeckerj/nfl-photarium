@@ -16,6 +16,8 @@ export default function Home() {
     const envDefault = process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || '';
     if (stored === '__none__') {
       setNamespace('');
+    } else if (stored === '__all__') {
+      setNamespace('__all__');
     } else {
       setNamespace(stored || envDefault);
     }
@@ -25,6 +27,8 @@ export default function Home() {
     if (typeof window !== 'undefined') {
       if (value === '') {
         window.localStorage.setItem('imageNamespace', '__none__');
+      } else if (value === '__all__') {
+        window.localStorage.setItem('imageNamespace', '__all__');
       } else {
         window.localStorage.setItem('imageNamespace', value);
       }
@@ -58,7 +62,7 @@ export default function Home() {
             <p className="text-sm font-mono text-gray-900 mb-2">
               Cloudflare Image Upload
             </p>
-            <ImageUploader onImageUploaded={handleImageUploaded} namespace={namespace} />
+            <ImageUploader onImageUploaded={handleImageUploaded} namespace={namespace === '__all__' ? '' : namespace} />
           </section>
         </div>
       </div>

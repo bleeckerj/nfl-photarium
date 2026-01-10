@@ -44,12 +44,15 @@ This document summarizes the namespace feature, its goals, where it is stored, a
 
 - A gear icon in the gallery header opens the namespace modal.
   - **Dropdown** options include:
+    - `All namespaces` (maps to `__all__`)
     - `(no namespace)` (maps to `__none__`)
+    - Registry-known namespaces
     - Observed namespaces in the current image set
     - `Custom…` input for manual entry
   - The selection is persisted to `localStorage` as:
     - `imageNamespace = "namespace-value"`
     - `imageNamespace = "__none__"` for empty namespace
+    - `imageNamespace = "__all__"` for the all-namespace view
 
 ## “No Namespace” Mode
 
@@ -63,6 +66,13 @@ This document summarizes the namespace feature, its goals, where it is stored, a
   - `npm run namespace:backfill`
   - Supports `--dry-run`, `--namespace=...`, `--limit=...`, `--page-size=...`
 - The script reads `.env.local` for Cloudflare credentials and default namespace.
+
+## Namespace Registry
+
+- Uploads append their namespace to `data/namespace-registry.json` (local, uncommitted).
+- To seed the registry from an existing Cloudflare account, run:
+  - `npm run namespace:scan`
+  - Supports `--page-size=...` and `--output=...`
 
 ## API and Docs
 

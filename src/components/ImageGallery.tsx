@@ -33,6 +33,7 @@ interface CloudflareImage {
   sourceUrl?: string;
   sourceUrlNormalized?: string;
   contentHash?: string;
+  namespace?: string;
 }
 
 interface ImageGalleryProps {
@@ -288,18 +289,37 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [namespaceSettingsOpen, setNamespaceSettingsOpen] = useState(false);
   const [namespaceDraft, setNamespaceDraft] = useState(namespace ?? '');
   const [namespaceSelectValue, setNamespaceSelectValue] = useState('');
+  const [registryNamespaces, setRegistryNamespaces] = useState<string[]>([]);
   const utilityButtonClasses = 'text-[0.65rem] font-mono px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 transition';
 
   useEffect(() => {
     const next = namespace ?? '';
-    setNamespaceDraft(next);
+    setNamespaceDraft(next === '__all__' ? '' : next);
     setNamespaceSelectValue(next || '');
   }, [namespace]);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/namespaces')
+      .then((response) => response.json())
+      .then((data) => {
+        if (!active) return;
+        const payload = Array.isArray(data?.namespaces) ? data.namespaces : [];
+        setRegistryNamespaces(payload.filter((entry: unknown) => typeof entry === 'string'));
+      })
+      .catch((error) => {
+        console.warn('Failed to load namespace registry', error);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const namespaceOptions = useMemo(() => {
     const rawSeen = new Set(images.map((image) => image.namespace).filter(Boolean));
     const envDefault = process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || '';
     const knownRaw = process.env.NEXT_PUBLIC_KNOWN_NAMESPACES || '';
+    const registryRaw = registryNamespaces;
     
     // Explicitly known items
     const defaults = new Set<string>();
@@ -312,15 +332,23 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       if (!defaults.has(s)) known.add(s);
     });
 
+    const registry = new Set<string>();
+    registryRaw.map((entry) => entry.trim()).filter(Boolean).forEach((entry) => {
+      if (!defaults.has(entry) && !known.has(entry)) {
+        registry.add(entry);
+      }
+    });
+
     // Discovered from current image set
     const discovered = new Set<string>();
     rawSeen.forEach(s => {
-      if (!defaults.has(s) && !known.has(s)) {
+      if (!defaults.has(s) && !known.has(s) && !registry.has(s)) {
         discovered.add(s);
       }
     });
 
     const options = [
+      { value: '__all__', label: 'All namespaces' },
       { value: '', label: '(no namespace)' },
     ];
 
@@ -331,6 +359,11 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     if (known.size > 0) {
       const sorted = Array.from(known).sort();
       sorted.forEach(val => options.push({ value: val, label: val }));
+    }
+
+    if (registry.size > 0) {
+      const sorted = Array.from(registry).sort();
+      sorted.forEach(val => options.push({ value: val, label: `${val} (registry)` }));
     }
 
     if (discovered.size > 0) {
@@ -347,7 +380,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     }
 
     return options;
-  }, [images, namespace]);
+  }, [images, namespace, registryNamespaces]);
+
+  const namespaceLabel = namespace === '__all__' ? 'All namespaces' : namespace;
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -504,7 +539,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       }
       if (namespace === '') {
         params.set('namespace', '__none__');
-      } else if (namespace) {
+      } else if (namespace === '__all__') {
+        params.set('namespace', '__all__');
+      } else if (namespace && namespace !== '__all__') {
         params.set('namespace', namespace);
       }
       const query = params.toString();
@@ -1492,7 +1529,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
               Image Gallery ({filteredWithVariants.length}/{images.length})
             </p>
             {namespace && (
-              <p className="font-mono text-[0.7em] text-gray-500">Namespace: {namespace}</p>
+              <p className="font-mono text-[0.7em] text-gray-500">Namespace: {namespaceLabel}</p>
             )}
             {showPagination && currentPageRangeLabel && (
               <p className="font-mono text-[0.7em] font-mono text-gray-500">
@@ -2161,6 +2198,23 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                       <div className="text-gray-500 text-[0.6rem] mt-1 space-y-0.5">
                         <p>{new Date(image.uploaded).toLocaleDateString()}</p>
                         <p>📁 {image.folder ? image.folder : '[none]'}</p>
+                        <p className="flex items-center gap-1">
+                          <span>🧭 {image.namespace ? image.namespace : '[none]'}</span>
+                          {image.namespace && (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                copyToClipboard(image.namespace, 'Namespace');
+                              }}
+                              className="inline-flex items-center text-gray-400 hover:text-gray-600"
+                              title="Copy namespace"
+                              aria-label="Copy namespace"
+                            >
+                              <Copy className="h-3 w-3" />
+                            </button>
+                          )}
+                        </p>
                         <AspectRatioDisplay imageId={image.id} />
                         {image.tags && image.tags.length > 0 ? (
                           <p>🏷️ {image.tags.slice(0, 2).join(', ')}{image.tags.length > 2 ? '...' : ''}</p>
@@ -2309,6 +2363,23 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                       {new Date(image.uploaded).toLocaleDateString()}
                     </p>
                     <p className="text-[0.7em] font-mono text-gray-500">📁 {image.folder ? image.folder : '[none]'}</p>
+                    <p className="text-[0.7em] font-mono text-gray-500 flex items-center gap-1">
+                      <span>🧭 {image.namespace ? image.namespace : '[none]'}</span>
+                      {image.namespace && (
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            copyToClipboard(image.namespace, 'Namespace');
+                          }}
+                          className="inline-flex items-center text-gray-400 hover:text-gray-600"
+                          title="Copy namespace"
+                          aria-label="Copy namespace"
+                        >
+                          <Copy className="h-3 w-3" />
+                        </button>
+                      )}
+                    </p>
                     <div className="text-[0.7em] font-mono text-gray-500">
                       <AspectRatioDisplay imageId={image.id} />
                     </div>
@@ -2529,7 +2600,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                 </div>
               </label>
               <p className="text-[0.7em] text-gray-500">
-                Only images in this namespace are shown and used for duplicate checks.
+                Only images in this namespace are shown and used for duplicate checks (unless you pick "All namespaces").
               </p>
             </div>
             <div className="flex items-center justify-end gap-2 p-3 border-t">

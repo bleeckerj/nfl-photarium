@@ -8,6 +8,7 @@ import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { enforceCloudflareMetadataLimit } from '@/utils/cloudflareMetadata';
 import { extractExifSummary } from '@/utils/exif';
 import { extractSnagx } from '@/utils/snagx';
+import { upsertRegistryNamespace } from '@/server/namespaceRegistry';
 
 const logIssue = (message: string, details?: Record<string, unknown>) => {
   console.warn('[upload] ' + message, details);
@@ -89,7 +90,11 @@ export async function POST(request: NextRequest) {
     const cleanOriginalUrl = originalUrl && originalUrl.trim() && originalUrl !== 'undefined' ? originalUrl.trim() : undefined;
     const cleanSourceUrl = sourceUrl && sourceUrl.trim() && sourceUrl !== 'undefined' ? sourceUrl.trim() : undefined;
     const cleanSourceUrlNormalized = normalizeOriginalUrl(cleanSourceUrl);
-    const cleanNamespace = namespace && namespace.trim() && namespace !== 'undefined' ? namespace.trim() : undefined;
+    const rawNamespace = typeof namespace === 'string' ? namespace.trim() : '';
+    const cleanNamespace =
+      rawNamespace && rawNamespace !== 'undefined' && rawNamespace !== '__all__' && rawNamespace !== '__none__'
+        ? rawNamespace
+        : undefined;
     const defaultNamespace = process.env.IMAGE_NAMESPACE || process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || undefined;
     const effectiveNamespace = cleanNamespace || defaultNamespace;
     const parentIdValue = typeof parentIdRaw === 'string' ? parentIdRaw.trim() : '';
@@ -461,6 +466,10 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      if (results.length > 0) {
+        await upsertRegistryNamespace(effectiveNamespace);
+      }
+
       return NextResponse.json({
         results,
         failures,
@@ -497,6 +506,8 @@ export async function POST(request: NextRequest) {
         { status: outcome.status }
       );
     }
+
+    await upsertRegistryNamespace(effectiveNamespace);
 
     return NextResponse.json(outcome.data);
 

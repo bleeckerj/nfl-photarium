@@ -7,6 +7,7 @@ import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { enforceCloudflareMetadataLimit } from '@/utils/cloudflareMetadata';
 import { extractSnagx } from '@/utils/snagx';
 import { extractExifSummary } from '@/utils/exif';
+import { upsertRegistryNamespace } from '@/server/namespaceRegistry';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -92,7 +93,11 @@ export async function POST(request: NextRequest) {
     const normalizedOriginalUrl = normalizeOriginalUrl(cleanOriginalUrl);
     const cleanSourceUrl = sourceUrl && sourceUrl.trim() && sourceUrl !== 'undefined' ? sourceUrl.trim() : undefined;
     const normalizedSourceUrl = normalizeOriginalUrl(cleanSourceUrl);
-    const cleanNamespace = namespace && namespace.trim() && namespace !== 'undefined' ? namespace.trim() : undefined;
+    const rawNamespace = typeof namespace === 'string' ? namespace.trim() : '';
+    const cleanNamespace =
+      rawNamespace && rawNamespace !== 'undefined' && rawNamespace !== '__all__' && rawNamespace !== '__none__'
+        ? rawNamespace
+        : undefined;
     const defaultNamespace = process.env.IMAGE_NAMESPACE || process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || undefined;
     const effectiveNamespace = cleanNamespace || defaultNamespace;
     const parentIdValue = typeof parentIdRaw === 'string' ? parentIdRaw.trim() : '';
@@ -318,6 +323,8 @@ export async function POST(request: NextRequest) {
         console.error('Failed to patch SVG metadata', err);
       }
     }
+
+    await upsertRegistryNamespace(effectiveNamespace);
 
     return withCors(NextResponse.json({
       id: imageData.id,
