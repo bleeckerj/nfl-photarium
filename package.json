@@ -19,11 +19,11 @@
     "namespace:scan": "node scripts/scan-namespaces.mjs"
   },
   "dependencies": {
-    "clsx": "^2.1.1",
     "adm-zip": "^0.5.16",
+    "clsx": "^2.1.1",
     "exif-reader": "^2.0.2",
     "lucide-react": "^0.545.0",
-    "next": "15.5.4",
+    "next": "^15.5.9",
     "qrcode": "^1.5.3",
     "react": "19.1.0",
     "react-dom": "19.1.0",
@@ -33,12 +33,12 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
+    "@types/adm-zip": "^0.5.7",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@types/adm-zip": "^0.5.7",
     "eslint": "^9",
-    "eslint-config-next": "15.5.4",
+    "eslint-config-next": "^15.5.9",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^2.1.4"

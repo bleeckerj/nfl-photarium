@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import Image from 'next/image';
 import { getCloudflareImageUrl } from '@/utils/imageUtils';
 
@@ -68,7 +68,10 @@ const HoverPreview: React.FC<HoverPreviewProps> = ({
     };
   };
 
-  const previewSize = getPreviewSize();
+  const previewSize = useMemo(() => getPreviewSize(), [
+    dimensions?.width,
+    dimensions?.height
+  ]);
 
   // Calculate position to keep preview within viewport
   useEffect(() => {
@@ -97,8 +100,14 @@ const HoverPreview: React.FC<HoverPreviewProps> = ({
     x = Math.max(padding, Math.min(x, viewportWidth - previewWidth - padding));
     y = Math.max(padding, Math.min(y, viewportHeight - previewHeight - padding));
 
-    setPosition({ x, y });
-  }, [mousePosition, isVisible, previewSize]);
+    setPosition((prev) => (prev.x === x && prev.y === y ? prev : { x, y }));
+  }, [
+    mousePosition.x,
+    mousePosition.y,
+    isVisible,
+    previewSize.width,
+    previewSize.height
+  ]);
 
   // Reset loaded state when visibility changes
   useEffect(() => {

@@ -70,6 +70,7 @@ This document summarizes the namespace feature, its goals, where it is stored, a
 ## Namespace Registry
 
 - Uploads append their namespace to `data/namespace-registry.json` (local, uncommitted).
+- The registry is managed by `src/server/namespaceRegistry.ts` and is used to populate the UI dropdown.
 - To seed the registry from an existing Cloudflare account, run:
   - `npm run namespace:scan`
   - Supports `--page-size=...` and `--output=...`
