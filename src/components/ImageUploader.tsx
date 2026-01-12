@@ -19,6 +19,7 @@ interface UploadedImage {
   originalUrl?: string;
   sourceUrl?: string;
   file?: File;
+  remoteUrl?: string;
   folderInput?: string;
   tagsInput?: string;
   descriptionInput?: string;
@@ -34,7 +35,13 @@ interface ImageUploaderProps {
 
 interface QueuedFile {
   id: string;
-  file: File;
+  file?: File;
+  filename: string;
+  remoteUrl?: string;
+  previewUrl?: string;
+  sizeBytes?: number;
+  contentType?: string;
+  selected?: boolean;
   originalUrl?: string;
   sourceUrl?: string;
   folder?: string;
@@ -115,6 +122,10 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
   const [importUrl, setImportUrl] = useState('');
   const [importLoading, setImportLoading] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  const [pageImportUrl, setPageImportUrl] = useState('');
+  const [pageImportLoading, setPageImportLoading] = useState(false);
+  const [pageImportError, setPageImportError] = useState<string | null>(null);
+  const [previewFailures, setPreviewFailures] = useState<Record<string, boolean>>({});
   const [expandedQueueMetadata, setExpandedQueueMetadata] = useState<Record<string, boolean>>({});
 
   const createQueueId = useCallback(
@@ -153,11 +164,11 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
             .filter(Boolean)
         : undefined;
       return estimateMetadataBytes({
-        filename: item.file.name,
-        displayName: item.file.name,
+        filename: item.filename,
+        displayName: item.filename,
         uploadedAt: new Date().toISOString(),
-        size: item.file.size,
-        type: item.file.type,
+        size: item.file?.size ?? item.sizeBytes ?? 0,
+        type: item.file?.type ?? item.contentType ?? undefined,
         folder: overrides.folder || undefined,
         tags: tagList,
         description: overrides.description || undefined,
@@ -217,6 +228,11 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     ];
   }, [parentOptions]);
 
+  const selectedQueuedCount = useMemo(
+    () => queuedFiles.filter((item) => item.selected !== false).length,
+    [queuedFiles]
+  );
+
   // Debug: Log current state
   console.log("ImageUploader - Selected folder:", selectedFolder);
   console.log("ImageUploader - Available folders:", folders);
@@ -254,24 +270,24 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
   }, [fetchFolders]);
 
   // Function to actually upload files
+  const resolveFolder = useCallback(() => {
+    if (selectedFolder && selectedFolder.trim()) {
+      return selectedFolder.trim();
+    }
+    if (newFolder && newFolder.trim()) {
+      const normalized = newFolder.trim().toLowerCase().replace(/\s+/g, "-");
+      if (!folders.includes(normalized)) {
+        setFolders((prev) => (prev.includes(normalized) ? prev : [...prev, normalized]));
+      }
+      setSelectedFolder(normalized);
+      return normalized;
+    }
+    return "";
+  }, [selectedFolder, newFolder, folders]);
+
   const uploadFiles = useCallback(
     async (filesToUpload: QueuedFile[]) => {
       setIsUploading(true);
-
-      const resolveFolder = () => {
-        if (selectedFolder && selectedFolder.trim()) {
-          return selectedFolder.trim();
-        }
-        if (newFolder && newFolder.trim()) {
-          const normalized = newFolder.trim().toLowerCase().replace(/\s+/g, "-");
-          if (!folders.includes(normalized)) {
-            setFolders((prev) => (prev.includes(normalized) ? prev : [...prev, normalized]));
-          }
-          setSelectedFolder(normalized);
-          return normalized;
-        }
-        return "";
-      };
 
       const folderToUse = resolveFolder();
 
@@ -288,7 +304,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         return {
           id: entry.id,
           url: "",
-          filename: entry.file.name,
+          filename: entry.filename,
           status: "uploading" as const,
           file: entry.file,
           folderInput: folderToSend,
@@ -325,6 +341,17 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         const tagsToSend = queuedTags !== undefined ? queuedTags : tags;
         const descriptionToSend =
           queuedDescription !== undefined ? queuedDescription : description;
+
+        if (!file) {
+          setUploadedImages((prev) =>
+            prev.map((img) =>
+              img.id === imageId
+                ? { ...img, status: "error", error: "Missing file data" }
+                : img
+            )
+          );
+          continue;
+        }
 
         try {
           const formData = new FormData();
@@ -480,7 +507,159 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       setSourceUrl("");
       setSelectedParentId("");
     },
-    [selectedFolder, newFolder, folders, tags, description, originalUrl, sourceUrl, namespace, selectedParentId, onImageUploaded, fetchFolders, formatUploadErrorMessage]
+    [resolveFolder, tags, description, originalUrl, sourceUrl, namespace, selectedParentId, onImageUploaded, fetchFolders, formatUploadErrorMessage]
+  );
+
+  const uploadRemoteFiles = useCallback(
+    async (itemsToUpload: QueuedFile[]) => {
+      const validItems = itemsToUpload.filter((item) => Boolean(item.remoteUrl));
+      if (validItems.length === 0) return;
+      setIsUploading(true);
+
+      const folderToUse = resolveFolder();
+      const initialImages: UploadedImage[] = validItems.map((entry) => {
+        const originalUrlToSend =
+          entry.originalUrl !== undefined ? entry.originalUrl : originalUrl.trim() || entry.remoteUrl || '';
+        const sourceUrlToSend =
+          entry.sourceUrl !== undefined ? entry.sourceUrl : sourceUrl.trim() || '';
+        const folderToSend = entry.folder !== undefined ? entry.folder : folderToUse;
+        const tagsToSend = entry.tags !== undefined ? entry.tags : tags;
+        const descriptionToSend = entry.description !== undefined ? entry.description : description;
+
+        return {
+          id: entry.id,
+          url: "",
+          filename: entry.filename,
+          status: "uploading" as const,
+          remoteUrl: entry.remoteUrl,
+          folderInput: folderToSend,
+          tagsInput: tagsToSend,
+          descriptionInput: descriptionToSend,
+          originalUrlInput: originalUrlToSend || undefined,
+          sourceUrlInput: sourceUrlToSend || undefined,
+          parentId: selectedParentId || undefined
+        };
+      });
+
+      setUploadedImages((prev) => {
+        const ids = new Set(initialImages.map((item) => item.id));
+        return [...prev.filter((img) => !ids.has(img.id)), ...initialImages];
+      });
+
+      const payloadItems = validItems.map((entry) => {
+        const originalUrlToSend =
+          entry.originalUrl !== undefined ? entry.originalUrl : originalUrl.trim() || entry.remoteUrl || '';
+        const sourceUrlToSend =
+          entry.sourceUrl !== undefined ? entry.sourceUrl : sourceUrl.trim() || '';
+        const folderToSend = entry.folder !== undefined ? entry.folder : folderToUse;
+        const tagsToSend = entry.tags !== undefined ? entry.tags : tags;
+        const descriptionToSend =
+          entry.description !== undefined ? entry.description : description;
+
+        return {
+          clientId: entry.id,
+          url: entry.remoteUrl,
+          folder: folderToSend && folderToSend.trim() ? folderToSend.trim() : undefined,
+          tags: tagsToSend && tagsToSend.trim() ? tagsToSend.trim() : undefined,
+          description: descriptionToSend && descriptionToSend.trim() ? descriptionToSend.trim() : undefined,
+          originalUrl: originalUrlToSend || undefined,
+          sourceUrl: sourceUrlToSend || undefined,
+          namespace,
+          parentId: selectedParentId || undefined
+        };
+      });
+
+      try {
+        const response = await fetch('/api/import/page/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ items: payloadItems })
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          const message = typeof data?.error === 'string' ? data.error : 'Failed to upload page images';
+          setUploadedImages((prev) =>
+            prev.map((img) =>
+              payloadItems.some((item) => item.clientId === img.id)
+                ? { ...img, status: "error", error: message }
+                : img
+            )
+          );
+          return;
+        }
+
+        const resultList = Array.isArray(data?.results) ? data.results : [];
+        const failureList = Array.isArray(data?.failures) ? data.failures : [];
+        const successMap = new Map(resultList.map((item: { clientId: string }) => [item.clientId, item]));
+        const failureMap = new Map(failureList.map((item: { clientId: string }) => [item.clientId, item]));
+
+        setUploadedImages((prev) =>
+          prev.map((img) => {
+            const success = successMap.get(img.id);
+            if (success) {
+              return {
+                ...img,
+                status: "success",
+                url: success.url,
+                folder: success.folder,
+                tags: success.tags,
+                description: success.description,
+                originalUrl: success.originalUrl,
+                sourceUrl: success.sourceUrl,
+                remoteUrl: undefined
+              };
+            }
+            const failure = failureMap.get(img.id);
+            if (failure) {
+              return {
+                ...img,
+                status: "error",
+                error: failure.error || 'Upload failed'
+              };
+            }
+            if (payloadItems.some((item) => item.clientId === img.id)) {
+              return {
+                ...img,
+                status: "error",
+                error: "Upload failed"
+              };
+            }
+            return img;
+          })
+        );
+
+        if (onImageUploaded && resultList.length > 0) {
+          setTimeout(() => {
+            onImageUploaded();
+          }, 500);
+        }
+      } catch (error) {
+        console.error('Remote upload error:', error);
+        setUploadedImages((prev) =>
+          prev.map((img) =>
+            payloadItems.some((item) => item.clientId === img.id)
+              ? { ...img, status: "error", error: "Network error" }
+              : img
+          )
+        );
+      } finally {
+        setIsUploading(false);
+        try {
+          await fetchFolders();
+        } catch (e) {
+          console.warn("Failed to refresh folders after upload", e);
+        }
+        setSelectedFolder("");
+        setNewFolder("");
+        setTags("found");
+        setDescription("");
+        setOriginalUrl("");
+        setSourceUrl("");
+        setSelectedParentId("");
+      }
+    },
+    [resolveFolder, tags, description, originalUrl, sourceUrl, namespace, selectedParentId, onImageUploaded, fetchFolders]
   );
 
   // Handle drag and drop - either queue or upload immediately
@@ -498,28 +677,51 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         const lowerName = file.name.toLowerCase();
         const isSnagx = lowerName.endsWith('.snagx');
         const tagOverride = isZipFile(file) ? 'zip' : isSnagx ? 'snagx' : undefined;
-        return { id: createQueueId(), file, tags: tagOverride };
+        return {
+          id: createQueueId(),
+          file,
+          filename: file.name,
+          tags: tagOverride,
+          selected: true
+        };
       })
     ]);
   }, [createQueueId]);
 
   // Manual upload button handler
   const handleManualUpload = async () => {
-    if (queuedFiles.length > 0) {
+    const selectedItems = queuedFiles.filter((item) => item.selected !== false);
+    if (selectedItems.length === 0) return;
+
+    const localItems = selectedItems.filter((item) => Boolean(item.file));
+    const remoteItems = selectedItems.filter((item) => Boolean(item.remoteUrl) && !item.file);
+
+    if (localItems.length > 0) {
       const processed: QueuedFile[] = [];
-      for (const item of queuedFiles) {
+      for (const item of localItems) {
+        if (!item.file) continue;
+        const processedFile = isZipFile(item.file) ? item.file : await shrinkImageFile(item.file);
         processed.push({
-          file: isZipFile(item.file) ? item.file : await shrinkImageFile(item.file),
+          file: processedFile,
+          filename: processedFile.name,
           id: item.id,
           originalUrl: item.originalUrl,
+          sourceUrl: item.sourceUrl,
           folder: item.folder,
           tags: item.tags,
-          description: item.description
+          description: item.description,
+          selected: item.selected
         });
       }
-      uploadFiles(processed);
-      setQueuedFiles([]); // Clear the queue
+      await uploadFiles(processed);
     }
+
+    if (remoteItems.length > 0) {
+      await uploadRemoteFiles(remoteItems);
+    }
+
+    const selectedIds = new Set(selectedItems.map((item) => item.id));
+    setQueuedFiles((prev) => prev.filter((item) => !selectedIds.has(item.id)));
   };
 
   // Clear queued files
@@ -544,21 +746,37 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
 
   const handleRetryUpload = useCallback(
     (image: UploadedImage) => {
-      if (!image.file) {
+      if (image.file) {
+        const retryItem: QueuedFile = {
+          id: image.id,
+          file: image.file,
+          filename: image.filename,
+          originalUrl: image.originalUrlInput ?? image.originalUrl,
+          sourceUrl: image.sourceUrlInput ?? image.sourceUrl,
+          folder: image.folderInput,
+          tags: image.tagsInput,
+          description: image.descriptionInput,
+          selected: true
+        };
+        uploadFiles([retryItem]);
         return;
       }
-      const retryItem: QueuedFile = {
-        id: image.id,
-        file: image.file,
-        originalUrl: image.originalUrlInput ?? image.originalUrl,
-        sourceUrl: image.sourceUrlInput ?? image.sourceUrl,
-        folder: image.folderInput,
-        tags: image.tagsInput,
-        description: image.descriptionInput
-      };
-      uploadFiles([retryItem]);
+      if (image.remoteUrl) {
+        const retryItem: QueuedFile = {
+          id: image.id,
+          filename: image.filename,
+          remoteUrl: image.remoteUrl,
+          originalUrl: image.originalUrlInput ?? image.originalUrl,
+          sourceUrl: image.sourceUrlInput ?? image.sourceUrl,
+          folder: image.folderInput,
+          tags: image.tagsInput,
+          description: image.descriptionInput,
+          selected: true
+        };
+        uploadRemoteFiles([retryItem]);
+      }
     },
-    [uploadFiles]
+    [uploadFiles, uploadRemoteFiles]
   );
 
   const copyToClipboard = async (url: string) => {
@@ -624,10 +842,12 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         {
           id: createQueueId(),
           file,
+          filename: file.name,
           originalUrl: sourceUrl,
           description: descriptionFromSnagx || undefined,
           captureDate: typeof data.captureDate === 'string' ? data.captureDate : undefined,
-          tags: tagsFromSnagx
+          tags: tagsFromSnagx,
+          selected: true
         }
       ]);
       if (!originalUrl.trim()) {
@@ -639,6 +859,53 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       setImportError(err instanceof Error ? err.message : 'Failed to import image');
     } finally {
       setImportLoading(false);
+    }
+  };
+
+  const handleImportFromPage = async () => {
+    if (!pageImportUrl.trim()) return;
+    try {
+      setPageImportLoading(true);
+      setPageImportError(null);
+      const response = await fetch('/api/import/page', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: pageImportUrl.trim(), minBytes: 8 * 1024 })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to inspect page');
+      }
+      const images = Array.isArray(data?.images) ? data.images : [];
+      if (images.length === 0) {
+        throw new Error('No images found on that page');
+      }
+
+      const newItems: QueuedFile[] = images.map((image: { url: string; filename?: string; contentLength?: number; contentType?: string }) => ({
+        id: createQueueId(),
+        filename: image.filename || image.url.split('/').pop() || 'remote-image',
+        remoteUrl: image.url,
+        previewUrl: image.url,
+        sizeBytes: typeof image.contentLength === 'number' ? image.contentLength : undefined,
+        contentType: typeof image.contentType === 'string' ? image.contentType : undefined,
+        originalUrl: image.url,
+        selected: true
+      }));
+
+      setQueuedFiles((prev) => {
+        const existing = new Set(prev.map((item) => item.remoteUrl || item.originalUrl || item.filename));
+        const filtered = newItems.filter((item) => !existing.has(item.remoteUrl || item.originalUrl || item.filename));
+        return [...prev, ...filtered];
+      });
+      if (!sourceUrl.trim()) {
+        setSourceUrl(pageImportUrl.trim());
+      }
+      setPageImportUrl('');
+    } catch (err) {
+      console.error('Import page failed', err);
+      setPageImportError(err instanceof Error ? err.message : 'Failed to import page');
+    } finally {
+      setPageImportLoading(false);
     }
   };
 
@@ -813,6 +1080,33 @@ A long list of filenames is not user friendly and essentially useless for select
         </p>
       </div>
 
+      <div className="mt-4 p-4 border border-dashed rounded-lg bg-white/60">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-mono font-medium text-gray-900">Import images from page URL</p>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <input
+            type="url"
+            value={pageImportUrl}
+            onChange={(e) => setPageImportUrl(e.target.value)}
+            placeholder="https://example.com/gallery"
+            className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <button
+            type="button"
+            onClick={handleImportFromPage}
+            disabled={pageImportLoading || !pageImportUrl.trim()}
+            className="px-4 py-2 text-xs bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+          >
+            {pageImportLoading ? 'Scanning…' : 'Scan page'}
+          </button>
+        </div>
+        {pageImportError && <p className="text-xs text-red-600 mt-1">{pageImportError}</p>}
+        <p className="text-[11px] text-gray-500 mt-1">
+          We’ll scan the page for image URLs, show thumbnails in your queue, and you can select what to ingest before uploading.
+        </p>
+      </div>
+
       {/* Queued Files Section */}
       {queuedFiles.length > 0 && (
         <div className="mt-6">
@@ -828,12 +1122,12 @@ A long list of filenames is not user friendly and essentially useless for select
               </button>
               <button
                 onClick={handleManualUpload}
-                disabled={isUploading}
+                disabled={isUploading || selectedQueuedCount === 0}
                 className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
               >
                 <Upload className="h-4 w-4" />
                 <span>
-                  Upload {queuedFiles.length} File{queuedFiles.length !== 1 ? "s" : ""}
+                  Upload {selectedQueuedCount} File{selectedQueuedCount !== 1 ? "s" : ""}
                 </span>
               </button>
             </div>
@@ -846,6 +1140,9 @@ A long list of filenames is not user friendly and essentially useless for select
               const hasCustomDescription = item.description !== undefined;
               const hasCustomOriginalUrl = item.originalUrl !== undefined;
               const hasCustomSourceUrl = item.sourceUrl !== undefined;
+              const previewUrl = item.previewUrl || item.remoteUrl;
+              const previewFailed = Boolean(previewFailures[item.id]);
+              const displaySizeBytes = item.file?.size ?? item.sizeBytes;
               const previewFolder = selectedFolder.trim()
                 ? selectedFolder.trim()
                 : newFolder.trim()
@@ -868,13 +1165,44 @@ A long list of filenames is not user friendly and essentially useless for select
 
               return (
               <div key={item.id} className="p-3 bg-blue-50 border border-blue-200 rounded-lg w-full">
-                <p className="text-xs font-mono font-medium text-gray-900 truncate">{item.file.name}</p>
-                <p className="text-xs text-gray-500">{(item.file.size / 1024 / 1024).toFixed(2)} MB</p>
-                {effectiveOriginalUrl && (
-                  <p className="text-[11px] text-gray-600 truncate" title={effectiveOriginalUrl}>
-                    🔗 {effectiveOriginalUrl}
-                  </p>
-                )}
+                <div className="flex items-start gap-3">
+                  {previewUrl && !previewFailed ? (
+                    <img
+                      src={previewUrl}
+                      alt={item.filename}
+                      className="h-14 w-14 rounded border border-blue-200 object-cover bg-white"
+                      onError={() => setPreviewFailures((prev) => ({ ...prev, [item.id]: true }))}
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="h-14 w-14 rounded border border-blue-200 bg-white flex items-center justify-center text-[10px] text-gray-400">
+                      {item.file ? "Local file" : "No preview"}
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-mono font-medium text-gray-900 truncate">{item.filename}</p>
+                    <p className="text-xs text-gray-500">
+                      {typeof displaySizeBytes === 'number'
+                        ? `${(displaySizeBytes / 1024 / 1024).toFixed(2)} MB`
+                        : "Size unknown"}
+                    </p>
+                    {effectiveOriginalUrl && (
+                      <p className="text-[11px] text-gray-600 truncate" title={effectiveOriginalUrl}>
+                        🔗 {effectiveOriginalUrl}
+                      </p>
+                    )}
+                  </div>
+                  <label className="flex items-center gap-1 text-[11px] text-gray-600">
+                    <input
+                      type="checkbox"
+                      checked={item.selected !== false}
+                      onChange={(e) => updateQueuedFile(item.id, { selected: e.target.checked })}
+                      className="h-3 w-3"
+                      disabled={isUploading}
+                    />
+                    Include
+                  </label>
+                </div>
                 <div className="mt-2 flex items-center gap-2">
                   <button
                     type="button"
