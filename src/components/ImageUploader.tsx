@@ -126,6 +126,12 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
   const [pageImportLoading, setPageImportLoading] = useState(false);
   const [pageImportError, setPageImportError] = useState<string | null>(null);
   const [previewFailures, setPreviewFailures] = useState<Record<string, boolean>>({});
+  const [animateFps, setAnimateFps] = useState<string>('');
+  const [animateFpsTouched, setAnimateFpsTouched] = useState(false);
+  const [animateLoop, setAnimateLoop] = useState(true);
+  const [animateFilename, setAnimateFilename] = useState('');
+  const [animateLoading, setAnimateLoading] = useState(false);
+  const [animateError, setAnimateError] = useState<string | null>(null);
   const [expandedQueueMetadata, setExpandedQueueMetadata] = useState<Record<string, boolean>>({});
 
   const createQueueId = useCallback(
@@ -232,6 +238,16 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     () => queuedFiles.filter((item) => item.selected !== false).length,
     [queuedFiles]
   );
+
+  useEffect(() => {
+    if (animateFpsTouched) return;
+    if (selectedQueuedCount === 0) {
+      setAnimateFps('');
+      return;
+    }
+    const next = Math.max(1, selectedQueuedCount / 2);
+    setAnimateFps(next.toString());
+  }, [animateFpsTouched, selectedQueuedCount]);
 
   // Debug: Log current state
   console.log("ImageUploader - Selected folder:", selectedFolder);
@@ -909,6 +925,106 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     }
   };
 
+  const handleCreateAnimation = async () => {
+    const selectedItems = queuedFiles.filter((item) => item.selected !== false);
+    if (selectedItems.length < 2) {
+      setAnimateError('Select at least two images to animate');
+      return;
+    }
+    const fpsValue = Number(animateFps);
+    if (!Number.isFinite(fpsValue) || fpsValue <= 0) {
+      setAnimateError('FPS must be greater than 0');
+      return;
+    }
+    setAnimateLoading(true);
+    setAnimateError(null);
+
+    try {
+      const formData = new FormData();
+      const folderToUse = resolveFolder();
+      const itemsPayload: Array<{ kind: 'file'; fileIndex: number } | { kind: 'url'; url: string }> = [];
+      let fileIndex = 0;
+
+      for (const item of selectedItems) {
+        if (item.file) {
+          formData.append('files', item.file);
+          itemsPayload.push({ kind: 'file', fileIndex });
+          fileIndex += 1;
+        } else if (item.remoteUrl) {
+          itemsPayload.push({ kind: 'url', url: item.remoteUrl });
+        }
+      }
+
+      if (itemsPayload.length < 2) {
+        setAnimateError('Select at least two valid images to animate');
+        return;
+      }
+
+      formData.append('items', JSON.stringify(itemsPayload));
+      formData.append('fps', String(fpsValue));
+      formData.append('loop', animateLoop ? '1' : '0');
+      if (animateFilename.trim()) {
+        formData.append('filename', animateFilename.trim());
+      }
+      if (folderToUse && folderToUse.trim()) {
+        formData.append('folder', folderToUse.trim());
+      }
+      if (tags.trim()) {
+        formData.append('tags', tags.trim());
+      }
+      if (description.trim()) {
+        formData.append('description', description.trim());
+      }
+      if (originalUrl.trim()) {
+        formData.append('originalUrl', originalUrl.trim());
+      }
+      if (sourceUrl.trim()) {
+        formData.append('sourceUrl', sourceUrl.trim());
+      }
+      if (namespace) {
+        formData.append('namespace', namespace);
+      }
+      if (selectedParentId) {
+        formData.append('parentId', selectedParentId);
+      }
+
+      const response = await fetch('/api/animate', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to create animation');
+      }
+
+      setUploadedImages((prev) => [
+        ...prev,
+        {
+          id: data.id,
+          url: data.url,
+          filename: data.filename,
+          status: 'success',
+          folder: data.folder,
+          tags: data.tags,
+          description: data.description,
+          originalUrl: data.originalUrl,
+          sourceUrl: data.sourceUrl
+        }
+      ]);
+
+      if (onImageUploaded) {
+        setTimeout(() => {
+          onImageUploaded();
+        }, 500);
+      }
+    } catch (err) {
+      console.error('Create animation failed', err);
+      setAnimateError(err instanceof Error ? err.message : 'Failed to create animation');
+    } finally {
+      setAnimateLoading(false);
+    }
+  };
+
   return (
     <div className="bg-white rounded-lg shadow-lg p-6">
       <h2 className="text-xs font-mono  text-gray-900 mb-4">Upload Images</h2>
@@ -1130,6 +1246,54 @@ A long list of filenames is not user friendly and essentially useless for select
                   Upload {selectedQueuedCount} File{selectedQueuedCount !== 1 ? "s" : ""}
                 </span>
               </button>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between mb-3 border border-blue-200 rounded-lg p-3 bg-white/70">
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="text-[11px] text-gray-600 flex items-center gap-2">
+                FPS
+                <input
+                  type="number"
+                  min="0.1"
+                  step="0.5"
+                  value={animateFps}
+                  onChange={(e) => {
+                    setAnimateFpsTouched(true);
+                    setAnimateFps(e.target.value);
+                  }}
+                  className="w-20 border border-gray-300 rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
+                />
+              </label>
+              <label className="text-[11px] text-gray-600 flex items-center gap-2">
+                Loop
+                <input
+                  type="checkbox"
+                  checked={animateLoop}
+                  onChange={(e) => setAnimateLoop(e.target.checked)}
+                  className="h-3 w-3"
+                />
+              </label>
+              <label className="text-[11px] text-gray-600 flex items-center gap-2">
+                Output name
+                <input
+                  type="text"
+                  value={animateFilename}
+                  onChange={(e) => setAnimateFilename(e.target.value)}
+                  placeholder="animated-webp"
+                  className="w-40 border border-gray-300 rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
+                />
+              </label>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleCreateAnimation}
+                disabled={animateLoading || selectedQueuedCount < 2}
+                className="px-3 py-2 text-xs bg-emerald-600 text-white rounded-md hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {animateLoading ? 'Building…' : 'Create animated WebP'}
+              </button>
+              {animateError && <p className="text-[11px] text-red-600">{animateError}</p>}
             </div>
           </div>
 

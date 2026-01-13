@@ -278,6 +278,12 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [bulkTagsMode, setBulkTagsMode] = useState<'replace' | 'append'>('replace');
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkAnimateFps, setBulkAnimateFps] = useState<string>('');
+  const [bulkAnimateTouched, setBulkAnimateTouched] = useState(false);
+  const [bulkAnimateLoop, setBulkAnimateLoop] = useState(true);
+  const [bulkAnimateFilename, setBulkAnimateFilename] = useState('');
+  const [bulkAnimateLoading, setBulkAnimateLoading] = useState(false);
+  const [bulkAnimateError, setBulkAnimateError] = useState<string | null>(null);
   const [showDuplicatesOnly, setShowDuplicatesOnly] = useState<boolean>(storedPreferencesRef.current.showDuplicatesOnly ?? false);
   const [showBrokenOnly, setShowBrokenOnly] = useState<boolean>(storedPreferencesRef.current.showBrokenOnly ?? false);
   const [pageSize, setPageSize] = useState<number>(storedPreferencesRef.current.pageSize ?? DEFAULT_PAGE_SIZE);
@@ -899,6 +905,16 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
 
   const selectedCount = selectedImageIds.size;
 
+  useEffect(() => {
+    if (bulkAnimateTouched) return;
+    if (selectedCount === 0) {
+      setBulkAnimateFps('');
+      return;
+    }
+    const next = Math.max(1, selectedCount / 2);
+    setBulkAnimateFps(next.toString());
+  }, [bulkAnimateTouched, selectedCount]);
+
   const toggleSelection = useCallback((imageId: string) => {
     setSelectedImageIds(prev => {
       const next = new Set(prev);
@@ -940,6 +956,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     setBulkApplyFolder(false);
     setBulkApplyTags(true);
     setBulkTagsMode('append');
+    setBulkAnimateFilename('');
+    setBulkAnimateLoop(true);
+    setBulkAnimateTouched(false);
+    setBulkAnimateError(null);
     setBulkEditOpen(true);
   }, [selectedCount, toast]);
 
@@ -1044,6 +1064,53 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     selectedImageIds,
     toast,
     clearSelection
+  ]);
+
+  const createBulkAnimation = useCallback(async () => {
+    if (selectedCount < 2) {
+      toast.push('Select at least two images');
+      return;
+    }
+    const fpsValue = Number(bulkAnimateFps);
+    if (!Number.isFinite(fpsValue) || fpsValue <= 0) {
+      setBulkAnimateError('FPS must be greater than 0');
+      return;
+    }
+    setBulkAnimateLoading(true);
+    setBulkAnimateError(null);
+    try {
+      const response = await fetch('/api/animate/selection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ids: Array.from(selectedImageIds),
+          fps: fpsValue,
+          loop: bulkAnimateLoop,
+          filename: bulkAnimateFilename.trim() || undefined,
+          namespace: namespace && namespace !== '__all__' ? namespace : undefined
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to create animation');
+      }
+      toast.push('Animated WebP created');
+      await fetchImages({ forceRefresh: true });
+    } catch (error) {
+      console.error('Bulk animation failed', error);
+      setBulkAnimateError(error instanceof Error ? error.message : 'Failed to create animation');
+    } finally {
+      setBulkAnimateLoading(false);
+    }
+  }, [
+    bulkAnimateFps,
+    bulkAnimateFilename,
+    bulkAnimateLoop,
+    fetchImages,
+    namespace,
+    selectedCount,
+    selectedImageIds,
+    toast
   ]);
 
   const deleteSelectedImages = useCallback(async () => {
@@ -2800,6 +2867,55 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                   </p>
                 </div>
               )}
+            </div>
+            <div className="space-y-2 border-t border-gray-200 pt-3">
+              <p className="text-[0.65rem] text-gray-500 uppercase tracking-wide">Animate selection</p>
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-2 text-[0.65rem] text-gray-600">
+                  FPS
+                  <input
+                    type="number"
+                    min="0.1"
+                    step="0.5"
+                    value={bulkAnimateFps}
+                    onChange={(e) => {
+                      setBulkAnimateTouched(true);
+                      setBulkAnimateFps(e.target.value);
+                    }}
+                    className="w-20 border border-gray-300 rounded px-2 py-1"
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-[0.65rem] text-gray-600">
+                  Loop
+                  <input
+                    type="checkbox"
+                    checked={bulkAnimateLoop}
+                    onChange={(e) => setBulkAnimateLoop(e.target.checked)}
+                    className="h-3 w-3"
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-[0.65rem] text-gray-600">
+                  Output name
+                  <input
+                    type="text"
+                    value={bulkAnimateFilename}
+                    onChange={(e) => setBulkAnimateFilename(e.target.value)}
+                    placeholder="animated-webp"
+                    className="w-40 border border-gray-300 rounded px-2 py-1"
+                  />
+                </label>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={createBulkAnimation}
+                  disabled={bulkAnimateLoading || selectedCount < 2}
+                  className="px-3 py-2 bg-emerald-600 text-white rounded-md disabled:opacity-50"
+                >
+                  {bulkAnimateLoading ? 'Building…' : 'Create animated WebP'}
+                </button>
+                {bulkAnimateError && <p className="text-[0.65rem] text-red-600">{bulkAnimateError}</p>}
+              </div>
             </div>
             <div className="flex justify-end gap-2">
               <button

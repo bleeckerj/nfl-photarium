@@ -72,6 +72,10 @@ Before you start, you'll need:
 - **A Cloudflare account** (free tier available)
   - [Create a free account →](https://dash.cloudflare.com/sign-up)
   - [Enable Cloudflare Images →](https://dash.cloudflare.com/?to=/:account/images/getting-started) (100k images/month, free)
+- **ffmpeg** — Required for creating animated WebP images
+  - macOS: `brew install ffmpeg`
+  - Ubuntu/Debian: `sudo apt install ffmpeg`
+  - Windows: [Download from ffmpeg.org](https://ffmpeg.org/download.html)
 - **Optional:** OpenAI API key for AI ALT text generation
 
 ---
@@ -134,6 +138,14 @@ Open [http://localhost:3000](http://localhost:3000)
 1. Drag and drop into the upload area, or click to browse
 2. (Optional) Select a folder and add comma-separated tags
 3. Watch progress and copy the permanent Cloudflare URL
+
+### Importing from URLs
+
+- **Single image URL**: Fetch an image into the queue, edit metadata, then upload.
+- **Page URL**: Scan a page for images, preview thumbnails in the queue, select what you want, and upload the rest.
+  - Picks the largest `srcset` candidate when multiple sizes are available.
+  - Filters out tiny assets below 8 KB.
+  - Shows a placeholder when a preview is blocked; ingestion still works server-side.
 
 ### Finding Images
 
