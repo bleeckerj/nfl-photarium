@@ -202,3 +202,81 @@ export function getImageDimensions(imageUrl: string): Promise<{ width: number; h
     img.src = imageUrl;
   });
 }
+
+/**
+ * Generate a Cloudflare Images URL for direct download, preserving file extension/format if possible.
+ * @param imageId - The Cloudflare image ID
+ * @param filename - The original filename to deduce extension
+ * @param accountHash - Your Cloudflare account hash (optional)
+ * @returns Object with url and mime type
+ */
+export function getCloudflareDownloadUrl(
+  imageId: string,
+  filename?: string,
+  accountHash?: string
+): { url: string; mime: string } {
+  const hash = accountHash || process.env.NEXT_PUBLIC_CLOUDFLARE_ACCOUNT_HASH;
+  if (!hash) {
+    return { url: '', mime: 'application/octet-stream' };
+  }
+
+  let ext = 'jpg';
+  if (filename) {
+    const parts = filename.split('.');
+    if (parts.length > 1) {
+      ext = parts.pop()?.toLowerCase() || 'jpg';
+    }
+  }
+
+  let mime = 'image/jpeg';
+  let formatParam = 'jpeg';
+
+  switch (ext) {
+    case 'png':
+      mime = 'image/png';
+      formatParam = 'png';
+      break;
+    case 'gif':
+      mime = 'image/gif';
+      formatParam = 'gif';
+      break;
+    case 'svg':
+      mime = 'image/svg+xml';
+      formatParam = ''; // Don't force format for SVG
+      break;
+    case 'webp':
+      mime = 'image/webp';
+      formatParam = 'webp';
+      break;
+    case 'avif':
+      mime = 'image/avif';
+      formatParam = 'avif';
+      break;
+    case 'avif':
+      mime = 'image/avif';
+      formatParam = 'avif';
+      break;
+    case 'bmp':
+      mime = 'image/bmp';
+      formatParam = ''; 
+      break;
+    default:
+      mime = 'image/jpeg';
+      formatParam = 'jpeg';
+  }
+
+  const base = `https://imagedelivery.net/${hash}/${imageId}/public`;
+  
+  // OPTIMIZATION: We avoid adding ?format=xyz if we can, because explicit format transformation
+  // often results in "Transfer-Encoding: chunked" with no Content-Length header.
+  // Many OS drag-and-drop handlers (like macOS Finder) fail and create a 0-byte file
+  // if Content-Length is missing.
+  //
+  // By omitting the format param, we rely on Cloudflare serving the stored original,
+  // which generally includes the Content-Length header.
+  //
+  // We only force format if we are strictly converting or if it's a specialized request.
+  // For general "Drag this image", we assume the filename's extension matches the stored original.
+  
+  return { url: base, mime };
+}

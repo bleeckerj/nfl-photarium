@@ -1,6 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Agent } from 'undici';
 
 const DEFAULT_MIN_BYTES = 8 * 1024;
+
+const insecureAgent = new Agent({
+  connect: {
+    rejectUnauthorized: false
+  }
+});
+
+const isCertError = (error: unknown) => {
+  const code = typeof error === 'object' && error && 'code' in error
+    ? String((error as { code?: string }).code)
+    : '';
+  return code === 'CERT_HAS_EXPIRED' || code === 'DEPTH_ZERO_SELF_SIGNED_CERT' || code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE';
+};
+
+const fetchWithCertFallback = async (url: string, allowInsecure: boolean, init?: RequestInit) => {
+  const firstInit = allowInsecure ? { ...(init as any), dispatcher: insecureAgent } : init;
+  try {
+    return await fetch(url, firstInit);
+  } catch (error) {
+    if (!allowInsecure) throw error;
+    if (isCertError(error)) {
+      // Retry once with insecure agent if the first attempt didn't already use it
+      if (!firstInit || !(firstInit as any).dispatcher) {
+        return await fetch(url, { ...(init as any), dispatcher: insecureAgent } as any);
+      }
+    }
+    throw error;
+  }
+};
 
 const isValidUrl = (value: string) => {
   try {
@@ -119,9 +149,9 @@ const mapWithConcurrency = async <T, R>(
   return results;
 };
 
-const fetchHeadInfo = async (url: string) => {
+const fetchHeadInfo = async (url: string, allowInsecure: boolean) => {
   try {
-    const response = await fetch(url, { method: 'HEAD', redirect: 'follow' });
+    const response = await fetchWithCertFallback(url, allowInsecure, { method: 'HEAD', redirect: 'follow' });
     if (!response.ok) return {};
     const contentLength = response.headers.get('content-length');
     const contentType = response.headers.get('content-type');
@@ -150,6 +180,12 @@ export async function POST(request: NextRequest) {
     const pageUrl = typeof body?.url === 'string' ? body.url.trim() : '';
     const minBytes = Number.isFinite(body?.minBytes) ? Number(body.minBytes) : DEFAULT_MIN_BYTES;
     const maxImages = Number.isFinite(body?.maxImages) ? Math.max(0, Number(body.maxImages)) : undefined;
+    const allowInsecureEnv = process.env.IMPORT_ALLOW_INSECURE_TLS === 'true';
+    const allowInsecure = allowInsecureEnv && Boolean(body?.allowInsecure);
+
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[import/page] allowInsecureEnv:', allowInsecureEnv, 'allowInsecureReq:', Boolean(body?.allowInsecure), 'effective:', allowInsecure);
+    }
 
     if (!pageUrl || !isValidUrl(pageUrl)) {
       return NextResponse.json({ error: 'A valid page URL is required' }, { status: 400 });
@@ -159,7 +195,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Private or localhost URLs are not allowed' }, { status: 400 });
     }
 
-    const response = await fetch(pageUrl);
+    const response = await fetchWithCertFallback(pageUrl, allowInsecure);
     if (!response.ok) {
       return NextResponse.json({ error: 'Failed to fetch page' }, { status: 400 });
     }
@@ -185,7 +221,7 @@ export async function POST(request: NextRequest) {
 
     const headInfos = await mapWithConcurrency(limitedUrls, 6, async (url) => ({
       url,
-      ...(await fetchHeadInfo(url))
+      ...(await fetchHeadInfo(url, allowInsecure))
     }));
 
     const images = headInfos
@@ -205,6 +241,7 @@ export async function POST(request: NextRequest) {
       sourceUrl: pageUrl,
       minBytes,
       maxImages: typeof maxImages === 'number' ? maxImages : null,
+      allowInsecure,
       images
     });
   } catch (error) {

@@ -7,12 +7,29 @@ import Link from 'next/link';
 import MonoSelect from './MonoSelect';
 import GalleryCommandBar from './GalleryCommandBar';
 import FolderManagerButton from './FolderManagerButton';
-import { getCloudflareImageUrl, getMultipleImageUrls, IMAGE_VARIANTS } from '@/utils/imageUtils';
+import DateNavigator, { DateFilter } from './DateNavigator';
+import { getCloudflareImageUrl, getMultipleImageUrls, getCloudflareDownloadUrl, IMAGE_VARIANTS } from '@/utils/imageUtils';
 import { useToast } from './Toast';
 import { useImageAspectRatio } from '@/hooks/useImageAspectRatio';
 import HoverPreview from './HoverPreview';
 import { downloadImageToFile, formatDownloadFileName } from '@/utils/downloadUtils';
 import { filterImagesForGallery } from '@/utils/galleryFilter';
+
+const handleImageDragStart = (e: React.DragEvent, image: CloudflareImage) => {
+  e.stopPropagation();
+  const filename = (image.filename || `image-${image.id}`).replace(/[^a-zA-Z0-9._-]/g, '_');
+  const cdnUrl = getCloudflareImageUrl(image.id, 'original');
+  const { mime } = getCloudflareDownloadUrl(image.id, filename);
+  
+  e.dataTransfer.clearData();
+  // Chrome/Edge/Electron: Allows dragging file to desktop
+  e.dataTransfer.setData('DownloadURL', `${mime}:${filename}:${cdnUrl}`);
+  
+  // Standard Apps (Discord, Slack, etc)
+  e.dataTransfer.setData('text/plain', cdnUrl);
+  e.dataTransfer.setData('text/uri-list', cdnUrl);
+  e.dataTransfer.effectAllowed = 'copy';
+};
 
 interface CloudflareImage {
   id: string;
@@ -184,7 +201,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         bulkFolderMode: 'existing' as 'existing' | 'new',
         showDuplicatesOnly: false,
         showBrokenOnly: false,
-        pageSize: DEFAULT_PAGE_SIZE
+        pageSize: DEFAULT_PAGE_SIZE,
+        dateFilter: null as DateFilter | null,
+        currentPage: 1
       };
     }
     try {
@@ -203,6 +222,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           showDuplicatesOnly?: boolean;
           showBrokenOnly?: boolean;
           pageSize?: number;
+          dateFilter?: { year: number; month: number } | null;
+          currentPage?: number;
         };
         const rawPageSize = typeof parsed.pageSize === 'number' ? parsed.pageSize : DEFAULT_PAGE_SIZE;
         const normalizedPageSize = PAGE_SIZE_OPTIONS.includes(rawPageSize)
@@ -212,6 +233,17 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         const normalizedVariant = storedVariant === 'public' || storedVariant === 'original'
           ? 'full'
           : storedVariant;
+        const normalizedDateFilter = (() => {
+          if (!parsed.dateFilter || typeof parsed.dateFilter !== 'object') return null;
+          const year = (parsed.dateFilter as { year?: number }).year;
+          const month = (parsed.dateFilter as { month?: number }).month;
+          if (typeof year !== 'number' || typeof month !== 'number') return null;
+          if (month < 0 || month > 11) return null;
+          return { year, month };
+        })();
+        const normalizedCurrentPage = typeof parsed.currentPage === 'number' && parsed.currentPage > 0
+          ? Math.floor(parsed.currentPage)
+          : 1;
         return {
           variant: normalizedVariant,
           onlyCanonical: Boolean(parsed.onlyCanonical),
@@ -226,7 +258,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           bulkFolderMode: parsed.bulkFolderMode === 'new' ? 'new' : 'existing',
           showDuplicatesOnly: Boolean(parsed.showDuplicatesOnly),
           showBrokenOnly: Boolean(parsed.showBrokenOnly),
-          pageSize: normalizedPageSize
+          pageSize: normalizedPageSize,
+          dateFilter: normalizedDateFilter,
+          currentPage: normalizedCurrentPage
         };
       }
     } catch (error) {
@@ -246,7 +280,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       bulkFolderMode: 'existing',
       showDuplicatesOnly: false,
       showBrokenOnly: false,
-      pageSize: DEFAULT_PAGE_SIZE
+      pageSize: DEFAULT_PAGE_SIZE,
+      dateFilter: null as DateFilter | null,
+      currentPage: 1
     };
   };
 
@@ -260,7 +296,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [searchTerm, setSearchTerm] = useState<string>(storedPreferencesRef.current.searchTerm ?? '');
   const [selectedTag, setSelectedTag] = useState<string>(storedPreferencesRef.current.selectedTag ?? '');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(storedPreferencesRef.current.viewMode ?? 'grid');
-  const [currentPage, setCurrentPage] = useState(1);
+  const [currentPage, setCurrentPage] = useState(storedPreferencesRef.current.currentPage ?? 1);
   const [onlyCanonical, setOnlyCanonical] = useState(storedPreferencesRef.current.onlyCanonical);
   const [respectAspectRatio, setRespectAspectRatio] = useState(storedPreferencesRef.current.respectAspectRatio);
   const [onlyWithVariants, setOnlyWithVariants] = useState(storedPreferencesRef.current.onlyWithVariants);
@@ -286,6 +322,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [bulkAnimateError, setBulkAnimateError] = useState<string | null>(null);
   const [showDuplicatesOnly, setShowDuplicatesOnly] = useState<boolean>(storedPreferencesRef.current.showDuplicatesOnly ?? false);
   const [showBrokenOnly, setShowBrokenOnly] = useState<boolean>(storedPreferencesRef.current.showBrokenOnly ?? false);
+  const [dateFilter, setDateFilter] = useState<DateFilter | null>(storedPreferencesRef.current.dateFilter ?? null);
   const [pageSize, setPageSize] = useState<number>(storedPreferencesRef.current.pageSize ?? DEFAULT_PAGE_SIZE);
   const [brokenAudit, setBrokenAudit] = useState<BrokenAudit>(() => loadBrokenAuditFromStorage());
   const [auditLoading, setAuditLoading] = useState(false);
@@ -296,6 +333,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [namespaceDraft, setNamespaceDraft] = useState(namespace ?? '');
   const [namespaceSelectValue, setNamespaceSelectValue] = useState('');
   const [registryNamespaces, setRegistryNamespaces] = useState<string[]>([]);
+  const didInitFilterPageRef = useRef(false);
   const utilityButtonClasses = 'text-[0.65rem] font-mono px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 transition';
 
   useEffect(() => {
@@ -407,12 +445,14 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         bulkFolderMode,
         showDuplicatesOnly,
         showBrokenOnly,
-        pageSize
+        pageSize,
+        dateFilter,
+        currentPage
       }));
     } catch (error) {
       console.warn('Failed to save gallery prefs', error);
     }
-  }, [onlyCanonical, respectAspectRatio, selectedVariant, onlyWithVariants, selectedFolder, selectedTag, searchTerm, viewMode, filtersCollapsed, bulkFolderInput, bulkFolderMode, showDuplicatesOnly, showBrokenOnly, pageSize]);
+  }, [onlyCanonical, respectAspectRatio, selectedVariant, onlyWithVariants, selectedFolder, selectedTag, searchTerm, viewMode, filtersCollapsed, bulkFolderInput, bulkFolderMode, showDuplicatesOnly, showBrokenOnly, pageSize, dateFilter, currentPage]);
   useEffect(() => {
     persistHiddenFolders(hiddenFolders);
   }, [hiddenFolders]);
@@ -1462,6 +1502,15 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     return [...filteredWithVariants].sort((a, b) => new Date(b.uploaded).getTime() - new Date(a.uploaded).getTime());
   }, [filteredWithVariants]);
 
+  // Apply date filter (month) if set
+  const dateFilteredImages = useMemo(() => {
+    if (!dateFilter) return sortedImages;
+    return sortedImages.filter((image) => {
+      const d = new Date(image.uploaded);
+      return d.getFullYear() === dateFilter.year && d.getMonth() === dateFilter.month;
+    });
+  }, [sortedImages, dateFilter]);
+
   const hasActiveFilters = Boolean(
     searchTerm.trim() ||
     selectedFolder !== 'all' ||
@@ -1471,7 +1520,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     onlyWithVariants ||
     showDuplicatesOnly ||
     showBrokenOnly ||
-    hiddenFolders.length > 0
+    hiddenFolders.length > 0 ||
+    dateFilter !== null
   );
 
   const clearFilters = useCallback(() => {
@@ -1484,19 +1534,24 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     setShowDuplicatesOnly(false);
     setShowBrokenOnly(false);
     setHiddenFolders([]);
+    setDateFilter(null);
   }, []);
 
-  const totalPages = Math.max(1, Math.ceil(sortedImages.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(dateFilteredImages.length / pageSize));
   const pageIndex = Math.min(currentPage, totalPages);
   const pageSliceStart = (pageIndex - 1) * pageSize;
-  const pageImages = sortedImages.slice(pageSliceStart, pageSliceStart + pageSize);
-  const showPagination = sortedImages.length > pageSize;
-  const hasResults = sortedImages.length > 0;
+  const pageImages = dateFilteredImages.slice(pageSliceStart, pageSliceStart + pageSize);
+  const showPagination = dateFilteredImages.length > pageSize;
+  const hasResults = dateFilteredImages.length > 0;
 
   useEffect(() => {
+    if (!didInitFilterPageRef.current) {
+      didInitFilterPageRef.current = true;
+      return;
+    }
     setCurrentPage(1);
     scrollGalleryToTop();
-  }, [selectedFolder, selectedTag, searchTerm, onlyWithVariants, showDuplicatesOnly, showBrokenOnly, pageSize, scrollGalleryToTop]);
+  }, [selectedFolder, selectedTag, searchTerm, onlyWithVariants, showDuplicatesOnly, showBrokenOnly, pageSize, dateFilter, scrollGalleryToTop]);
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -1523,7 +1578,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const getPageDateRangeLabel = (pageNumber: number) => {
     if (pageNumber < 1 || pageNumber > totalPages) return null;
     const startIndex = (pageNumber - 1) * pageSize;
-    const slice = sortedImages.slice(startIndex, startIndex + pageSize);
+    const slice = dateFilteredImages.slice(startIndex, startIndex + pageSize);
     return formatDateRangeLabel(slice);
   };
 
@@ -1657,6 +1712,12 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                 >
                   Last
                 </button>
+                {/* Month filter */}
+                <DateNavigator
+                  allImages={sortedImages}
+                  currentFilter={dateFilter}
+                  onFilterChange={setDateFilter}
+                />
               </div>
             )}
           </div>
@@ -2218,12 +2279,16 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                   >
                     {svgImage ? (
                       <img
+                        draggable
+                        onDragStart={(e) => handleImageDragStart(e, image)}
                         src={displayUrl}
                         alt={image.displayName || image.filename}
                         className={`absolute inset-0 w-full h-full ${respectAspectRatio ? 'object-contain bg-white' : 'object-cover'}`}
                       />
                     ) : (
                       <Image
+                        draggable
+                        onDragStart={(e) => handleImageDragStart(e, image)}
                         src={displayUrl}
                         alt={image.displayName || image.filename}
                         fill
@@ -2387,12 +2452,16 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                   >
                     {svgImage ? (
                       <img
+                        draggable
+                        onDragStart={(e) => handleImageDragStart(e, image)}
                         src={displayUrl}
                         alt={image.filename}
                         className="absolute inset-0 w-full h-full object-contain bg-white"
                       />
                     ) : (
                       <Image
+                        draggable
+                        onDragStart={(e) => handleImageDragStart(e, image)}
                         src={displayUrl}
                         alt={image.filename}
                         fill
@@ -2416,8 +2485,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                   
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <p className="text-[0.7em] font-mono font-mono font-medum text-gray-900 truncate">
-                        {image.filename}
+                      <p className="text-[0.7em] font-mono font-mono font-medum text-gray-900 truncate" title={image.displayName || image.filename}>
+                        {image.displayName || image.filename}
                       </p>
                       {duplicateIds.has(image.id) && (
                         <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[0.55rem] font-semibold uppercase tracking-wide text-amber-800">

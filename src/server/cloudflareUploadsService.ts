@@ -209,6 +209,7 @@ export async function getUploadDownloadInfo(uploadId: string) {
   return {
     url: downloadUrl,
     filename: result.filename || uploadId,
-    contentType: contentType ?? 'application/octet-stream'
+    contentType: contentType ?? 'application/octet-stream',
+    size: typeof result.size === 'number' ? result.size : undefined
   };
 }

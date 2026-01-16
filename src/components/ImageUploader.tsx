@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useDropzone } from "react-dropzone";
 import { Upload, X, CheckCircle, AlertCircle } from "lucide-react";
 import clsx from "clsx";
@@ -125,6 +125,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
   const [pageImportUrl, setPageImportUrl] = useState('');
   const [pageImportLoading, setPageImportLoading] = useState(false);
   const [pageImportError, setPageImportError] = useState<string | null>(null);
+  const [pageImportAllowInsecure, setPageImportAllowInsecure] = useState(false);
   const [previewFailures, setPreviewFailures] = useState<Record<string, boolean>>({});
   const [animateFps, setAnimateFps] = useState<string>('');
   const [animateFpsTouched, setAnimateFpsTouched] = useState(false);
@@ -248,6 +249,22 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     const next = Math.max(1, selectedQueuedCount / 2);
     setAnimateFps(next.toString());
   }, [animateFpsTouched, selectedQueuedCount]);
+
+  // Keep track of queued files for cleanup on unmount
+  const queuedFilesRef = useRef(queuedFiles);
+  useEffect(() => {
+    queuedFilesRef.current = queuedFiles;
+  }, [queuedFiles]);
+
+  useEffect(() => {
+    return () => {
+      queuedFilesRef.current.forEach((file) => {
+        if (file.previewUrl && file.previewUrl.startsWith('blob:')) {
+          URL.revokeObjectURL(file.previewUrl);
+        }
+      });
+    };
+  }, []);
 
   // Debug: Log current state
   console.log("ImageUploader - Selected folder:", selectedFolder);
@@ -589,7 +606,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         const response = await fetch('/api/import/page/upload', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ items: payloadItems })
+          body: JSON.stringify({ items: payloadItems, allowInsecure: pageImportAllowInsecure })
         });
         const data = await response.json();
 
@@ -698,6 +715,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
           file,
           filename: file.name,
           tags: tagOverride,
+          previewUrl: isImageFile(file) ? URL.createObjectURL(file) : undefined,
           selected: true
         };
       })
@@ -737,11 +755,21 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     }
 
     const selectedIds = new Set(selectedItems.map((item) => item.id));
+    selectedItems.forEach((item) => {
+      if (item.previewUrl && item.previewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(item.previewUrl);
+      }
+    });
     setQueuedFiles((prev) => prev.filter((item) => !selectedIds.has(item.id)));
   };
 
   // Clear queued files
   const clearQueue = () => {
+    queuedFiles.forEach((file) => {
+      if (file.previewUrl && file.previewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(file.previewUrl);
+      }
+    });
     setQueuedFiles([]);
   };
 
@@ -863,6 +891,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
           description: descriptionFromSnagx || undefined,
           captureDate: typeof data.captureDate === 'string' ? data.captureDate : undefined,
           tags: tagsFromSnagx,
+          previewUrl: URL.createObjectURL(file),
           selected: true
         }
       ]);
@@ -886,15 +915,32 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       const response = await fetch('/api/import/page', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: pageImportUrl.trim(), minBytes: 8 * 1024 })
+        body: JSON.stringify({
+          url: pageImportUrl.trim(),
+          minBytes: 8 * 1024,
+          allowInsecure: pageImportAllowInsecure
+        })
       });
-      const data = await response.json();
+      const contentType = response.headers.get('content-type') || '';
+      const isJson = contentType.includes('application/json');
+      const data = isJson ? await response.json() : await response.text();
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to inspect page');
+        if (isJson && typeof data === 'object' && data && 'error' in data) {
+          throw new Error((data as { error?: string }).error || 'Failed to inspect page');
+        }
+        throw new Error('Failed to inspect page');
+      }
+      if (!isJson || typeof data !== 'object' || !data) {
+        throw new Error('Failed to inspect page');
       }
       const images = Array.isArray(data?.images) ? data.images : [];
       if (images.length === 0) {
-        throw new Error('No images found on that page');
+        // Not a catastrophic error - just inform the user gracefully
+        setPageImportError(
+          'No images found on that page. The images may be loaded via JavaScript or otherwise obfuscated. ' +
+          'Try using your browser\'s dev tools (Network tab) to locate the image URL directly.'
+        );
+        return;
       }
 
       const newItems: QueuedFile[] = images.map((image: { url: string; filename?: string; contentLength?: number; contentType?: string }) => ({
@@ -1217,6 +1263,15 @@ A long list of filenames is not user friendly and essentially useless for select
             {pageImportLoading ? 'Scanning…' : 'Scan page'}
           </button>
         </div>
+        <label className="mt-2 flex items-center gap-2 text-[11px] text-gray-600">
+          <input
+            type="checkbox"
+            checked={pageImportAllowInsecure}
+            onChange={(e) => setPageImportAllowInsecure(e.target.checked)}
+            className="h-3 w-3"
+          />
+          Allow insecure TLS (expired/self-signed certs). Requires IMPORT_ALLOW_INSECURE_TLS=true on the server.
+        </label>
         {pageImportError && <p className="text-xs text-red-600 mt-1">{pageImportError}</p>}
         <p className="text-[11px] text-gray-500 mt-1">
           We’ll scan the page for image URLs, show thumbnails in your queue, and you can select what to ingest before uploading.
@@ -1381,7 +1436,12 @@ A long list of filenames is not user friendly and essentially useless for select
                     {metadataExpanded ? "Hide metadata" : "Show metadata"}
                   </button>
                   <button
-                    onClick={() => setQueuedFiles((prev) => prev.filter((entry) => entry.id !== item.id))}
+                    onClick={() => {
+                      if (item.previewUrl && item.previewUrl.startsWith('blob:')) {
+                        URL.revokeObjectURL(item.previewUrl);
+                      }
+                      setQueuedFiles((prev) => prev.filter((entry) => entry.id !== item.id));
+                    }}
                     className="text-xs text-red-600 hover:text-red-800"
                     disabled={isUploading}
                   >

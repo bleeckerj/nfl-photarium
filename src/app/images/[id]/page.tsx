@@ -3,7 +3,7 @@
 import React, { CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { getMultipleImageUrls, getCloudflareImageUrl, IMAGE_VARIANTS } from '@/utils/imageUtils';
+import { getMultipleImageUrls, getCloudflareImageUrl, getCloudflareDownloadUrl, IMAGE_VARIANTS } from '@/utils/imageUtils';
 import { useToast } from '@/components/Toast';
 import { Sparkles, RotateCcw, RotateCw, ChevronUp, ChevronDown, GripVertical } from 'lucide-react';
 import FolderManagerButton from '@/components/FolderManagerButton';
@@ -16,6 +16,20 @@ import { useImageAspectRatio } from '@/hooks/useImageAspectRatio';
 import QRCode from 'qrcode';
 
 import { useParams } from 'next/navigation';
+
+const handleImageDragStart = (e: React.DragEvent, image: CloudflareImage) => {
+  e.stopPropagation();
+  const filename = (image.filename || `image-${image.id}`).replace(/[^a-zA-Z0-9._-]/g, '_');
+  const cdnUrl = getCloudflareImageUrl(image.id, 'original');
+  const { mime } = getCloudflareDownloadUrl(image.id, filename);
+  
+  e.dataTransfer.clearData();
+  e.dataTransfer.setData('DownloadURL', `${mime}:${filename}:${cdnUrl}`);
+  
+  e.dataTransfer.setData('text/plain', cdnUrl);
+  e.dataTransfer.setData('text/uri-list', cdnUrl);
+  e.dataTransfer.effectAllowed = 'copy';
+};
 
 interface CloudflareImage {
   id: string;
@@ -1795,6 +1809,8 @@ export default function ImageDetailPage() {
           <div id="image-hero-section" className="w-full mb-4">
             <div className="relative w-full aspect-[3/2] bg-gray-100 rounded overflow-hidden">
               <Image
+                draggable
+                onDragStart={(e) => handleImageDragStart(e, image)}
                 src={originalDeliveryUrl}
                 alt={image.filename || 'image'}
                 fill
@@ -2508,6 +2524,8 @@ export default function ImageDetailPage() {
                           onMouseMove={(e) => handleThumbMouseMove(getCloudflareImageUrl(child.id, 'w=600'), child.filename || 'Variation', e)}
                         >
                           <Image
+                            draggable
+                            onDragStart={(e) => handleImageDragStart(e, child)}
                             src={getCloudflareImageUrl(child.id, 'w=300')}
                             alt={child.filename || 'Variation'}
                             fill
@@ -2628,6 +2646,8 @@ export default function ImageDetailPage() {
                             onMouseMove={(e) => handleThumbMouseMove(getCloudflareImageUrl(candidate.id, 'w=600'), candidate.filename || 'Image', e)}
                           >
                             <Image
+                              draggable
+                              onDragStart={(e) => handleImageDragStart(e, candidate)}
                               src={getCloudflareImageUrl(candidate.id, 'w=300')}
                               alt={candidate.filename || 'Image'}
                               fill

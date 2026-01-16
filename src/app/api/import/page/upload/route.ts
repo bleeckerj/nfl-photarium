@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Agent } from 'undici';
 import { toDuplicateSummary } from '@/server/duplicateDetector';
 import { MAX_IMAGE_BYTES, SUPPORTED_IMAGE_TYPES, uploadImageBuffer } from '@/server/uploadService';
 import type { UploadFailure, UploadSuccess } from '@/server/uploadService';
@@ -16,6 +17,34 @@ const IMAGE_EXTENSION_MIME_MAP: Record<string, string> = {
 };
 
 const MIN_IMAGE_BYTES = 8 * 1024;
+
+const insecureAgent = new Agent({
+  connect: {
+    rejectUnauthorized: false,
+  },
+});
+
+const isCertError = (error: unknown) => {
+  const code = typeof error === 'object' && error && 'code' in error
+    ? String((error as { code?: string }).code)
+    : '';
+  return code === 'CERT_HAS_EXPIRED' || code === 'DEPTH_ZERO_SELF_SIGNED_CERT' || code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE';
+};
+
+const fetchWithCertFallback = async (url: string, allowInsecure: boolean, init?: RequestInit) => {
+  const firstInit = allowInsecure ? { ...(init as any), dispatcher: insecureAgent } : init;
+  try {
+    return await fetch(url, firstInit as any);
+  } catch (error) {
+    if (!allowInsecure) throw error;
+    if (isCertError(error)) {
+      if (!firstInit || !(firstInit as any).dispatcher) {
+        return await fetch(url, { ...(init as any), dispatcher: insecureAgent } as any);
+      }
+    }
+    throw error;
+  }
+};
 
 const isValidUrl = (value: string) => {
   try {
@@ -114,6 +143,11 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const items = Array.isArray(body?.items) ? (body.items as UploadItem[]) : [];
+    const allowInsecureEnv = process.env.IMPORT_ALLOW_INSECURE_TLS === 'true';
+    const allowInsecure = allowInsecureEnv && Boolean(body?.allowInsecure);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[import/page/upload] allowInsecureEnv:', allowInsecureEnv, 'allowInsecureReq:', Boolean(body?.allowInsecure), 'effective:', allowInsecure);
+    }
     if (items.length === 0) {
       return NextResponse.json({ error: 'No URLs provided' }, { status: 400 });
     }
@@ -164,7 +198,7 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        const response = await fetch(item.url);
+        const response = await fetchWithCertFallback(item.url, allowInsecure);
         if (!response.ok) {
           failures.push({
             clientId: item.clientId,

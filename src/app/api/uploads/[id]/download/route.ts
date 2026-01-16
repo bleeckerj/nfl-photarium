@@ -26,7 +26,7 @@ export async function GET(
       return withCors(NextResponse.json({ error: 'Upload ID is required' }, { status: 400 }));
     }
 
-    const { url, filename, contentType } = await getUploadDownloadInfo(id);
+    const { url, filename, contentType, size } = await getUploadDownloadInfo(id);
     const response = await fetch(url, { cache: 'no-store' });
 
     if (!response.ok || !response.body) {
@@ -38,6 +38,9 @@ export async function GET(
     const headers = new Headers();
     headers.set('Content-Type', contentType);
     headers.set('Content-Disposition', `attachment; filename="${filename}"`);
+    if (size) {
+      headers.set('Content-Length', size.toString());
+    }
 
     return withCors(new NextResponse(response.body, { headers }));
   } catch (error) {
