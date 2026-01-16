@@ -5,7 +5,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { getMultipleImageUrls, getCloudflareImageUrl, getCloudflareDownloadUrl, IMAGE_VARIANTS } from '@/utils/imageUtils';
 import { useToast } from '@/components/Toast';
-import { Sparkles, RotateCcw, RotateCw, ChevronUp, ChevronDown, GripVertical } from 'lucide-react';
+import { Sparkles, RotateCcw, RotateCw, ChevronUp, ChevronDown, GripVertical, ExternalLink } from 'lucide-react';
 import FolderManagerButton from '@/components/FolderManagerButton';
 import MonoSelect from '@/components/MonoSelect';
 import { cleanString, pickCloudflareMetadata } from '@/utils/cloudflareMetadata';
@@ -1807,7 +1807,7 @@ export default function ImageDetailPage() {
             </Link>
           </div>
           <div id="image-hero-section" className="w-full mb-4">
-            <div className="relative w-full aspect-[3/2] bg-gray-100 rounded overflow-hidden">
+            <div className="relative w-full aspect-[3/2] bg-gray-100 rounded overflow-hidden group">
               <Image
                 draggable
                 onDragStart={(e) => handleImageDragStart(e, image)}
@@ -1819,6 +1819,24 @@ export default function ImageDetailPage() {
                 priority
                 style={heroRotationStyle}
               />
+              <button
+                type="button"
+                onClick={() => {
+                  const width = Math.min(900, window.screen.width * 0.6);
+                  const height = Math.min(700, window.screen.height * 0.6);
+                  const left = (window.screen.width - width) / 2;
+                  const top = (window.screen.height - height) / 2;
+                  window.open(
+                    originalDeliveryUrl,
+                    `drag_${image.id}`,
+                    `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=no`
+                  );
+                }}
+                title="Open image in a popup window for easy drag-and-drop to other apps"
+                className="absolute top-2 right-2 p-2 bg-black/60 hover:bg-black/80 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <ExternalLink className="h-4 w-4" />
+              </button>
             </div>
             <div className="mt-3 space-y-2">
               <div className="flex items-center justify-between text-[11px]">
