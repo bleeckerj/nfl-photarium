@@ -1,5 +1,6 @@
 import { cleanString, parseCloudflareMetadata } from '@/utils/cloudflareMetadata';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
+import { getCacheStorage, type ICacheStorage } from './cacheStorage';
 
 interface CloudflareImageApiResponse {
   id: string;
@@ -36,6 +37,8 @@ interface CacheState {
   map: Map<string, CachedCloudflareImage>;
   lastFetched: number;
   inflight: Promise<CachedCloudflareImage[]> | null;
+  initialized: boolean;
+  backgroundRefreshInProgress: boolean;
 }
 
 const GLOBAL_CACHE_KEY = Symbol.for('cloudflare.image.cache');
@@ -47,7 +50,9 @@ const defaultState: CacheState = {
   images: [],
   map: new Map(),
   lastFetched: 0,
-  inflight: null
+  inflight: null,
+  initialized: false,
+  backgroundRefreshInProgress: false
 };
 
 const cacheState: CacheState = globalObject[GLOBAL_CACHE_KEY] ?? defaultState;
@@ -56,6 +61,7 @@ if (!globalObject[GLOBAL_CACHE_KEY]) {
 }
 
 const CACHE_TTL_MS = Number(process.env.CLOUDFLARE_CACHE_TTL_MS ?? 5 * 60 * 1000);
+const PERSISTENT_CACHE_TTL_MS = Number(process.env.CLOUDFLARE_PERSISTENT_CACHE_TTL_MS ?? 24 * 60 * 60 * 1000); // 24 hours default
 const PAGE_SIZE = Math.min(
   100,
   Math.max(10, Number(process.env.CLOUDFLARE_CACHE_PAGE_SIZE ?? 100))
@@ -64,6 +70,17 @@ const MAX_PAGES = (() => {
   const value = Number(process.env.CLOUDFLARE_CACHE_MAX_PAGES);
   return Number.isFinite(value) && value > 0 ? value : undefined;
 })();
+
+const PERSISTENT_CACHE_KEY = 'cloudflare-images';
+
+// Get persistent storage instance
+let storage: ICacheStorage | null = null;
+const getStorage = (): ICacheStorage => {
+  if (!storage) {
+    storage = getCacheStorage();
+  }
+  return storage;
+};
 
 const transformImage = (image: CloudflareImageApiResponse): CachedCloudflareImage => {
   const parsedMeta = parseCloudflareMetadata(image.meta);
@@ -209,40 +226,167 @@ const fetchAllImages = async (): Promise<CachedCloudflareImage[]> => {
   return collected.map(transformImage);
 };
 
-const shouldUseCache = (forceRefresh?: boolean) => {
+/**
+ * Load images from persistent storage (file/Redis)
+ * Returns null if cache doesn't exist or is too old
+ */
+const loadFromPersistentCache = async (): Promise<{ images: CachedCloudflareImage[]; timestamp: number } | null> => {
+  try {
+    const cached = await getStorage().get<CachedCloudflareImage[]>(PERSISTENT_CACHE_KEY);
+    if (!cached) {
+      console.log('[Cache] No persistent cache found');
+      return null;
+    }
+
+    const age = Date.now() - cached.timestamp;
+    const isStale = age > PERSISTENT_CACHE_TTL_MS;
+    
+    console.log(`[Cache] Loaded ${cached.data.length} images from persistent cache (age: ${Math.round(age / 1000)}s, stale: ${isStale})`);
+    
+    // Return data even if stale - we'll refresh in background
+    return { images: cached.data, timestamp: cached.timestamp };
+  } catch (error) {
+    console.warn('[Cache] Failed to load from persistent cache:', error);
+    return null;
+  }
+};
+
+/**
+ * Save images to persistent storage
+ */
+const saveToPersistentCache = async (images: CachedCloudflareImage[], timestamp: number): Promise<void> => {
+  try {
+    await getStorage().set(PERSISTENT_CACHE_KEY, images, timestamp);
+    console.log(`[Cache] Saved ${images.length} images to persistent cache`);
+  } catch (error) {
+    console.warn('[Cache] Failed to save to persistent cache:', error);
+  }
+};
+
+const shouldUseMemoryCache = (forceRefresh?: boolean) => {
   if (forceRefresh) return false;
   if (!cacheState.images.length) return false;
   return Date.now() - cacheState.lastFetched < CACHE_TTL_MS;
 };
 
-const rebuildState = (images: CachedCloudflareImage[]) => {
+const rebuildState = (images: CachedCloudflareImage[], timestamp?: number) => {
   cacheState.images = images;
   cacheState.map = new Map(images.map(image => [image.id, image]));
-  cacheState.lastFetched = Date.now();
+  cacheState.lastFetched = timestamp ?? Date.now();
+  cacheState.initialized = true;
 };
 
-export const getCachedImages = async (forceRefresh = false) => {
-  if (shouldUseCache(forceRefresh)) {
+/**
+ * Fetch fresh data from Cloudflare and update both caches
+ */
+const fetchAndUpdateCaches = async (): Promise<CachedCloudflareImage[]> => {
+  const images = await fetchAllImages();
+  const timestamp = Date.now();
+  
+  // Update in-memory cache
+  rebuildState(images, timestamp);
+  
+  // Update persistent cache (fire and forget)
+  saveToPersistentCache(images, timestamp).catch(err => {
+    console.warn('[Cache] Background save to persistent cache failed:', err);
+  });
+  
+  return images;
+};
+
+/**
+ * Trigger a background refresh of the cache
+ * Doesn't block the current request
+ */
+const triggerBackgroundRefresh = (): void => {
+  if (cacheState.backgroundRefreshInProgress) {
+    return;
+  }
+  
+  cacheState.backgroundRefreshInProgress = true;
+  console.log('[Cache] Starting background refresh from Cloudflare API');
+  
+  fetchAndUpdateCaches()
+    .then((images) => {
+      console.log(`[Cache] Background refresh complete: ${images.length} images`);
+    })
+    .catch((error) => {
+      console.warn('[Cache] Background refresh failed:', error);
+    })
+    .finally(() => {
+      cacheState.backgroundRefreshInProgress = false;
+    });
+};
+
+/**
+ * Main entry point for getting cached images
+ * 
+ * Cache hierarchy:
+ * 1. In-memory cache (fastest, TTL: 5 minutes)
+ * 2. Persistent cache (fast, TTL: 24 hours)  
+ * 3. Cloudflare API (slow, paginated)
+ * 
+ * On cold start:
+ * - Loads from persistent cache immediately (fast)
+ * - Triggers background refresh if persistent cache is stale
+ */
+export const getCachedImages = async (forceRefresh = false): Promise<CachedCloudflareImage[]> => {
+  // 1. Check in-memory cache first
+  if (shouldUseMemoryCache(forceRefresh)) {
     return cacheState.images;
   }
 
+  // 2. If there's already a fetch in progress, wait for it
   if (cacheState.inflight) {
     return cacheState.inflight;
   }
 
-  const inflight = fetchAllImages()
-    .then(images => {
-      rebuildState(images);
-      cacheState.inflight = null;
-      return cacheState.images;
-    })
+  // 3. For force refresh, go straight to Cloudflare API
+  if (forceRefresh) {
+    const inflight = fetchAndUpdateCaches()
+      .catch(error => {
+        cacheState.inflight = null;
+        if (cacheState.images.length) {
+          console.warn('[Cache] Falling back to existing cache after fetch failure:', error);
+          return cacheState.images;
+        }
+        throw error;
+      })
+      .finally(() => {
+        cacheState.inflight = null;
+      });
+
+    cacheState.inflight = inflight;
+    return inflight;
+  }
+
+  // 4. Try to load from persistent cache
+  const persistent = await loadFromPersistentCache();
+  
+  if (persistent && persistent.images.length > 0) {
+    // Use persistent cache data
+    rebuildState(persistent.images, persistent.timestamp);
+    
+    // Check if persistent cache is stale and needs background refresh
+    const persistentAge = Date.now() - persistent.timestamp;
+    if (persistentAge > CACHE_TTL_MS) {
+      // Persistent cache is older than memory TTL, trigger background refresh
+      triggerBackgroundRefresh();
+    }
+    
+    return cacheState.images;
+  }
+
+  // 5. No cache available, fetch from Cloudflare API (blocking)
+  console.log('[Cache] No cache available, fetching from Cloudflare API...');
+  
+  const inflight = fetchAndUpdateCaches()
     .catch(error => {
       cacheState.inflight = null;
-      if (cacheState.images.length) {
-        console.warn('Falling back to existing image cache after fetch failure:', error);
-        return cacheState.images;
-      }
       throw error;
+    })
+    .finally(() => {
+      cacheState.inflight = null;
     });
 
   cacheState.inflight = inflight;
@@ -270,12 +414,18 @@ export const upsertCachedImage = (image: CachedCloudflareImage) => {
     cacheState.images.unshift(image);
   }
   cacheState.lastFetched = Date.now();
+  
+  // Update persistent cache in background
+  saveToPersistentCache(cacheState.images, cacheState.lastFetched).catch(() => {});
 };
 
 export const removeCachedImage = (id: string) => {
   cacheState.map.delete(id);
   cacheState.images = cacheState.images.filter(image => image.id !== id);
   cacheState.lastFetched = Date.now();
+  
+  // Update persistent cache in background
+  saveToPersistentCache(cacheState.images, cacheState.lastFetched).catch(() => {});
 };
 
 export const transformApiImageToCached = (image: CloudflareImageApiResponse) =>
@@ -284,5 +434,25 @@ export const transformApiImageToCached = (image: CloudflareImageApiResponse) =>
 export const getCacheStats = () => ({
   count: cacheState.images.length,
   lastFetched: cacheState.lastFetched,
-  ttlMs: CACHE_TTL_MS
+  ttlMs: CACHE_TTL_MS,
+  persistentTtlMs: PERSISTENT_CACHE_TTL_MS,
+  initialized: cacheState.initialized,
+  backgroundRefreshInProgress: cacheState.backgroundRefreshInProgress
 });
+
+/**
+ * Force clear all caches (useful for debugging)
+ */
+export const clearAllCaches = async () => {
+  cacheState.images = [];
+  cacheState.map = new Map();
+  cacheState.lastFetched = 0;
+  cacheState.initialized = false;
+  
+  try {
+    await getStorage().delete(PERSISTENT_CACHE_KEY);
+    console.log('[Cache] All caches cleared');
+  } catch (error) {
+    console.warn('[Cache] Failed to clear persistent cache:', error);
+  }
+};
