@@ -2,9 +2,12 @@
  * Cache Storage Abstraction Layer
  * 
  * Provides a unified interface for persistent cache storage.
- * Currently implements file-based storage, but can be swapped for Redis.
+ * Supports file-based storage (default) and Redis.
  * 
- * To switch to Redis later, implement ICacheStorage and set CACHE_STORAGE_TYPE=redis
+ * Configuration:
+ *   CACHE_STORAGE_TYPE=file|redis (default: file)
+ *   CACHE_STORAGE_DIR=/path/to/.cache (for file storage)
+ *   REDIS_URL=redis://localhost:6379 (for Redis storage)
  */
 
 import { promises as fs } from 'fs';
@@ -143,40 +146,153 @@ class FileCacheStorage implements ICacheStorage {
 }
 
 /**
- * Redis cache storage implementation (placeholder)
- * Implement this class when switching to Redis
+ * Redis cache storage implementation
  * 
- * Example with ioredis:
- * ```
- * import Redis from 'ioredis';
+ * To use Redis:
+ * 1. Install ioredis: npm install ioredis
+ * 2. Set environment variables:
+ *    - CACHE_STORAGE_TYPE=redis
+ *    - REDIS_URL=redis://localhost:6379 (or your Redis URL)
  * 
- * class RedisCacheStorage implements ICacheStorage {
- *   private client: Redis;
- *   
- *   constructor() {
- *     this.client = new Redis(process.env.REDIS_URL);
- *   }
- *   
- *   async get<T>(key: string): Promise<CacheData<T> | null> {
- *     const data = await this.client.get(`cache:${key}`);
- *     return data ? JSON.parse(data) : null;
- *   }
- *   
- *   async set<T>(key: string, data: T, timestamp?: number): Promise<void> {
- *     const cacheData: CacheData<T> = { data, timestamp: timestamp ?? Date.now(), version: CACHE_VERSION };
- *     await this.client.set(`cache:${key}`, JSON.stringify(cacheData));
- *   }
- *   
- *   async delete(key: string): Promise<void> {
- *     await this.client.del(`cache:${key}`);
- *   }
- *   
- *   async exists(key: string): Promise<boolean> {
- *     return (await this.client.exists(`cache:${key}`)) === 1;
- *   }
- * }
- * ```
+ * Running Redis locally:
+ *   - macOS: brew install redis && redis-server
+ *   - Docker: docker run -d -p 6379:6379 redis:alpine
+ *   - Docker Compose: see docs/FUTURE_SEARCH_FEATURES.md
  */
+
+// Redis client type (loosely typed to avoid requiring ioredis as a dependency)
+interface RedisClient {
+  get(key: string): Promise<string | null>;
+  set(key: string, value: string): Promise<unknown>;
+  del(key: string): Promise<number>;
+  exists(key: string): Promise<number>;
+  quit(): Promise<unknown>;
+  connect(): Promise<void>;
+  on(event: string, callback: (arg?: unknown) => void): void;
+}
+
+class RedisCacheStorage implements ICacheStorage {
+  private client: RedisClient | null = null;
+  private connectionPromise: Promise<void> | null = null;
+  private readonly keyPrefix = 'photarium:cache:';
+
+  private async getClient(): Promise<RedisClient> {
+    if (this.client) {
+      return this.client;
+    }
+
+    if (this.connectionPromise) {
+      await this.connectionPromise;
+      return this.client!;
+    }
+
+    this.connectionPromise = this.connect();
+    await this.connectionPromise;
+    return this.client!;
+  }
+
+  private async connect(): Promise<void> {
+    try {
+      // Dynamic import to avoid requiring ioredis when using file storage
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const Redis = (await import(/* webpackIgnore: true */ 'ioredis' as string)).default;
+      const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
+      
+      const client = new Redis(redisUrl, {
+        maxRetriesPerRequest: 3,
+        retryDelayOnFailover: 100,
+        lazyConnect: true
+      });
+
+      client.on('error', (err: Error) => {
+        console.error('[Redis] Connection error:', err.message);
+      });
+
+      client.on('connect', () => {
+        console.log('[Redis] Connected successfully');
+      });
+
+      await client.connect();
+      this.client = client as unknown as RedisClient;
+    } catch (error) {
+      this.client = null;
+      this.connectionPromise = null;
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      throw new Error(`Failed to connect to Redis: ${message}. Did you install ioredis? Run: npm install ioredis`);
+    }
+  }
+
+  async get<T>(key: string): Promise<CacheData<T> | null> {
+    try {
+      const client = await this.getClient();
+      const data = await client.get(`${this.keyPrefix}${key}`);
+      
+      if (!data) {
+        return null;
+      }
+
+      const parsed = JSON.parse(data) as CacheData<T>;
+      
+      // Validate cache version
+      if (parsed.version !== CACHE_VERSION) {
+        console.log(`[Redis] Cache version mismatch for ${key}: expected ${CACHE_VERSION}, got ${parsed.version}`);
+        return null;
+      }
+      
+      return parsed;
+    } catch (error) {
+      console.warn(`[Redis] Failed to get key ${key}:`, error);
+      return null;
+    }
+  }
+
+  async set<T>(key: string, data: T, timestamp?: number): Promise<void> {
+    try {
+      const client = await this.getClient();
+      const cacheData: CacheData<T> = {
+        data,
+        timestamp: timestamp ?? Date.now(),
+        version: CACHE_VERSION
+      };
+      
+      await client.set(`${this.keyPrefix}${key}`, JSON.stringify(cacheData));
+    } catch (error) {
+      console.warn(`[Redis] Failed to set key ${key}:`, error);
+      throw error;
+    }
+  }
+
+  async delete(key: string): Promise<void> {
+    try {
+      const client = await this.getClient();
+      await client.del(`${this.keyPrefix}${key}`);
+    } catch (error) {
+      console.warn(`[Redis] Failed to delete key ${key}:`, error);
+      throw error;
+    }
+  }
+
+  async exists(key: string): Promise<boolean> {
+    try {
+      const client = await this.getClient();
+      return (await client.exists(`${this.keyPrefix}${key}`)) === 1;
+    } catch (error) {
+      console.warn(`[Redis] Failed to check existence of key ${key}:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Gracefully close the Redis connection
+   */
+  async disconnect(): Promise<void> {
+    if (this.client) {
+      await this.client.quit();
+      this.client = null;
+      this.connectionPromise = null;
+    }
+  }
+}
 
 // Factory function to get the appropriate storage implementation
 let storageInstance: ICacheStorage | null = null;
@@ -191,15 +307,17 @@ export function getCacheStorage(): ICacheStorage {
 
   switch (storageType) {
     case 'redis':
-      // TODO: Implement Redis storage
-      throw new Error('Redis storage not yet implemented. Set CACHE_STORAGE_TYPE=file or implement RedisCacheStorage.');
+      console.log('[Cache] Using Redis storage');
+      storageInstance = new RedisCacheStorage();
+      return storageInstance;
     
     case 'file':
     default:
+      console.log('[Cache] Using file-based storage');
       storageInstance = new FileCacheStorage(cacheDir);
       return storageInstance;
   }
 }
 
 // Export for testing or direct use
-export { FileCacheStorage, CACHE_VERSION };
+export { FileCacheStorage, RedisCacheStorage, CACHE_VERSION };
