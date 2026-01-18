@@ -17,6 +17,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import Image from 'next/image';
 import { Search, X, Loader2, Sparkles, History, Palette } from 'lucide-react';
 import { getCloudflareImageUrl } from '@/utils/imageUtils';
+import ColorWheel from './ColorWheel';
 
 interface SearchResult {
   imageId: string;
@@ -210,28 +211,41 @@ export function TextSearch({ className = '', onImageClick, initialQuery = '' }: 
         </button>
       </div>
 
-      {/* Search input */}
-      <div className="relative mb-3">
-        <input
-          ref={inputRef}
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={handleKeyDown}
-          onFocus={() => setShowPresets(true)}
-          placeholder={searchType === 'text' ? 'Describe what you\'re looking for...' : 'Enter hex color like #3B82F6'}
-          className="w-full bg-gray-800 border border-gray-600 rounded-lg pl-10 pr-10 py-2.5 text-[12px] text-gray-100 placeholder-gray-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-        />
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-        {query && (
-          <button
-            onClick={clearSearch}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        )}
-      </div>
+      {/* Search input - Text mode */}
+      {searchType === 'text' && (
+        <div className="relative mb-3">
+          <input
+            ref={inputRef}
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onFocus={() => setShowPresets(true)}
+            placeholder="Describe what you're looking for..."
+            className="w-full bg-gray-800 border border-gray-600 rounded-lg pl-10 pr-10 py-2.5 text-[12px] text-gray-100 placeholder-gray-500 focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
+          />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+          {query && (
+            <button
+              onClick={clearSearch}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Color Wheel - Color mode */}
+      {searchType === 'color' && (
+        <div className="mb-3">
+          <ColorWheel
+            value={query}
+            onChange={(color) => setQuery(color)}
+            size={160}
+          />
+        </div>
+      )}
 
       {/* Search button */}
       <button
@@ -275,7 +289,7 @@ export function TextSearch({ className = '', onImageClick, initialQuery = '' }: 
       )}
 
       {/* Search history */}
-      {searchHistory.length > 0 && !results.length && !loading && (
+      {searchType === 'text' && searchHistory.length > 0 && !results.length && !loading && (
         <div className="mt-3 space-y-2">
           <div className="flex items-center gap-1 text-[10px] text-gray-500 uppercase tracking-wider">
             <History className="w-3 h-3" />

@@ -1,10 +1,14 @@
-# Future Search Features
+# Photarium Search Features
 
-This document outlines potential search enhancements for Photarium, including similarity search ("Find images like this") and full-text search capabilities.
+This document describes Photarium's search capabilities, including semantic similarity search, color search, and the underlying embedding architecture.
+
+> **Status:** Most features described in this document are now **implemented** on the `redis` branch. See [Implementation Status](#implementation-status) for details.
 
 ## Table of Contents
 
-- [Current Search](#current-search)
+- [Implementation Status](#implementation-status)
+- [Search Exclusion Tags](#search-exclusion-tags)
+- [Current Search Capabilities](#current-search-capabilities)
 - [Similarity Search](#similarity-search)
   - [How It Works](#how-it-works)
   - [Embedding Types](#embedding-types)
@@ -19,9 +23,143 @@ This document outlines potential search enhancements for Photarium, including si
 
 ---
 
-## Current Search
+## Implementation Status
 
-The current search implementation filters images client-side based on:
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Redis Stack vector search | ✅ Implemented | Using RediSearch |
+| CLIP embedding generation | ✅ Implemented | HuggingFace API or local Python |
+| Color embedding generation | ✅ Implemented | Local JavaScript extraction |
+| Text-to-image search | ✅ Implemented | "Find sunset photos" |
+| Image similarity search | ✅ Implemented | CLIP and color modes |
+| Color hex search | ✅ Implemented | "#3B82F6" queries |
+| Antipode search | ✅ Implemented | Find semantic/color opposites |
+| Search exclusion tags | ✅ Implemented | x-clip, x-color, x-search |
+| Backfill script | ✅ Implemented | `backfill-embeddings.mjs` |
+| UI: Semantic Cluster | ✅ Implemented | Image detail page |
+| UI: Antipode Search | ✅ Implemented | Image detail page |
+| Combined filters | 🔄 Partial | Basic filtering available |
+| Bulk similarity grouping | ❌ Not started | Find near-duplicates |
+
+---
+
+## Search Exclusion Tags
+
+Photarium supports special tags to exclude images from search results:
+
+### Available Tags
+
+| Tag | Effect | Use Case |
+|-----|--------|----------|
+| `x-clip` | Exclude from CLIP/semantic search | Hide sensitive images from "find similar" |
+| `x-color` | Exclude from color search | Hide from color-based queries |
+| `x-search` | Exclude from ALL vector searches | Complete search exclusion |
+
+### How Tags Work
+
+```
+Image with tags: ["vacation", "beach", "x-clip"]
+  │
+  ├── Text search "sunset" → NOT FOUND (x-clip excludes)
+  ├── Similar images (CLIP) → NOT FOUND (x-clip excludes)
+  ├── Color search "#FFD700" → FOUND (not excluded from color)
+  └── Similar images (color) → FOUND (not excluded from color)
+
+Image with tags: ["product", "x-search"]
+  │
+  ├── Text search → NOT FOUND
+  ├── Similar (CLIP) → NOT FOUND
+  ├── Color search → NOT FOUND
+  └── Similar (color) → NOT FOUND
+```
+
+### Applying Exclusion Tags
+
+**Via UI:**
+1. Open image detail page (`/images/{id}`)
+2. Find "Search Exclusions" section
+3. Toggle desired exclusions (Semantic, Color, All Search)
+
+**Via API:**
+```bash
+# Add x-clip tag to existing tags
+curl -X PATCH http://localhost:3000/api/images/{id}/update \
+  -H "Content-Type: application/json" \
+  -d '{"tags":["existing-tag","x-clip"]}'
+```
+
+**Via Gallery CLI:**
+```
+# Filter to see images that could be excluded
+show tag x-clip
+show tag x-search
+```
+
+### Implementation Details
+
+Tags are checked at query time in the vector search functions:
+
+```typescript
+// src/utils/searchExclusion.ts
+export const EXCLUDE_CLIP_TAG = 'x-clip';
+export const EXCLUDE_COLOR_TAG = 'x-color';
+export const EXCLUDE_ALL_SEARCH_TAG = 'x-search';
+
+export function shouldExcludeFromCLIP(tags: string[]): boolean {
+  return tags.some(tag => 
+    tag === EXCLUDE_CLIP_TAG || 
+    tag === EXCLUDE_ALL_SEARCH_TAG
+  );
+}
+
+export function shouldExcludeFromColor(tags: string[]): boolean {
+  return tags.some(tag => 
+    tag === EXCLUDE_COLOR_TAG || 
+    tag === EXCLUDE_ALL_SEARCH_TAG
+  );
+}
+```
+
+---
+
+## Current Search Capabilities
+
+### Implemented Search Types
+
+| Search Type | API | UI Location |
+|-------------|-----|-------------|
+| **Text/Semantic** | `POST /api/images/search` | Gallery search bar |
+| **Color (hex)** | `POST /api/images/search` | Gallery search bar |
+| **Similar (CLIP)** | `GET /api/images/{id}/similar?type=clip` | Semantic Cluster |
+| **Similar (color)** | `GET /api/images/{id}/similar?type=color` | Semantic Cluster |
+| **Antipode (CLIP)** | `POST /api/images/{id}/antipode` | Antipode Search |
+| **Antipode (color)** | `POST /api/images/{id}/antipode` | Antipode Search |
+
+### Search API Examples
+
+```bash
+# Text search
+curl -X POST http://localhost:3000/api/images/search \
+  -H "Content-Type: application/json" \
+  -d '{"type":"text","query":"dog playing in park","limit":24}'
+
+# Color search
+curl -X POST http://localhost:3000/api/images/search \
+  -H "Content-Type: application/json" \
+  -d '{"type":"color","query":"#3B82F6","limit":24}'
+
+# Similar images
+curl "http://localhost:3000/api/images/{id}/similar?type=clip&limit=12"
+
+# Antipode search
+curl -X POST http://localhost:3000/api/images/{id}/antipode \
+  -H "Content-Type: application/json" \
+  -d '{"type":"clip","limit":8}'
+```
+
+### Legacy Text Search
+
+The gallery also supports client-side text filtering based on:
 - Filename
 - Display name
 - Description
@@ -505,62 +643,80 @@ REDIS_URL=redis://default:xxx@xxx.redis.cloud:6379
 
 ## Implementation Roadmap
 
-### Phase 1: Foundation (Current)
+### Phase 1: Foundation ✅ COMPLETE
 - [x] File-based persistent cache
 - [x] Redis cache storage adapter
-- [ ] Redis Stack deployment guide
+- [x] Redis Stack deployment (Docker)
+- [x] npm scripts for Redis management
 
-### Phase 2: Vector Search Infrastructure
-- [ ] Choose vector database (Redis Stack recommended)
-- [ ] Create vector index schema (CLIP + color embeddings)
-- [ ] Add embedding fields to image metadata
+### Phase 2: Vector Search Infrastructure ✅ COMPLETE
+- [x] Redis Stack with RediSearch
+- [x] Vector index schema (CLIP 512-dim + color embeddings)
+- [x] Embedding fields in Redis
+- [x] Cosine similarity search
 
-### Phase 3: CLIP Embedding Generation
-- [ ] Integrate CLIP model (Cloudflare Workers AI recommended)
-- [ ] Generate CLIP embeddings on image upload
-- [ ] Batch process existing images (~$0.07 one-time)
-- [ ] Store embeddings in vector database
+### Phase 3: CLIP Embedding Generation ✅ COMPLETE
+- [x] HuggingFace API integration (recommended)
+- [x] Local Python CLIP option
+- [x] Generate CLIP embeddings on image upload
+- [x] Batch processing script (`backfill-embeddings.mjs`)
+- [x] Store embeddings in Redis
 
-### Phase 4: Color Embedding Generation
-- [ ] Implement color histogram extraction (client-side JS)
-- [ ] Extract dominant colors (k-means clustering)
-- [ ] Calculate average color per image
-- [ ] Store color embeddings alongside CLIP vectors
+### Phase 4: Color Embedding Generation ✅ COMPLETE
+- [x] Color histogram extraction (server-side)
+- [x] Dominant colors extraction
+- [x] Average color calculation
+- [x] Store color embeddings alongside CLIP vectors
 
-### Phase 5: Search API
-- [ ] Create `/api/images/similar` endpoint (CLIP-based)
-- [ ] Create `/api/images/similar-colors` endpoint
-- [ ] Accept image ID or uploaded image
-- [ ] Return top N similar images with scores
-- [ ] Support combined queries (similar + same colors)
+### Phase 5: Search API ✅ COMPLETE
+- [x] `/api/images/search` unified endpoint
+- [x] `/api/images/{id}/similar` endpoint (CLIP + color modes)
+- [x] `/api/images/{id}/antipode` endpoint (find opposites)
+- [x] Text-to-image queries
+- [x] Hex color queries
+- [x] Return top N with similarity scores
 
-### Phase 6: UI Integration
-- [ ] Add "Find Similar" button to image card
-- [ ] Add "Find Similar" button to image detail page
-- [ ] Add "Find Same Colors" button
-- [ ] Create similarity results modal/panel
-- [ ] Add "More like this" to search interface
-- [ ] Color picker search ("find images with this color")
+### Phase 6: UI Integration ✅ COMPLETE
+- [x] Semantic Cluster component (similar images)
+- [x] Antipode Search component (opposite images)
+- [x] Toggle between CLIP/color modes
+- [x] Hover previews with distance scores
+- [x] Click to navigate
+- [x] Copy image lists to clipboard
 
-### Phase 7: Advanced Features
-- [ ] Text-to-image search ("find sunset photos")
-- [ ] Combined filters (similar + in folder X + date range)
-- [ ] Bulk similarity grouping (find all near-duplicates)
-- [ ] Color palette extraction and display
-- [ ] "Find complementary colors" search
-- [ ] Mood/tone search (warm, cool, vibrant, muted)
+### Phase 7: Search Exclusions ✅ COMPLETE
+- [x] `x-clip` tag (exclude from semantic search)
+- [x] `x-color` tag (exclude from color search)
+- [x] `x-search` tag (exclude from all searches)
+- [x] UI toggles on image detail page
+- [x] Query-time filtering
+
+### Phase 8: Advanced Features 🔄 IN PROGRESS
+- [x] Gallery CLI embedding filter commands
+- [ ] Bulk similarity grouping (find near-duplicates)
+- [ ] Combined filters (similar + folder + date range)
+- [ ] Color palette display on image detail
+- [ ] Mood/tone search (warm, cool, vibrant)
+
+---
+
+## Future Enhancements
+
+Potential features not yet implemented:
+
+- **Bulk duplicate detection** — Find visually similar images across library
+- **Auto-tagging** — Suggest tags based on CLIP concepts
+- **Color palette extraction** — Show dominant colors on detail page
+- **Mood classification** — Warm/cool/vibrant/muted filters
+- **Face detection** — Group images by detected faces
+- **OCR search** — Find images containing specific text
 
 ---
 
 ## Resources
 
 - [Redis Vector Similarity Search](https://redis.io/docs/stack/search/reference/vectors/)
-- [Cloudflare Vectorize](https://developers.cloudflare.com/vectorize/)
-- [Cloudflare Workers AI - CLIP](https://developers.cloudflare.com/workers-ai/models/clip/)
-- [Cloudflare Workers AI Pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/)
-- [Pinecone Documentation](https://docs.pinecone.io/)
-- [Qdrant Documentation](https://qdrant.tech/documentation/)
-- [pgvector](https://github.com/pgvector/pgvector)
+- [HuggingFace Inference API](https://huggingface.co/docs/api-inference/index)
 - [OpenAI CLIP](https://openai.com/research/clip)
-- [Color Histogram Tutorial](https://www.pyimagesearch.com/2014/01/22/clever-girl-a-guide-to-utilizing-color-histograms-for-computer-vision-and-image-search-engines/)
-- [K-Means Color Extraction](https://www.timpoulsen.com/2018/finding-the-dominant-colors-of-an-image.html)
+- [Photarium Features Guide](./features_and_operations.md)
+- [Redis Backup Guide](./redis-backup.md)

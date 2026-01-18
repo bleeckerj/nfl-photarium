@@ -11,7 +11,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Search, X } from 'lucide-react';
+import { Search, X, Clipboard, Check } from 'lucide-react';
 import Image from 'next/image';
 import { getCloudflareImageUrl } from '@/utils/imageUtils';
 
@@ -35,6 +35,8 @@ interface ConceptRadarProps {
   className?: string;
   size?: number;
   onImageClick?: (imageId: string) => void;
+  copyVariant?: string;
+  onCopySuccess?: (message: string) => void;
 }
 
 // Concept pairs must match the API
@@ -51,14 +53,38 @@ const CONCEPT_PAIRS: [string, string][] = [
   ['cold', 'warm'],
 ];
 
-export function ConceptRadar({ imageId, className = '', size = 360, onImageClick }: ConceptRadarProps) {
+export function ConceptRadar({ imageId, className = '', size = 360, onImageClick, copyVariant = 'full', onCopySuccess }: ConceptRadarProps) {
   const [concepts, setConcepts] = useState<ConceptScore[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [clickTarget, setClickTarget] = useState<{ x: number; y: number; scores: number[] } | null>(null);
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [searching, setSearching] = useState(false);
+  const [copied, setCopied] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
+
+  // Copy search results to clipboard in YAML format
+  const handleCopyResults = useCallback(async () => {
+    if (!searchResults || searchResults.length === 0) return;
+
+    const accountHash = process.env.NEXT_PUBLIC_CLOUDFLARE_ACCOUNT_HASH || 'gaLGizR3kCgx5yRLtiRIOw';
+    const variant = copyVariant || 'full';
+
+    const yaml = 'imagesFromGridDirectory:\n' + searchResults.map(result => {
+      const url = `https://imagedelivery.net/${accountHash}/${result.imageId}/${variant}?format=webp`;
+      const altText = result.filename || result.imageId;
+      return `  - url: ${url}\n    altText: "${altText}"`;
+    }).join('\n');
+
+    try {
+      await navigator.clipboard.writeText(yaml);
+      setCopied(true);
+      onCopySuccess?.(`Copied ${searchResults.length} images to clipboard`);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  }, [searchResults, copyVariant, onCopySuccess]);
 
   const fetchConcepts = useCallback(async () => {
     if (!imageId) return;
@@ -178,23 +204,43 @@ export function ConceptRadar({ imageId, className = '', size = 360, onImageClick
     setSearchResults(null);
 
     // Build text query from the dominant concepts at click point
-    const queryParts: string[] = [];
-    scores.forEach((score, i) => {
-      const [negative, positive] = CONCEPT_PAIRS[i];
-      const intensity = Math.abs(score);
-      if (intensity > 0.02) { // Only include if above threshold
-        const word = score >= 0 ? positive : negative;
-        if (intensity > 0.1) {
-          queryParts.push(`very ${word}`);
-        } else {
-          queryParts.push(word);
-        }
+    // Sort by absolute intensity and pick only the strongest 2-3
+    const rankedConcepts = scores
+      .map((score, i) => ({
+        score,
+        intensity: Math.abs(score),
+        negative: CONCEPT_PAIRS[i][0],
+        positive: CONCEPT_PAIRS[i][1],
+      }))
+      .filter(c => c.intensity > 0.04) // Higher threshold - only meaningful signals
+      .sort((a, b) => b.intensity - a.intensity)
+      .slice(0, 3); // Top 3 only
+
+    const queryParts: string[] = rankedConcepts.map(c => {
+      const word = c.score >= 0 ? c.positive : c.negative;
+      // More granular intensity modifiers
+      if (c.intensity > 0.15) {
+        return `extremely ${word}`;
+      } else if (c.intensity > 0.10) {
+        return `very ${word}`;
+      } else if (c.intensity > 0.06) {
+        return `${word}`;
+      } else {
+        return `slightly ${word}`;
       }
     });
 
-    const textQuery = queryParts.length > 0 
-      ? `a ${queryParts.slice(0, 4).join(', ')} image`
-      : 'an image';
+    // Vary query structure based on concept count for more distinctive embeddings
+    let textQuery: string;
+    if (queryParts.length === 0) {
+      textQuery = 'a photograph';
+    } else if (queryParts.length === 1) {
+      textQuery = `${queryParts[0]} imagery`;
+    } else if (queryParts.length === 2) {
+      textQuery = `${queryParts[0]} and ${queryParts[1]}`;
+    } else {
+      textQuery = `${queryParts[0]}, ${queryParts[1]}, ${queryParts[2]}`;
+    }
 
     try {
       const response = await fetch('/api/images/search', {
@@ -440,12 +486,23 @@ export function ConceptRadar({ imageId, className = '', size = 360, onImageClick
               <Search className="h-3 w-3" />
               Semantic Search Results
             </h4>
-            <button
-              onClick={clearSearch}
-              className="text-gray-500 hover:text-gray-300 p-1"
-            >
-              <X className="h-4 w-4" />
-            </button>
+            <div className="flex items-center gap-1">
+              {searchResults && searchResults.length > 0 && (
+                <button
+                  onClick={handleCopyResults}
+                  className="text-gray-500 hover:text-amber-400 p-1 transition-colors"
+                  title="Copy images as YAML"
+                >
+                  {copied ? <Check className="h-4 w-4 text-green-500" /> : <Clipboard className="h-4 w-4" />}
+                </button>
+              )}
+              <button
+                onClick={clearSearch}
+                className="text-gray-500 hover:text-gray-300 p-1"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
           </div>
           
           {searching ? (

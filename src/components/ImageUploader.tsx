@@ -310,6 +310,15 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
   const [pageImportLoading, setPageImportLoading] = useState(false);
   const [pageImportError, setPageImportError] = useState<string | null>(null);
   const [pageImportAllowInsecure, setPageImportAllowInsecure] = useState(false);
+  const [pageImportScrollMode, setPageImportScrollMode] = useState(false);
+  const [pageImportMaxScrolls, setPageImportMaxScrolls] = useState('10');
+  const [pageImportMaxPages, setPageImportMaxPages] = useState('1');
+  const [pageImportProgress, setPageImportProgress] = useState<{
+    message: string;
+    scrollCount: number;
+    imageCount: number;
+    pageNum?: number;
+  } | null>(null);
   const [previewFailures, setPreviewFailures] = useState<Record<string, boolean>>({});
   const [animateFps, setAnimateFps] = useState<string>('');
   const [animateFpsTouched, setAnimateFpsTouched] = useState(false);
@@ -1350,13 +1359,119 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     try {
       setPageImportLoading(true);
       setPageImportError(null);
+      setPageImportProgress(null);
+      
+      // For scroll mode, use streaming SSE endpoint for progressive loading
+      if (pageImportScrollMode) {
+        const maxScrolls = Number(pageImportMaxScrolls) || 10;
+        const maxPages = Number(pageImportMaxPages) || 1;
+        
+        const response = await fetch('/api/import/page/scroll/stream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: pageImportUrl.trim(),
+            maxScrolls,
+            maxPages
+          })
+        });
+
+        if (!response.ok || !response.body) {
+          throw new Error('Failed to start page scan');
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let totalImages = 0;
+        let scrollCount = 0;
+        const existingUrls = new Set(queuedFiles.map(f => f.remoteUrl || f.originalUrl || f.filename));
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          let eventType = '';
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              eventType = line.slice(7).trim();
+            } else if (line.startsWith('data: ') && eventType) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                
+                if (eventType === 'status') {
+                  setPageImportProgress({
+                    message: data.message || 'Processing...',
+                    scrollCount: data.scrollCount || 0,
+                    imageCount: data.imageCount || 0
+                  });
+                  scrollCount = data.scrollCount || 0;
+                } else if (eventType === 'image') {
+                  // Add image to queue progressively
+                  const imageUrl = data.url;
+                  if (imageUrl && !existingUrls.has(imageUrl)) {
+                    existingUrls.add(imageUrl);
+                    totalImages++;
+                    
+                    const newItem: QueuedFile = {
+                      id: createQueueId(),
+                      filename: data.filename || imageUrl.split('/').pop() || 'remote-image',
+                      remoteUrl: imageUrl,
+                      previewUrl: imageUrl,
+                      originalUrl: imageUrl,
+                      selected: true
+                    };
+                    
+                    setQueuedFiles(prev => [...prev, newItem]);
+                  }
+                } else if (eventType === 'done') {
+                  setPageImportProgress({
+                    message: data.message || 'Complete',
+                    scrollCount: data.scrollCount || scrollCount,
+                    imageCount: data.imageCount || totalImages
+                  });
+                } else if (eventType === 'error') {
+                  throw new Error(data.error || 'Unknown error');
+                }
+              } catch (parseErr) {
+                // Ignore parse errors for incomplete data
+                if (eventType === 'error') {
+                  throw parseErr;
+                }
+              }
+              eventType = '';
+            }
+          }
+        }
+
+        if (totalImages === 0) {
+          setPageImportError(`No images found after ${scrollCount} scroll${scrollCount !== 1 ? 's' : ''}. The page may require login, use complex lazy-loading, or block automated browsers.`);
+        } else {
+          console.log(`[page-import] Streamed ${totalImages} images`);
+        }
+        
+        if (!sourceUrl.trim()) {
+          setSourceUrl(pageImportUrl.trim());
+        }
+        setPageImportUrl('');
+        
+        // Clear progress after a brief delay
+        setTimeout(() => setPageImportProgress(null), 3000);
+        return;
+      }
+      
+      // Non-scroll mode: use original endpoint
       const response = await fetch('/api/import/page', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: pageImportUrl.trim(),
           minBytes: 8 * 1024,
-          allowInsecure: pageImportAllowInsecure
+          allowInsecure: pageImportAllowInsecure,
         })
       });
       const contentType = response.headers.get('content-type') || '';
@@ -1372,14 +1487,13 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         throw new Error('Failed to inspect page');
       }
       const images = Array.isArray(data?.images) ? data.images : [];
+      
       if (images.length === 0) {
-        // Not a catastrophic error - just inform the user gracefully
-        setPageImportError(
-          'No images found on that page. The images may be loaded via JavaScript or otherwise obfuscated. ' +
-          'Try using your browser\'s dev tools (Network tab) to locate the image URL directly.'
-        );
+        setPageImportError('No images found on that page. The images may be loaded via JavaScript—try enabling "Scroll mode" to load infinite scroll content.');
         return;
       }
+      
+      console.log(`[page-import] Received ${images.length} images from server`);
 
       const newItems: QueuedFile[] = images.map((image: { url: string; filename?: string; contentLength?: number; contentType?: string }) => ({
         id: createQueueId(),
@@ -1395,6 +1509,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       setQueuedFiles((prev) => {
         const existing = new Set(prev.map((item) => item.remoteUrl || item.originalUrl || item.filename));
         const filtered = newItems.filter((item) => !existing.has(item.remoteUrl || item.originalUrl || item.filename));
+        console.log(`[page-import] Adding ${filtered.length} new images (${newItems.length - filtered.length} duplicates skipped)`);
         return [...prev, ...filtered];
       });
       if (!sourceUrl.trim()) {
@@ -1611,7 +1726,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
             disabled={omitOriginalUrl}
             className="w-full border border-gray-300 rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
           />
-          <p className="text-xs text-gray-500 mt-1">Asset URL used for duplicate detection</p>
+          {/* <p className="text-xs text-gray-500 mt-1">Asset URL</p> */}
         </div>
         <div>
           <label htmlFor="source-url-input" className="block text-xs font-mono font-medium text-gray-700 mb-2">
@@ -1761,15 +1876,100 @@ A long list of filenames is not user friendly and essentially useless for select
             onChange={(e) => setPageImportUrl(e.target.value)}
             placeholder="https://example.com/gallery"
             className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+            disabled={pageImportLoading}
           />
           <button
             type="button"
             onClick={handleImportFromPage}
             disabled={pageImportLoading || !pageImportUrl.trim()}
-            className="px-4 py-2 text-xs bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+            className="px-4 py-2 text-xs bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
           >
-            {pageImportLoading ? 'Scanning…' : 'Scan page'}
+            {pageImportLoading && <Loader2 className="h-3 w-3 animate-spin" />}
+            {pageImportLoading ? (pageImportScrollMode ? 'Scrolling…' : 'Scanning…') : 'Scan page'}
           </button>
+        </div>
+        
+        {/* Progress indicator for scroll mode */}
+        {pageImportLoading && pageImportScrollMode && pageImportProgress && (
+          <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="flex items-center gap-3">
+              <div className="flex-shrink-0">
+                <Loader2 className="h-5 w-5 text-blue-600 animate-spin" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-blue-900">{pageImportProgress.message}</p>
+                <div className="flex items-center gap-4 mt-1">
+                  {pageImportProgress.pageNum && Number(pageImportMaxPages) > 1 && (
+                    <span className="text-[11px] text-blue-700">
+                      📄 Page {pageImportProgress.pageNum}
+                    </span>
+                  )}
+                  <span className="text-[11px] text-blue-700">
+                    {pageImportProgress.scrollCount} scroll{pageImportProgress.scrollCount !== 1 ? 's' : ''}
+                  </span>
+                  <span className="text-[11px] text-blue-700">
+                    {pageImportProgress.imageCount} image{pageImportProgress.imageCount !== 1 ? 's' : ''} found
+                  </span>
+                </div>
+              </div>
+            </div>
+            {pageImportProgress.imageCount > 0 && (
+              <p className="text-[10px] text-blue-600 mt-2">
+                Images are being added to your queue as they&apos;re discovered…
+              </p>
+            )}
+          </div>
+        )}
+        
+        {/* Done indicator (brief) */}
+        {!pageImportLoading && pageImportProgress && (
+          <div className="mt-3 p-2 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2">
+            <CheckCircle className="h-4 w-4 text-green-600" />
+            <span className="text-xs text-green-800">
+              {pageImportProgress.message} — {pageImportProgress.imageCount} image{pageImportProgress.imageCount !== 1 ? 's' : ''} added
+            </span>
+          </div>
+        )}
+        
+        <div className="mt-2 flex flex-wrap items-center gap-4">
+          <label className="flex items-center gap-2 text-[11px] text-gray-600">
+            <input
+              type="checkbox"
+              checked={pageImportScrollMode}
+              onChange={(e) => setPageImportScrollMode(e.target.checked)}
+              className="h-3 w-3"
+              disabled={pageImportLoading}
+            />
+            Scroll mode (for infinite scroll pages)
+          </label>
+          {pageImportScrollMode && (
+            <>
+              <label className="flex items-center gap-2 text-[11px] text-gray-600">
+                Max scrolls
+                <input
+                  type="number"
+                  min="1"
+                  max="50"
+                  value={pageImportMaxScrolls}
+                  onChange={(e) => setPageImportMaxScrolls(e.target.value)}
+                  className="w-16 border border-gray-300 rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
+                  disabled={pageImportLoading}
+                />
+              </label>
+              <label className="flex items-center gap-2 text-[11px] text-gray-600">
+                Max pages
+                <input
+                  type="number"
+                  min="1"
+                  max="20"
+                  value={pageImportMaxPages}
+                  onChange={(e) => setPageImportMaxPages(e.target.value)}
+                  className="w-16 border border-gray-300 rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
+                  disabled={pageImportLoading}
+                />
+              </label>
+            </>
+          )}
         </div>
         <label className="mt-2 flex items-center gap-2 text-[11px] text-gray-600">
           <input
@@ -1777,12 +1977,15 @@ A long list of filenames is not user friendly and essentially useless for select
             checked={pageImportAllowInsecure}
             onChange={(e) => setPageImportAllowInsecure(e.target.checked)}
             className="h-3 w-3"
+            disabled={pageImportLoading}
           />
           Allow insecure TLS (expired/self-signed certs). Requires IMPORT_ALLOW_INSECURE_TLS=true on the server.
         </label>
         {pageImportError && <p className="text-xs text-red-600 mt-1">{pageImportError}</p>}
         <p className="text-[11px] text-gray-500 mt-1">
-          We’ll scan the page for image URLs, show thumbnails in your queue, and you can select what to ingest before uploading.
+          {pageImportScrollMode 
+            ? 'Uses a headless browser to scroll and follow pagination links. Set "Max pages" > 1 for paginated sites. Requires puppeteer.'
+            : 'Scans the page HTML for image URLs. Fast but may miss JavaScript-loaded content.'}
         </p>
       </div>
 
@@ -1913,12 +2116,12 @@ A long list of filenames is not user friendly and essentially useless for select
                     <img
                       src={previewUrl}
                       alt={item.filename}
-                      className="h-14 w-14 rounded border border-blue-200 object-cover bg-white"
+                      className="h-28 w-28 rounded border border-blue-200 object-cover bg-white"
                       onError={() => setPreviewFailures((prev) => ({ ...prev, [item.id]: true }))}
                       referrerPolicy="no-referrer"
                     />
                   ) : (
-                    <div className="h-14 w-14 rounded border border-blue-200 bg-white flex items-center justify-center text-[10px] text-gray-400">
+                    <div className="h-28 w-28 rounded border border-blue-200 bg-white flex items-center justify-center text-[10px] text-gray-400">
                       {item.file ? "Local file" : "No preview"}
                     </div>
                   )}

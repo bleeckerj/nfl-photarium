@@ -6,6 +6,12 @@ Never start the server. Ask me to start the server if needed.
 When you start the server, you step over your code tests.
 I control the server starting and stopping.
 
+# DOCUMENTATAION
+## Users' Manual / Quick Start Guide
+* Write clear, concise, and user-friendly documentation as new features are added.
+* Maintain this in the file `docs/features_and_operations.md`.
+
+
 # CODE INSTRUCTIONS FOR PHOTARIUM PROJECT
 ## Style
 * Ensure modularity and separation of concerns.
@@ -19,6 +25,7 @@ I control the server starting and stopping.
 
 ## EMOJIS and Documetation
 * Use emojis in console output and logs to enhance readability (e.g., ✓ for success, ⚠ for warnings, ✗ for errors).
+* Never use picture EMOJIS in UI components, or in the UI ever.
 * DO NOT use EMOJIS in production user-facing UI components or documentation, marketing website, etc. Only use SVG icons from icons8.com or similar.
 
 ## If there are long-running processes on the server, the UI should actively, vividly, and clearly indicate progress to the user. Animations, progress bars, spinners, and frequent updates with messages in the UI / browser view are absolutely required.

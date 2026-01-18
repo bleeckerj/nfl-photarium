@@ -288,13 +288,13 @@ export function AntipodeSearch({ imageId, className = '', onImageClick, copyVari
           }}
         >
           <div className="bg-gray-900 rounded-lg shadow-2xl border border-amber-700 overflow-hidden">
-            <div className="relative w-48 h-48">
+            <div className="relative w-80 h-80">
               <Image
-                src={getCloudflareImageUrl(hoverPreview.imageId, 'medium')}
+                src={getCloudflareImageUrl(hoverPreview.imageId, 'large')}
                 alt={hoverPreview.filename || 'Preview'}
                 fill
                 className="object-cover"
-                sizes="192px"
+                sizes="320px"
               />
             </div>
             {hoverPreview.filename && (

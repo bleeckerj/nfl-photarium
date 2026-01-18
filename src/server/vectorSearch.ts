@@ -257,7 +257,8 @@ export async function deleteImageVectors(imageId: string): Promise<void> {
  * Search for semantically distant images ("strangers") using CLIP embeddings
  * Returns images that are most UNLIKE the query embedding
  * 
- * Since RediSearch KNN returns most similar, we get extra results and reverse sort
+ * Strategy: Scan all vectors and compute cosine distance, return highest distances.
+ * With cosine distance in Redis: 0 = identical, 2 = opposite.
  * 
  * @param embedding - Query embedding (512-dim)
  * @param limit - Maximum results to return (default: 4)
@@ -269,8 +270,9 @@ export async function searchCLIPStrangers(
 ): Promise<VectorSearchResult[]> {
   const client = await getRedisClient();
 
-  // Get more results so we can take the most distant ones
-  const searchLimit = Math.max(50, limit * 5);
+  // Get ALL images with embeddings to find truly distant ones
+  // We query for a large number and then sort by distance DESC
+  const searchLimit = 500; // Scan up to 500 images
   const query = `*=>[KNN ${searchLimit} @${CLIP_FIELD} $vec AS score]`;
 
   const result = await client.call(
@@ -278,16 +280,20 @@ export async function searchCLIPStrangers(
     INDEX_NAME,
     query,
     'PARAMS', '2', 'vec', vectorToBuffer(embedding),
-    'SORTBY', 'score',
+    'SORTBY', 'score', 'ASC', // Lowest distance (most similar) first
+    'LIMIT', '0', searchLimit.toString(),
     'RETURN', '3', 'filename', 'folder', 'score',
     'DIALECT', '2'
   ) as [number, ...unknown[]];
 
   const allResults = parseSearchResults(result);
   
-  // Return the most distant ones (last in the similarity-sorted list)
-  // Reverse to have most distant first
-  return allResults.slice(-limit).reverse();
+  // Sort by score DESCENDING (highest distance = most different)
+  // Cosine distance: 0 = identical, 2 = opposite
+  allResults.sort((a, b) => b.score - a.score);
+  
+  // Return the top N most distant images
+  return allResults.slice(0, limit);
 }
 
 /**

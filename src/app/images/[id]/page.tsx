@@ -2108,6 +2108,8 @@ export default function ImageDetailPage() {
                           imageId={image.id} 
                           size={320}
                           onImageClick={(id) => window.location.href = `/images/${id}`}
+                          copyVariant={listVariant}
+                          onCopySuccess={(msg) => toast.push(msg)}
                         />
                       </div>
                       <div>

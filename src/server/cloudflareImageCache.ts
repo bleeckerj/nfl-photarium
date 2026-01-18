@@ -484,11 +484,48 @@ export const getCachedImagesSync = (): CachedCloudflareImage[] => {
 };
 
 export const getCachedImage = async (id: string) => {
+  // First check in-memory map
   if (cacheState.map.has(id)) {
     return cacheState.map.get(id);
   }
+  
+  // Try the images array (might be in there but not map due to race condition)
   const images = await getCachedImages();
-  return images.find(image => image.id === id);
+  const found = images.find(image => image.id === id);
+  if (found) {
+    return found;
+  }
+  
+  // Image not in cache - try fetching directly from Cloudflare API
+  // This handles the case where an image was just uploaded but hasn't propagated
+  // to the list API yet, or where cache was refreshed between upload and lookup
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+  
+  if (accountId && apiToken) {
+    try {
+      const response = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${id}`,
+        {
+          headers: { Authorization: `Bearer ${apiToken}` }
+        }
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.result) {
+          const cached = transformApiImageToCached(data.result);
+          // Add to cache so subsequent lookups are fast
+          upsertCachedImage(cached);
+          return cached;
+        }
+      }
+    } catch (err) {
+      console.warn('[Cache] Failed to fetch single image from Cloudflare:', err);
+    }
+  }
+  
+  return undefined;
 };
 
 export const refreshCloudflareImageCache = async () => {
