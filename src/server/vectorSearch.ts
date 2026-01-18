@@ -303,6 +303,7 @@ export async function searchByCLIP(
   limit = 10,
   filter?: string
 ): Promise<VectorSearchResult[]> {
+  console.log('[VectorSearch] searchByCLIP called with limit:', limit);
   const client = await getRedisClient();
 
   // Build KNN query
@@ -314,6 +315,7 @@ export async function searchByCLIP(
 
   const queryParts = filter ? `(${filter})` : '*';
   const query = `${queryParts}=>[KNN ${limit} @${CLIP_FIELD} $vec AS score]`;
+  console.log('[VectorSearch] Redis query:', query);
 
   const result = await client.call(
     'FT.SEARCH',
@@ -321,10 +323,12 @@ export async function searchByCLIP(
     query,
     'PARAMS', '2', 'vec', vectorToBuffer(embedding),
     'SORTBY', 'score',
+    'LIMIT', '0', limit.toString(),
     'RETURN', '3', 'filename', 'folder', 'score',
     'DIALECT', '2'
   ) as [number, ...unknown[]];
 
+  console.log('[VectorSearch] Redis result count:', result[0]);
   return parseSearchResults(result);
 }
 
@@ -352,6 +356,7 @@ export async function searchByColor(
     query,
     'PARAMS', '2', 'vec', vectorToBuffer(histogram),
     'SORTBY', 'score',
+    'LIMIT', '0', limit.toString(),
     'RETURN', '3', 'filename', 'folder', 'score',
     'DIALECT', '2'
   ) as [number, ...unknown[]];
@@ -370,6 +375,7 @@ export async function searchByText(
   textQuery: string,
   limit = 10
 ): Promise<VectorSearchResult[]> {
+  console.log('[VectorSearch] searchByText called with limit:', limit);
   // Import embedding service dynamically to avoid circular dependency
   const { generateClipTextEmbedding } = await import('./embeddingService');
   

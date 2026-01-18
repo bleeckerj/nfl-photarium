@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cleanString, parseCloudflareMetadata, pickCloudflareMetadata } from '@/utils/cloudflareMetadata';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { transformApiImageToCached, upsertCachedImage } from '@/server/cloudflareImageCache';
+import { upsertRegistryNamespace } from '@/server/namespaceRegistry';
 
 export async function PATCH(
   request: NextRequest,
@@ -21,7 +22,7 @@ export async function PATCH(
 
     const { id: imageId } = await params;
     const body = await request.json();
-    const { folder, tags, description, originalUrl, sourceUrl, parentId, displayName, altTag, variationSort, clearExif } = body;
+    const { folder, tags, description, originalUrl, sourceUrl, parentId, displayName, altTag, variationSort, clearExif, namespace } = body;
     
     if (!imageId) {
       return NextResponse.json(
@@ -39,8 +40,10 @@ export async function PATCH(
     const altTagProvided = Object.prototype.hasOwnProperty.call(body, 'altTag');
     const variationSortProvided = Object.prototype.hasOwnProperty.call(body, 'variationSort');
     const clearExifProvided = Object.prototype.hasOwnProperty.call(body, 'clearExif');
+    const namespaceProvided = Object.prototype.hasOwnProperty.call(body, 'namespace');
 
     const cleanFolder = cleanString(typeof folder === 'string' ? folder : undefined);
+    const cleanNamespace = cleanString(typeof namespace === 'string' ? namespace : undefined);
     const cleanDescription =
       typeof description === 'string'
         ? cleanString(description)
@@ -147,6 +150,14 @@ export async function PATCH(
       delete metadata.exif;
     }
 
+    // Update namespace if provided and register it
+    if (namespaceProvided) {
+      metadata.namespace = cleanNamespace ?? '';
+      if (cleanNamespace) {
+        await upsertRegistryNamespace(cleanNamespace);
+      }
+    }
+
     const metadataPayload = pickCloudflareMetadata(metadata);
 
     // Update image metadata in Cloudflare using JSON body
@@ -184,6 +195,7 @@ export async function PATCH(
     const finalAltTag = metadataPayload.altTag as string | undefined;
     const finalVariationSort =
       typeof metadataPayload.variationSort === 'number' ? metadataPayload.variationSort : undefined;
+    const finalNamespace = metadataPayload.namespace as string | undefined;
 
     const cachedImage = transformApiImageToCached({
       id: fetchedImageResult.result.id,
@@ -207,6 +219,7 @@ export async function PATCH(
       parentId: finalParentId,
       altTag: finalAltTag,
       variationSort: finalVariationSort,
+      namespace: finalNamespace,
     });
 
   } catch (error) {

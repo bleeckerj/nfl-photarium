@@ -1,6 +1,11 @@
 ---
 applyTo: '**/**'
 ---
+
+Never start the server. Ask me to start the server if needed.
+When you start the server, you step over your code tests.
+I control the server starting and stopping.
+
 # CODE INSTRUCTIONS FOR PHOTARIUM PROJECT
 ## Style
 * Ensure modularity and separation of concerns.
@@ -15,6 +20,9 @@ applyTo: '**/**'
 ## EMOJIS and Documetation
 * Use emojis in console output and logs to enhance readability (e.g., ✓ for success, ⚠ for warnings, ✗ for errors).
 * DO NOT use EMOJIS in production user-facing UI components or documentation, marketing website, etc. Only use SVG icons from icons8.com or similar.
+
+## If there are long-running processes on the server, the UI should actively, vividly, and clearly indicate progress to the user. Animations, progress bars, spinners, and frequent updates with messages in the UI / browser view are absolutely required.
+
 
 ## Stand-alone scripts
 When creating stand-alone scripts in the `scripts/` directory:

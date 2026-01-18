@@ -29,6 +29,8 @@ interface SemanticNeighborsProps {
   showStrangers?: boolean;
   className?: string;
   onImageClick?: (imageId: string) => void;
+  copyVariant?: string;
+  onCopySuccess?: (message: string) => void;
 }
 
 // Hover preview state
@@ -46,6 +48,8 @@ export function SemanticNeighbors({
   showStrangers = true,
   className = '',
   onImageClick,
+  copyVariant = 'w=1200',
+  onCopySuccess,
 }: SemanticNeighborsProps) {
   const [neighbors, setNeighbors] = useState<SimilarResult[]>([]);
   const [strangers, setStrangers] = useState<SimilarResult[]>([]);
@@ -66,6 +70,47 @@ export function SemanticNeighbors({
   const handleMouseLeave = useCallback(() => {
     setHoverPreview(null);
   }, []);
+
+  const handleCopyList = useCallback(async () => {
+    const allResults = [...neighbors, ...strangers];
+    if (allResults.length === 0) return;
+    
+    const formatEntriesAsYaml = (entries: { url: string; altText: string }[]) => {
+      const lines = ['imagesFromGridDirectory:'];
+      entries.forEach((entry) => {
+        lines.push(`  - url: ${entry.url}`);
+        lines.push(`    altText: ${JSON.stringify(entry.altText ?? '')}`);
+      });
+      return lines.join('\n');
+    };
+    
+    const entries = allResults.map((result) => ({
+      url: getCloudflareImageUrl(result.imageId, copyVariant),
+      altText: result.filename || ''
+    }));
+    
+    const payload = formatEntriesAsYaml(entries);
+    
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(payload);
+        onCopySuccess?.(type === 'clip' ? 'Semantic cluster copied' : 'Color neighbors copied');
+        return;
+      }
+      // Fallback for non-secure contexts
+      const textArea = document.createElement('textarea');
+      textArea.value = payload;
+      textArea.style.position = 'fixed';
+      textArea.style.left = '-999999px';
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      onCopySuccess?.(type === 'clip' ? 'Semantic cluster copied' : 'Color neighbors copied');
+    } catch (err) {
+      console.error('Failed to copy', err);
+    }
+  }, [neighbors, strangers, copyVariant, type, onCopySuccess]);
 
   const fetchSimilar = useCallback(async () => {
     if (!imageId) return;
@@ -214,6 +259,18 @@ export function SemanticNeighbors({
         <h4 className="text-sm font-medium text-gray-300">
           {type === 'clip' ? 'Semantic Cluster' : 'Color Neighbors'}
         </h4>
+        {(neighbors.length > 0 || strangers.length > 0) && (
+          <button
+            onClick={handleCopyList}
+            className="text-[10px] text-gray-500 hover:text-blue-400 transition-colors"
+            title="Copy image list to clipboard"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+          </button>
+        )}
       </div>
       
       <div className="space-y-3">

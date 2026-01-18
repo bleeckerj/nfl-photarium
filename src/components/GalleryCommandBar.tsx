@@ -23,6 +23,8 @@ interface GalleryCommandBarProps {
   currentPage: number;
   totalPages: number;
   onGoToPage: (page: number) => void;
+  embeddingFilter: 'none' | 'missing-clip' | 'missing-color' | 'missing-any';
+  onSetEmbeddingFilter: (filter: 'none' | 'missing-clip' | 'missing-color' | 'missing-any') => void;
 }
 
 const baseHelp = [
@@ -42,6 +44,8 @@ const baseHelp = [
   '- show only tags <a,b>: Hide every tag except the listed ones',
   '- parents only: Only show images that have variants',
   '- show all: Show every image, including solos',
+  '- show missing clip/color/embeddings: Filter to images without embeddings',
+  '- clear embedding filter: Remove embedding filter',
   '- page next/prev or page <n>: Navigate gallery pages',
   '- help: Show this command list'
 ].join(' ');
@@ -65,7 +69,9 @@ export default function GalleryCommandBar({
   onSetParentsOnly,
   currentPage,
   totalPages,
-  onGoToPage
+  onGoToPage,
+  embeddingFilter,
+  onSetEmbeddingFilter
 }: GalleryCommandBarProps) {
   const [inputValue, setInputValue] = useState('');
   const [statusLine, setStatusLine] = useState(baseHelp);
@@ -280,6 +286,37 @@ export default function GalleryCommandBar({
         toast.push('Solo images restored');
       }
       setStatusLine('Showing all images.');
+      return;
+    }
+
+    // Embedding filter commands
+    if (/^show\s+(missing\s+)?clip$/i.test(trimmed) || /^(missing|no)\s+clip$/i.test(trimmed)) {
+      onSetEmbeddingFilter('missing-clip');
+      toast.push('Filtering: missing CLIP embeddings');
+      setStatusLine('Showing images without CLIP embeddings.');
+      return;
+    }
+
+    if (/^show\s+(missing\s+)?color$/i.test(trimmed) || /^(missing|no)\s+color$/i.test(trimmed)) {
+      onSetEmbeddingFilter('missing-color');
+      toast.push('Filtering: missing color embeddings');
+      setStatusLine('Showing images without color embeddings.');
+      return;
+    }
+
+    if (/^show\s+(missing\s+)?(embeddings?|any)$/i.test(trimmed) || /^(missing|no)\s+embeddings?$/i.test(trimmed)) {
+      onSetEmbeddingFilter('missing-any');
+      toast.push('Filtering: missing any embedding');
+      setStatusLine('Showing images missing CLIP or color embeddings.');
+      return;
+    }
+
+    if (/^(clear|reset)\s+embed(ding)?(\s+filter)?$/i.test(trimmed)) {
+      if (embeddingFilter !== 'none') {
+        onSetEmbeddingFilter('none');
+        toast.push('Embedding filter cleared');
+      }
+      setStatusLine('Embedding filter cleared.');
       return;
     }
 

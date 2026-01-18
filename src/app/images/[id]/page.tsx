@@ -13,7 +13,7 @@ import ConceptRadar from '@/components/ConceptRadar';
 import SemanticNeighbors from '@/components/SemanticNeighbors';
 import HaikuDisplay from '@/components/HaikuDisplay';
 import AntipodeSearch from '@/components/AntipodeSearch';
-import { subscribeEmbeddingPending, type EmbeddingPendingEntry } from '@/utils/embeddingPending';
+import { subscribeEmbeddingPending, clearPendingIfHasEmbeddings, type EmbeddingPendingEntry } from '@/utils/embeddingPending';
 import { cleanString, pickCloudflareMetadata } from '@/utils/cloudflareMetadata';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { useDropzone } from 'react-dropzone';
@@ -281,6 +281,13 @@ export default function ImageDetailPage() {
   useEffect(() => {
     return subscribeEmbeddingPending(setEmbeddingPendingMap);
   }, []);
+
+  // Clear stale pending embedding status if the image already has embeddings
+  useEffect(() => {
+    if (image?.id && (image.hasClipEmbedding || image.hasColorEmbedding)) {
+      clearPendingIfHasEmbeddings(image.id, image.hasClipEmbedding, image.hasColorEmbedding);
+    }
+  }, [image?.id, image?.hasClipEmbedding, image?.hasColorEmbedding]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -2055,7 +2062,8 @@ export default function ImageDetailPage() {
               <span className={`px-2 py-0.5 rounded-full border ${image.hasColorEmbedding ? 'border-purple-200 bg-purple-50 text-purple-700' : 'border-gray-200 bg-gray-50 text-gray-500'}`}>
                 Color {image.hasColorEmbedding ? 'ready' : 'missing'}
               </span>
-              {pendingEmbedding && (
+              {/* Only show pending badge if image doesn't already have all embeddings */}
+              {pendingEmbedding && !(image.hasClipEmbedding && image.hasColorEmbedding) && (
                 <span className="inline-flex items-center gap-2 px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-700">
                   <span className="relative flex h-2 w-2">
                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75"></span>
@@ -2109,6 +2117,8 @@ export default function ImageDetailPage() {
                           limit={8}
                           showStrangers={true}
                           onImageClick={(id) => window.location.href = `/images/${id}`}
+                          copyVariant={listVariant}
+                          onCopySuccess={(msg) => toast.push(msg)}
                         />
                       </div>
                     </div>
@@ -2118,6 +2128,8 @@ export default function ImageDetailPage() {
                       imageId={image.id}
                       className="bg-gray-900/50 border border-amber-900/30 rounded-lg p-4"
                       onImageClick={(id) => window.location.href = `/images/${id}`}
+                      copyVariant={listVariant}
+                      onCopySuccess={(msg) => toast.push(msg)}
                     />
                   </div>
                 </details>

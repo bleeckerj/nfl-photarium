@@ -32,6 +32,8 @@ interface AntipodeSearchProps {
   imageId: string;
   className?: string;
   onImageClick?: (imageId: string) => void;
+  copyVariant?: string;
+  onCopySuccess?: (message: string) => void;
 }
 
 const CLIP_METHODS = [
@@ -68,7 +70,7 @@ interface HoverPreview {
   y: number;
 }
 
-export function AntipodeSearch({ imageId, className = '', onImageClick }: AntipodeSearchProps) {
+export function AntipodeSearch({ imageId, className = '', onImageClick, copyVariant = 'w=1200', onCopySuccess }: AntipodeSearchProps) {
   const [domain, setDomain] = useState<'clip' | 'color'>('clip');
   const [method, setMethod] = useState<string>('stranger');
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -90,6 +92,46 @@ export function AntipodeSearch({ imageId, className = '', onImageClick }: Antipo
   const handleMouseLeave = useCallback(() => {
     setHoverPreview(null);
   }, []);
+
+  const handleCopyList = useCallback(async () => {
+    if (results.length === 0) return;
+    
+    const formatEntriesAsYaml = (entries: { url: string; altText: string }[]) => {
+      const lines = ['imagesFromGridDirectory:'];
+      entries.forEach((entry) => {
+        lines.push(`  - url: ${entry.url}`);
+        lines.push(`    altText: ${JSON.stringify(entry.altText ?? '')}`);
+      });
+      return lines.join('\n');
+    };
+    
+    const entries = results.map((result) => ({
+      url: getCloudflareImageUrl(result.imageId, copyVariant),
+      altText: result.filename || ''
+    }));
+    
+    const payload = formatEntriesAsYaml(entries);
+    
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(payload);
+        onCopySuccess?.('Antipode results copied');
+        return;
+      }
+      // Fallback for non-secure contexts
+      const textArea = document.createElement('textarea');
+      textArea.value = payload;
+      textArea.style.position = 'fixed';
+      textArea.style.left = '-999999px';
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      onCopySuccess?.('Antipode results copied');
+    } catch (err) {
+      console.error('Failed to copy', err);
+    }
+  }, [results, copyVariant, onCopySuccess]);
 
   const search = useCallback(async () => {
     setLoading(true);
@@ -119,7 +161,7 @@ export function AntipodeSearch({ imageId, className = '', onImageClick }: Antipo
 
   return (
     <div className={className}>
-      <h4 className="text-sm font-medium text-gray-300 mb-3">Antipode Search</h4>
+      <h4 className="text-sm font-medium text-gray-100 mb-3">Antipode Search</h4>
       
       {/* Domain Toggle */}
       <div className="flex gap-2 mb-3">
@@ -158,7 +200,7 @@ export function AntipodeSearch({ imageId, className = '', onImageClick }: Antipo
             }`}
           >
             <div className="text-xs font-3270 text-gray-200">{m.label}</div>
-            <div className="text-[10px] text-gray-500">{m.desc}</div>
+            <div className="text-[10px] text-gray-100">{m.desc}</div>
           </button>
         ))}
       </div>
@@ -181,9 +223,19 @@ export function AntipodeSearch({ imageId, className = '', onImageClick }: Antipo
       {/* Results */}
       {lastSearch && results.length > 0 && (
         <div className="mt-4">
-          <div className="mb-2">
+          <div className="mb-2 flex items-center gap-2">
             <span className="text-xs font-3270 text-amber-400">{lastSearch.label}</span>
-            <span className="text-[10px] text-gray-500 ml-2">{lastSearch.desc}</span>
+            <span className="text-[10px] text-gray-100">{lastSearch.desc}</span>
+            <button
+              onClick={handleCopyList}
+              className="ml-auto text-gray-100 hover:text-amber-400 transition-colors"
+              title="Copy image list to clipboard"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+            </button>
           </div>
           
           <div className="grid grid-cols-4 gap-2">
@@ -222,7 +274,7 @@ export function AntipodeSearch({ imageId, className = '', onImageClick }: Antipo
       )}
 
       {lastSearch && results.length === 0 && !loading && !error && (
-        <p className="text-gray-500 text-xs mt-3 text-center">No antipodes found</p>
+        <p className="text-gray-300 text-xs mt-3 text-center">No antipodes found</p>
       )}
 
       {/* Hover preview tooltip */}

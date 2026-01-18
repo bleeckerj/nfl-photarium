@@ -8,7 +8,7 @@
  *   - type: 'text' | 'image' | 'color' | 'upload'
  *   - query: string (for text search or hex color)
  *   - imageId: string (for image-based search)
- *   - limit: number (default: 10, max: 50)
+ *   - limit: number (default: 48, max: 100)
  * 
  * Examples:
  *   POST { "type": "text", "query": "sunset on beach" }
@@ -46,7 +46,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const body = await request.json() as SearchRequest;
     const { type, query, imageId } = body;
-    const limit = Math.min(50, Math.max(1, body.limit ?? 10));
+    const limit = Math.min(100, Math.max(1, body.limit ?? 48));
+    
+    console.log('[Search API] Received request:', { type, query, limit, bodyLimit: body.limit });
 
     if (!type) {
       return NextResponse.json(

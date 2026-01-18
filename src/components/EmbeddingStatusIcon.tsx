@@ -45,8 +45,11 @@ export function EmbeddingStatusIcon({
 
   const hasBoth = hasClipEmbedding && hasColorEmbedding;
   const hasAny = hasClipEmbedding || hasColorEmbedding;
-  const isPending = pendingStatus === 'queued' || pendingStatus === 'embedding';
-  const isError = pendingStatus === 'error';
+  
+  // Ignore pending status if embeddings already exist (stale localStorage state)
+  const effectivePendingStatus = hasBoth ? undefined : pendingStatus;
+  const isPending = effectivePendingStatus === 'queued' || effectivePendingStatus === 'embedding';
+  const isError = effectivePendingStatus === 'error';
 
   // Determine status and colors
   let statusColor = '#6b7280'; // gray-500 - no embeddings
@@ -56,7 +59,7 @@ export function EmbeddingStatusIcon({
   if (isPending) {
     statusColor = '#f59e0b'; // amber-500
     fillOpacity = 0.6;
-    statusText = pendingStatus === 'queued' ? 'Embedding queued' : 'Embedding in progress';
+    statusText = effectivePendingStatus === 'queued' ? 'Embedding queued' : 'Embedding in progress';
   } else if (isError) {
     statusColor = '#ef4444'; // red-500
     fillOpacity = 0.6;

@@ -35,13 +35,13 @@ const HoverPreview: React.FC<HoverPreviewProps> = ({
     const maxAllowedHeight = Math.max(160, viewportHeight - VIEWPORT_PADDING * 2);
 
     if (!dimensions) {
-      const fallbackWidth = Math.min(400, maxAllowedWidth);
-      const fallbackHeight = Math.min(300, maxAllowedHeight);
+      const fallbackWidth = Math.min(600, maxAllowedWidth);
+      const fallbackHeight = Math.min(450, maxAllowedHeight);
       return { width: fallbackWidth, height: fallbackHeight };
     }
 
-    const maxWidth = Math.min(600, maxAllowedWidth);
-    const maxHeight = Math.min(450, maxAllowedHeight);
+    const maxWidth = Math.min(900, maxAllowedWidth);
+    const maxHeight = Math.min(700, maxAllowedHeight);
     const aspectRatio = dimensions.width / dimensions.height;
 
     let previewWidth = maxWidth;

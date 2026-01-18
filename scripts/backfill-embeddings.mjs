@@ -353,10 +353,13 @@ async function main() {
       const avgTime = recentTimings.reduce((a, b) => a + b, 0) / recentTimings.length;
       const remaining = toProcess.length - (i + 1);
       const eta = remaining * avgTime;
+      const totalElapsed = Date.now() - startTime;
+      const totalStr = formatDuration(totalElapsed);
       const etaStr = remaining > 0 ? `ETA: ${formatDuration(eta)}` : 'Done!';
+      const imgTimeStr = `${(embedElapsed/1000).toFixed(1)}s`;
       
       if (result.skipped) {
-        process.stdout.write(`⊘ skip ${(embedElapsed/1000).toFixed(1)}s | ${etaStr}\n`);
+        process.stdout.write(`⊘ skip (${imgTimeStr}) | Total: ${totalStr} | ${etaStr}\n`);
         log.verbose(`  Skipped: embeddings already exist`);
         skipped++;
       } else {
@@ -364,7 +367,7 @@ async function main() {
         if (result.clipGenerated) parts.push('CLIP');
         if (result.colorGenerated) parts.push('color');
         const colorPreview = result.dominantColors ? ` ${colorBlocksRow(result.dominantColors)}` : '';
-        process.stdout.write(`✓ ${parts.join('+')} ${(embedElapsed/1000).toFixed(1)}s${colorPreview} | ${etaStr}\n`);
+        process.stdout.write(`✓ ${parts.join('+')} (${imgTimeStr})${colorPreview} | Total: ${totalStr} | ${etaStr}\n`);
         log.verbose(`  Generated: ${parts.join(', ')}`);
         if (result.dominantColors) {
           log.verbose(`  Dominant colors: ${colorBlocksRow(result.dominantColors)} ${result.dominantColors.join(', ')}`);
@@ -381,9 +384,11 @@ async function main() {
       const recentTimings = timings.slice(-10);
       const avgTime = recentTimings.reduce((a, b) => a + b, 0) / recentTimings.length;
       const eta = remaining * avgTime;
+      const totalElapsed = Date.now() - startTime;
+      const totalStr = formatDuration(totalElapsed);
       const etaStr = remaining > 0 ? `ETA: ${formatDuration(eta)}` : '';
       
-      process.stdout.write(`✗ FAILED | ${etaStr}\n`);
+      process.stdout.write(`✗ FAILED | Total: ${totalStr} | ${etaStr}\n`);
       log.info(`  Error: ${error.message}`);
       failed++;
       errors.push({ id: image.id, filename: image.filename, error: error.message });

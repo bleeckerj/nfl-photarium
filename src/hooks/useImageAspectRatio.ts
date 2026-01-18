@@ -20,8 +20,11 @@ const aspectRatioCache = new Map<string, { aspectRatio: string; dimensions: { wi
  * @returns Object with aspect ratio, dimensions, loading state, and error
  */
 export function useImageAspectRatio(imageId: string, shouldCalculate: boolean = true): AspectRatioResult {
-  const [aspectRatio, setAspectRatio] = useState<string | null>(null);
-  const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(null);
+  // Initialize from cache synchronously to prevent flickering
+  const cached = imageId ? aspectRatioCache.get(imageId) : undefined;
+  
+  const [aspectRatio, setAspectRatio] = useState<string | null>(cached?.aspectRatio ?? null);
+  const [dimensions, setDimensions] = useState<{ width: number; height: number } | null>(cached?.dimensions ?? null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);

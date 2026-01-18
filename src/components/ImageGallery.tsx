@@ -9,7 +9,7 @@ import GalleryCommandBar from './GalleryCommandBar';
 import FolderManagerButton from './FolderManagerButton';
 import DateNavigator, { DateFilter } from './DateNavigator';
 import { EmbeddingStatusDot } from './EmbeddingStatusIcon';
-import { subscribeEmbeddingPending, type EmbeddingPendingEntry } from '@/utils/embeddingPending';
+import { subscribeEmbeddingPending, clearPendingIfHasEmbeddings, type EmbeddingPendingEntry } from '@/utils/embeddingPending';
 import { getCloudflareImageUrl, getMultipleImageUrls, getCloudflareDownloadUrl, IMAGE_VARIANTS } from '@/utils/imageUtils';
 import { useToast } from './Toast';
 import { useImageAspectRatio } from '@/hooks/useImageAspectRatio';
@@ -368,6 +368,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [bulkApplyDisplayName, setBulkApplyDisplayName] = useState(false);
   const [bulkDisplayNameMode, setBulkDisplayNameMode] = useState<'custom' | 'auto' | 'clear'>('custom');
   const [bulkDisplayNameInput, setBulkDisplayNameInput] = useState('');
+  const [bulkApplyNamespace, setBulkApplyNamespace] = useState(false);
+  const [bulkNamespaceInput, setBulkNamespaceInput] = useState('');
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkEmbeddingGenerating, setBulkEmbeddingGenerating] = useState(false);
@@ -379,6 +381,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [bulkAnimateError, setBulkAnimateError] = useState<string | null>(null);
   const [showDuplicatesOnly, setShowDuplicatesOnly] = useState<boolean>(storedPreferencesRef.current.showDuplicatesOnly ?? false);
   const [showBrokenOnly, setShowBrokenOnly] = useState<boolean>(storedPreferencesRef.current.showBrokenOnly ?? false);
+  const [embeddingFilter, setEmbeddingFilter] = useState<'none' | 'missing-clip' | 'missing-color' | 'missing-any'>('none');
   const [dateFilter, setDateFilter] = useState<DateFilter | null>(storedPreferencesRef.current.dateFilter ?? null);
   const [pageSize, setPageSize] = useState<number>(storedPreferencesRef.current.pageSize ?? DEFAULT_PAGE_SIZE);
   const [brokenAudit, setBrokenAudit] = useState<BrokenAudit>(() => loadBrokenAuditFromStorage());
@@ -420,6 +423,15 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   useEffect(() => {
     return subscribeEmbeddingPending(setEmbeddingPendingMap);
   }, []);
+
+  // Clear stale pending status for images that already have embeddings
+  useEffect(() => {
+    for (const image of images) {
+      if (image.hasClipEmbedding || image.hasColorEmbedding) {
+        clearPendingIfHasEmbeddings(image.id, image.hasClipEmbedding, image.hasColorEmbedding);
+      }
+    }
+  }, [images]);
 
   const namespaceOptions = useMemo(() => {
     const rawSeen = new Set(images.map((image) => image.namespace).filter(Boolean));
@@ -1102,6 +1114,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     setBulkApplyDisplayName(false);
     setBulkDisplayNameMode('custom');
     setBulkDisplayNameInput('');
+    setBulkApplyNamespace(false);
+    setBulkNamespaceInput('');
     setBulkAnimateFilename('');
     setBulkAnimateLoop(true);
     setBulkAnimateTouched(false);
@@ -1126,7 +1140,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       bulkApplyTags &&
       (bulkTagsMode === 'replace' || parsedBulkTags.length > 0);
     const hasDisplayNameChanges = bulkApplyDisplayName;
-    if (!bulkApplyFolder && !hasTagChanges && !hasDisplayNameChanges) {
+    const hasNamespaceChanges = bulkApplyNamespace;
+    if (!bulkApplyFolder && !hasTagChanges && !hasDisplayNameChanges && !hasNamespaceChanges) {
       toast.push('Choose at least one field to update');
       return;
     }
@@ -1164,6 +1179,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
               const baseName = target?.filename || '';
               payload.displayName = truncateMiddle(baseName, 64);
             }
+          }
+          if (bulkApplyNamespace) {
+            payload.namespace = bulkNamespaceInput.trim() || '';
           }
           return fetch(`/api/images/${id}/update`, {
             method: 'PATCH',
@@ -1203,12 +1221,14 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
               updatedDisplayName = truncateMiddle(img.filename || '', 64);
             }
           }
+          const updatedNamespace = bulkApplyNamespace ? (bulkNamespaceInput.trim() || undefined) : img.namespace;
 
           return {
             ...img,
             folder: bulkApplyFolder ? updatedFolder : img.folder,
             tags: updatedTags,
-            displayName: updatedDisplayName
+            displayName: updatedDisplayName,
+            namespace: updatedNamespace
           };
         })
       );
@@ -1231,6 +1251,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     bulkApplyDisplayName,
     bulkDisplayNameInput,
     bulkDisplayNameMode,
+    bulkApplyNamespace,
+    bulkNamespaceInput,
     images,
     selectedCount,
     selectedImageIds,
@@ -1678,17 +1700,33 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     return duplicatesSortedByFilename.filter((image) => brokenImageIds.has(image.id));
   }, [duplicatesSortedByFilename, showBrokenOnly, brokenImageIds]);
 
+  const embeddingFilteredImages = useMemo(() => {
+    if (embeddingFilter === 'none') {
+      return brokenFilteredImages;
+    }
+    return brokenFilteredImages.filter((image) => {
+      if (embeddingFilter === 'missing-clip') {
+        return !image.hasClipEmbedding;
+      }
+      if (embeddingFilter === 'missing-color') {
+        return !image.hasColorEmbedding;
+      }
+      // missing-any
+      return !image.hasClipEmbedding || !image.hasColorEmbedding;
+    });
+  }, [brokenFilteredImages, embeddingFilter]);
+
   const filteredWithVariants = useMemo(() => {
     if (!onlyWithVariants) {
-      return brokenFilteredImages;
+      return embeddingFilteredImages;
     }
     const parentIdsWithChildren = new Set(
       Object.entries(childrenMap)
         .filter(([, value]) => (value?.length ?? 0) > 0)
         .map(([key]) => key)
     );
-    return brokenFilteredImages.filter(image => parentIdsWithChildren.has(image.id));
-  }, [brokenFilteredImages, onlyWithVariants, childrenMap]);
+    return embeddingFilteredImages.filter(image => parentIdsWithChildren.has(image.id));
+  }, [embeddingFilteredImages, onlyWithVariants, childrenMap]);
 
   const sortedImages = useMemo(() => {
     return [...filteredWithVariants].sort((a, b) => new Date(b.uploaded).getTime() - new Date(a.uploaded).getTime());
@@ -2256,6 +2294,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             currentPage={pageIndex}
             totalPages={totalPages}
             onGoToPage={goToPageNumber}
+            embeddingFilter={embeddingFilter}
+            onSetEmbeddingFilter={setEmbeddingFilter}
           />
         </div>
           {hiddenFolders.length > 0 && (
@@ -3277,6 +3317,35 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                   )}
                   <p className="text-[0.6rem] text-gray-500">
                     Auto mode uses the filename trimmed to 64 characters.
+                  </p>
+                </div>
+              )}
+            </div>
+            <div className="space-y-3">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={bulkApplyNamespace}
+                  onChange={(e) => setBulkApplyNamespace(e.target.checked)}
+                  className="h-3 w-3"
+                />
+                Move to namespace
+              </label>
+              {bulkApplyNamespace && (
+                <div className="space-y-2">
+                  <MonoSelect
+                    value={bulkNamespaceInput}
+                    onChange={setBulkNamespaceInput}
+                    options={[
+                      { value: '', label: '[none]' },
+                      ...registryNamespaces.map(ns => ({ value: ns, label: ns }))
+                    ]}
+                    className="w-full"
+                    placeholder="[none]"
+                    size="sm"
+                  />
+                  <p className="text-[0.6rem] text-gray-500">
+                    Move selected images to a different namespace. Empty clears the namespace.
                   </p>
                 </div>
               )}

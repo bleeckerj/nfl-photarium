@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useDropzone } from "react-dropzone";
-import { Upload, X, CheckCircle, AlertCircle } from "lucide-react";
+import { Upload, X, CheckCircle, AlertCircle, Loader2, Zap, CloudUpload, Cpu, Sparkles } from "lucide-react";
 import clsx from "clsx";
 import MonoSelect from "./MonoSelect";
 import { normalizeOriginalUrl } from "@/utils/urlNormalization";
@@ -60,6 +60,182 @@ interface GalleryImageSummary {
   folder?: string | null;
   filename?: string;
   parentId?: string | null;
+}
+
+/**
+ * Kinetic Activity Indicator
+ * Shows prominent, animated feedback during bulk uploads and embedding generation
+ */
+interface ActivityStats {
+  total: number;
+  uploading: number;
+  uploaded: number;
+  embedding: number;
+  embedded: number;
+  errors: number;
+  embeddingQueue: number;
+}
+
+function ActivityIndicator({ stats, isActive }: { stats: ActivityStats; isActive: boolean }) {
+  const [dots, setDots] = useState(0);
+  const [pulsePhase, setPulsePhase] = useState(0);
+  
+  useEffect(() => {
+    if (!isActive) return;
+    const interval = setInterval(() => {
+      setDots(d => (d + 1) % 4);
+      setPulsePhase(p => (p + 1) % 3);
+    }, 400);
+    return () => clearInterval(interval);
+  }, [isActive]);
+
+  if (!isActive && stats.total === 0) return null;
+
+  const uploadProgress = stats.total > 0 ? (stats.uploaded / stats.total) * 100 : 0;
+  const embeddingProgress = stats.embedded > 0 || stats.embedding > 0 || stats.embeddingQueue > 0
+    ? (stats.embedded / (stats.embedded + stats.embedding + stats.embeddingQueue)) * 100
+    : 0;
+  
+  const totalWork = stats.uploading + stats.embedding + stats.embeddingQueue;
+  const isWorking = totalWork > 0;
+
+  // Calculate what phase of work we're in
+  const phase = stats.uploading > 0 ? 'upload' : stats.embedding > 0 || stats.embeddingQueue > 0 ? 'embed' : 'complete';
+  
+  return (
+    <div className={clsx(
+      "rounded-xl border-2 p-4 mb-4 transition-all duration-300",
+      isWorking 
+        ? "border-blue-400 bg-gradient-to-r from-blue-50 via-purple-50 to-blue-50 shadow-lg shadow-blue-200/50" 
+        : stats.errors > 0 
+          ? "border-amber-300 bg-amber-50"
+          : "border-emerald-300 bg-emerald-50"
+    )}>
+      {/* Main activity header */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-3">
+          {/* Animated icon */}
+          <div className={clsx(
+            "relative w-10 h-10 rounded-full flex items-center justify-center",
+            isWorking ? "bg-blue-500" : stats.errors > 0 ? "bg-amber-500" : "bg-emerald-500"
+          )}>
+            {isWorking ? (
+              <>
+                <div className="absolute inset-0 rounded-full bg-blue-400 animate-ping opacity-40" />
+                <div className="absolute inset-0 rounded-full bg-blue-300 animate-pulse opacity-30" />
+                {phase === 'upload' ? (
+                  <CloudUpload className="w-5 h-5 text-white animate-bounce" />
+                ) : (
+                  <Cpu className="w-5 h-5 text-white animate-spin" style={{ animationDuration: '2s' }} />
+                )}
+              </>
+            ) : stats.errors > 0 ? (
+              <AlertCircle className="w-5 h-5 text-white" />
+            ) : (
+              <Sparkles className="w-5 h-5 text-white" />
+            )}
+          </div>
+          
+          {/* Status text */}
+          <div>
+            <h3 className="text-sm font-bold text-gray-900">
+              {phase === 'upload' && `Uploading${'.'.repeat(dots)}`}
+              {phase === 'embed' && `Generating embeddings${'.'.repeat(dots)}`}
+              {phase === 'complete' && (stats.errors > 0 ? 'Completed with errors' : 'All done!')}
+            </h3>
+            <p className="text-xs text-gray-600">
+              {isWorking ? (
+                <>
+                  {stats.uploading > 0 && `${stats.uploading} uploading`}
+                  {stats.uploading > 0 && (stats.embedding > 0 || stats.embeddingQueue > 0) && ' · '}
+                  {(stats.embedding > 0 || stats.embeddingQueue > 0) && `${stats.embedding + stats.embeddingQueue} in embedding pipeline`}
+                </>
+              ) : (
+                `${stats.uploaded} images processed`
+              )}
+            </p>
+          </div>
+        </div>
+        
+        {/* Quick stats badges */}
+        <div className="flex items-center gap-2">
+          {stats.uploaded > 0 && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-medium">
+              <CheckCircle className="w-3 h-3" />
+              {stats.uploaded}
+            </span>
+          )}
+          {stats.errors > 0 && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-red-100 text-red-700 text-xs font-medium">
+              <AlertCircle className="w-3 h-3" />
+              {stats.errors}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Progress bars */}
+      {(stats.uploading > 0 || stats.uploaded > 0) && (
+        <div className="space-y-2">
+          {/* Upload progress */}
+          <div className="space-y-1">
+            <div className="flex justify-between text-[10px] text-gray-600">
+              <span className="flex items-center gap-1">
+                <CloudUpload className="w-3 h-3" />
+                Upload progress
+              </span>
+              <span>{stats.uploaded} / {stats.total}</span>
+            </div>
+            <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+              <div 
+                className={clsx(
+                  "h-full rounded-full transition-all duration-300",
+                  stats.uploading > 0 
+                    ? "bg-gradient-to-r from-blue-500 via-blue-400 to-blue-500 bg-[length:200%_100%] animate-[shimmer_1.5s_ease-in-out_infinite]"
+                    : "bg-emerald-500"
+                )}
+                style={{ width: `${uploadProgress}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Embedding progress */}
+          {(stats.embedding > 0 || stats.embeddingQueue > 0 || stats.embedded > 0) && (
+            <div className="space-y-1">
+              <div className="flex justify-between text-[10px] text-gray-600">
+                <span className="flex items-center gap-1">
+                  <Zap className="w-3 h-3" />
+                  Embeddings
+                </span>
+                <span>{stats.embedded} / {stats.embedded + stats.embedding + stats.embeddingQueue}</span>
+              </div>
+              <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                <div 
+                  className={clsx(
+                    "h-full rounded-full transition-all duration-300",
+                    stats.embedding > 0 
+                      ? "bg-gradient-to-r from-purple-500 via-purple-400 to-purple-500 bg-[length:200%_100%] animate-[shimmer_1.5s_ease-in-out_infinite]"
+                      : "bg-emerald-500"
+                  )}
+                  style={{ width: `${embeddingProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Live file ticker during active upload */}
+      {isWorking && stats.uploading > 0 && (
+        <div className="mt-3 pt-3 border-t border-gray-200">
+          <div className="flex items-center gap-2 text-xs text-gray-600">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            <span className="font-mono">Processing files...</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 const base64ToFile = (base64: string, filename: string, mimeType: string) => {
@@ -368,6 +544,31 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     [queuedFiles]
   );
 
+  // Activity stats for the prominent progress indicator
+  const activityStats = useMemo((): ActivityStats => {
+    const uploading = uploadedImages.filter(img => img.status === 'uploading').length;
+    const uploaded = uploadedImages.filter(img => img.status === 'success').length;
+    const errors = uploadedImages.filter(img => img.status === 'error').length;
+    const embedding = uploadedImages.filter(img => img.embeddingStatus === 'embedding').length;
+    const embedded = uploadedImages.filter(img => img.embeddingStatus === 'success').length;
+    const embeddingQueued = uploadedImages.filter(img => img.embeddingStatus === 'queued').length;
+    
+    return {
+      total: uploadedImages.length,
+      uploading,
+      uploaded,
+      embedding,
+      embedded,
+      errors,
+      embeddingQueue: embeddingQueueDepth + embeddingQueued
+    };
+  }, [uploadedImages, embeddingQueueDepth]);
+
+  const isActivityActive = useMemo(() => 
+    isUploading || activityStats.uploading > 0 || activityStats.embedding > 0 || embeddingQueueDepth > 0,
+    [isUploading, activityStats.uploading, activityStats.embedding, embeddingQueueDepth]
+  );
+
   useEffect(() => {
     if (animateFpsTouched) return;
     if (selectedQueuedCount === 0) {
@@ -455,6 +656,45 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       const shouldEmbedAnything = shouldEmbedClip || shouldEmbedColor;
 
       const folderToUse = resolveFolder();
+      
+      // Rate limiting configuration
+      const UPLOAD_DELAY_MS = 200; // Delay between uploads to avoid rate limits
+      const MAX_RETRIES = 3;
+      const RETRY_DELAY_MS = 2000; // Wait 2s before retry
+      const RATE_LIMIT_DELAY_MS = 5000; // Wait 5s if rate limited
+
+      // Helper to delay execution
+      const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+      // Helper to upload with retry logic
+      const uploadWithRetry = async (
+        formData: FormData, 
+        retryCount = 0
+      ): Promise<{ response: Response; result: unknown }> => {
+        const response = await fetch("/api/upload", {
+          method: "POST",
+          body: formData,
+        });
+
+        const result = await response.json();
+        
+        // Check for rate limiting or server errors that warrant retry
+        if (!response.ok && retryCount < MAX_RETRIES) {
+          const errorMessage = typeof result?.error === 'string' ? result.error.toLowerCase() : '';
+          const isRateLimit = response.status === 429 || errorMessage.includes('rate limit');
+          const isServerError = response.status >= 500;
+          const isTimeout = errorMessage.includes('timeout');
+          
+          if (isRateLimit || isServerError || isTimeout) {
+            const waitTime = isRateLimit ? RATE_LIMIT_DELAY_MS : RETRY_DELAY_MS;
+            console.log(`[Uploader] Retry ${retryCount + 1}/${MAX_RETRIES} after ${waitTime}ms (${isRateLimit ? 'rate limited' : isServerError ? 'server error' : 'timeout'})`);
+            await delay(waitTime);
+            return uploadWithRetry(formData, retryCount + 1);
+          }
+        }
+        
+        return { response, result };
+      };
 
       // Create initial entries for all files
       const initialImages: UploadedImage[] = filesToUpload.map((entry) => {
@@ -549,12 +789,13 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
             formData.append("parentId", selectedParentId);
           }
 
-          const response = await fetch("/api/upload", {
-            method: "POST",
-            body: formData,
-          });
+          // Add delay between uploads to avoid rate limits (except first file)
+          if (i > 0) {
+            await delay(UPLOAD_DELAY_MS);
+          }
 
-          const result = await response.json();
+          // Upload with automatic retry on rate limits/server errors
+          const { response, result } = await uploadWithRetry(formData);
 
           if (response.ok) {
             if (result && typeof result === 'object' && Array.isArray((result as { results?: unknown }).results)) {
@@ -616,8 +857,9 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
                 }, 500);
               }
             } else {
-              const serverId = result && typeof result === 'object' && 'id' in result && typeof (result as { id?: string }).id === 'string'
-                ? (result as { id?: string }).id as string
+              const typedResult = result as { id?: string; url?: string };
+              const serverId = typedResult && typeof typedResult === 'object' && 'id' in typedResult && typeof typedResult.id === 'string'
+                ? typedResult.id
                 : imageId;
               setUploadedImages((prev) =>
                 prev.map((img) =>
@@ -628,7 +870,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
                         status: "success",
                         embeddingStatus: shouldEmbedAnything ? "queued" : undefined,
                         embeddingRequested: shouldEmbedAnything ? { clip: shouldEmbedClip, color: shouldEmbedColor } : undefined,
-                        url: result.url,
+                        url: typedResult.url || '',
                         folder: folderToSend || undefined,
                         tags: tagsToSend
                           .trim()
@@ -1271,6 +1513,11 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     <div className="bg-white rounded-lg shadow-lg p-6">
       <h2 className="text-xs font-mono  text-gray-900 mb-4">Upload Images</h2>
 
+      {/* Activity Indicator - prominent progress during bulk operations */}
+      {(isActivityActive || activityStats.total > 0) && (
+        <ActivityIndicator stats={activityStats} isActive={isActivityActive} />
+      )}
+
       {/* Organization Controls */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 p-4 bg-gray-50 rounded-lg">
         <div>
@@ -1412,12 +1659,24 @@ A long list of filenames is not user friendly and essentially useless for select
       <div
         {...getRootProps()}
         className={clsx(
-          "border-2 border-dashed rounded-lg p-2 text-center transition-colors cursor-pointer",
-          isDragActive ? "border-blue-400 bg-blue-50" : "border-gray-300 hover:border-gray-400"
+          "border-2 border-dashed rounded-lg p-2 text-center transition-all cursor-pointer relative overflow-hidden",
+          isDragActive ? "border-blue-400 bg-blue-50" : 
+          isUploading ? "border-blue-300 bg-gradient-to-r from-blue-50 via-white to-blue-50" :
+          "border-gray-300 hover:border-gray-400"
         )}
       >
+        {/* Animated border during upload */}
+        {isUploading && (
+          <div className="absolute inset-0 rounded-lg pointer-events-none">
+            <div className="absolute inset-0 rounded-lg border-2 border-blue-400 animate-pulse" />
+          </div>
+        )}
         <input {...getInputProps()} />
-        <Upload className="mx-auto h-8 w-8 text-gray-400 mb-4" />
+        {isUploading ? (
+          <Loader2 className="mx-auto h-8 w-8 text-blue-500 mb-4 animate-spin" />
+        ) : (
+          <Upload className="mx-auto h-8 w-8 text-gray-400 mb-4" />
+        )}
         <p className="text-xs font-mono font-medium text-gray-900 mb-2">
           {isUploading ? "Uploading..." : isDragActive ? "Drop images or a .zip here" : "Drag & drop images or a .zip here"}
         </p>
@@ -1874,7 +2133,16 @@ A long list of filenames is not user friendly and essentially useless for select
 
       {uploadedImages.length > 0 && (
         <div className="mt-6">
-          <h3 className="text-lg font-medium text-gray-900 mb-4">Uploaded Images ({uploadedImages.length})</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-medium text-gray-900">Uploaded Images ({uploadedImages.length})</h3>
+            <button
+              onClick={() => setUploadedImages([])}
+              className="text-sm text-gray-500 hover:text-red-600 transition-colors flex items-center gap-1"
+            >
+              <X className="h-4 w-4" />
+              Clear All
+            </button>
+          </div>
           <div className="space-y-3">
             {uploadedImages.map((image) => (
               <div key={image.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">

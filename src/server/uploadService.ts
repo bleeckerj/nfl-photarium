@@ -229,6 +229,37 @@ export async function uploadImageBuffer({
     }
   );
 
+  // Handle non-JSON responses (rate limits, timeouts, HTML error pages)
+  const contentType = cloudflareResponse.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    const textBody = await cloudflareResponse.text();
+    console.error('Cloudflare returned non-JSON response:', {
+      status: cloudflareResponse.status,
+      statusText: cloudflareResponse.statusText,
+      contentType,
+      bodyPreview: textBody.slice(0, 500)
+    });
+    
+    // Detect specific error conditions
+    let errorMessage = 'Cloudflare returned an unexpected response';
+    if (cloudflareResponse.status === 429) {
+      errorMessage = 'Rate limited by Cloudflare. Please wait and try again.';
+    } else if (cloudflareResponse.status === 503 || cloudflareResponse.status === 502) {
+      errorMessage = 'Cloudflare service temporarily unavailable. Please retry.';
+    } else if (cloudflareResponse.status === 408 || textBody.includes('timeout')) {
+      errorMessage = 'Request timed out. The file may be too large or the connection is slow.';
+    } else if (cloudflareResponse.status >= 500) {
+      errorMessage = `Cloudflare server error (${cloudflareResponse.status}). Please retry.`;
+    }
+    
+    return {
+      ok: false,
+      error: errorMessage,
+      status: cloudflareResponse.status,
+      reason: 'upload'
+    };
+  }
+
   const result = await cloudflareResponse.json();
 
   if (!cloudflareResponse.ok) {

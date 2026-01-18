@@ -40,6 +40,11 @@ Optional values:
 - `OPENAI_API_KEY` (AI alt text)
 - `HUGGINGFACE_API_TOKEN` (remote CLIP embeddings)
 
+Search settings (optional):
+
+- `NEXT_PUBLIC_SEARCH_LIMIT` - Max results from semantic search (default: 48)
+- `NEXT_PUBLIC_SEARCH_PAGE_SIZE` - Results per page / "Load More" tranche (default: 12)
+
 ## 3) Start Redis with Docker
 
 Redis Stack is used for vector search and embeddings.
