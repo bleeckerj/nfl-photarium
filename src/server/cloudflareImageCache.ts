@@ -1,4 +1,4 @@
-import { cleanString, parseCloudflareMetadata } from '@/utils/cloudflareMetadata';
+import { cleanString, parseCloudflareMetadata, type CloudflareMetadata } from '@/utils/cloudflareMetadata';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { getCacheStorage, type ICacheStorage } from './cacheStorage';
 
@@ -30,6 +30,16 @@ export interface CachedCloudflareImage {
   parentId?: string;
   linkedAssetId?: string;
   variationSort?: number;
+  
+  // Vector search fields (Phase 2)
+  /** Whether CLIP embedding has been generated and stored in vector index */
+  hasClipEmbedding?: boolean;
+  /** Whether color histogram has been generated and stored in vector index */
+  hasColorEmbedding?: boolean;
+  /** Dominant colors extracted from image (hex codes) */
+  dominantColors?: string[];
+  /** Average color of image (hex code) */
+  averageColor?: string;
 }
 
 interface CacheState {
@@ -72,6 +82,7 @@ const MAX_PAGES = (() => {
 })();
 
 const PERSISTENT_CACHE_KEY = 'cloudflare-images';
+const METADATA_OVERRIDE_KEY = 'cloudflare-metadata-overrides';
 
 // Get persistent storage instance
 let storage: ICacheStorage | null = null;
@@ -82,67 +93,132 @@ const getStorage = (): ICacheStorage => {
   return storage;
 };
 
+const metadataOverrides = new Map<string, CloudflareMetadata>();
+let metadataOverridesLoaded = false;
+
+const loadMetadataOverrides = async (): Promise<void> => {
+  if (metadataOverridesLoaded) return;
+  metadataOverridesLoaded = true;
+  try {
+    const cached = await getStorage().get<Record<string, CloudflareMetadata>>(METADATA_OVERRIDE_KEY);
+    if (!cached?.data) return;
+    Object.entries(cached.data).forEach(([id, meta]) => {
+      if (meta && typeof meta === 'object') {
+        metadataOverrides.set(id, meta);
+      }
+    });
+  } catch (error) {
+    console.warn('[Cache] Failed to load metadata overrides:', error);
+  }
+};
+
+const saveMetadataOverrides = async (): Promise<void> => {
+  try {
+    const payload = Object.fromEntries(metadataOverrides.entries());
+    await getStorage().set(METADATA_OVERRIDE_KEY, payload);
+  } catch (error) {
+    console.warn('[Cache] Failed to save metadata overrides:', error);
+  }
+};
+
+const buildMetadataOverride = (image: CachedCloudflareImage): CloudflareMetadata => {
+  const override: CloudflareMetadata = {};
+  const assign = <K extends keyof CloudflareMetadata>(key: K, value: CloudflareMetadata[K]) => {
+    if (value !== undefined) {
+      override[key] = value;
+    }
+  };
+  assign('folder', image.folder);
+  assign('tags', image.tags);
+  assign('description', image.description);
+  assign('originalUrl', image.originalUrl);
+  assign('originalUrlNormalized', image.originalUrlNormalized);
+  assign('sourceUrl', image.sourceUrl);
+  assign('sourceUrlNormalized', image.sourceUrlNormalized);
+  assign('namespace', image.namespace);
+  assign('contentHash', image.contentHash);
+  assign('altTag', image.altTag);
+  assign('displayName', image.displayName);
+  assign('variationParentId', image.parentId);
+  assign('linkedAssetId', image.linkedAssetId);
+  assign('variationSort', image.variationSort);
+  return override;
+};
+
+const mergeMetadata = (base: CloudflareMetadata, override?: CloudflareMetadata) => {
+  if (!override) return base;
+  const merged = { ...base } as CloudflareMetadata;
+  Object.entries(override).forEach(([key, value]) => {
+    if (merged[key as keyof CloudflareMetadata] === undefined && value !== undefined) {
+      merged[key as keyof CloudflareMetadata] = value as CloudflareMetadata[keyof CloudflareMetadata];
+    }
+  });
+  return merged;
+};
+
 const transformImage = (image: CloudflareImageApiResponse): CachedCloudflareImage => {
   const parsedMeta = parseCloudflareMetadata(image.meta);
+  const overrideMeta = metadataOverrides.get(image.id);
+  const mergedMeta = mergeMetadata(parsedMeta, overrideMeta);
   const cleanFolder =
-    parsedMeta.folder && parsedMeta.folder !== 'undefined' ? parsedMeta.folder : undefined;
-  const cleanTags = Array.isArray(parsedMeta.tags)
-    ? parsedMeta.tags.filter((tag): tag is string => Boolean(tag) && tag !== 'undefined')
+    mergedMeta.folder && mergedMeta.folder !== 'undefined' ? mergedMeta.folder : undefined;
+  const cleanTags = Array.isArray(mergedMeta.tags)
+    ? mergedMeta.tags.filter((tag): tag is string => Boolean(tag) && tag !== 'undefined')
     : [];
   const cleanDescription =
-    parsedMeta.description && parsedMeta.description !== 'undefined'
-      ? parsedMeta.description
+    mergedMeta.description && mergedMeta.description !== 'undefined'
+      ? mergedMeta.description
       : undefined;
   const cleanOriginalUrl =
-    parsedMeta.originalUrl && parsedMeta.originalUrl !== 'undefined'
-      ? parsedMeta.originalUrl
+    mergedMeta.originalUrl && mergedMeta.originalUrl !== 'undefined'
+      ? mergedMeta.originalUrl
       : undefined;
   const cleanOriginalUrlNormalized =
-    parsedMeta.originalUrlNormalized && parsedMeta.originalUrlNormalized !== 'undefined'
-      ? parsedMeta.originalUrlNormalized
+    mergedMeta.originalUrlNormalized && mergedMeta.originalUrlNormalized !== 'undefined'
+      ? mergedMeta.originalUrlNormalized
       : undefined;
   const normalizedOriginalUrl =
     cleanOriginalUrlNormalized ?? normalizeOriginalUrl(cleanOriginalUrl);
   const cleanSourceUrl =
-    parsedMeta.sourceUrl && parsedMeta.sourceUrl !== 'undefined'
-      ? parsedMeta.sourceUrl
+    mergedMeta.sourceUrl && mergedMeta.sourceUrl !== 'undefined'
+      ? mergedMeta.sourceUrl
       : undefined;
   const cleanSourceUrlNormalized =
-    parsedMeta.sourceUrlNormalized && parsedMeta.sourceUrlNormalized !== 'undefined'
-      ? parsedMeta.sourceUrlNormalized
+    mergedMeta.sourceUrlNormalized && mergedMeta.sourceUrlNormalized !== 'undefined'
+      ? mergedMeta.sourceUrlNormalized
       : undefined;
   const normalizedSourceUrl =
     cleanSourceUrlNormalized ?? normalizeOriginalUrl(cleanSourceUrl);
   const cleanNamespace =
-    parsedMeta.namespace && parsedMeta.namespace !== 'undefined'
-      ? parsedMeta.namespace
+    mergedMeta.namespace && mergedMeta.namespace !== 'undefined'
+      ? mergedMeta.namespace
       : undefined;
   const cleanAltTag =
-    parsedMeta.altTag && parsedMeta.altTag !== 'undefined' ? parsedMeta.altTag : undefined;
+    mergedMeta.altTag && mergedMeta.altTag !== 'undefined' ? mergedMeta.altTag : undefined;
   const displayName =
-    parsedMeta.displayName && parsedMeta.displayName !== 'undefined'
-      ? parsedMeta.displayName
+    mergedMeta.displayName && mergedMeta.displayName !== 'undefined'
+      ? mergedMeta.displayName
       : undefined;
   const cleanContentHash =
-    parsedMeta.contentHash && parsedMeta.contentHash !== 'undefined'
-      ? parsedMeta.contentHash
+    mergedMeta.contentHash && mergedMeta.contentHash !== 'undefined'
+      ? mergedMeta.contentHash
       : undefined;
   const cleanExif =
-    parsedMeta.exif && typeof parsedMeta.exif === 'object' && !Array.isArray(parsedMeta.exif)
-      ? (parsedMeta.exif as Record<string, string | number>)
+    mergedMeta.exif && typeof mergedMeta.exif === 'object' && !Array.isArray(mergedMeta.exif)
+      ? (mergedMeta.exif as Record<string, string | number>)
       : undefined;
   const cleanVariationSort = (() => {
-    if (typeof parsedMeta.variationSort === 'number' && Number.isFinite(parsedMeta.variationSort)) {
-      return parsedMeta.variationSort;
+    if (typeof mergedMeta.variationSort === 'number' && Number.isFinite(mergedMeta.variationSort)) {
+      return mergedMeta.variationSort;
     }
-    if (typeof parsedMeta.variationSort === 'string') {
-      const parsed = Number(parsedMeta.variationSort);
+    if (typeof mergedMeta.variationSort === 'string') {
+      const parsed = Number(mergedMeta.variationSort);
       return Number.isFinite(parsed) ? parsed : undefined;
     }
     return undefined;
   })();
-  const parentId = cleanString(parsedMeta.variationParentId);
-  const linkedAssetId = cleanString(parsedMeta.linkedAssetId);
+  const parentId = cleanString(mergedMeta.variationParentId);
+  const linkedAssetId = cleanString(mergedMeta.linkedAssetId);
 
   return {
     id: image.id,
@@ -159,7 +235,7 @@ const transformImage = (image: CloudflareImageApiResponse): CachedCloudflareImag
     namespace: cleanNamespace,
     contentHash: cleanContentHash,
     altTag: cleanAltTag,
-    displayName: displayName ?? image.filename || parsedMeta.filename || undefined,
+    displayName: displayName ?? (image.filename || parsedMeta.filename || undefined),
     exif: cleanExif,
     variationSort: cleanVariationSort,
     parentId,
@@ -331,6 +407,7 @@ const triggerBackgroundRefresh = (): void => {
  * - Triggers background refresh if persistent cache is stale
  */
 export const getCachedImages = async (forceRefresh = false): Promise<CachedCloudflareImage[]> => {
+  await loadMetadataOverrides();
   // 1. Check in-memory cache first
   if (shouldUseMemoryCache(forceRefresh)) {
     return cacheState.images;
@@ -393,6 +470,19 @@ export const getCachedImages = async (forceRefresh = false): Promise<CachedCloud
   return inflight;
 };
 
+/**
+ * Synchronous access to the in-memory cache.
+ * CRITICAL for duplicate detection: Returns whatever is currently in memory,
+ * without triggering any async fetches. This ensures that images uploaded
+ * in the current session are visible to subsequent duplicate checks,
+ * even if the async cache refresh is still in progress.
+ * 
+ * May return an empty array if the cache hasn't been initialized yet.
+ */
+export const getCachedImagesSync = (): CachedCloudflareImage[] => {
+  return cacheState.images;
+};
+
 export const getCachedImage = async (id: string) => {
   if (cacheState.map.has(id)) {
     return cacheState.map.get(id);
@@ -414,6 +504,14 @@ export const upsertCachedImage = (image: CachedCloudflareImage) => {
     cacheState.images.unshift(image);
   }
   cacheState.lastFetched = Date.now();
+
+  void loadMetadataOverrides().then(() => {
+    const override = buildMetadataOverride(image);
+    if (Object.keys(override).length) {
+      metadataOverrides.set(image.id, override);
+      saveMetadataOverrides().catch(() => {});
+    }
+  });
   
   // Update persistent cache in background
   saveToPersistentCache(cacheState.images, cacheState.lastFetched).catch(() => {});
@@ -448,9 +546,12 @@ export const clearAllCaches = async () => {
   cacheState.map = new Map();
   cacheState.lastFetched = 0;
   cacheState.initialized = false;
+  metadataOverrides.clear();
+  metadataOverridesLoaded = false;
   
   try {
     await getStorage().delete(PERSISTENT_CACHE_KEY);
+    await getStorage().delete(METADATA_OVERRIDE_KEY);
     console.log('[Cache] All caches cleared');
   } catch (error) {
     console.warn('[Cache] Failed to clear persistent cache:', error);

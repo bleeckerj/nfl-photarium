@@ -5,9 +5,15 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { getMultipleImageUrls, getCloudflareImageUrl, getCloudflareDownloadUrl, IMAGE_VARIANTS } from '@/utils/imageUtils';
 import { useToast } from '@/components/Toast';
-import { Sparkles, RotateCcw, RotateCw, ChevronUp, ChevronDown, GripVertical, ExternalLink } from 'lucide-react';
+import { Sparkles, RotateCcw, RotateCw, ChevronUp, ChevronDown, GripVertical, ExternalLink, Cpu } from 'lucide-react';
 import FolderManagerButton from '@/components/FolderManagerButton';
 import MonoSelect from '@/components/MonoSelect';
+import EmbeddingStatusIcon from '@/components/EmbeddingStatusIcon';
+import ConceptRadar from '@/components/ConceptRadar';
+import SemanticNeighbors from '@/components/SemanticNeighbors';
+import HaikuDisplay from '@/components/HaikuDisplay';
+import AntipodeSearch from '@/components/AntipodeSearch';
+import { subscribeEmbeddingPending, type EmbeddingPendingEntry } from '@/utils/embeddingPending';
 import { cleanString, pickCloudflareMetadata } from '@/utils/cloudflareMetadata';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { useDropzone } from 'react-dropzone';
@@ -50,6 +56,11 @@ interface CloudflareImage {
   parentId?: string;
   linkedAssetId?: string;
   variationSort?: number;
+  // Embedding status fields
+  hasClipEmbedding?: boolean;
+  hasColorEmbedding?: boolean;
+  dominantColors?: string[];
+  averageColor?: string;
 }
 
 const DEFAULT_LIST_VARIANT = 'full';
@@ -171,11 +182,14 @@ export default function ImageDetailPage() {
   const [originalUrlInput, setOriginalUrlInput] = useState('');
   const [sourceUrlInput, setSourceUrlInput] = useState('');
   const [displayNameInput, setDisplayNameInput] = useState('');
+  const [clearExif, setClearExif] = useState(false);
   const [shareBaseUrl, setShareBaseUrl] = useState('');
+  const [embeddingGenerating, setEmbeddingGenerating] = useState(false);
   const [shareVariant, setShareVariant] = useState('large');
   const [shareQrDataUrl, setShareQrDataUrl] = useState('');
   const [namespace, setNamespace] = useState('');
   const [saving, setSaving] = useState(false);
+  const [embeddingPendingMap, setEmbeddingPendingMap] = useState<Record<string, EmbeddingPendingEntry>>({});
   const [uniqueFolders, setUniqueFolders] = useState<string[]>([]);
   const [newFolderInput, setNewFolderInput] = useState('');
   const [variantModalState, setVariantModalState] = useState<{ target: CloudflareImage } | null>(null);
@@ -189,6 +203,57 @@ export default function ImageDetailPage() {
   const [rotationLoading, setRotationLoading] = useState(false);
   const [rotationError, setRotationError] = useState<string | null>(null);
   const [rotatedAsset, setRotatedAsset] = useState<{ id: string; url: string; info?: string } | null>(null);
+
+  const generateEmbeddings = useCallback(async () => {
+    if (!image || !id) {
+      return;
+    }
+    setEmbeddingGenerating(true);
+    try {
+      const response = await fetch(`/api/images/${id}/embeddings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clip: true, color: true, force: false })
+      });
+      const data = await response.json();
+      
+      if (!response.ok) {
+        const message = typeof data?.error === 'string' ? data.error : 'Failed to generate embeddings';
+        toast.push(message);
+        return;
+      }
+
+      // Update local image state with embedding data
+      const updatedImage = {
+        ...image,
+        hasClipEmbedding: data.hasClipEmbedding ?? image.hasClipEmbedding,
+        hasColorEmbedding: data.hasColorEmbedding ?? image.hasColorEmbedding,
+        dominantColors: data.dominantColors ?? image.dominantColors,
+        averageColor: data.averageColor ?? image.averageColor,
+      };
+
+      setImage(updatedImage);
+      setAllImages((prev) => prev.map((img) => (img.id === id ? updatedImage : img)));
+
+      const types: string[] = [];
+      if (data.generatedClip) types.push('CLIP');
+      if (data.generatedColor) types.push('color');
+      
+      if (types.length > 0) {
+        toast.push(`Generated ${types.join(' + ')} embeddings`);
+      } else if (data.skippedClip || data.skippedColor) {
+        toast.push('Embeddings already exist');
+      } else {
+        toast.push('Embeddings updated');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to generate embeddings';
+      console.error('Failed to generate embeddings:', error);
+      toast.push(message);
+    } finally {
+      setEmbeddingGenerating(false);
+    }
+  }, [id, image, toast]);
 
   useEffect(() => {
     setVariationPage(1);
@@ -211,6 +276,10 @@ export default function ImageDetailPage() {
     } else {
       setNamespace(stored || envDefault);
     }
+  }, []);
+
+  useEffect(() => {
+    return subscribeEmbeddingPending(setEmbeddingPendingMap);
   }, []);
 
   useEffect(() => {
@@ -511,7 +580,7 @@ export default function ImageDetailPage() {
     [previewRotation]
   );
 
-  const metadataByteSize = useMemo(() => {
+  const metadataDiagnostics = useMemo(() => {
     const finalFolder =
       folderSelect === '__create__'
         ? newFolderInput.trim() || undefined
@@ -536,7 +605,7 @@ export default function ImageDetailPage() {
       contentHash: image?.contentHash,
       altTag: image?.altTag ?? '',
       displayName: image?.displayName ?? image?.filename,
-      exif: image?.exif,
+      exif: clearExif ? undefined : image?.exif,
       variationParentId: image?.parentId,
       linkedAssetId: image?.linkedAssetId,
       updatedAt: new Date().toISOString()
@@ -561,12 +630,22 @@ export default function ImageDetailPage() {
     metadata.altTag = cleanAltTag;
     const compact = pickCloudflareMetadata(metadata);
     try {
-      return new TextEncoder().encode(JSON.stringify(compact)).length;
+      const encoder = new TextEncoder();
+      const size = encoder.encode(JSON.stringify(compact)).length;
+      const largestFields = Object.entries(compact)
+        .map(([key, value]) => ({
+          key,
+          bytes: encoder.encode(JSON.stringify(value)).length
+        }))
+        .sort((a, b) => b.bytes - a.bytes)
+        .slice(0, 3);
+      return { size, largestFields };
     } catch {
-      return 0;
+      return { size: 0, largestFields: [] };
     }
   }, [
     altTextInput,
+    clearExif,
     descriptionInput,
     displayNameInput,
     folderSelect,
@@ -576,6 +655,20 @@ export default function ImageDetailPage() {
     sourceUrlInput,
     tagsInput
   ]);
+
+  const metadataByteSize = metadataDiagnostics.size;
+  const metadataLargestFields = metadataDiagnostics.largestFields;
+
+  const pendingEmbedding = id ? embeddingPendingMap[id as string] : undefined;
+
+  const originalUrlByteLength = useMemo(() => {
+    try {
+      return new TextEncoder().encode(originalUrlInput || '').length;
+    } catch {
+      return 0;
+    }
+  }, [originalUrlInput]);
+  const originalUrlTooLong = originalUrlByteLength > 64;
 
   const effectiveParentFolder = useMemo(() => {
     const selected =
@@ -665,9 +758,14 @@ export default function ImageDetailPage() {
     if (altValue !== imageAlt) {
       return true;
     }
+    // EXIF clearing is a dirty state
+    if (clearExif) {
+      return true;
+    }
     return false;
   }, [
     altTextInput,
+    clearExif,
     descriptionInput,
     displayNameInput,
     folderSelect,
@@ -1024,6 +1122,7 @@ export default function ImageDetailPage() {
     setOriginalUrlInput(image.originalUrl || '');
     setSourceUrlInput(image.sourceUrl || '');
     setDisplayNameInput(image.displayName || image.filename || '');
+    setClearExif(false);
   }, [image]);
 
   const handleSaveMetadata = useCallback(async () => {
@@ -1037,7 +1136,7 @@ export default function ImageDetailPage() {
         : (folderSelect === '' ? undefined : folderSelect);
       const cleanedOriginalUrl = cleanString(originalUrlInput);
       const cleanedSourceUrl = cleanString(sourceUrlInput);
-      const payload = {
+      const payload: Record<string, unknown> = {
         folder: finalFolder,
         tags: tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(Boolean) : [],
         description: descriptionInput,
@@ -1046,6 +1145,10 @@ export default function ImageDetailPage() {
         displayName: cleanString(displayNameInput) ?? '',
         altTag: cleanString(altTextInput) ?? '',
       };
+      // Include clearExif flag if user wants to remove EXIF
+      if (clearExif) {
+        payload.clearExif = true;
+      }
       const res = await fetch(`/api/images/${id}/update`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -1054,7 +1157,19 @@ export default function ImageDetailPage() {
       const body = await res.json() as CloudflareImage;
       if (res.ok) {
         toast.push('Metadata updated');
-        setImage(prev => prev ? ({ ...prev, folder: body.folder, tags: body.tags, description: body.description, originalUrl: body.originalUrl, sourceUrl: body.sourceUrl, displayName: body.displayName, altTag: body.altTag }) : prev);
+        // Reset clearExif flag after successful save
+        setClearExif(false);
+        setImage(prev => prev ? ({ 
+          ...prev, 
+          folder: body.folder, 
+          tags: body.tags, 
+          description: body.description, 
+          originalUrl: body.originalUrl, 
+          sourceUrl: body.sourceUrl, 
+          displayName: body.displayName, 
+          altTag: body.altTag,
+          exif: clearExif ? undefined : prev.exif  // Clear EXIF in local state if requested
+        }) : prev);
         await refreshImageList();
       } else {
         toast.push(body.error || 'Failed to update metadata');
@@ -1067,6 +1182,7 @@ export default function ImageDetailPage() {
     }
   }, [
     altTextInput,
+    clearExif,
     descriptionInput,
     displayNameInput,
     folderSelect,
@@ -1908,7 +2024,47 @@ export default function ImageDetailPage() {
           </div>
 
           <div id="image-summary-section" className="mb-6">
-            <p className="text-xs mono font-semibold text-gray-900">{image.filename || 'Image'}</p>
+            <div className="flex items-center gap-2">
+              <p className="text-xs mono font-semibold text-gray-900">{image.filename || 'Image'}</p>
+              <EmbeddingStatusIcon
+                hasClipEmbedding={image.hasClipEmbedding}
+                hasColorEmbedding={image.hasColorEmbedding}
+                dominantColors={image.dominantColors}
+                averageColor={image.averageColor}
+                pendingStatus={pendingEmbedding?.status}
+                pendingLabel={pendingEmbedding?.error}
+                size={18}
+                showTooltip={true}
+              />
+              <button
+                onClick={generateEmbeddings}
+                disabled={embeddingGenerating}
+                className="inline-flex items-center gap-1 px-2 py-1 text-[10px] border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                title="Generate CLIP and color embeddings for vector search"
+              >
+                <Cpu className="h-3 w-3" />
+                {embeddingGenerating || pendingEmbedding?.status === 'embedding'
+                  ? 'Generating...'
+                  : (image.hasClipEmbedding && image.hasColorEmbedding ? 'Refresh' : 'Generate')}
+              </button>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-gray-600">
+              <span className={`px-2 py-0.5 rounded-full border ${image.hasClipEmbedding ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-gray-200 bg-gray-50 text-gray-500'}`}>
+                CLIP {image.hasClipEmbedding ? 'ready' : 'missing'}
+              </span>
+              <span className={`px-2 py-0.5 rounded-full border ${image.hasColorEmbedding ? 'border-purple-200 bg-purple-50 text-purple-700' : 'border-gray-200 bg-gray-50 text-gray-500'}`}>
+                Color {image.hasColorEmbedding ? 'ready' : 'missing'}
+              </span>
+              {pendingEmbedding && (
+                <span className="inline-flex items-center gap-2 px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-700">
+                  <span className="relative flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75"></span>
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500"></span>
+                  </span>
+                  {pendingEmbedding.status === 'queued' ? 'Embedding queued' : pendingEmbedding.status === 'embedding' ? 'Embedding running' : 'Embedding failed'}
+                </span>
+              )}
+            </div>
             <p className="text-xs text-gray-500 mt-1">
               Uploaded {new Date(image.uploaded).toLocaleString()}
             </p>
@@ -1923,6 +2079,50 @@ export default function ImageDetailPage() {
               </button>
             </div>
             <AspectRatioDisplay imageId={image.id} />
+
+            {/* Semantic Analysis Section - only show if image has CLIP embedding */}
+            {image.hasClipEmbedding && (
+              <div className="mt-4 pt-4 border-t border-gray-200">
+                <details className="group">
+                  <summary className="cursor-pointer text-xs font-medium text-gray-700 hover:text-gray-900 flex items-center gap-2">
+                    <ChevronDown className="h-3 w-3 group-open:rotate-180 transition-transform" />
+                    Semantic Analysis
+                    <span className="text-[10px] text-gray-500 font-normal">(CLIP embedding visualization)</span>
+                  </summary>
+                  <div className="mt-3 space-y-4">
+                    {/* Machine Haiku */}
+                    <HaikuDisplay imageId={image.id} hasClipEmbedding={image.hasClipEmbedding} />
+                    
+                    {/* Concept Radar and Semantic Neighbors */}
+                    <div className="grid md:grid-cols-2 gap-4">
+                      <div>
+                        <ConceptRadar 
+                          imageId={image.id} 
+                          size={320}
+                          onImageClick={(id) => window.location.href = `/images/${id}`}
+                        />
+                      </div>
+                      <div>
+                        <SemanticNeighbors 
+                          imageId={image.id} 
+                          type="clip" 
+                          limit={8}
+                          showStrangers={true}
+                          onImageClick={(id) => window.location.href = `/images/${id}`}
+                        />
+                      </div>
+                    </div>
+                    
+                    {/* Antipode Search */}
+                    <AntipodeSearch 
+                      imageId={image.id}
+                      className="bg-gray-900/50 border border-amber-900/30 rounded-lg p-4"
+                      onImageClick={(id) => window.location.href = `/images/${id}`}
+                    />
+                  </div>
+                </details>
+              </div>
+            )}
           </div>
 
           <div id="image-metadata-section" className="space-y-4">
@@ -1930,6 +2130,11 @@ export default function ImageDetailPage() {
               <span className="text-[11px] font-mono text-gray-700 bg-gray-100 border border-gray-200 rounded-full px-3 py-1">
                 Metadata: {metadataByteSize} bytes
               </span>
+              {metadataLargestFields.length > 0 && (
+                <span className="text-[10px] text-gray-500">
+                  Largest: {metadataLargestFields.map((field) => `${field.key} (${field.bytes}b)`).join(', ')}
+                </span>
+              )}
               <div className="flex flex-wrap items-center gap-2 text-[11px]">
                 <span className={`px-2 py-1 rounded-full border ${isMetadataDirty ? 'border-amber-300 bg-amber-50 text-amber-800' : pendingAutoSave ? 'border-blue-200 bg-blue-50 text-blue-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
                   {isMetadataDirty ? 'Unsaved changes' : pendingAutoSave ? 'Saving…' : 'All changes saved'}
@@ -2088,6 +2293,36 @@ export default function ImageDetailPage() {
                 className="w-full border border-gray-300 rounded-md px-3 py-2 text-xs mt-2"
                 placeholder="Comma-separated tags"
               />
+              {/* Exclusion tag quick-add buttons */}
+              <div className="flex flex-wrap items-center gap-2 mt-2">
+                <span className="text-[10px] text-gray-500">Exclude from:</span>
+                {(['x-clip', 'x-color', 'x-search'] as const).map((tag) => {
+                  const hasTag = tagsInput.split(',').map(t => t.trim()).includes(tag);
+                  const toggleTag = () => {
+                    const currentTags = tagsInput.split(',').map(t => t.trim()).filter(Boolean);
+                    if (hasTag) {
+                      setTagsInput(currentTags.filter(t => t !== tag).join(', '));
+                    } else {
+                      setTagsInput([...currentTags, tag].join(', '));
+                    }
+                  };
+                  const label = tag === 'x-clip' ? 'Semantic' : tag === 'x-color' ? 'Color' : 'All Search';
+                  return (
+                    <button
+                      key={tag}
+                      onClick={toggleTag}
+                      className={`px-2 py-0.5 text-[10px] rounded border transition-colors ${
+                        hasTag 
+                          ? 'border-red-400 bg-red-50 text-red-700 hover:bg-red-100' 
+                          : 'border-gray-300 text-gray-500 hover:bg-gray-50'
+                      }`}
+                      title={hasTag ? `Remove ${tag} tag` : `Add ${tag} tag to exclude from ${label.toLowerCase()} search`}
+                    >
+                      {hasTag ? '✓ ' : ''}{label}
+                    </button>
+                  );
+                })}
+              </div>
               {hasVariations && parentTags.length === 0 && (
                 <p className="text-[10px] text-gray-500 mt-1">Add tags to enable appending.</p>
               )}
@@ -2107,7 +2342,14 @@ export default function ImageDetailPage() {
             </div>
 
             <div id="original-url-section">
-              <p className="text-xs font-mono font-medum text-gray-700">Original URL</p>
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-mono font-medum text-gray-700">Original URL</p>
+                {originalUrlTooLong && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-mono text-amber-800">
+                    ⚠ {originalUrlByteLength} bytes
+                  </span>
+                )}
+              </div>
               <div className="flex items-center gap-3 mt-2">
                 <input
                   value={originalUrlInput}
@@ -2115,6 +2357,14 @@ export default function ImageDetailPage() {
                   className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-xs"
                   placeholder="Original source URL"
                 />
+                <button
+                  type="button"
+                  onClick={() => setOriginalUrlInput('')}
+                  className="px-3 py-1 border border-gray-300 rounded text-xs text-gray-600 hover:bg-gray-50"
+                  disabled={!originalUrlInput}
+                >
+                  Clear
+                </button>
                 <button
                   onClick={async () => { await copyToClipboard(originalUrlInput || originalDeliveryUrl, 'Original'); }}
                   className="px-3 py-1 bg-blue-600 text-white rounded text-xs cursor-pointer transition transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-300"
@@ -2250,12 +2500,29 @@ export default function ImageDetailPage() {
             {exifEntries.length > 0 && (
               <div id="exif-section">
                 <div className="flex items-center justify-between">
-                  <p className="text-xs font-mono font-medum text-gray-700">EXIF</p>
-                  <p className="text-[10px] text-gray-500">{exifEntries.length} fields</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs font-mono font-medum text-gray-700">EXIF</p>
+                    <p className="text-[10px] text-gray-500">{exifEntries.length} fields</p>
+                  </div>
+                  <button
+                    onClick={() => setClearExif(!clearExif)}
+                    className={`px-2 py-0.5 text-[10px] rounded border transition-colors ${
+                      clearExif 
+                        ? 'border-red-400 bg-red-50 text-red-700 hover:bg-red-100' 
+                        : 'border-gray-300 text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {clearExif ? '✓ Will clear EXIF on save' : 'Clear EXIF'}
+                  </button>
                 </div>
+                {clearExif && (
+                  <p className="text-[10px] text-amber-600 mt-1">
+                    EXIF data will be removed when you save. Press &quot;Discard&quot; to cancel.
+                  </p>
+                )}
                 <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {exifEntries.map(([key, value]) => (
-                    <div key={key} className="flex items-start justify-between gap-3 border rounded px-2 py-1 text-[11px]">
+                    <div key={key} className={`flex items-start justify-between gap-3 border rounded px-2 py-1 text-[11px] ${clearExif ? 'opacity-50 line-through' : ''}`}>
                       <span className="text-gray-600 font-mono">{key}</span>
                       <span className="text-gray-900 font-mono break-all text-right">{value}</span>
                     </div>

@@ -1,19 +1,22 @@
 'use client';
 
 import { useState, useEffect, forwardRef, useImperativeHandle, useMemo, CSSProperties, useRef, useCallback } from 'react';
-import { Trash2, Copy, ExternalLink, Sparkles, Layers, AlertTriangle, Settings } from 'lucide-react';
+import { Trash2, Copy, ExternalLink, Sparkles, Layers, AlertTriangle, Settings, Cpu } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import MonoSelect from './MonoSelect';
 import GalleryCommandBar from './GalleryCommandBar';
 import FolderManagerButton from './FolderManagerButton';
 import DateNavigator, { DateFilter } from './DateNavigator';
+import { EmbeddingStatusDot } from './EmbeddingStatusIcon';
+import { subscribeEmbeddingPending, type EmbeddingPendingEntry } from '@/utils/embeddingPending';
 import { getCloudflareImageUrl, getMultipleImageUrls, getCloudflareDownloadUrl, IMAGE_VARIANTS } from '@/utils/imageUtils';
 import { useToast } from './Toast';
 import { useImageAspectRatio } from '@/hooks/useImageAspectRatio';
 import HoverPreview from './HoverPreview';
 import { downloadImageToFile, formatDownloadFileName } from '@/utils/downloadUtils';
 import { filterImagesForGallery } from '@/utils/galleryFilter';
+import { EXCLUDE_CLIP_TAG, EXCLUDE_COLOR_TAG, EXCLUDE_ALL_SEARCH_TAG } from '@/utils/searchExclusion';
 
 const handleImageDragStart = (e: React.DragEvent, image: CloudflareImage) => {
   e.stopPropagation();
@@ -51,6 +54,11 @@ interface CloudflareImage {
   sourceUrlNormalized?: string;
   contentHash?: string;
   namespace?: string;
+  // Embedding status fields
+  hasClipEmbedding?: boolean;
+  hasColorEmbedding?: boolean;
+  dominantColors?: string[];
+  averageColor?: string;
 }
 
 interface ImageGalleryProps {
@@ -70,6 +78,50 @@ const HIDDEN_TAGS_STORAGE_KEY = 'galleryHiddenTags';
 const BROKEN_AUDIT_STORAGE_KEY = 'galleryBrokenAudit';
 const AUDIT_LOG_LIMIT = 200;
 const VARIANT_DIMENSIONS = new Map(IMAGE_VARIANTS.map(variant => [variant.name, variant.width]));
+
+/**
+ * Check if an image has any search exclusion tags
+ */
+const hasSearchExclusionTag = (tags?: string[]): boolean => {
+  if (!tags || tags.length === 0) return false;
+  return tags.some(tag => 
+    tag === EXCLUDE_CLIP_TAG || 
+    tag === EXCLUDE_COLOR_TAG || 
+    tag === EXCLUDE_ALL_SEARCH_TAG
+  );
+};
+
+/**
+ * Get tooltip text describing which searches are excluded
+ */
+const getExclusionTooltip = (tags?: string[]): string => {
+  if (!tags || tags.length === 0) return '';
+  const excluded: string[] = [];
+  if (tags.includes(EXCLUDE_ALL_SEARCH_TAG)) {
+    return 'Excluded from all vector searches';
+  }
+  if (tags.includes(EXCLUDE_CLIP_TAG)) excluded.push('semantic');
+  if (tags.includes(EXCLUDE_COLOR_TAG)) excluded.push('color');
+  return `Excluded from ${excluded.join(' & ')} search`;
+};
+
+/**
+ * Search exclusion icon (icons8 style - eye with slash)
+ */
+const SearchExclusionIcon = ({ className = '', title = '' }: { className?: string; title?: string }) => (
+  <svg 
+    xmlns="http://www.w3.org/2000/svg" 
+    viewBox="0 0 24 24" 
+    fill="currentColor"
+    className={className}
+    aria-label={title}
+  >
+    <title>{title}</title>
+    {/* Eye with slash - indicates hidden from search */}
+    <path d="M2.71 2.29a1 1 0 00-1.42 1.42l2.5 2.5C2.26 7.8 1.1 9.79.39 11.55a1 1 0 000 .9c1.42 3.5 4.88 7.05 9.61 7.5v.05l2.29 2.29a1 1 0 001.42-1.42l-11-11.16zM12 6c3.79 0 7.17 2.13 8.82 5.5-.5 1.02-1.19 1.99-2.02 2.85l1.42 1.42c1.13-1.13 2.07-2.46 2.78-3.9a1 1 0 000-.87C21.27 7.11 17 4 12 4c-1.27 0-2.49.2-3.64.56l1.57 1.57c.68-.09 1.38-.13 2.07-.13zM12 8a4 4 0 014 4c0 .35-.06.69-.15 1.02l-4.87-4.87c.33-.09.67-.15 1.02-.15z"/>
+    <line x1="1" y1="1" x2="23" y2="23" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+  </svg>
+);
 
 type BrokenAudit = {
   checkedAt?: string;
@@ -296,6 +348,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [searchTerm, setSearchTerm] = useState<string>(storedPreferencesRef.current.searchTerm ?? '');
   const [selectedTag, setSelectedTag] = useState<string>(storedPreferencesRef.current.selectedTag ?? '');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(storedPreferencesRef.current.viewMode ?? 'grid');
+  const [embeddingPendingMap, setEmbeddingPendingMap] = useState<Record<string, EmbeddingPendingEntry>>({});
   const [currentPage, setCurrentPage] = useState(storedPreferencesRef.current.currentPage ?? 1);
   const [onlyCanonical, setOnlyCanonical] = useState(storedPreferencesRef.current.onlyCanonical);
   const [respectAspectRatio, setRespectAspectRatio] = useState(storedPreferencesRef.current.respectAspectRatio);
@@ -312,8 +365,12 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [bulkApplyFolder, setBulkApplyFolder] = useState(true);
   const [bulkApplyTags, setBulkApplyTags] = useState(false);
   const [bulkTagsMode, setBulkTagsMode] = useState<'replace' | 'append'>('replace');
+  const [bulkApplyDisplayName, setBulkApplyDisplayName] = useState(false);
+  const [bulkDisplayNameMode, setBulkDisplayNameMode] = useState<'custom' | 'auto' | 'clear'>('custom');
+  const [bulkDisplayNameInput, setBulkDisplayNameInput] = useState('');
   const [bulkUpdating, setBulkUpdating] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkEmbeddingGenerating, setBulkEmbeddingGenerating] = useState(false);
   const [bulkAnimateFps, setBulkAnimateFps] = useState<string>('');
   const [bulkAnimateTouched, setBulkAnimateTouched] = useState(false);
   const [bulkAnimateLoop, setBulkAnimateLoop] = useState(true);
@@ -333,6 +390,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [namespaceDraft, setNamespaceDraft] = useState(namespace ?? '');
   const [namespaceSelectValue, setNamespaceSelectValue] = useState('');
   const [registryNamespaces, setRegistryNamespaces] = useState<string[]>([]);
+  const [colorMetadataMap, setColorMetadataMap] = useState<Record<string, { dominantColors?: string[]; averageColor?: string }>>({});
   const didInitFilterPageRef = useRef(false);
   const utilityButtonClasses = 'text-[0.65rem] font-mono px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 transition';
 
@@ -357,6 +415,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     return () => {
       active = false;
     };
+  }, []);
+
+  useEffect(() => {
+    return subscribeEmbeddingPending(setEmbeddingPendingMap);
   }, []);
 
   const namespaceOptions = useMemo(() => {
@@ -595,7 +657,15 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       const response = await fetch(url, { signal: controller.signal });
       const data = await response.json();
       if (response.ok) {
-        setImages(data.images || []);
+        // Deduplicate images by ID to prevent duplicate key errors in React
+        const rawImages = data.images || [];
+        const seen = new Set<string>();
+        const uniqueImages = rawImages.filter((img: CloudflareImage) => {
+          if (seen.has(img.id)) return false;
+          seen.add(img.id);
+          return true;
+        });
+        setImages(uniqueImages);
       }
     } catch (error) {
       if ((error as Error).name === 'AbortError') return;
@@ -612,6 +682,39 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const handleFoldersChanged = async () => {
     await fetchImages({ silent: true });
   };
+
+  // Fetch color metadata from Redis for displayed images
+  useEffect(() => {
+    if (images.length === 0) return;
+    
+    const fetchColorMetadata = async () => {
+      try {
+        // Only fetch for images we don't already have metadata for
+        const idsToFetch = images
+          .filter(img => !colorMetadataMap[img.id])
+          .map(img => img.id);
+        
+        if (idsToFetch.length === 0) return;
+        
+        // Batch in chunks of 100
+        const chunkSize = 100;
+        for (let i = 0; i < idsToFetch.length; i += chunkSize) {
+          const chunk = idsToFetch.slice(i, i + chunkSize);
+          const response = await fetch(`/api/images/colors?ids=${chunk.join(',')}`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.colors) {
+              setColorMetadataMap(prev => ({ ...prev, ...data.colors }));
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to fetch color metadata:', error);
+      }
+    };
+    
+    fetchColorMetadata();
+  }, [images]);
 
   const deleteImage = async (imageId: string) => {
     try {
@@ -996,6 +1099,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     setBulkApplyFolder(false);
     setBulkApplyTags(true);
     setBulkTagsMode('append');
+    setBulkApplyDisplayName(false);
+    setBulkDisplayNameMode('custom');
+    setBulkDisplayNameInput('');
     setBulkAnimateFilename('');
     setBulkAnimateLoop(true);
     setBulkAnimateTouched(false);
@@ -1019,7 +1125,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     const hasTagChanges =
       bulkApplyTags &&
       (bulkTagsMode === 'replace' || parsedBulkTags.length > 0);
-    if (!bulkApplyFolder && !hasTagChanges) {
+    const hasDisplayNameChanges = bulkApplyDisplayName;
+    if (!bulkApplyFolder && !hasTagChanges && !hasDisplayNameChanges) {
       toast.push('Choose at least one field to update');
       return;
     }
@@ -1045,6 +1152,17 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
               existingTags.forEach(tag => merged.set(tag.toLowerCase(), tag));
               parsedBulkTags.forEach(tag => merged.set(tag.toLowerCase(), tag));
               payload.tags = Array.from(merged.values());
+            }
+          }
+          if (bulkApplyDisplayName) {
+            if (bulkDisplayNameMode === 'clear') {
+              payload.displayName = '';
+            } else if (bulkDisplayNameMode === 'custom') {
+              payload.displayName = bulkDisplayNameInput.trim();
+            } else if (bulkDisplayNameMode === 'auto') {
+              const target = images.find(img => img.id === id);
+              const baseName = target?.filename || '';
+              payload.displayName = truncateMiddle(baseName, 64);
             }
           }
           return fetch(`/api/images/${id}/update`, {
@@ -1075,11 +1193,22 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
               updatedTags = Array.from(merged.values());
             }
           }
+          let updatedDisplayName = img.displayName;
+          if (bulkApplyDisplayName) {
+            if (bulkDisplayNameMode === 'clear') {
+              updatedDisplayName = '';
+            } else if (bulkDisplayNameMode === 'custom') {
+              updatedDisplayName = bulkDisplayNameInput.trim();
+            } else if (bulkDisplayNameMode === 'auto') {
+              updatedDisplayName = truncateMiddle(img.filename || '', 64);
+            }
+          }
 
           return {
             ...img,
             folder: bulkApplyFolder ? updatedFolder : img.folder,
-            tags: updatedTags
+            tags: updatedTags,
+            displayName: updatedDisplayName
           };
         })
       );
@@ -1099,6 +1228,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     bulkFolderInput,
     bulkTagsInput,
     bulkTagsMode,
+    bulkApplyDisplayName,
+    bulkDisplayNameInput,
+    bulkDisplayNameMode,
     images,
     selectedCount,
     selectedImageIds,
@@ -1187,6 +1319,52 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       setBulkDeleting(false);
     }
   }, [selectedCount, selectedImageIds, toast, clearSelection]);
+
+  const generateEmbeddingsForSelected = useCallback(async () => {
+    if (!selectedCount) {
+      toast.push('Select images to generate embeddings');
+      return;
+    }
+    
+    setBulkEmbeddingGenerating(true);
+    try {
+      const imageIds = Array.from(selectedImageIds);
+      const response = await fetch('/api/images/embeddings/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageIds }),
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to generate embeddings');
+      }
+      
+      const result = await response.json();
+      
+      // Update local state with embedding flags
+      setImages(prev => prev.map(img => {
+        if (selectedImageIds.has(img.id)) {
+          const imgResult = result.results?.find((r: { imageId: string }) => r.imageId === img.id);
+          if (imgResult?.success && !imgResult?.skipped) {
+            return {
+              ...img,
+              hasClipEmbedding: imgResult.clipGenerated || img.hasClipEmbedding,
+              hasColorEmbedding: imgResult.colorGenerated || img.hasColorEmbedding,
+            };
+          }
+        }
+        return img;
+      }));
+      
+      toast.push(`Generated embeddings: ${result.success} success, ${result.skipped} skipped, ${result.errors} errors`);
+    } catch (error) {
+      console.error('Batch embedding generation failed', error);
+      toast.push(error instanceof Error ? error.message : 'Embedding generation failed');
+    } finally {
+      setBulkEmbeddingGenerating(false);
+    }
+  }, [selectedCount, selectedImageIds, toast]);
 
   const getImageUrl = (image: CloudflareImage, variant: string) => {
     // Use the utility function with the variant string directly
@@ -1313,10 +1491,32 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     return /^[a-f0-9]{64}$/.test(trimmed) ? trimmed : undefined;
   };
 
+  const truncateMiddle = (value: string, max = 64) => {
+    if (value.length <= max) return value;
+    const keep = max - 1;
+    const head = Math.ceil(keep / 2);
+    const tail = Math.floor(keep / 2);
+    return `${value.slice(0, head)}…${value.slice(value.length - tail)}`;
+  };
+
+  // Move baseFilteredImages earlier so duplicateGroups can use the filtered list
+  const baseFilteredImages = useMemo(() => {
+    return filterImagesForGallery(images, {
+      selectedFolder,
+      selectedTag,
+      searchTerm,
+      onlyCanonical,
+      hiddenFolders,
+      hiddenTags
+    });
+  }, [images, selectedFolder, selectedTag, searchTerm, onlyCanonical, hiddenFolders, hiddenTags]);
+
+  // Compute duplicates from the filtered images, not all images
+  // This ensures "show duplicates only" shows duplicates within the current filter selection
   const duplicateGroups = useMemo(() => {
     const byKey = new Map<string, { items: CloudflareImage[]; reason: DuplicateReason }>();
 
-    images.forEach((image) => {
+    baseFilteredImages.forEach((image) => {
       const keyFromUrl = normalizeUrlKey(image.originalUrlNormalized);
       const keyFromHash = normalizeHashKey(image.contentHash);
 
@@ -1341,7 +1541,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         label: 'Original URL + content hash',
         items: group.items
       }));
-  }, [images]);
+  }, [baseFilteredImages]);
 
   const duplicateIds = useMemo(() => {
     const ids = new Set<string>();
@@ -1453,16 +1653,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
 
   const isSvgImage = (img: CloudflareImage) => img.filename?.toLowerCase().endsWith('.svg') ?? false;
 
-  const baseFilteredImages = useMemo(() => {
-    return filterImagesForGallery(images, {
-      selectedFolder,
-      selectedTag,
-      searchTerm,
-      onlyCanonical,
-      hiddenFolders,
-      hiddenTags
-    });
-  }, [images, selectedFolder, selectedTag, searchTerm, onlyCanonical, hiddenFolders, hiddenTags]);
+  // baseFilteredImages is now computed earlier (before duplicateGroups) so duplicates
+  // are detected within the current filter selection
 
   const duplicateFilteredImages = useMemo(() => {
     if (!showDuplicatesOnly) {
@@ -1521,6 +1713,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     showDuplicatesOnly ||
     showBrokenOnly ||
     hiddenFolders.length > 0 ||
+    hiddenTags.length > 0 ||
     dateFilter !== null
   );
 
@@ -1534,6 +1727,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     setShowDuplicatesOnly(false);
     setShowBrokenOnly(false);
     setHiddenFolders([]);
+    setHiddenTags([]);
     setDateFilter(null);
   }, []);
 
@@ -1809,6 +2003,15 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
               disabled={!selectedCount}
             >
               Bulk edit
+            </button>
+            <button
+              onClick={generateEmbeddingsForSelected}
+              className="px-2 py-1 border border-green-300 text-green-700 rounded-md hover:bg-green-50 disabled:opacity-40 inline-flex items-center gap-1"
+              disabled={!selectedCount || bulkEmbeddingGenerating}
+              title="Generate CLIP and color embeddings for selected images"
+            >
+              <Cpu className="h-3 w-3" />
+              {bulkEmbeddingGenerating ? 'Generating…' : 'Embeddings'}
             </button>
             <button
               onClick={deleteSelectedImages}
@@ -2239,6 +2442,14 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           <p className="text-[0.7em] font-mono text-gray-400">
             {images.length === 0 ? 'Upload some images to see them here' : 'Try adjusting your search or filters'}
           </p>
+          {images.length > 0 && hasActiveFilters && (
+            <button
+              onClick={clearFilters}
+              className="mt-3 px-3 py-1 text-[0.7em] font-mono border border-gray-200 rounded-md hover:bg-gray-100 transition"
+            >
+              Clear filters
+            </button>
+          )}
         </div>
       ) : (
         viewMode === 'grid' ? (
@@ -2311,6 +2522,14 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                         Select
                       </label>
                     )}
+                    {!bulkSelectionMode && hasSearchExclusionTag(image.tags) && (
+                      <div 
+                        className="absolute top-2 left-2 p-1 bg-black/70 rounded-md shadow"
+                        title={getExclusionTooltip(image.tags)}
+                      >
+                        <SearchExclusionIcon className="h-4 w-4 text-white" title={getExclusionTooltip(image.tags)} />
+                      </div>
+                    )}
                   </Link>
                   
                   {/* Metadata footer */}
@@ -2320,6 +2539,12 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                         <p className="text-[0.6rem] font-mono font-semibold text-gray-900 truncate" title={image.displayName || image.filename} style={{ lineHeight: '1.2' }}>
                           {image.displayName || image.filename}
                         </p>
+                        <EmbeddingStatusDot
+                          hasClipEmbedding={image.hasClipEmbedding}
+                          hasColorEmbedding={image.hasColorEmbedding}
+                          pendingStatus={embeddingPendingMap[image.id]?.status}
+                          size={8}
+                        />
                         {duplicateIds.has(image.id) && (
                           <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[0.55rem] font-semibold uppercase tracking-wide text-amber-800">
                             <AlertTriangle className="h-3 w-3" />
@@ -2364,6 +2589,36 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                             <Layers className="h-3.5 w-3.5" />
                             {variationChildren.length} variation{variationChildren.length > 1 ? 's' : ''}
                           </p>
+                        )}
+                        {/* Color metadata display */}
+                        {colorMetadataMap[image.id] && (
+                          <div className="font-3270 text-[0.55rem] leading-tight mt-1 space-y-0.5">
+                            {colorMetadataMap[image.id].averageColor && (
+                              <div className="flex items-center gap-1.5">
+                                <span 
+                                  className="inline-block w-3 h-3 rounded-sm border border-gray-200 shadow-sm"
+                                  style={{ backgroundColor: colorMetadataMap[image.id].averageColor }}
+                                  title={colorMetadataMap[image.id].averageColor}
+                                />
+                                <span className="text-gray-500 uppercase tracking-wide">
+                                  avg {colorMetadataMap[image.id].averageColor}
+                                </span>
+                              </div>
+                            )}
+                            {colorMetadataMap[image.id].dominantColors && colorMetadataMap[image.id].dominantColors!.length > 0 && (
+                              <div className="flex items-center gap-1">
+                                <span className="text-gray-400 mr-0.5">◆</span>
+                                {colorMetadataMap[image.id].dominantColors!.slice(0, 5).map((color, idx) => (
+                                  <span 
+                                    key={idx}
+                                    className="inline-block w-3 h-3 rounded-sm border border-gray-200 shadow-sm"
+                                    style={{ backgroundColor: color }}
+                                    title={color}
+                                  />
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>
@@ -2535,6 +2790,36 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                         <Layers className="h-3.5 w-3.5" />
                         {variationChildren.length} variation{variationChildren.length > 1 ? 's' : ''}
                       </p>
+                    )}
+                    {/* Color metadata display */}
+                    {colorMetadataMap[image.id] && (
+                      <div className="font-3270 text-[0.6rem] leading-tight mt-1.5 flex items-center gap-3">
+                        {colorMetadataMap[image.id].averageColor && (
+                          <div className="flex items-center gap-1.5">
+                            <span 
+                              className="inline-block w-3.5 h-3.5 rounded-sm border border-gray-200 shadow-sm"
+                              style={{ backgroundColor: colorMetadataMap[image.id].averageColor }}
+                              title={colorMetadataMap[image.id].averageColor}
+                            />
+                            <span className="text-gray-500 uppercase tracking-wide">
+                              avg {colorMetadataMap[image.id].averageColor}
+                            </span>
+                          </div>
+                        )}
+                        {colorMetadataMap[image.id].dominantColors && colorMetadataMap[image.id].dominantColors!.length > 0 && (
+                          <div className="flex items-center gap-1">
+                            <span className="text-gray-400 mr-0.5">◆</span>
+                            {colorMetadataMap[image.id].dominantColors!.slice(0, 5).map((color, idx) => (
+                              <span 
+                                key={idx}
+                                className="inline-block w-3.5 h-3.5 rounded-sm border border-gray-200 shadow-sm"
+                                style={{ backgroundColor: color }}
+                                title={color}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     )}
                     <button
                       onClick={() => generateAltTag(image.id)}
@@ -2933,6 +3218,65 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                     {bulkTagsMode === 'replace'
                       ? 'Replace tags with this list (empty clears tags).'
                       : 'Append tags to each image (empty keeps existing tags).'}
+                  </p>
+                </div>
+              )}
+            </div>
+            <div className="space-y-3">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={bulkApplyDisplayName}
+                  onChange={(e) => setBulkApplyDisplayName(e.target.checked)}
+                  className="h-3 w-3"
+                />
+                Update display name
+              </label>
+              {bulkApplyDisplayName && (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-4 text-[0.65rem] text-gray-600">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="bulk-display-name-mode"
+                        checked={bulkDisplayNameMode === 'custom'}
+                        onChange={() => setBulkDisplayNameMode('custom')}
+                        className="h-3 w-3"
+                      />
+                      Custom
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="bulk-display-name-mode"
+                        checked={bulkDisplayNameMode === 'auto'}
+                        onChange={() => setBulkDisplayNameMode('auto')}
+                        className="h-3 w-3"
+                      />
+                      Auto (trim filename)
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="bulk-display-name-mode"
+                        checked={bulkDisplayNameMode === 'clear'}
+                        onChange={() => setBulkDisplayNameMode('clear')}
+                        className="h-3 w-3"
+                      />
+                      Clear
+                    </label>
+                  </div>
+                  {bulkDisplayNameMode === 'custom' && (
+                    <input
+                      type="text"
+                      value={bulkDisplayNameInput}
+                      onChange={(e) => setBulkDisplayNameInput(e.target.value)}
+                      className="w-full border border-gray-300 rounded px-3 py-2"
+                      placeholder="Display name"
+                    />
+                  )}
+                  <p className="text-[0.6rem] text-gray-500">
+                    Auto mode uses the filename trimmed to 64 characters.
                   </p>
                 </div>
               )}

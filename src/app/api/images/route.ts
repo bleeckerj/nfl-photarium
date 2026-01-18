@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCachedImages, getCacheStats } from '@/server/cloudflareImageCache';
+import { batchGetColorMetadata, isVectorSearchAvailable } from '@/server/vectorSearch';
 
 export async function GET(request: NextRequest) {
   try {
@@ -20,8 +21,36 @@ export async function GET(request: NextRequest) {
       : namespace === ''
         ? images.filter((image) => !image.namespace)
         : images.filter((image) => image.namespace === namespace);
+    
+    // Merge embedding status from Redis if available
+    let imagesWithEmbeddings = filtered;
+    try {
+      const redisAvailable = await isVectorSearchAvailable();
+      if (redisAvailable && filtered.length > 0) {
+        const imageIds = filtered.map(img => img.id);
+        const colorMetadata = await batchGetColorMetadata(imageIds);
+        
+        imagesWithEmbeddings = filtered.map(img => {
+          const meta = colorMetadata.get(img.id);
+          if (meta) {
+            return {
+              ...img,
+              hasClipEmbedding: meta.hasClipEmbedding,
+              hasColorEmbedding: meta.hasColorEmbedding,
+              dominantColors: meta.dominantColors ?? img.dominantColors,
+              averageColor: meta.averageColor ?? img.averageColor,
+            };
+          }
+          return img;
+        });
+      }
+    } catch (redisError) {
+      // Redis not available, continue without embedding status
+      console.warn('[ImagesAPI] Redis unavailable for embedding status:', redisError);
+    }
+    
     const cache = getCacheStats();
-    return NextResponse.json({ images: filtered, cache, namespace: namespace ?? null });
+    return NextResponse.json({ images: imagesWithEmbeddings, cache, namespace: namespace ?? null });
   } catch (error) {
     console.error('Fetch images error:', error);
     return NextResponse.json(

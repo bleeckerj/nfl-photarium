@@ -7,6 +7,10 @@ import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { enforceCloudflareMetadataLimit } from '@/utils/cloudflareMetadata';
 import { extractExifSummary } from '@/utils/exif';
 import { extractSnagx } from '@/utils/snagx';
+import { sanitizeFilename, MAX_FILENAME_LENGTH } from '@/utils/filename';
+
+// Re-export for backward compatibility
+export { sanitizeFilename, MAX_FILENAME_LENGTH } from '@/utils/filename';
 
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 export const SUPPORTED_IMAGE_TYPES = new Set([
@@ -118,10 +122,12 @@ export async function uploadImageBuffer({
     return { ok: false, error: 'File size must be less than 10MB', status: 400, reason: 'too-large' };
   }
 
-  let normalizedName = fileName.split(/[\\/]/).pop() || fileName;
+  // Sanitize filename: truncate, clean, and handle Google Photos blobs
+  let normalizedName = sanitizeFilename(fileName);
   const normalizedOriginalUrl = normalizeOriginalUrl(originalUrl);
   const normalizedSourceUrl = normalizeOriginalUrl(sourceUrl);
-  let duplicateMatches: Awaited<ReturnType<typeof findDuplicatesByOriginalUrl>> = [];
+  let duplicateMatches: Awaited<ReturnType<typeof findDuplicatesByContentHash>> = [];
+  let originalUrlDuplicates: Awaited<ReturnType<typeof findDuplicatesByOriginalUrl>> = [];
 
   let workingBuffer = buffer;
   let workingOriginalBuffer = originalBuffer;
@@ -135,7 +141,8 @@ export async function uploadImageBuffer({
       workingOriginalBuffer = extracted.buffer;
       workingFileType = 'image/png';
       workingFileSize = extracted.buffer.byteLength;
-      normalizedName = extracted.filename;
+      // Sanitize the extracted filename too
+      normalizedName = sanitizeFilename(extracted.filename);
     } catch (error) {
       logIssue('Failed to extract .snagx image', { filename: fileName });
       return { ok: false, error: 'Failed to extract image from .snagx file', status: 400, reason: 'unsupported' };
@@ -153,20 +160,13 @@ export async function uploadImageBuffer({
   }
 
   if (normalizedOriginalUrl) {
-    duplicateMatches = await findDuplicatesByOriginalUrl(normalizedOriginalUrl, namespace);
-    if (duplicateMatches.length) {
-      console.warn('[upload] Duplicate original URL detected', {
+    originalUrlDuplicates = await findDuplicatesByOriginalUrl(normalizedOriginalUrl, namespace);
+    if (originalUrlDuplicates.length) {
+      console.warn('[upload] Original URL already exists (not treated as duplicate)', {
         originalUrl,
-        duplicateIds: duplicateMatches.map(match => match.id),
-        folders: duplicateMatches.map(match => match.folder || null)
+        duplicateIds: originalUrlDuplicates.map(match => match.id),
+        folders: originalUrlDuplicates.map(match => match.folder || null)
       });
-      return {
-        ok: false,
-        error: `Duplicate original URL "${originalUrl}" detected`,
-        status: 409,
-        reason: 'duplicate',
-        duplicates: duplicateMatches
-      };
     }
   }
 
@@ -174,22 +174,20 @@ export async function uploadImageBuffer({
   const contentHash = createHash('sha256').update(finalBuffer).digest('hex');
   const exifSummary = await extractExifSummary(workingOriginalBuffer);
 
-  if (!normalizedOriginalUrl) {
-    duplicateMatches = await findDuplicatesByContentHash(contentHash, namespace);
-    if (duplicateMatches.length) {
-      console.warn('[upload] Duplicate content hash detected', {
-        contentHash,
-        duplicateIds: duplicateMatches.map(match => match.id),
-        folders: duplicateMatches.map(match => match.folder || null)
-      });
-      return {
-        ok: false,
-        error: 'Duplicate image content detected',
-        status: 409,
-        reason: 'duplicate',
-        duplicates: duplicateMatches
-      };
-    }
+  duplicateMatches = await findDuplicatesByContentHash(contentHash, namespace);
+  if (duplicateMatches.length) {
+    console.warn('[upload] Duplicate content hash detected', {
+      contentHash,
+      duplicateIds: duplicateMatches.map(match => match.id),
+      folders: duplicateMatches.map(match => match.folder || null)
+    });
+    return {
+      ok: false,
+      error: 'Duplicate image content detected',
+      status: 409,
+      reason: 'duplicate',
+      duplicates: duplicateMatches
+    };
   }
 
   const uploadFormData = new FormData();
@@ -214,9 +212,9 @@ export async function uploadImageBuffer({
     exif: exifSummary,
   };
 
-  const { metadata: limitedMetadata, dropped } = enforceCloudflareMetadataLimit(metadataPayload);
+  const { metadata: limitedMetadata, dropped, size, limitBytes } = enforceCloudflareMetadataLimit(metadataPayload);
   if (dropped.length) {
-    logIssue('Metadata trimmed to fit Cloudflare limits', { dropped });
+    logIssue('Metadata trimmed to fit Cloudflare limits', { dropped, size, limitBytes });
   }
   uploadFormData.append('metadata', JSON.stringify(limitedMetadata));
 
@@ -244,7 +242,10 @@ export async function uploadImageBuffer({
   }
 
   const imageData = result.result;
-  const baseMeta = imageData.meta ?? limitedMetadata;
+  const serverMeta = imageData.meta && typeof imageData.meta === 'object'
+    ? (imageData.meta as Record<string, unknown>)
+    : undefined;
+  const baseMeta = serverMeta ? { ...metadataPayload, ...serverMeta } : metadataPayload;
   const primaryCached = transformApiImageToCached({
     id: imageData.id,
     filename: imageData.filename,
@@ -268,9 +269,9 @@ export async function uploadImageBuffer({
         variationParentId: parentId,
         linkedAssetId: imageData.id,
       };
-      const { metadata: limitedWebpMetadata, dropped } = enforceCloudflareMetadataLimit(webpMetadataPayload);
+      const { metadata: limitedWebpMetadata, dropped, size, limitBytes } = enforceCloudflareMetadataLimit(webpMetadataPayload);
       if (dropped.length) {
-        logIssue('Metadata trimmed for webp variant', { dropped });
+        logIssue('Metadata trimmed for webp variant', { dropped, size, limitBytes });
       }
       webpFormData.append('metadata', JSON.stringify(limitedWebpMetadata));
       const webpResponse = await fetch(
@@ -295,7 +296,9 @@ export async function uploadImageBuffer({
             filename: webpResult.filename,
             uploaded: webpResult.uploaded,
             variants: webpResult.variants,
-            meta: webpResult.meta ?? limitedWebpMetadata
+            meta: webpResult.meta && typeof webpResult.meta === 'object'
+              ? { ...webpMetadataPayload, ...(webpResult.meta as Record<string, unknown>) }
+              : webpMetadataPayload
           });
           upsertCachedImage(cachedVariant);
         }
@@ -311,9 +314,9 @@ export async function uploadImageBuffer({
       linkedAssetId: webpVariantId,
       updatedAt: new Date().toISOString(),
     };
-    const { metadata: limitedUpdatedMetadata, dropped } = enforceCloudflareMetadataLimit(updatedMetadata);
+    const { metadata: limitedUpdatedMetadata, dropped, size, limitBytes } = enforceCloudflareMetadataLimit(updatedMetadata);
     if (dropped.length) {
-      logIssue('Metadata trimmed for linked asset update', { dropped });
+      logIssue('Metadata trimmed for linked asset update', { dropped, size, limitBytes });
     }
     try {
       const patchResp = await fetch(

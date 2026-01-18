@@ -416,7 +416,7 @@
     <main>
         <section class="hero">
             <h1>Self-Hosted Image Management</h1>
-            <p>Upload, organize, and distribute images via Cloudflare's global CDN. No vendor lock-in. Your infrastructure.</p>
+            <p>Upload, organize, and explore your images with semantic AI. Lightning-fast CDN delivery via Cloudflare. No vendor lock-in.</p>
             <div class="cta-buttons">
                 <a href="https://github.com/bleeckerj/nfl-photarium" class="btn btn-primary">Get Started</a>
                 <a href="https://github.com/bleeckerj/nfl-photarium#features" class="btn btn-secondary">Learn More</a>
@@ -463,6 +463,53 @@
                     <div class="feature">
                         <h3>CDN Delivery</h3>
                         <p>Lightning-fast global distribution via Cloudflare's trusted network.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="features" id="ai-features" style="background: #f9f7f4;">
+            <div class="features-container">
+                <h2>Machine Intelligence</h2>
+                <p style="text-align: center; color: var(--text-light); max-width: 700px; margin: -1.5rem auto 3rem;">
+                    Powered by Redis Stack vector search and CLIP embeddings, Photarium understands your images semantically — not just by filename.
+                </p>
+                <div class="features-grid">
+                    <div class="feature">
+                        <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px;"><path d="M12 2a8 8 0 1 0 8 8"/><path d="M12 2v4"/><path d="M12 18v4"/><path d="M4.93 4.93l2.83 2.83"/><path d="M16.24 16.24l2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="M4.93 19.07l2.83-2.83"/><path d="M16.24 7.76l2.83-2.83"/></svg>CLIP Embeddings</h3>
+                        <p>512-dimensional semantic vectors capture meaning, mood, and concept — a lonely chair neighbors a portrait of solitude.</p>
+                    </div>
+                    <div class="feature">
+                        <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px;"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="19" cy="17" r="2"/><circle cx="6" cy="12" r="3"/><circle cx="12" cy="19" r="2"/></svg>Color Histograms</h3>
+                        <p>64-dimensional color vectors for palette-based search. Find all your sunset oranges or ocean blues.</p>
+                    </div>
+                    <div class="feature">
+                        <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px;"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>Semantic Search</h3>
+                        <p>Type natural language like "vintage car at sunset" and find conceptually matching images, no tags required.</p>
+                    </div>
+                    <div class="feature">
+                        <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>Concept Radar</h3>
+                        <p>Visualize how the machine perceives your image across 10 aesthetic axes: warm↔cold, minimal↔complex, nostalgic↔futuristic.</p>
+                    </div>
+                    <div class="feature">
+                        <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px;"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51 15.42 17.49"/><path d="M15.41 6.51 8.59 10.49"/></svg>Semantic Clustering</h3>
+                        <p>See 4 "neighbors" (conceptually adjacent) and 4 "strangers" (most distant) — explore your collection's semantic topology.</p>
+                    </div>
+                    <div class="feature">
+                        <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px;"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>Click-to-Search Radar</h3>
+                        <p>Click anywhere on the concept radar to search for images matching those semantic coordinates. Interactive exploration.</p>
+                    </div>
+                    <div class="feature">
+                        <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px;"><path d="M17 6.1H3"/><path d="M21 12.1H3"/><path d="M15.1 18H3"/></svg>Machine Haiku</h3>
+                        <p>Generate contemplative 5-7-5 haiku from CLIP embeddings. The machine's poetic interpretation of your image's essence.</p>
+                    </div>
+                    <div class="feature">
+                        <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px;"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>Redis Stack</h3>
+                        <p>High-performance vector similarity search via RediSearch. Sub-millisecond KNN queries across your entire library.</p>
+                    </div>
+                    <div class="feature">
+                        <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px;"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>Color Search</h3>
+                        <p>Search by hex color like #3B82F6 to find images with matching palettes. Perfect for brand consistency.</p>
                     </div>
                 </div>
             </div>
@@ -592,7 +639,7 @@
             <!-- Project Credits -->
             <div class="project-credits">
                 <p>Photarium is open source and self-hosted. <a href="https://github.com/bleeckerj/nfl-photarium">View on GitHub</a></p>
-                <p>Built with Next.js, Tailwind CSS, and Cloudflare Images</p>
+                <p>Built with Next.js, Tailwind CSS, Cloudflare Images, Redis Stack, and CLIP</p>
             </div>
 
             <!-- Copyright -->

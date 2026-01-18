@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractSnagx } from '@/utils/snagx';
+import { sanitizeFilename } from '@/server/uploadService';
 import path from 'path';
 
 const MAX_SIZE = 10 * 1024 * 1024; // 10MB to match uploader
@@ -113,7 +114,8 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(arrayBuffer);
     let finalBuffer = buffer;
     let finalType = inferredContentType || 'image/png';
-    let filename = getFilenameFromUrl(sourceUrl, inferredContentType);
+    // Sanitize filename: truncate, clean, and handle Google Photos blobs
+    let filename = sanitizeFilename(getFilenameFromUrl(sourceUrl, inferredContentType));
     let captureDate: string | undefined;
     let snagxMetadata: Record<string, unknown> | undefined;
     let snagxDescription: string | undefined;
@@ -123,7 +125,8 @@ export async function POST(request: NextRequest) {
         const extracted = extractSnagx(buffer, filename);
         finalBuffer = extracted.buffer;
         finalType = 'image/png';
-        filename = extracted.filename;
+        // Sanitize the extracted filename too
+        filename = sanitizeFilename(extracted.filename);
         captureDate = extracted.captureDate;
         snagxMetadata = extracted.metadata;
         snagxDescription = buildSnagxDescription(captureDate, snagxMetadata);

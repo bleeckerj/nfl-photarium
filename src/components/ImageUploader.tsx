@@ -6,12 +6,17 @@ import { Upload, X, CheckCircle, AlertCircle } from "lucide-react";
 import clsx from "clsx";
 import MonoSelect from "./MonoSelect";
 import { normalizeOriginalUrl } from "@/utils/urlNormalization";
+import { setEmbeddingPendingEntry } from "@/utils/embeddingPending";
+import { sanitizeFilename, needsSanitization, MAX_FILENAME_LENGTH } from "@/utils/filename";
 
 interface UploadedImage {
   id: string;
   url: string;
   filename: string;
   status: "uploading" | "success" | "error";
+  embeddingStatus?: "queued" | "embedding" | "success" | "error";
+  embeddingError?: string;
+  embeddingRequested?: { clip: boolean; color: boolean };
   error?: string;
   folder?: string;
   tags?: string[];
@@ -104,11 +109,14 @@ const shrinkImageFile = async (file: File): Promise<File> => {
 export default function ImageUploader({ onImageUploaded, namespace }: ImageUploaderProps) {
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [embedClipOnUpload, setEmbedClipOnUpload] = useState(true);
+  const [embedColorOnUpload, setEmbedColorOnUpload] = useState(true);
   const [selectedFolder, setSelectedFolder] = useState<string>("");
   const [newFolder, setNewFolder] = useState<string>("");
   const [tags, setTags] = useState<string>("found");
   const [description, setDescription] = useState<string>("");
   const [originalUrl, setOriginalUrl] = useState<string>("");
+  const [omitOriginalUrl, setOmitOriginalUrl] = useState(false);
   const [sourceUrl, setSourceUrl] = useState<string>("");
   const [folders, setFolders] = useState<string[]>([
     "email-campaigns",
@@ -134,6 +142,29 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
   const [animateLoading, setAnimateLoading] = useState(false);
   const [animateError, setAnimateError] = useState<string | null>(null);
   const [expandedQueueMetadata, setExpandedQueueMetadata] = useState<Record<string, boolean>>({});
+  const [embeddingQueueDepth, setEmbeddingQueueDepth] = useState(0);
+  const embeddingQueueRef = useRef<Array<{ id: string; clip: boolean; color: boolean }>>([]);
+  const embeddingWorkerRef = useRef(false);
+
+  const updateEmbeddingPending = useCallback((
+    id: string,
+    status?: 'queued' | 'embedding' | 'error',
+    clip?: boolean,
+    color?: boolean,
+    error?: string
+  ) => {
+    if (!status || clip === undefined || color === undefined) {
+      setEmbeddingPendingEntry(id, undefined);
+      return;
+    }
+    setEmbeddingPendingEntry(id, {
+      status,
+      clip,
+      color,
+      error,
+      updatedAt: new Date().toISOString()
+    });
+  }, []);
 
   const createQueueId = useCallback(
     () =>
@@ -148,6 +179,103 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       prev.map((item) => (item.id === id ? { ...item, ...updates } : item))
     );
   }, []);
+
+  const processEmbeddingQueue = useCallback(async () => {
+    if (embeddingWorkerRef.current) {
+      console.log('[Uploader] Embedding worker already running, skipping');
+      return;
+    }
+    embeddingWorkerRef.current = true;
+    console.log('[Uploader] Starting embedding queue processing, depth:', embeddingQueueRef.current.length);
+
+    while (embeddingQueueRef.current.length > 0) {
+      const job = embeddingQueueRef.current.shift();
+      setEmbeddingQueueDepth(embeddingQueueRef.current.length);
+      if (!job) continue;
+
+      console.log('[Uploader] Processing embedding job:', job.id, { clip: job.clip, color: job.color });
+      updateEmbeddingPending(job.id, 'embedding', job.clip, job.color);
+      setUploadedImages((prev) =>
+        prev.map((img) =>
+          img.id === job.id
+            ? {
+                ...img,
+                embeddingStatus: "embedding",
+                embeddingError: undefined,
+                embeddingRequested: { clip: job.clip, color: job.color }
+              }
+            : img
+        )
+      );
+
+      try {
+        const response = await fetch(`/api/images/${job.id}/embeddings`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clip: job.clip, color: job.color })
+        });
+        const data = await response.json().catch(() => null);
+        console.log('[Uploader] Embedding response for', job.id, ':', response.status, data);
+        if (!response.ok) {
+          const message = typeof data?.error === 'string' ? data.error : 'Embedding failed';
+          throw new Error(message);
+        }
+
+        updateEmbeddingPending(job.id, undefined);
+        setUploadedImages((prev) =>
+          prev.map((img) =>
+            img.id === job.id
+              ? { ...img, embeddingStatus: "success", embeddingError: undefined }
+              : img
+          )
+        );
+        if (onImageUploaded) {
+          onImageUploaded();
+        }
+      } catch (error) {
+        updateEmbeddingPending(
+          job.id,
+          'error',
+          job.clip,
+          job.color,
+          error instanceof Error ? error.message : 'Embedding failed'
+        );
+        setUploadedImages((prev) =>
+          prev.map((img) =>
+            img.id === job.id
+              ? {
+                  ...img,
+                  embeddingStatus: "error",
+                  embeddingError: error instanceof Error ? error.message : 'Embedding failed'
+                }
+              : img
+          )
+        );
+      }
+    }
+
+    embeddingWorkerRef.current = false;
+  }, [onImageUploaded, updateEmbeddingPending]);
+
+  const enqueueEmbedding = useCallback((imageId: string, clip: boolean, color: boolean) => {
+    if (!clip && !color) return;
+    embeddingQueueRef.current.push({ id: imageId, clip, color });
+    setEmbeddingQueueDepth(embeddingQueueRef.current.length);
+    updateEmbeddingPending(imageId, 'queued', clip, color);
+    setUploadedImages((prev) =>
+      prev.map((img) =>
+        img.id === imageId
+          ? {
+              ...img,
+              embeddingStatus: "queued",
+              embeddingError: undefined,
+              embeddingRequested: { clip, color }
+            }
+          : img
+      )
+    );
+    void processEmbeddingQueue();
+  }, [processEmbeddingQueue, updateEmbeddingPending]);
 
   const estimateMetadataBytes = useCallback((payload: Record<string, unknown>) => {
     const filtered = Object.fromEntries(
@@ -322,12 +450,19 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     async (filesToUpload: QueuedFile[]) => {
       setIsUploading(true);
 
+      const shouldEmbedClip = embedClipOnUpload;
+      const shouldEmbedColor = embedColorOnUpload;
+      const shouldEmbedAnything = shouldEmbedClip || shouldEmbedColor;
+
       const folderToUse = resolveFolder();
 
       // Create initial entries for all files
       const initialImages: UploadedImage[] = filesToUpload.map((entry) => {
-        const originalUrlToSend =
-          entry.originalUrl !== undefined ? entry.originalUrl : originalUrl.trim() || '';
+        const originalUrlToSend = omitOriginalUrl
+          ? ''
+          : entry.originalUrl !== undefined
+            ? entry.originalUrl
+            : originalUrl.trim() || '';
         const sourceUrlToSend =
           entry.sourceUrl !== undefined ? entry.sourceUrl : sourceUrl.trim() || '';
         const folderToSend = entry.folder !== undefined ? entry.folder : folderToUse;
@@ -366,8 +501,11 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
           id: queuedId
         } = filesToUpload[i];
         const imageId = queuedId;
-        const originalUrlToSend =
-          queuedOriginalUrl !== undefined ? queuedOriginalUrl : originalUrl.trim() || '';
+        const originalUrlToSend = omitOriginalUrl
+          ? ''
+          : queuedOriginalUrl !== undefined
+            ? queuedOriginalUrl
+            : originalUrl.trim() || '';
         const sourceUrlToSend =
           queuedSourceUrl !== undefined ? queuedSourceUrl : sourceUrl.trim() || '';
         const folderToSend = queuedFolder !== undefined ? queuedFolder : folderToUse;
@@ -439,6 +577,8 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
                 url: item.url,
                 filename: item.filename,
                 status: "success",
+                embeddingStatus: shouldEmbedAnything ? "queued" : undefined,
+                embeddingRequested: shouldEmbedAnything ? { clip: shouldEmbedClip, color: shouldEmbedColor } : undefined,
                 folder: item.folder,
                 tags: item.tags,
                 description: item.description,
@@ -466,18 +606,28 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
                 ...skippedEntries
               ]);
 
+              if (shouldEmbedAnything) {
+                successEntries.forEach((entry) => enqueueEmbedding(entry.id, shouldEmbedClip, shouldEmbedColor));
+              }
+
               if (onImageUploaded && successEntries.length > 0) {
                 setTimeout(() => {
                   onImageUploaded();
                 }, 500);
               }
             } else {
+              const serverId = result && typeof result === 'object' && 'id' in result && typeof (result as { id?: string }).id === 'string'
+                ? (result as { id?: string }).id as string
+                : imageId;
               setUploadedImages((prev) =>
                 prev.map((img) =>
                   img.id === imageId
                     ? {
                         ...img,
+                        id: serverId,
                         status: "success",
+                        embeddingStatus: shouldEmbedAnything ? "queued" : undefined,
+                        embeddingRequested: shouldEmbedAnything ? { clip: shouldEmbedClip, color: shouldEmbedColor } : undefined,
                         url: result.url,
                         folder: folderToSend || undefined,
                         tags: tagsToSend
@@ -492,6 +642,10 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
                     : img
                 )
               );
+
+              if (shouldEmbedAnything) {
+                enqueueEmbedding(serverId, shouldEmbedClip, shouldEmbedColor);
+              }
 
               // Call the callback to refresh the gallery after a short delay
               // This ensures Cloudflare has processed the image
@@ -540,7 +694,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       setSourceUrl("");
       setSelectedParentId("");
     },
-    [resolveFolder, tags, description, originalUrl, sourceUrl, namespace, selectedParentId, onImageUploaded, fetchFolders, formatUploadErrorMessage]
+    [resolveFolder, tags, description, originalUrl, sourceUrl, namespace, selectedParentId, onImageUploaded, fetchFolders, formatUploadErrorMessage, embedClipOnUpload, embedColorOnUpload, enqueueEmbedding, omitOriginalUrl]
   );
 
   const uploadRemoteFiles = useCallback(
@@ -549,10 +703,17 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       if (validItems.length === 0) return;
       setIsUploading(true);
 
+      const shouldEmbedClip = embedClipOnUpload;
+      const shouldEmbedColor = embedColorOnUpload;
+      const shouldEmbedAnything = shouldEmbedClip || shouldEmbedColor;
+
       const folderToUse = resolveFolder();
       const initialImages: UploadedImage[] = validItems.map((entry) => {
-        const originalUrlToSend =
-          entry.originalUrl !== undefined ? entry.originalUrl : originalUrl.trim() || entry.remoteUrl || '';
+        const originalUrlToSend = omitOriginalUrl
+          ? ''
+          : entry.originalUrl !== undefined
+            ? entry.originalUrl
+            : originalUrl.trim() || entry.remoteUrl || '';
         const sourceUrlToSend =
           entry.sourceUrl !== undefined ? entry.sourceUrl : sourceUrl.trim() || '';
         const folderToSend = entry.folder !== undefined ? entry.folder : folderToUse;
@@ -580,8 +741,11 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       });
 
       const payloadItems = validItems.map((entry) => {
-        const originalUrlToSend =
-          entry.originalUrl !== undefined ? entry.originalUrl : originalUrl.trim() || entry.remoteUrl || '';
+        const originalUrlToSend = omitOriginalUrl
+          ? ''
+          : entry.originalUrl !== undefined
+            ? entry.originalUrl
+            : originalUrl.trim() || entry.remoteUrl || '';
         const sourceUrlToSend =
           entry.sourceUrl !== undefined ? entry.sourceUrl : sourceUrl.trim() || '';
         const folderToSend = entry.folder !== undefined ? entry.folder : folderToUse;
@@ -624,8 +788,29 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
 
         const resultList = Array.isArray(data?.results) ? data.results : [];
         const failureList = Array.isArray(data?.failures) ? data.failures : [];
-        const successMap = new Map(resultList.map((item: { clientId: string }) => [item.clientId, item]));
-        const failureMap = new Map(failureList.map((item: { clientId: string }) => [item.clientId, item]));
+
+        interface UploadResult {
+          clientId: string;
+          id?: string;
+          url?: string;
+          folder?: string;
+          tags?: string[];
+          description?: string;
+          originalUrl?: string;
+          sourceUrl?: string;
+        }
+
+        interface UploadFailure {
+          clientId: string;
+          error?: string;
+        }
+
+        const successMap = new Map<string, UploadResult>(
+          resultList.map((item: UploadResult) => [item.clientId, item])
+        );
+        const failureMap = new Map<string, UploadFailure>(
+          failureList.map((item: UploadFailure) => [item.clientId, item])
+        );
 
         setUploadedImages((prev) =>
           prev.map((img) => {
@@ -633,8 +818,11 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
             if (success) {
               return {
                 ...img,
-                status: "success",
-                url: success.url,
+                id: success.id ?? img.id,
+                status: "success" as const,
+                embeddingStatus: shouldEmbedAnything ? "queued" : undefined,
+                embeddingRequested: shouldEmbedAnything ? { clip: shouldEmbedClip, color: shouldEmbedColor } : undefined,
+                url: success.url ?? img.url,
                 folder: success.folder,
                 tags: success.tags,
                 description: success.description,
@@ -647,20 +835,28 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
             if (failure) {
               return {
                 ...img,
-                status: "error",
+                status: "error" as const,
                 error: failure.error || 'Upload failed'
               };
             }
             if (payloadItems.some((item) => item.clientId === img.id)) {
               return {
                 ...img,
-                status: "error",
+                status: "error" as const,
                 error: "Upload failed"
               };
             }
             return img;
           })
         );
+
+        if (shouldEmbedAnything) {
+          resultList.forEach((item: UploadResult) => {
+            if (item.id) {
+              enqueueEmbedding(item.id, shouldEmbedClip, shouldEmbedColor);
+            }
+          });
+        }
 
         if (onImageUploaded && resultList.length > 0) {
           setTimeout(() => {
@@ -692,7 +888,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         setSelectedParentId("");
       }
     },
-    [resolveFolder, tags, description, originalUrl, sourceUrl, namespace, selectedParentId, onImageUploaded, fetchFolders]
+    [resolveFolder, tags, description, originalUrl, sourceUrl, namespace, selectedParentId, onImageUploaded, fetchFolders, embedClipOnUpload, embedColorOnUpload, enqueueEmbedding, omitOriginalUrl]
   );
 
   // Handle drag and drop - either queue or upload immediately
@@ -1145,13 +1341,28 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
           <label htmlFor="original-url-input" className="block text-xs font-mono font-medium text-gray-700 mb-2">
             Original URL (Optional)
           </label>
+          <label className="mb-2 flex items-center gap-2 text-[11px] text-gray-600">
+            <input
+              type="checkbox"
+              checked={omitOriginalUrl}
+              onChange={(e) => {
+                setOmitOriginalUrl(e.target.checked);
+                if (e.target.checked) {
+                  setOriginalUrl('');
+                }
+              }}
+              className="h-3 w-3"
+            />
+            Do not store original URL
+          </label>
           <input
             id="original-url-input"
             type="url"
             placeholder="https://example.com/original-image.jpg"
             value={originalUrl}
             onChange={(e) => setOriginalUrl(e.target.value)}
-            className="w-full border border-gray-300 rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+            disabled={omitOriginalUrl}
+            className="w-full border border-gray-300 rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
           />
           <p className="text-xs text-gray-500 mt-1">Asset URL used for duplicate detection</p>
         </div>
@@ -1212,6 +1423,44 @@ A long list of filenames is not user friendly and essentially useless for select
         </p>
         <p className="text-xs font-mono text-gray-500">
           {isUploading ? "Please wait while your images are being uploaded" : "or click to select files (.zip supported)"}
+        </p>
+      </div>
+
+      <div className="mt-4 p-4 border border-dashed rounded-lg bg-white/60">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-mono font-medium text-gray-900">Embeddings after upload</p>
+          {embeddingQueueDepth > 0 && (
+            <div className="flex items-center gap-2 text-[11px] text-purple-700">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-purple-400 opacity-75"></span>
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-purple-600"></span>
+              </span>
+              {embeddingQueueDepth} queued
+            </div>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-4">
+          <label className="flex items-center gap-2 text-[11px] text-gray-600">
+            <input
+              type="checkbox"
+              checked={embedClipOnUpload}
+              onChange={(e) => setEmbedClipOnUpload(e.target.checked)}
+              className="h-3 w-3"
+            />
+            Similarity (CLIP)
+          </label>
+          <label className="flex items-center gap-2 text-[11px] text-gray-600">
+            <input
+              type="checkbox"
+              checked={embedColorOnUpload}
+              onChange={(e) => setEmbedColorOnUpload(e.target.checked)}
+              className="h-3 w-3"
+            />
+            Color palette
+          </label>
+        </div>
+        <p className="text-[11px] text-gray-500 mt-2">
+          Embeddings run in the background after upload and may take a while. You can keep uploading while they finish.
         </p>
       </div>
 
@@ -1284,6 +1533,22 @@ A long list of filenames is not user friendly and essentially useless for select
           <div className="flex items-center justify-between mb-4">
             <p className="text-xs font-mono font-medium text-gray-900">Queued Files ({queuedFiles.length})</p>
             <div className="flex space-x-2">
+              {queuedFiles.some(f => needsSanitization(f.filename)) && (
+                <button
+                  onClick={() => {
+                    setQueuedFiles(prev => prev.map(f => 
+                      needsSanitization(f.filename) 
+                        ? { ...f, filename: sanitizeFilename(f.filename) }
+                        : f
+                    ));
+                  }}
+                  className="px-3 py-1 text-xs text-amber-700 hover:text-amber-800 border border-amber-300 bg-amber-50 rounded-md hover:bg-amber-100"
+                  disabled={isUploading}
+                  title="Sanitize all long or problematic filenames"
+                >
+                  Sanitize All Names
+                </button>
+              )}
               <button
                 onClick={clearQueue}
                 className="px-3 py-1 text-xs text-gray-600 hover:text-red-600 border border-gray-300 rounded-md hover:border-red-300"
@@ -1399,11 +1664,34 @@ A long list of filenames is not user friendly and essentially useless for select
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-mono font-medium text-gray-900 truncate">{item.filename}</p>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        value={item.filename}
+                        onChange={(e) => updateQueuedFile(item.id, { filename: e.target.value })}
+                        className="flex-1 min-w-0 text-xs font-mono font-medium text-gray-900 bg-transparent border-b border-transparent hover:border-blue-300 focus:border-blue-500 focus:outline-none truncate"
+                        title="Click to edit filename"
+                        disabled={isUploading}
+                      />
+                      {needsSanitization(item.filename) && (
+                        <button
+                          type="button"
+                          onClick={() => updateQueuedFile(item.id, { filename: sanitizeFilename(item.filename) })}
+                          className="px-1.5 py-0.5 text-[10px] bg-amber-100 hover:bg-amber-200 text-amber-700 rounded border border-amber-300 whitespace-nowrap"
+                          title="Clean up and truncate filename"
+                          disabled={isUploading}
+                        >
+                          Sanitize
+                        </button>
+                      )}
+                    </div>
                     <p className="text-xs text-gray-500">
                       {typeof displaySizeBytes === 'number'
                         ? `${(displaySizeBytes / 1024 / 1024).toFixed(2)} MB`
                         : "Size unknown"}
+                      {item.filename.length > MAX_FILENAME_LENGTH && (
+                        <span className="ml-2 text-amber-600">⚠ Long filename ({item.filename.length} chars)</span>
+                      )}
                     </p>
                     {effectiveOriginalUrl && (
                       <p className="text-[11px] text-gray-600 truncate" title={effectiveOriginalUrl}>
@@ -1607,6 +1895,35 @@ A long list of filenames is not user friendly and essentially useless for select
                       <p className="text-xs text-gray-500">🔗 <a href={image.sourceUrl} target="_blank" rel="noreferrer" className="underline">Source</a></p>
                     )}
                     {image.tags && image.tags.length > 0 && <p className="text-xs text-gray-500">🏷️ {image.tags.join(", ")}</p>}
+                    {image.embeddingRequested && (
+                      <div className="flex items-center gap-2 text-[11px] text-purple-700">
+                        {(image.embeddingStatus === "queued" || image.embeddingStatus === "embedding") && (
+                          <span className="relative flex h-2 w-2">
+                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-purple-400 opacity-75"></span>
+                            <span className="relative inline-flex h-2 w-2 rounded-full bg-purple-600"></span>
+                          </span>
+                        )}
+                        {image.embeddingStatus === "success" && (
+                          <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
+                        )}
+                        {image.embeddingStatus === "error" && (
+                          <span className="inline-flex h-2 w-2 rounded-full bg-red-500"></span>
+                        )}
+                        <span>
+                          Embedding {image.embeddingStatus ?? "queued"}
+                          {image.embeddingRequested.clip && image.embeddingRequested.color
+                            ? " (clip + color)"
+                            : image.embeddingRequested.clip
+                              ? " (clip)"
+                              : image.embeddingRequested.color
+                                ? " (color)"
+                                : ""}
+                        </span>
+                      </div>
+                    )}
+                    {image.embeddingStatus === "error" && image.embeddingError && (
+                      <p className="text-[11px] text-red-600">{image.embeddingError}</p>
+                    )}
                     {image.status === "success" && image.url && (
                       <button onClick={() => copyToClipboard(image.url)} className="text-xs text-blue-600 hover:text-blue-800 truncate block max-w-xs">
                         {image.url}

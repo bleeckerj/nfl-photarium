@@ -8,6 +8,7 @@ import { enforceCloudflareMetadataLimit } from '@/utils/cloudflareMetadata';
 import { extractSnagx } from '@/utils/snagx';
 import { extractExifSummary } from '@/utils/exif';
 import { upsertRegistryNamespace } from '@/server/namespaceRegistry';
+import { sanitizeFilename } from '@/server/uploadService';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -126,14 +127,16 @@ export async function POST(request: NextRequest) {
     const originalBuffer = Buffer.from(bytes);
     let workingBuffer = originalBuffer;
     let workingType = file.type;
-    let workingName = file.name;
+    // Sanitize filename: truncate, clean, and handle Google Photos blobs
+    let workingName = sanitizeFilename(file.name);
 
     if (isSnagx) {
       try {
         const extracted = extractSnagx(originalBuffer, file.name);
         workingBuffer = extracted.buffer;
         workingType = 'image/png';
-        workingName = extracted.filename;
+        // Sanitize the extracted filename too
+        workingName = sanitizeFilename(extracted.filename);
       } catch (error) {
         logExternalIssue('Failed to extract .snagx image', { filename: file.name });
         return withCors(NextResponse.json(
@@ -194,9 +197,9 @@ export async function POST(request: NextRequest) {
       exif: exifSummary,
     };
 
-    const { metadata: limitedMetadata, dropped } = enforceCloudflareMetadataLimit(metadataPayload);
+    const { metadata: limitedMetadata, dropped, size, limitBytes } = enforceCloudflareMetadataLimit(metadataPayload);
     if (dropped.length) {
-      logExternalIssue('Metadata trimmed to fit Cloudflare limits', { dropped });
+      logExternalIssue('Metadata trimmed to fit Cloudflare limits', { dropped, size, limitBytes });
     }
     const metadata = JSON.stringify(limitedMetadata);
 
@@ -238,7 +241,7 @@ export async function POST(request: NextRequest) {
     let webpVariantId: string | undefined;
     if (file.type === 'image/svg+xml') {
       try {
-        const webpBuffer = await sharp(buffer).webp({ quality: 85 }).toBuffer();
+        const webpBuffer = await sharp(workingBuffer).webp({ quality: 85 }).toBuffer();
         const webpName = file.name.replace(/\.svg$/i, '') + '.webp';
         const webpFormData = new FormData();
         webpFormData.append('file', new Blob([webpBuffer], { type: 'image/webp' }), webpName);
@@ -249,9 +252,9 @@ export async function POST(request: NextRequest) {
           variationParentId: cleanParentId,
           linkedAssetId: imageData.id,
         };
-        const { metadata: limitedWebpMetadata, dropped } = enforceCloudflareMetadataLimit(webpMetadata);
+        const { metadata: limitedWebpMetadata, dropped, size, limitBytes } = enforceCloudflareMetadataLimit(webpMetadata);
         if (dropped.length) {
-          logExternalIssue('Metadata trimmed for webp variant', { dropped });
+          logExternalIssue('Metadata trimmed for webp variant', { dropped, size, limitBytes });
         }
         webpFormData.append('metadata', JSON.stringify(limitedWebpMetadata));
         const webpResponse = await fetch(

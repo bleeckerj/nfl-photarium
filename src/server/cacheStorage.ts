@@ -27,7 +27,8 @@ export interface ICacheStorage {
 }
 
 // Current cache format version - increment when CachedCloudflareImage shape changes
-const CACHE_VERSION = 1;
+// v2: Added vector search fields (hasClipEmbedding, hasColorEmbedding, dominantColors, averageColor)
+const CACHE_VERSION = 2;
 
 /**
  * File-based cache storage implementation
@@ -194,7 +195,7 @@ class RedisCacheStorage implements ICacheStorage {
   private async connect(): Promise<void> {
     try {
       // Dynamic import to avoid requiring ioredis when using file storage
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
+       
       const Redis = (await import(/* webpackIgnore: true */ 'ioredis' as string)).default;
       const redisUrl = process.env.REDIS_URL ?? 'redis://localhost:6379';
       

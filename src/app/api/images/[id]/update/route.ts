@@ -21,7 +21,7 @@ export async function PATCH(
 
     const { id: imageId } = await params;
     const body = await request.json();
-    const { folder, tags, description, originalUrl, sourceUrl, parentId, displayName, altTag, variationSort } = body;
+    const { folder, tags, description, originalUrl, sourceUrl, parentId, displayName, altTag, variationSort, clearExif } = body;
     
     if (!imageId) {
       return NextResponse.json(
@@ -38,6 +38,7 @@ export async function PATCH(
     const displayNameProvided = Object.prototype.hasOwnProperty.call(body, 'displayName');
     const altTagProvided = Object.prototype.hasOwnProperty.call(body, 'altTag');
     const variationSortProvided = Object.prototype.hasOwnProperty.call(body, 'variationSort');
+    const clearExifProvided = Object.prototype.hasOwnProperty.call(body, 'clearExif');
 
     const cleanFolder = cleanString(typeof folder === 'string' ? folder : undefined);
     const cleanDescription =
@@ -141,6 +142,11 @@ export async function PATCH(
       metadata.variationSort = cleanVariationSort;
     }
 
+    // Clear EXIF data if explicitly requested
+    if (clearExifProvided && clearExif === true) {
+      delete metadata.exif;
+    }
+
     const metadataPayload = pickCloudflareMetadata(metadata);
 
     // Update image metadata in Cloudflare using JSON body
@@ -179,15 +185,16 @@ export async function PATCH(
     const finalVariationSort =
       typeof metadataPayload.variationSort === 'number' ? metadataPayload.variationSort : undefined;
 
-    upsertCachedImage(
-      transformApiImageToCached({
-        id: fetchedImageResult.result.id,
-        filename: fetchedImageResult.result.filename,
-        uploaded: fetchedImageResult.result.uploaded,
-        variants: fetchedImageResult.result.variants,
-        meta: metadataPayload
-      })
-    );
+    const cachedImage = transformApiImageToCached({
+      id: fetchedImageResult.result.id,
+      filename: fetchedImageResult.result.filename,
+      uploaded: fetchedImageResult.result.uploaded,
+      variants: fetchedImageResult.result.variants,
+      meta: metadataPayload
+    });
+    
+    console.log(`[Update] Upserting cache for ${imageId} with tags:`, cachedImage.tags);
+    upsertCachedImage(cachedImage);
 
     return NextResponse.json({
       success: true,

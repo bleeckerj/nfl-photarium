@@ -41,13 +41,31 @@ export const CLOUDFLARE_METADATA_FIELDS = [
 
 type CloudflareMetadataField = typeof CLOUDFLARE_METADATA_FIELDS[number];
 
+/**
+ * Check if a value is "empty" and should be excluded from metadata.
+ * Empty values: undefined, null, '', [], {}
+ */
+function isEmptyValue(value: unknown): boolean {
+  if (value === undefined || value === null || value === '') {
+    return true;
+  }
+  if (Array.isArray(value) && value.length === 0) {
+    return true;
+  }
+  if (typeof value === 'object' && value !== null && Object.keys(value).length === 0) {
+    return true;
+  }
+  return false;
+}
+
 export function pickCloudflareMetadata(
   meta: Record<string, unknown>
 ): CloudflareMetadata {
   const trimmed: Record<string, unknown> = {};
   CLOUDFLARE_METADATA_FIELDS.forEach((key) => {
     const value = meta[key as CloudflareMetadataField];
-    if (value !== undefined) {
+    // Exclude undefined AND empty values to reduce byte count
+    if (!isEmptyValue(value)) {
       trimmed[key] = value;
     }
   });
@@ -105,19 +123,13 @@ export function enforceCloudflareMetadataLimit(
   payload: Record<string, unknown>,
   limitBytes = 1024
 ) {
-  let trimmed = { ...payload };
+  const trimmed = { ...payload };
   let size = getMetadataByteSize(trimmed);
   const dropped: string[] = [];
   const dropOrder = [
     'exif',
-    'description',
-    'tags',
     'originalUrlNormalized',
-    'originalUrl',
     'sourceUrlNormalized',
-    'sourceUrl',
-    'namespace',
-    'folder',
     'displayName',
     'filename',
     'contentHash',
@@ -126,7 +138,13 @@ export function enforceCloudflareMetadataLimit(
     'size',
     'variationParentId',
     'linkedAssetId',
-    'variationSort'
+    'variationSort',
+    'description',
+    'tags',
+    'originalUrl',
+    'sourceUrl',
+    'namespace',
+    'folder'
   ];
 
   for (const key of dropOrder) {
@@ -153,5 +171,5 @@ export function enforceCloudflareMetadataLimit(
     }
   }
 
-  return { metadata: trimmed, dropped };
+  return { metadata: trimmed, dropped, size, limitBytes };
 }

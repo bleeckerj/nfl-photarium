@@ -62,8 +62,8 @@ describe('POST /api/upload/external', () => {
     process.env.CLOUDFLARE_ACCOUNT_ID = 'acct';
     process.env.CLOUDFLARE_API_TOKEN = 'token';
 
-    const mockFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(
+    const mockFetch = vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+      Promise.resolve(new Response(
         JSON.stringify({
           result: {
             id: 'abc123',
@@ -71,13 +71,16 @@ describe('POST /api/upload/external', () => {
               'https://imagedelivery.net/hash/abc123/public',
               'https://imagedelivery.net/hash/abc123/thumb',
             ],
+            images: [],
           },
         }),
         { status: 200 }
-      ) as Response
+      ))
     );
 
-    const file = new File(['hello world'], 'photo.png', { type: 'image/png' });
+    // Use unique content to avoid duplicate detection from cached test data
+    const uniqueContent = `test-image-${Date.now()}-${Math.random()}`;
+    const file = new File([uniqueContent], 'photo.png', { type: 'image/png' });
     const formData = new FormData();
     formData.append('file', file);
     formData.append('folder', 'astro-uploads');
@@ -98,32 +101,46 @@ describe('POST /api/upload/external', () => {
     process.env.CLOUDFLARE_ACCOUNT_ID = 'acct';
     process.env.CLOUDFLARE_API_TOKEN = 'token';
 
-    const mockFetch = vi.spyOn(globalThis, 'fetch');
-    mockFetch.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          result: {
-            id: 'svg123',
-            variants: ['https://example.com/svg123/public']
-          }
-        }),
-        { status: 200 }
-      ) as Response
-    );
-    mockFetch.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          result: {
-            id: 'webp789',
-            variants: ['https://example.com/webp789/public']
-          }
-        }),
-        { status: 200 }
-      ) as Response
-    );
-    mockFetch.mockResolvedValueOnce(new Response(null, { status: 200 }) as Response);
+    let callCount = 0;
+    const mockFetch = vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        // First call: upload SVG
+        return Promise.resolve(new Response(
+          JSON.stringify({
+            result: {
+              id: 'svg123',
+              variants: ['https://example.com/svg123/public']
+            }
+          }),
+          { status: 200 }
+        ));
+      } else if (callCount === 2) {
+        // Second call: upload WebP variant
+        return Promise.resolve(new Response(
+          JSON.stringify({
+            result: {
+              id: 'webp789',
+              variants: ['https://example.com/webp789/public']
+            }
+          }),
+          { status: 200 }
+        ));
+      } else if (callCount === 3) {
+        // Third call: PATCH to link assets
+        return Promise.resolve(new Response(null, { status: 200 }));
+      } else {
+        // Subsequent calls: background cache refresh (return empty images)
+        return Promise.resolve(new Response(
+          JSON.stringify({ result: { images: [] } }),
+          { status: 200 }
+        ));
+      }
+    });
 
-    const file = new File(['<svg></svg>'], 'vector.svg', { type: 'image/svg+xml' });
+    // Valid SVG with explicit dimensions for sharp to process
+    const validSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="red"/></svg>';
+    const file = new File([validSvg], 'vector.svg', { type: 'image/svg+xml' });
     const formData = new FormData();
     formData.append('file', file);
     formData.append('folder', 'icons');
@@ -135,6 +152,8 @@ describe('POST /api/upload/external', () => {
     expect(response.status).toBe(200);
     expect(payload.id).toBe('svg123');
     expect(payload.webpVariantId).toBe('webp789');
-    expect(mockFetch).toHaveBeenCalledTimes(3);
+    // At least 3 calls: SVG upload, WebP upload, PATCH link (plus potential cache refresh)
+    expect(mockFetch).toHaveBeenCalled();
+    expect(callCount).toBeGreaterThanOrEqual(3);
   });
 });
