@@ -416,7 +416,7 @@
     <main>
         <section class="hero">
             <h1>Self-Hosted Image Management</h1>
-            <p>Upload, organize, and explore your images with semantic AI. Lightning-fast CDN delivery via Cloudflare. No vendor lock-in.</p>
+            <p>Upload, organize, and explore your images with semantic AI, vector search, and color-aware discovery. Lightning-fast CDN delivery via Cloudflare. No vendor lock-in.</p>
             <div class="cta-buttons">
                 <a href="https://github.com/bleeckerj/nfl-photarium" class="btn btn-primary">Get Started</a>
                 <a href="https://github.com/bleeckerj/nfl-photarium#features" class="btn btn-secondary">Learn More</a>
@@ -426,39 +426,39 @@
 
         <section class="features" id="features">
             <div class="features-container">
-                <h2>Designed for Teams</h2>
+                <h2>Core Workflow</h2>
                 <div class="features-grid">
                     <div class="feature">
                         <h3>Upload & Organize</h3>
                         <p>Drag-and-drop interface with folders, tags, and bulk operations.</p>
                     </div>
                     <div class="feature">
+                        <h3>External Uploads & Imports</h3>
+                        <p>Programmatic uploads plus bulk import tooling for existing libraries.</p>
+                    </div>
+                    <div class="feature">
                         <h3>Search & Filter</h3>
                         <p>Find images by name, folder, tag, or date range instantly.</p>
                     </div>
                     <div class="feature">
-                        <h3>Dual View Modes</h3>
-                        <p>Grid view for browsing, list view for bulk operations and metadata.</p>
+                        <h3>Semantic & Color Search</h3>
+                        <p>Natural language queries and hex color matching without manual tagging.</p>
                     </div>
                     <div class="feature">
-                        <h3>Smart Pagination</h3>
-                        <p>Date-aware page controls with sticky filters and quick navigation.</p>
+                        <h3>Similarity + Antipode</h3>
+                        <p>Surface neighbors and opposites to explore the edges of your catalog.</p>
                     </div>
                     <div class="feature">
-                        <h3>AI-Generated ALT Text</h3>
-                        <p>Auto-generate accessible descriptions with GPT-4o mini integration.</p>
+                        <h3>Metadata Precision</h3>
+                        <p>Assign variants, edit tags, and manage alt text with confidence.</p>
                     </div>
                     <div class="feature">
-                        <h3>Image Variants</h3>
-                        <p>Automatic responsive sizing: thumbnail, medium, large, public.</p>
+                        <h3>Embedding Pipeline</h3>
+                        <p>Batch generation, backfills, and status tracking for vector readiness.</p>
                     </div>
                     <div class="feature">
-                        <h3>External API (Optional)</h3>
-                        <p>Progammatic upload endpoint. Configurable and can be disabled for public deployments.</p>
-                    </div>
-                    <div class="feature">
-                        <h3>Namespace Isolation</h3>
-                        <p>Logical separation for multi-tenant or multi-app deployments.</p>
+                        <h3>Operational Controls</h3>
+                        <p>Namespace isolation, deduping, and cleanup scripts for large archives.</p>
                     </div>
                     <div class="feature">
                         <h3>CDN Delivery</h3>
@@ -493,7 +493,7 @@
                     </div>
                     <div class="feature">
                         <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px;"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51 15.42 17.49"/><path d="M15.41 6.51 8.59 10.49"/></svg>Semantic Clustering</h3>
-                        <p>See 4 "neighbors" (conceptually adjacent) and 4 "strangers" (most distant) — explore your collection's semantic topology.</p>
+                        <p>See neighbors and antipodes to explore your collection's semantic topology.</p>
                     </div>
                     <div class="feature">
                         <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px;"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>Click-to-Search Radar</h3>
@@ -502,6 +502,10 @@
                     <div class="feature">
                         <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px;"><path d="M17 6.1H3"/><path d="M21 12.1H3"/><path d="M15.1 18H3"/></svg>Machine Haiku</h3>
                         <p>Generate contemplative 5-7-5 haiku from CLIP embeddings. The machine's poetic interpretation of your image's essence.</p>
+                    </div>
+                    <div class="feature">
+                        <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px;"><path d="M3 12h18"/><path d="M12 3v18"/></svg>Embedding Ops</h3>
+                        <p>Batch embeddings, backfills, and status visibility keep large libraries searchable.</p>
                     </div>
                     <div class="feature">
                         <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px;"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>Redis Stack</h3>
@@ -564,11 +568,16 @@
                 </div>
                 <div class="step">
                     <div class="step-number">5</div>
+                    <h3>Enable Vector Search (Optional)</h3>
+                    <p>Run Redis Stack and generate embeddings for semantic search and similarity.</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">6</div>
                     <h3>Deploy Anywhere</h3>
                     <p>Deploy to Vercel, Railway, Render, or any Node.js host.</p>
                 </div>
                 <div class="step">
-                    <div class="step-number">6</div>
+                    <div class="step-number">7</div>
                     <h3>Start Managing</h3>
                     <p>Upload images, organize with folders and tags, copy CDN URLs.</p>
                 </div>
