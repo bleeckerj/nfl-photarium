@@ -125,7 +125,7 @@ export async function POST(request: NextRequest) {
 
     const bytes = await file.arrayBuffer();
     const originalBuffer = Buffer.from(bytes);
-    let workingBuffer = originalBuffer;
+    let workingBuffer: Buffer = originalBuffer;
     let workingType = file.type;
     // Sanitize filename: truncate, clean, and handle Google Photos blobs
     let workingName = sanitizeFilename(file.name);
@@ -176,7 +176,9 @@ export async function POST(request: NextRequest) {
     }
 
     const uploadFormData = new FormData();
-    uploadFormData.append('file', new Blob([workingBuffer], { type: workingType }), workingName);
+    // Convert Buffer to Uint8Array for Blob compatibility
+    const bufferArray = new Uint8Array(workingBuffer);
+    uploadFormData.append('file', new Blob([bufferArray], { type: workingType }), workingName);
 
     const metadataPayload: Record<string, unknown> = {
       filename: workingName,
@@ -272,7 +274,9 @@ export async function POST(request: NextRequest) {
         const webpBuffer = await sharp(workingBuffer).webp({ quality: 85 }).toBuffer();
         const webpName = file.name.replace(/\.svg$/i, '') + '.webp';
         const webpFormData = new FormData();
-        webpFormData.append('file', new Blob([webpBuffer], { type: 'image/webp' }), webpName);
+        // Convert Buffer to Uint8Array for Blob compatibility
+        const webpArray = new Uint8Array(webpBuffer);
+        webpFormData.append('file', new Blob([webpArray], { type: 'image/webp' }), webpName);
         const webpMetadata = {
           ...metadataPayload,
           filename: webpName,

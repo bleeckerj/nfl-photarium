@@ -23,7 +23,7 @@ const readRegistry = async (): Promise<NamespaceRegistryPayload> => {
     const raw = await fs.readFile(REGISTRY_PATH, 'utf8');
     const parsed = JSON.parse(raw);
     const namespaces = Array.isArray(parsed?.namespaces)
-      ? parsed.namespaces.filter((entry) => typeof entry === 'string')
+      ? parsed.namespaces.filter((entry: unknown) => typeof entry === 'string')
       : [];
     return {
       namespaces,

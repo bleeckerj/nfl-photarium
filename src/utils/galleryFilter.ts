@@ -9,10 +9,20 @@ export interface GalleryImage {
   description?: string;
   altTag?: string;
   parentId?: string;
+  linkedAssetId?: string;
   originalUrl?: string;
   originalUrlNormalized?: string;
   sourceUrl?: string;
   sourceUrlNormalized?: string;
+  contentHash?: string;
+  namespace?: string;
+  aspectRatio?: string;
+  dimensions?: { width: number; height: number };
+  // Embedding status fields
+  hasClipEmbedding?: boolean;
+  hasColorEmbedding?: boolean;
+  dominantColors?: string[];
+  averageColor?: string;
 }
 
 export interface GalleryFilterOptions {

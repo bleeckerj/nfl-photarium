@@ -271,6 +271,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           searchTerm?: string;
           viewMode?: 'grid' | 'list';
           filtersCollapsed?: boolean;
+          bulkFolderInput?: string;
+          bulkFolderMode?: 'existing' | 'new';
           showDuplicatesOnly?: boolean;
           showBrokenOnly?: boolean;
           pageSize?: number;
@@ -304,10 +306,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           selectedFolder: parsed.selectedFolder ?? 'all',
           selectedTag: parsed.selectedTag ?? '',
           searchTerm: parsed.searchTerm ?? '',
-          viewMode: parsed.viewMode === 'list' ? 'list' : 'grid',
+          viewMode: (parsed.viewMode === 'list' ? 'list' : 'grid') as 'grid' | 'list',
           filtersCollapsed: Boolean(parsed.filtersCollapsed),
           bulkFolderInput: typeof parsed.bulkFolderInput === 'string' ? parsed.bulkFolderInput : '',
-          bulkFolderMode: parsed.bulkFolderMode === 'new' ? 'new' : 'existing',
+          bulkFolderMode: (parsed.bulkFolderMode === 'new' ? 'new' : 'existing') as 'existing' | 'new',
           showDuplicatesOnly: Boolean(parsed.showDuplicatesOnly),
           showBrokenOnly: Boolean(parsed.showBrokenOnly),
           pageSize: normalizedPageSize,
@@ -347,7 +349,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [selectedFolder, setSelectedFolder] = useState<string>(storedPreferencesRef.current.selectedFolder ?? 'all');
   const [searchTerm, setSearchTerm] = useState<string>(storedPreferencesRef.current.searchTerm ?? '');
   const [selectedTag, setSelectedTag] = useState<string>(storedPreferencesRef.current.selectedTag ?? '');
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>(storedPreferencesRef.current.viewMode ?? 'grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>((storedPreferencesRef.current.viewMode ?? 'grid') as 'grid' | 'list');
   const [embeddingPendingMap, setEmbeddingPendingMap] = useState<Record<string, EmbeddingPendingEntry>>({});
   const [currentPage, setCurrentPage] = useState(storedPreferencesRef.current.currentPage ?? 1);
   const [onlyCanonical, setOnlyCanonical] = useState(storedPreferencesRef.current.onlyCanonical);
@@ -360,7 +362,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [selectedImageIds, setSelectedImageIds] = useState<Set<string>>(() => new Set());
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [bulkFolderInput, setBulkFolderInput] = useState<string>(storedPreferencesRef.current.bulkFolderInput ?? '');
-  const [bulkFolderMode, setBulkFolderMode] = useState<'existing' | 'new'>(storedPreferencesRef.current.bulkFolderMode ?? 'existing');
+  const [bulkFolderMode, setBulkFolderMode] = useState<'existing' | 'new'>((storedPreferencesRef.current.bulkFolderMode ?? 'existing') as 'existing' | 'new');
   const [bulkTagsInput, setBulkTagsInput] = useState('');
   const [bulkApplyFolder, setBulkApplyFolder] = useState(true);
   const [bulkApplyTags, setBulkApplyTags] = useState(false);
@@ -434,7 +436,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   }, [images]);
 
   const namespaceOptions = useMemo(() => {
-    const rawSeen = new Set(images.map((image) => image.namespace).filter(Boolean));
+    const rawSeen = new Set(images.map((image) => image.namespace).filter((ns): ns is string => Boolean(ns)));
     const envDefault = process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || '';
     const knownRaw = process.env.NEXT_PUBLIC_KNOWN_NAMESPACES || '';
     const registryRaw = registryNamespaces;
@@ -1195,11 +1197,12 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           if (!selectedImageIds.has(img.id)) {
             return img;
           }
-          const updatedFolder =
-            bulkApplyFolder &&
-            (bulkFolderMode === 'existing'
-              ? bulkFolderInput || undefined
-              : bulkFolderInput.trim() || undefined);
+          const updatedFolder: string | undefined =
+            bulkApplyFolder
+              ? (bulkFolderMode === 'existing'
+                  ? bulkFolderInput || undefined
+                  : bulkFolderInput.trim() || undefined)
+              : undefined;
           let updatedTags = img.tags;
           if (bulkApplyTags) {
             if (bulkTagsMode === 'replace') {
@@ -2602,7 +2605,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                               type="button"
                               onClick={(event) => {
                                 event.stopPropagation();
-                                copyToClipboard(image.namespace, 'Namespace');
+                                if (image.namespace) copyToClipboard(image.namespace, 'Namespace');
                               }}
                               className="inline-flex items-center text-gray-400 hover:text-gray-600"
                               title="Copy namespace"
@@ -2801,7 +2804,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                           type="button"
                           onClick={(event) => {
                             event.stopPropagation();
-                            copyToClipboard(image.namespace, 'Namespace');
+                            if (image.namespace) copyToClipboard(image.namespace, 'Namespace');
                           }}
                           className="inline-flex items-center text-gray-400 hover:text-gray-600"
                           title="Copy namespace"

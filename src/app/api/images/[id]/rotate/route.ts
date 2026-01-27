@@ -1,18 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
-import sharp from 'sharp';
+import sharp, { FormatEnum } from 'sharp';
 import { parseCloudflareMetadata } from '@/utils/cloudflareMetadata';
 import { transformApiImageToCached, upsertCachedImage } from '@/server/cloudflareImageCache';
 import { fetchCloudflareImage, getCloudflareCredentials } from '@/server/cloudflareClient';
 
-const FORMAT_TO_MIME: Record<string, string> = {
+type SharpFormat = keyof FormatEnum;
+
+const FORMAT_TO_MIME: Record<SharpFormat, string> = {
   jpeg: 'image/jpeg',
   png: 'image/png',
   webp: 'image/webp',
   avif: 'image/avif',
   tiff: 'image/tiff'
-};
+} as Record<SharpFormat, string>;
 
-const EXTENSION_TO_FORMAT: Record<string, string> = {
+const EXTENSION_TO_FORMAT: Record<string, SharpFormat> = {
   jpg: 'jpeg',
   jpeg: 'jpeg',
   png: 'png',
@@ -95,8 +97,8 @@ export async function POST(
     const info = await transformer.metadata();
     const extension = image.filename?.split('.').pop()?.toLowerCase();
     const fallbackFormat = extension ? EXTENSION_TO_FORMAT[extension] : undefined;
-    const chosenFormat = info.format && FORMAT_TO_MIME[info.format] ? info.format : fallbackFormat;
-    const safeFormat = chosenFormat && FORMAT_TO_MIME[chosenFormat] ? chosenFormat : 'jpeg';
+    const chosenFormat = info.format && (info.format in FORMAT_TO_MIME) ? info.format as SharpFormat : fallbackFormat;
+    const safeFormat: SharpFormat = chosenFormat && (chosenFormat in FORMAT_TO_MIME) ? chosenFormat : 'jpeg';
     const rotatedBuffer = await transformer.toFormat(safeFormat, { quality: 85 }).toBuffer();
     const contentType = FORMAT_TO_MIME[safeFormat] ?? 'image/jpeg';
 
@@ -112,7 +114,9 @@ export async function POST(
     };
 
     const uploadFormData = new FormData();
-    uploadFormData.append('file', new Blob([rotatedBuffer], { type: contentType }), image.filename);
+    // Convert Buffer to Uint8Array for Blob compatibility
+    const bufferArray = new Uint8Array(rotatedBuffer);
+    uploadFormData.append('file', new Blob([bufferArray], { type: contentType }), image.filename);
     uploadFormData.append('metadata', JSON.stringify(rotatedMetadata));
 
     const uploadResponse = await fetch(

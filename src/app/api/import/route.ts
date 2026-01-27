@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await response.arrayBuffer();
 
     const buffer = Buffer.from(arrayBuffer);
-    let finalBuffer = buffer;
+    let finalBuffer: Buffer = buffer;
     let finalType = inferredContentType || 'image/png';
     // Sanitize filename: truncate, clean, and handle Google Photos blobs
     let filename = sanitizeFilename(getFilenameFromUrl(sourceUrl, inferredContentType));

@@ -45,6 +45,7 @@ export type UploadSuccess = {
   description?: string;
   originalUrl?: string;
   sourceUrl?: string;
+  namespace?: string;
   parentId?: string;
   linkedAssetId?: string;
   webpVariantId?: string;
@@ -83,7 +84,7 @@ const shrinkIfNeeded = async (input: Buffer, type: string): Promise<Buffer> => {
 
 export type UploadOutcome =
   | { ok: true; data: UploadSuccess }
-  | { ok: false; error: string; status: number; reason?: UploadFailure['reason']; duplicates?: ReturnType<typeof findDuplicatesByOriginalUrl> };
+  | { ok: false; error: string; status: number; reason?: UploadFailure['reason']; duplicates?: Awaited<ReturnType<typeof findDuplicatesByOriginalUrl>> };
 
 export async function uploadImageBuffer({
   buffer,
@@ -191,7 +192,7 @@ export async function uploadImageBuffer({
   }
 
   const uploadFormData = new FormData();
-  uploadFormData.append('file', new Blob([finalBuffer], { type: workingFileType }), normalizedName);
+  uploadFormData.append('file', new Blob([new Uint8Array(finalBuffer)], { type: workingFileType }), normalizedName);
 
   const metadataPayload: Record<string, unknown> = {
     filename: normalizedName,
@@ -292,7 +293,7 @@ export async function uploadImageBuffer({
       const webpBuffer = await sharp(finalBuffer).webp({ quality: 85 }).toBuffer();
       const webpName = normalizedName.replace(/\.svg$/i, '') + '.webp';
       const webpFormData = new FormData();
-      webpFormData.append('file', new Blob([webpBuffer], { type: 'image/webp' }), webpName);
+      webpFormData.append('file', new Blob([new Uint8Array(webpBuffer)], { type: 'image/webp' }), webpName);
       const webpMetadataPayload = {
         ...metadataPayload,
         filename: webpName,

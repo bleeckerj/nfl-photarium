@@ -40,6 +40,7 @@ const handleImageDragStart = (e: React.DragEvent, image: CloudflareImage) => {
 interface CloudflareImage {
   id: string;
   filename: string;
+  displayName?: string;
   uploaded: string;
   variants?: string[];
   folder?: string;
@@ -121,7 +122,8 @@ const formatEntriesAsYaml = (entries: { url: string; altText: string }[]) => {
 
 export default function ImageDetailPage() {
   const params = useParams();
-  const id = params?.id;
+  const rawId = params?.id;
+  const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const [image, setImage] = useState<CloudflareImage | null>(null);
   const [loading, setLoading] = useState(true);
   const toast = useToast();
@@ -1161,8 +1163,8 @@ export default function ImageDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const body = await res.json() as CloudflareImage;
-      if (res.ok) {
+      const body = await res.json() as CloudflareImage | { error: string };
+      if (res.ok && !('error' in body)) {
         toast.push('Metadata updated');
         // Reset clearExif flag after successful save
         setClearExif(false);
@@ -1179,7 +1181,7 @@ export default function ImageDetailPage() {
         }) : prev);
         await refreshImageList();
       } else {
-        toast.push(body.error || 'Failed to update metadata');
+        toast.push('error' in body ? body.error : 'Failed to update metadata');
       }
     } catch (err) {
       console.error('Update failed', err);
@@ -1410,7 +1412,7 @@ export default function ImageDetailPage() {
   }, [image, isChildImage, toast]);
 
   const handleAdoptImage = useCallback(async () => {
-    if (!adoptImageId) {
+    if (!adoptImageId || !id) {
       return;
     }
     setAdoptLoading(true);
@@ -1747,7 +1749,7 @@ export default function ImageDetailPage() {
         })
       );
 
-      const failures = results.filter((result): result is BulkUpdateFailure => !result.ok);
+      const failures = results.filter((result): result is ({ ok: false } & BulkUpdateFailure) => !result.ok);
       const successIds = new Set(results.filter((result) => result.ok).map((result) => result.id));
       if (successIds.size) {
         setAllImages((prev) =>
@@ -1844,7 +1846,7 @@ export default function ImageDetailPage() {
           })
         );
 
-        const failures = results.filter((result): result is BulkUpdateFailure => !result.ok);
+        const failures = results.filter((result): result is ({ ok: false } & BulkUpdateFailure) => !result.ok);
         const tagsById = new Map(
           results.filter((result): result is { ok: true; id: string; tags: string[] } => result.ok).map((result) => [
             result.id,

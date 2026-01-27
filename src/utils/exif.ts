@@ -48,14 +48,14 @@ export const extractExifSummary = async (buffer: Buffer): Promise<ExifSummary | 
     }
     const parsed = exifReader(metadata.exif);
     const summary: ExifSummary = {};
-    addValue(summary, 'make', parsed?.image?.Make);
-    addValue(summary, 'model', parsed?.image?.Model);
-    addValue(summary, 'lens', parsed?.exif?.LensModel || parsed?.exif?.LensInfo);
-    addValue(summary, 'dateTimeOriginal', parsed?.exif?.DateTimeOriginal);
-    addValue(summary, 'exposureTime', parsed?.exif?.ExposureTime);
-    addValue(summary, 'fNumber', parsed?.exif?.FNumber);
-    addValue(summary, 'iso', parsed?.exif?.ISO || parsed?.exif?.PhotographicSensitivity);
-    addValue(summary, 'focalLength', parsed?.exif?.FocalLength);
+    addValue(summary, 'make', parsed?.Image?.Make);
+    addValue(summary, 'model', parsed?.Image?.Model);
+    addValue(summary, 'lens', parsed?.Photo?.LensModel || parsed?.Photo?.LensSpecification);
+    addValue(summary, 'dateTimeOriginal', parsed?.Photo?.DateTimeOriginal);
+    addValue(summary, 'exposureTime', parsed?.Photo?.ExposureTime);
+    addValue(summary, 'fNumber', parsed?.Photo?.FNumber);
+    addValue(summary, 'iso', parsed?.Photo?.ISOSpeedRatings || parsed?.Photo?.PhotographicSensitivity);
+    addValue(summary, 'focalLength', parsed?.Photo?.FocalLength);
     return Object.keys(summary).length ? summary : undefined;
   } catch (error) {
     console.warn('Failed to extract EXIF data:', error);
