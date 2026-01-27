@@ -77,6 +77,24 @@ Before you start, you'll need:
   - Ubuntu/Debian: `sudo apt install ffmpeg`
   - Windows: [Download from ffmpeg.org](https://ffmpeg.org/download.html)
 - **Optional:** OpenAI API key for AI ALT text generation
+- **Optional:** Redis Stack (via Docker or Cloud) for AI Semantic Search Features
+
+---
+
+## Deployment Options
+
+### 🚀 Simplified Mode (No Database)
+Deploy anywhere (Vercel, Railway, etc.) without managing a database.
+- **Features**: Upload, Gallery, Folders, Tags, basic filtering.
+- **Limitations**: No "semantic search" (finding images by describing them) or color search.
+- **Setup**: Just omit the `REDIS_URL` environment variable.
+
+### 🧠 Full AI Mode (with Redis)
+Unlock the full power of Photarium by connecting a Redis Stack instance.
+- **Features**: Everything above + **Semantic Search**, **Color Search**, and **"Find Similar"**.
+- **Setup**: 
+  1. spin up a Redis Stack instance (see [Deployment Guide](./DEPLOYMENT.md)).
+  2. Set `CACHE_STORAGE_TYPE=redis` and `REDIS_URL`.
 
 ---
 
