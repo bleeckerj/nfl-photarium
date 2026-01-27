@@ -2,6 +2,8 @@
 applyTo: '**/**'
 ---
 
+NEVER EVER START THE SERVER YOURSELF.
+
 Never start the server. Ask me to start the server if needed.
 When you start the server, you step over your code tests.
 I control the server starting and stopping.
