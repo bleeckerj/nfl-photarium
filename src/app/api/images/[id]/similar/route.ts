@@ -26,6 +26,14 @@ import {
 } from '@/server/vectorSearch';
 import { shouldExcludeFromSearch } from '@/utils/searchExclusion';
 
+function normalizeNamespace(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const trimmed = String(raw).trim();
+  if (!trimmed || trimmed === '__none__') return '';
+  if (trimmed === '__all__') return null;
+  return trimmed;
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -38,6 +46,9 @@ export async function GET(
   const strangersLimitParam = searchParams.get('strangersLimit');
   const strangersLimit = strangersLimitParam ? Math.min(50, Math.max(1, parseInt(strangersLimitParam))) : Math.ceil(limit / 2);
   const includeStrangers = searchParams.get('includeStrangers') === 'true';
+  const namespace = normalizeNamespace(searchParams.get('namespace'));
+  const internalLimit = namespace === null ? limit : Math.min(250, limit * 10);
+  const internalStrangersLimit = namespace === null ? strangersLimit : Math.min(250, strangersLimit * 10);
 
   try {
     // Check if vector search is available
@@ -81,7 +92,7 @@ export async function GET(
           { status: 404 }
         );
       }
-      results = await searchByColor(vectors.colorHistogram, limit + 1);
+      results = await searchByColor(vectors.colorHistogram, internalLimit + 1);
     } else {
       if (!vectors.clipEmbedding) {
         return NextResponse.json(
@@ -89,26 +100,36 @@ export async function GET(
           { status: 404 }
         );
       }
-      results = await searchByCLIP(vectors.clipEmbedding, limit + 1);
+      results = await searchByCLIP(vectors.clipEmbedding, internalLimit + 1);
       
       // Get strangers if requested (only for CLIP search)
       if (includeStrangers) {
-        strangers = await searchCLIPStrangers(vectors.clipEmbedding, strangersLimit + 1);
-        strangers = strangers.filter(r => r.imageId !== id).slice(0, strangersLimit);
+        strangers = await searchCLIPStrangers(vectors.clipEmbedding, internalStrangersLimit + 1);
+        strangers = strangers.filter(r => r.imageId !== id);
       }
     }
 
     // Filter out the source image itself
-    const filteredResults = results.filter(r => r.imageId !== id).slice(0, limit);
+    const filteredResults = results.filter(r => r.imageId !== id);
     
     // Get all images to check for exclusion tags
     const allImages = await getCachedImages();
     const imageTagsMap = new Map(allImages.map(img => [img.id, img.tags]));
+    const imageNamespaceMap = new Map(allImages.map(img => [img.id, img.namespace || '']));
     
     // Filter out images with exclusion tags
     const searchTypeNorm = searchType === 'color' ? 'color' : 'clip';
     const finalResults = filteredResults.filter(r => {
       const tags = imageTagsMap.get(r.imageId);
+      if (namespace !== null) {
+        const ns = imageNamespaceMap.get(r.imageId);
+        if (ns === undefined) return false;
+        if (namespace === '') {
+          if (ns) return false;
+        } else if (ns !== namespace) {
+          return false;
+        }
+      }
       return !shouldExcludeFromSearch(tags, searchTypeNorm);
     });
     
@@ -116,17 +137,30 @@ export async function GET(
     const finalStrangers = strangers 
       ? strangers.filter(r => {
           const tags = imageTagsMap.get(r.imageId);
+          if (namespace !== null) {
+            const ns = imageNamespaceMap.get(r.imageId);
+            if (ns === undefined) return false;
+            if (namespace === '') {
+              if (ns) return false;
+            } else if (ns !== namespace) {
+              return false;
+            }
+          }
           return !shouldExcludeFromSearch(tags, 'clip'); // strangers are always CLIP-based
         })
       : [];
 
+    const finalResultsLimited = finalResults.slice(0, limit);
+    const finalStrangersLimited = finalStrangers.slice(0, strangersLimit);
+
     return NextResponse.json({
       sourceId: id,
       searchType,
-      results: finalResults,
-      strangers: finalStrangers,
-      count: finalResults.length,
-      strangersCount: finalStrangers.length,
+      namespace: namespace ?? null,
+      results: finalResultsLimited,
+      strangers: finalStrangersLimited,
+      count: finalResultsLimited.length,
+      strangersCount: finalStrangersLimited.length,
     });
   } catch (error) {
     console.error('[API] Error in similar search:', error);

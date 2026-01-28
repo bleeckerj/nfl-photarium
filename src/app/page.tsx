@@ -73,6 +73,7 @@ export default function Home() {
                 <div className="mt-2">
                   <TextSearch 
                     onImageClick={(id) => router.push(`/images/${id}`)}
+                    namespace={namespace}
                   />
                 </div>
               </details>

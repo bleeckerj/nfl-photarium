@@ -1,9 +1,49 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { transformApiImageToCached, upsertCachedImage } from '@/server/cloudflareImageCache';
+import { pickCloudflareMetadata } from '@/utils/cloudflareMetadata';
 
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
 
 type CloudflareMetadata = Record<string, unknown>;
+
+const CLOUDFLARE_METADATA_LIMIT_BYTES = 1024;
+
+function getByteSize(payload: unknown) {
+  return Buffer.byteLength(JSON.stringify(payload ?? {}), 'utf8');
+}
+
+function isMetadataTooLarge(message?: string) {
+  if (!message) return false;
+  const lowered = message.toLowerCase();
+  return lowered.includes('metadata') && (lowered.includes('too large') || lowered.includes('size') || lowered.includes('limit') || lowered.includes('maximum'));
+}
+
+function pruneMetadataForAltSave(meta: CloudflareMetadata) {
+  const dropped: string[] = [];
+  const pruned: CloudflareMetadata = { ...meta };
+  const dropOrder: string[] = [
+    // biggest offenders first
+    'exif',
+    'originalUrlNormalized',
+    'sourceUrlNormalized',
+    // then URLs (often huge)
+    'sourceUrl',
+    'originalUrl',
+    // then description if necessary
+    'description',
+  ];
+
+  const limit = CLOUDFLARE_METADATA_LIMIT_BYTES;
+  for (const key of dropOrder) {
+    if (getByteSize(pruned) <= limit) break;
+    if (Object.prototype.hasOwnProperty.call(pruned, key)) {
+      delete pruned[key];
+      dropped.push(key);
+    }
+  }
+
+  return { metadata: pruned, dropped, size: getByteSize(pruned), limit };
+}
 
 function parseMetadata(rawMeta: unknown): CloudflareMetadata {
   if (!rawMeta) return {};
@@ -140,38 +180,65 @@ export async function POST(
       updatedAt: new Date().toISOString()
     };
 
-    const updateResponse = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${imageId}`,
-      {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${apiToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ metadata: updatedMeta })
-      }
-    );
+    // Only send whitelisted metadata keys to Cloudflare.
+    let metadataPayload = pickCloudflareMetadata(updatedMeta as Record<string, unknown>) as unknown as CloudflareMetadata;
+    let saved = false;
+    let droppedFields: string[] = [];
 
-    const updatePayload = await updateResponse.json();
-    if (!updateResponse.ok) {
-      console.error('Cloudflare API error (update alt):', updatePayload);
-      return NextResponse.json(
-        { error: updatePayload.errors?.[0]?.message || 'Failed to save ALT text' },
-        { status: updateResponse.status }
+    const attemptSave = async (payload: CloudflareMetadata) => {
+      const resp = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${imageId}`,
+        {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${apiToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ metadata: payload })
+        }
+      );
+      const body = await resp.json().catch(() => ({}));
+      return { resp, body };
+    };
+
+    let saveAttempt = await attemptSave(metadataPayload);
+    if (saveAttempt.resp.ok) {
+      saved = true;
+    } else {
+      const message = saveAttempt.body?.errors?.[0]?.message;
+      const tooLarge = isMetadataTooLarge(message) || saveAttempt.resp.status === 413;
+      if (tooLarge) {
+        const pruned = pruneMetadataForAltSave(metadataPayload);
+        droppedFields = pruned.dropped;
+        metadataPayload = pruned.metadata;
+        saveAttempt = await attemptSave(metadataPayload);
+        if (saveAttempt.resp.ok) {
+          saved = true;
+        } else {
+          console.warn('[ALT] Failed to save even after pruning:', saveAttempt.body);
+        }
+      } else {
+        console.error('Cloudflare API error (update alt):', saveAttempt.body);
+      }
+    }
+
+    if (saved) {
+      upsertCachedImage(
+        transformApiImageToCached({
+          id: image.id,
+          filename: image.filename,
+          uploaded: image.uploaded,
+          variants: image.variants,
+          meta: metadataPayload
+        })
       );
     }
 
-    upsertCachedImage(
-      transformApiImageToCached({
-        id: image.id,
-        filename: image.filename,
-        uploaded: image.uploaded,
-        variants: image.variants,
-        meta: updatedMeta
-      })
-    );
+    const warning = saved
+      ? undefined
+      : 'ALT text generated but could not be saved to Cloudflare metadata (likely metadata size limit). Consider clearing EXIF or shortening URLs/description.';
 
-    return NextResponse.json({ altTag: altText });
+    return NextResponse.json({ altTag: altText, saved, droppedFields, metadataBytes: getByteSize(metadataPayload), metadataLimitBytes: CLOUDFLARE_METADATA_LIMIT_BYTES, warning });
   } catch (error) {
     console.error('ALT tag generation error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

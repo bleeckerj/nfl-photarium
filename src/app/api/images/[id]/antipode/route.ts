@@ -33,6 +33,14 @@ import {
 } from '@/server/vectorSearch';
 import { shouldExcludeFromSearch } from '@/utils/searchExclusion';
 
+function normalizeNamespace(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const trimmed = String(raw).trim();
+  if (!trimmed || trimmed === '__none__') return '';
+  if (trimmed === '__all__') return null;
+  return trimmed;
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -43,6 +51,8 @@ export async function GET(
   const domain = searchParams.get('domain') ?? 'clip';
   const method = searchParams.get('method') ?? (domain === 'clip' ? 'stranger' : 'complementary');
   const limit = Math.min(20, Math.max(1, parseInt(searchParams.get('limit') ?? '8')));
+  const namespace = normalizeNamespace(searchParams.get('namespace'));
+  const internalLimit = namespace === null ? limit : Math.min(250, limit * 10);
 
   try {
     const available = await isVectorSearchAvailable();
@@ -99,7 +109,7 @@ export async function GET(
           description = 'Conceptual inversion: searching for opposite qualities';
           // Build inverted concept query - generic conceptual opposite
           const invertedQuery = 'artificial, chaotic, vast, futuristic, hard, bright, dynamic, playful, complex, cold';
-          results = await searchByText(invertedQuery, limit + 1);
+          results = await searchByText(invertedQuery, internalLimit + 1);
           results = results.filter(r => r.imageId !== id).slice(0, limit);
           break;
 
@@ -179,11 +189,21 @@ export async function GET(
     // Get all images to check for exclusion tags
     const allImages = await getCachedImages();
     const imageTagsMap = new Map(allImages.map(img => [img.id, img.tags]));
+    const imageNamespaceMap = new Map(allImages.map(img => [img.id, img.namespace || '']));
     
     // Filter out images with exclusion tags
     const searchTypeNorm = domain === 'color' ? 'color' : 'clip';
     const filteredResults = results.filter(r => {
       const tags = imageTagsMap.get(r.imageId);
+      if (namespace !== null) {
+        const ns = imageNamespaceMap.get(r.imageId);
+        if (ns === undefined) return false;
+        if (namespace === '') {
+          if (ns) return false;
+        } else if (ns !== namespace) {
+          return false;
+        }
+      }
       const shouldExclude = shouldExcludeFromSearch(tags, searchTypeNorm);
       if (shouldExclude) {
         console.log(`[Antipode] Filtering out ${r.imageId} with tags: ${tags?.join(', ')} (searchType: ${searchTypeNorm})`);
@@ -199,8 +219,9 @@ export async function GET(
       method,
       methodLabel,
       description,
-      results: filteredResults,
-      count: filteredResults.length,
+      namespace: namespace ?? null,
+      results: filteredResults.slice(0, limit),
+      count: Math.min(filteredResults.length, limit),
     });
   } catch (error) {
     console.error('[API] Error in antipode search:', error);

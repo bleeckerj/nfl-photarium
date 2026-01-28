@@ -30,6 +30,8 @@ interface TextSearchProps {
   className?: string;
   onImageClick?: (imageId: string) => void;
   initialQuery?: string;
+  // Current operating namespace from the gallery. Can be '', '__all__', or a namespace string.
+  namespace?: string;
 }
 
 // Hover preview state
@@ -58,7 +60,7 @@ const SEARCH_PRESETS = [
 const SEARCH_LIMIT = parseInt(process.env.NEXT_PUBLIC_SEARCH_LIMIT || '48', 10);
 const PAGE_SIZE = parseInt(process.env.NEXT_PUBLIC_SEARCH_PAGE_SIZE || '12', 10);
 
-export function TextSearch({ className = '', onImageClick, initialQuery = '' }: TextSearchProps) {
+export function TextSearch({ className = '', onImageClick, initialQuery = '', namespace = '' }: TextSearchProps) {
   const [query, setQuery] = useState(initialQuery);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
@@ -68,7 +70,15 @@ export function TextSearch({ className = '', onImageClick, initialQuery = '' }: 
   const [showPresets, setShowPresets] = useState(false);
   const [hoverPreview, setHoverPreview] = useState<HoverPreview | null>(null);
   const [searchType, setSearchType] = useState<'text' | 'color'>('text');
+  const [searchAllNamespaces, setSearchAllNamespaces] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const effectiveNamespaceFilter = (() => {
+    if (namespace === '__all__') return null;
+    if (searchAllNamespaces) return null;
+    if (!namespace) return '__none__';
+    return namespace;
+  })();
 
   // Load search history from localStorage
   useEffect(() => {
@@ -127,6 +137,7 @@ export function TextSearch({ className = '', onImageClick, initialQuery = '' }: 
           type: searchType,
           query: q.trim(),
           limit: SEARCH_LIMIT,
+          namespace: effectiveNamespaceFilter,
         }),
       });
 
@@ -184,6 +195,24 @@ export function TextSearch({ className = '', onImageClick, initialQuery = '' }: 
         <Sparkles className="w-5 h-5 text-purple-400" />
         <h3 className="text-sm font-medium text-gray-200">Semantic Search</h3>
       </div>
+
+      {/* Namespace scope toggle */}
+      {namespace !== '__all__' && (
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="text-[10px] text-gray-300">
+            Scope: {effectiveNamespaceFilter === null ? 'All namespaces' : effectiveNamespaceFilter === '__none__' ? '[none]' : effectiveNamespaceFilter}
+          </div>
+          <label className="flex items-center gap-2 text-[10px] text-gray-200 select-none">
+            <input
+              type="checkbox"
+              checked={searchAllNamespaces}
+              onChange={(e) => setSearchAllNamespaces(e.target.checked)}
+              className="h-3.5 w-3.5"
+            />
+            All namespaces
+          </label>
+        </div>
+      )}
 
       {/* Search type toggle */}
       <div className="flex gap-2 mb-3">

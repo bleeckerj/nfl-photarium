@@ -37,6 +37,9 @@ interface ConceptRadarProps {
   onImageClick?: (imageId: string) => void;
   copyVariant?: string;
   onCopySuccess?: (message: string) => void;
+  // Current operating namespace. Use '__all__' to disable scoping.
+  namespace?: string;
+  searchAllNamespaces?: boolean;
 }
 
 // Concept pairs must match the API
@@ -53,7 +56,7 @@ const CONCEPT_PAIRS: [string, string][] = [
   ['cold', 'warm'],
 ];
 
-export function ConceptRadar({ imageId, className = '', size = 360, onImageClick, copyVariant = 'full', onCopySuccess }: ConceptRadarProps) {
+export function ConceptRadar({ imageId, className = '', size = 360, onImageClick, copyVariant = 'full', onCopySuccess, namespace = '', searchAllNamespaces = false }: ConceptRadarProps) {
   const [concepts, setConcepts] = useState<ConceptScore[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -243,6 +246,13 @@ export function ConceptRadar({ imageId, className = '', size = 360, onImageClick
     }
 
     try {
+      const nsParam = (() => {
+        if (namespace === '__all__') return null;
+        if (searchAllNamespaces) return null;
+        if (!namespace) return '__none__';
+        return namespace;
+      })();
+
       const response = await fetch('/api/images/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -250,6 +260,7 @@ export function ConceptRadar({ imageId, className = '', size = 360, onImageClick
           query: textQuery,
           type: 'text',
           limit: 8,
+          namespace: nsParam,
         }),
       });
       

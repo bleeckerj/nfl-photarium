@@ -34,6 +34,9 @@ interface AntipodeSearchProps {
   onImageClick?: (imageId: string) => void;
   copyVariant?: string;
   onCopySuccess?: (message: string) => void;
+  // Current operating namespace. Use '__all__' to disable scoping.
+  namespace?: string;
+  searchAllNamespaces?: boolean;
 }
 
 const CLIP_METHODS = [
@@ -70,7 +73,7 @@ interface HoverPreview {
   y: number;
 }
 
-export function AntipodeSearch({ imageId, className = '', onImageClick, copyVariant = 'w=1200', onCopySuccess }: AntipodeSearchProps) {
+export function AntipodeSearch({ imageId, className = '', onImageClick, copyVariant = 'w=1200', onCopySuccess, namespace = '', searchAllNamespaces = false }: AntipodeSearchProps) {
   const [domain, setDomain] = useState<'clip' | 'color'>('clip');
   const [method, setMethod] = useState<string>('stranger');
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -139,8 +142,16 @@ export function AntipodeSearch({ imageId, className = '', onImageClick, copyVari
     setResults([]);
 
     try {
+      const nsParam = (() => {
+        if (namespace === '__all__') return null;
+        if (searchAllNamespaces) return null;
+        if (!namespace) return '__none__';
+        return namespace;
+      })();
+      const nsQuery = nsParam ? `&namespace=${encodeURIComponent(nsParam)}` : '';
+
       const response = await fetch(
-        `/api/images/${imageId}/antipode?domain=${domain}&method=${method}&limit=8`
+        `/api/images/${imageId}/antipode?domain=${domain}&method=${method}&limit=8${nsQuery}`
       );
       const data = await response.json();
 
@@ -155,7 +166,7 @@ export function AntipodeSearch({ imageId, className = '', onImageClick, copyVari
     } finally {
       setLoading(false);
     }
-  }, [imageId, domain, method]);
+  }, [imageId, domain, method, namespace, searchAllNamespaces]);
 
   const methods = domain === 'clip' ? CLIP_METHODS : COLOR_METHODS;
 

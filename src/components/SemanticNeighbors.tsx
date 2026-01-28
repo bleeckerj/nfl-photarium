@@ -31,6 +31,9 @@ interface SemanticNeighborsProps {
   onImageClick?: (imageId: string) => void;
   copyVariant?: string;
   onCopySuccess?: (message: string) => void;
+  // Current operating namespace. Use '__all__' to disable scoping.
+  namespace?: string;
+  searchAllNamespaces?: boolean;
 }
 
 // Hover preview state
@@ -50,6 +53,8 @@ export function SemanticNeighbors({
   onImageClick,
   copyVariant = 'w=1200',
   onCopySuccess,
+  namespace = '',
+  searchAllNamespaces = false,
 }: SemanticNeighborsProps) {
   const [neighbors, setNeighbors] = useState<SimilarResult[]>([]);
   const [strangers, setStrangers] = useState<SimilarResult[]>([]);
@@ -124,8 +129,16 @@ export function SemanticNeighbors({
       const strangersLimit = showStrangers ? Math.floor(limit / 2) : 0;
       const includeStrangers = showStrangers && type === 'clip';
       
+      const nsParam = (() => {
+        if (namespace === '__all__') return null;
+        if (searchAllNamespaces) return null;
+        if (!namespace) return '__none__';
+        return namespace;
+      })();
+      const nsQuery = nsParam ? `&namespace=${encodeURIComponent(nsParam)}` : '';
+
       const response = await fetch(
-        `/api/images/${imageId}/similar?type=${type}&limit=${neighborsLimit}&strangersLimit=${strangersLimit}&includeStrangers=${includeStrangers}`
+        `/api/images/${imageId}/similar?type=${type}&limit=${neighborsLimit}&strangersLimit=${strangersLimit}&includeStrangers=${includeStrangers}${nsQuery}`
       );
       const data = await response.json();
       
@@ -140,7 +153,7 @@ export function SemanticNeighbors({
     } finally {
       setLoading(false);
     }
-  }, [imageId, type, limit, showStrangers]);
+  }, [imageId, type, limit, showStrangers, namespace, searchAllNamespaces]);
 
   useEffect(() => {
     fetchSimilar();

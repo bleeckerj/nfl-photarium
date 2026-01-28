@@ -17,6 +17,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { getCachedImages } from '@/server/cloudflareImageCache';
 import {
   searchByText,
   searchByHexColor,
@@ -31,6 +32,32 @@ interface SearchRequest {
   query?: string;
   imageId?: string;
   limit?: number;
+  // Namespace filter. Use null/undefined to search across all namespaces.
+  // Use '__none__' to search images with no namespace.
+  namespace?: string | null;
+}
+
+function normalizeNamespace(raw: string | null | undefined): string | null {
+  if (raw == null) return null;
+  const trimmed = String(raw).trim();
+  if (!trimmed || trimmed === '__none__') return '';
+  if (trimmed === '__all__') return null;
+  return trimmed;
+}
+
+function filterResultsByNamespace<T extends { imageId: string }>(
+  results: T[],
+  allImages: { id: string; namespace?: string }[],
+  namespace: string | null
+): T[] {
+  if (namespace === null) return results;
+  const idToNamespace = new Map(allImages.map((img) => [img.id, img.namespace || '']));
+  return results.filter((r) => {
+    const ns = idToNamespace.get(r.imageId);
+    if (ns === undefined) return false;
+    if (namespace === '') return !ns;
+    return ns === namespace;
+  });
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -47,8 +74,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const body = await request.json() as SearchRequest;
     const { type, query, imageId } = body;
     const limit = Math.min(100, Math.max(1, body.limit ?? 48));
+    const namespace = normalizeNamespace(body.namespace);
+    const internalLimit = namespace === null ? limit : Math.min(250, limit * 10);
     
-    console.log('[Search API] Received request:', { type, query, limit, bodyLimit: body.limit });
+    console.log('[Search API] Received request:', { type, query, limit, bodyLimit: body.limit, namespace });
 
     if (!type) {
       return NextResponse.json(
@@ -67,7 +96,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             { status: 400 }
           );
         }
-        results = await searchByText(query, limit);
+        results = await searchByText(query, internalLimit);
         break;
       }
 
@@ -78,7 +107,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             { status: 400 }
           );
         }
-        results = await searchByHexColor(query, limit);
+        results = await searchByHexColor(query, internalLimit);
         break;
       }
 
@@ -98,9 +127,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           );
         }
         
-        results = await searchByCLIP(vectors.clipEmbedding, limit + 1);
+        results = await searchByCLIP(vectors.clipEmbedding, internalLimit + 1);
         // Filter out source image
-        results = results.filter(r => r.imageId !== imageId).slice(0, limit);
+        results = results.filter(r => r.imageId !== imageId);
         break;
       }
 
@@ -110,6 +139,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           { status: 400 }
         );
     }
+
+    if (namespace !== null) {
+      const allImages = await getCachedImages();
+      results = filterResultsByNamespace(results, allImages, namespace);
+    }
+
+    results = results.slice(0, limit);
 
     return NextResponse.json({
       type,
@@ -133,6 +169,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const textQuery = searchParams.get('q') ?? searchParams.get('text');
   const colorQuery = searchParams.get('color');
   const limit = Math.min(50, Math.max(1, parseInt(searchParams.get('limit') ?? '10')));
+  const namespace = normalizeNamespace(searchParams.get('namespace'));
+  const internalLimit = namespace === null ? limit : Math.min(250, limit * 10);
 
   if (!textQuery && !colorQuery) {
     return NextResponse.json({
@@ -160,12 +198,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (colorQuery) {
       type = 'color';
       query = colorQuery;
-      results = await searchByHexColor(colorQuery, limit);
+      results = await searchByHexColor(colorQuery, internalLimit);
     } else {
       type = 'text';
       query = textQuery!;
-      results = await searchByText(textQuery!, limit);
+      results = await searchByText(textQuery!, internalLimit);
     }
+
+    if (namespace !== null) {
+      const allImages = await getCachedImages();
+      results = filterResultsByNamespace(results, allImages, namespace);
+    }
+
+    results = results.slice(0, limit);
 
     return NextResponse.json({
       type,

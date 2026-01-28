@@ -14,7 +14,7 @@ import SemanticNeighbors from '@/components/SemanticNeighbors';
 import HaikuDisplay from '@/components/HaikuDisplay';
 import AntipodeSearch from '@/components/AntipodeSearch';
 import { subscribeEmbeddingPending, clearPendingIfHasEmbeddings, type EmbeddingPendingEntry } from '@/utils/embeddingPending';
-import { cleanString, pickCloudflareMetadata } from '@/utils/cloudflareMetadata';
+import { cleanString, enforceCloudflareMetadataLimit, pickCloudflareMetadata } from '@/utils/cloudflareMetadata';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { useDropzone } from 'react-dropzone';
 import { downloadImageToFile, formatDownloadFileName } from '@/utils/downloadUtils';
@@ -197,6 +197,10 @@ export default function ImageDetailPage() {
   const [altTextInput, setAltTextInput] = useState('');
   const [descriptionInput, setDescriptionInput] = useState('');
   const [descriptionGenerating, setDescriptionGenerating] = useState(false);
+  const [promptThisInput, setPromptThisInput] = useState('');
+  const [promptThisLoading, setPromptThisLoading] = useState(false);
+  const [promptThisGenerating, setPromptThisGenerating] = useState(false);
+  const [promptThisMeta, setPromptThisMeta] = useState<{ saved?: boolean; updatedAt?: string; model?: string } | null>(null);
   const [originalUrlInput, setOriginalUrlInput] = useState('');
   const [sourceUrlInput, setSourceUrlInput] = useState('');
   const [displayNameInput, setDisplayNameInput] = useState('');
@@ -221,6 +225,8 @@ export default function ImageDetailPage() {
   const [rotationLoading, setRotationLoading] = useState(false);
   const [rotationError, setRotationError] = useState<string | null>(null);
   const [rotatedAsset, setRotatedAsset] = useState<{ id: string; url: string; info?: string } | null>(null);
+
+  const [semanticSearchAllNamespaces, setSemanticSearchAllNamespaces] = useState(false);
 
   const [deleteFamilyJobId, setDeleteFamilyJobId] = useState<string | null>(null);
   const [deleteFamilyStatus, setDeleteFamilyStatus] = useState<DeleteFamilyJobStatus | null>(null);
@@ -661,6 +667,7 @@ export default function ImageDetailPage() {
     try {
       const encoder = new TextEncoder();
       const size = encoder.encode(JSON.stringify(compact)).length;
+      const pruned = enforceCloudflareMetadataLimit(compact, 1024);
       const largestFields = Object.entries(compact)
         .map(([key, value]) => ({
           key,
@@ -668,9 +675,9 @@ export default function ImageDetailPage() {
         }))
         .sort((a, b) => b.bytes - a.bytes)
         .slice(0, 3);
-      return { size, largestFields };
+      return { size, largestFields, prunedSize: pruned.size, prunedDropped: pruned.dropped };
     } catch {
-      return { size: 0, largestFields: [] };
+      return { size: 0, largestFields: [], prunedSize: 0, prunedDropped: [] };
     }
   }, [
     altTextInput,
@@ -687,6 +694,8 @@ export default function ImageDetailPage() {
 
   const metadataByteSize = metadataDiagnostics.size;
   const metadataLargestFields = metadataDiagnostics.largestFields;
+  const metadataPrunedByteSize = metadataDiagnostics.prunedSize;
+  const metadataPrunedDroppedFields = metadataDiagnostics.prunedDropped;
 
   const pendingEmbedding = id ? embeddingPendingMap[id as string] : undefined;
 
@@ -1636,7 +1645,7 @@ export default function ImageDetailPage() {
       const response = await fetch(`/api/images/${targetId}/alt`, { method: 'POST' });
       const data = await response.json();
       if (!response.ok || !data?.altTag) {
-        toast.push(data?.error || 'Failed to generate description');
+        toast.push(data?.error || 'Failed to generate ALT text');
         return;
       }
       setImage(prev => prev && prev.id === targetId ? { ...prev, altTag: data.altTag } : prev);
@@ -1644,7 +1653,11 @@ export default function ImageDetailPage() {
         setAltTextInput(data.altTag);
       }
       setAllImages(prev => prev.map(img => img.id === targetId ? { ...img, altTag: data.altTag } : img));
-      toast.push('ALT text updated');
+      if (data?.saved === false) {
+        toast.push(data?.warning || 'ALT text generated (not saved)');
+      } else {
+        toast.push('ALT text updated');
+      }
     } catch (error) {
       console.error('Failed to generate ALT text:', error);
       toast.push('Failed to generate ALT text');
@@ -1703,6 +1716,71 @@ export default function ImageDetailPage() {
       setDescriptionGenerating(false);
     }
   }, [image, descriptionInput, toast]);
+
+  const refreshPromptThis = useCallback(async () => {
+    if (!image?.id) {
+      return;
+    }
+    setPromptThisLoading(true);
+    try {
+      const response = await fetch(`/api/images/${image.id}/prompt`, { method: 'GET' });
+      const data = await response.json();
+      if (!response.ok) {
+        return;
+      }
+      const record = data?.record;
+      if (record?.prompt && typeof record.prompt === 'string') {
+        setPromptThisInput(record.prompt);
+        setPromptThisMeta({ saved: true, updatedAt: record.updatedAt, model: record.model });
+      } else {
+        setPromptThisInput('');
+        setPromptThisMeta(null);
+      }
+    } catch (error) {
+      console.warn('Failed to refresh Prompt This:', error);
+    } finally {
+      setPromptThisLoading(false);
+    }
+  }, [image?.id]);
+
+  const generatePromptThis = useCallback(async (force?: boolean) => {
+    if (!image?.id) {
+      return;
+    }
+    setPromptThisGenerating(true);
+    try {
+      const response = await fetch(`/api/images/${image.id}/prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          force: Boolean(force),
+          existingPrompt: promptThisInput || ''
+        })
+      });
+      const data = await response.json();
+      if (!response.ok || !data?.record?.prompt) {
+        toast.push(data?.error || 'Failed to generate prompt');
+        return;
+      }
+      const promptText: string = data.record.prompt;
+      setPromptThisInput(promptText);
+      setPromptThisMeta({
+        saved: Boolean(data?.saved),
+        updatedAt: data?.record?.updatedAt,
+        model: data?.record?.model
+      });
+      toast.push(data?.generated ? 'Prompt generated' : 'Prompt loaded');
+    } catch (error) {
+      console.error('Failed to generate prompt:', error);
+      toast.push('Failed to generate prompt');
+    } finally {
+      setPromptThisGenerating(false);
+    }
+  }, [image?.id, promptThisInput, toast]);
+
+  useEffect(() => {
+    refreshPromptThis();
+  }, [refreshPromptThis]);
 
   const applyDescriptionToVariations = useCallback(async () => {
     if (isChildImage) {
@@ -2207,6 +2285,20 @@ export default function ImageDetailPage() {
                     <span className="text-[10px] text-gray-500 font-normal">(CLIP embedding visualization)</span>
                   </summary>
                   <div className="mt-3 space-y-4">
+                    <div className="flex items-center justify-between gap-3 rounded border border-gray-200 bg-white/60 px-3 py-2">
+                      <div className="text-[11px] text-gray-600">
+                        Scope: {semanticSearchAllNamespaces ? 'All namespaces' : (namespace ? namespace : '[none]')}
+                      </div>
+                      <label className="flex items-center gap-2 text-[11px] text-gray-700 select-none">
+                        <input
+                          type="checkbox"
+                          checked={semanticSearchAllNamespaces}
+                          onChange={(e) => setSemanticSearchAllNamespaces(e.target.checked)}
+                          className="h-3.5 w-3.5"
+                        />
+                        All namespaces
+                      </label>
+                    </div>
                     {/* Machine Haiku */}
                     <HaikuDisplay imageId={image.id} hasClipEmbedding={image.hasClipEmbedding} />
                     
@@ -2272,6 +2364,8 @@ export default function ImageDetailPage() {
                           onImageClick={(id) => window.location.href = `/images/${id}`}
                           copyVariant={listVariant}
                           onCopySuccess={(msg) => toast.push(msg)}
+                          namespace={namespace}
+                          searchAllNamespaces={semanticSearchAllNamespaces}
                         />
                       </div>
                       <div>
@@ -2283,6 +2377,8 @@ export default function ImageDetailPage() {
                           onImageClick={(id) => window.location.href = `/images/${id}`}
                           copyVariant={listVariant}
                           onCopySuccess={(msg) => toast.push(msg)}
+                          namespace={namespace}
+                          searchAllNamespaces={semanticSearchAllNamespaces}
                         />
                       </div>
                     </div>
@@ -2294,6 +2390,8 @@ export default function ImageDetailPage() {
                       onImageClick={(id) => window.location.href = `/images/${id}`}
                       copyVariant={listVariant}
                       onCopySuccess={(msg) => toast.push(msg)}
+                      namespace={namespace}
+                      searchAllNamespaces={semanticSearchAllNamespaces}
                     />
                   </div>
                 </details>
@@ -2304,11 +2402,19 @@ export default function ImageDetailPage() {
           <div id="image-metadata-section" className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-[11px] font-mono text-gray-700 bg-gray-100 border border-gray-200 rounded-full px-3 py-1">
-                Metadata: {metadataByteSize} bytes
+                Cloudflare meta (pending): {metadataByteSize} bytes
+                {metadataPrunedByteSize > 0 && metadataPrunedByteSize !== metadataByteSize && (
+                  <>  pruned: {metadataPrunedByteSize}/1024</>
+                )}
               </span>
               {metadataLargestFields.length > 0 && (
                 <span className="text-[10px] text-gray-500">
                   Largest: {metadataLargestFields.map((field) => `${field.key} (${field.bytes}b)`).join(', ')}
+                </span>
+              )}
+              {metadataPrunedDroppedFields.length > 0 && (
+                <span className="text-[10px] text-amber-700">
+                  Would drop to fit: {metadataPrunedDroppedFields.slice(0, 5).join(', ')}{metadataPrunedDroppedFields.length > 5 ? '' : ''}
                 </span>
               )}
               <div className="flex flex-wrap items-center gap-2 text-[11px]">
@@ -2395,6 +2501,56 @@ export default function ImageDetailPage() {
                 placeholder="No ALT text yet"
                 className="w-full font-mono text-xs border border-gray-300 rounded-md px-3 py-2 mt-2 bg-white text-gray-800 min-h-[80px]"
               />
+            </div>
+
+            <div id="prompt-this-section">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-mono font-medum text-gray-700">Prompt This</p>
+                  <p className="text-[10px] text-gray-500">Generate a text-to-image prompt from the image.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => generatePromptThis(false)}
+                    disabled={promptThisGenerating}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border border-gray-200 text-gray-700 hover:border-gray-300 disabled:opacity-50"
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    {promptThisGenerating ? 'Generating…' : promptThisInput ? 'Refresh prompt' : 'Generate prompt'}
+                  </button>
+                  <button
+                    onClick={() => generatePromptThis(true)}
+                    disabled={promptThisGenerating}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border border-gray-200 text-gray-700 hover:border-gray-300 disabled:opacity-50"
+                    title="Force regenerate"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    Regenerate
+                  </button>
+                  <button
+                    onClick={() => copyToClipboard(promptThisInput || '', 'Prompt', 'Prompt copied')}
+                    disabled={!promptThisInput}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border border-gray-200 text-gray-700 hover:border-gray-300 disabled:opacity-50"
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+
+              <textarea
+                value={promptThisInput}
+                onChange={(e) => setPromptThisInput(e.target.value)}
+                placeholder={promptThisLoading ? 'Loading…' : 'No prompt yet'}
+                className="w-full font-mono text-xs border border-gray-300 rounded-md px-3 py-2 mt-2 bg-white text-gray-800 min-h-[96px]"
+                rows={4}
+              />
+
+              {promptThisMeta?.updatedAt && (
+                <div className="mt-1 text-[10px] text-gray-500">
+                  Updated: {new Date(promptThisMeta.updatedAt).toLocaleString()} {promptThisMeta?.model ? `• ${promptThisMeta.model}` : ''}{' '}
+                  {promptThisMeta?.saved === false ? '• not saved' : ''}
+                </div>
+              )}
             </div>
 
             <div id="folder-section">
