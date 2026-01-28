@@ -58,11 +58,11 @@ function buildPromptThisUserText(options: {
   if (options.existingPrompt) contextSegments.push(`Existing prompt draft: ${options.existingPrompt}`);
 
   return [
-    'You are a prompt engineer for text-to-image models (Stable Diffusion / Midjourney-like).',
+    'You are a prompt engineer for text-to-image models (Stable Diffusion / ComfyUI / Midjourney-like).',
     'Create ONE high-quality, production-ready prompt that recreates the uploaded image as closely as possible.',
-    'Be specific about subject, setting, composition, camera/framing, lighting, materials, color palette, and mood.',
+    'Be specific about subject, setting, composition, camera/framing, lighting, visual style (e.g. line illustration? oil painting? watercolor, vintage photograph?), visual texture, materials, color palette, and mood. Specify the visual style clearly — whether it is a line illustration, oil painting, watercolor, vintage photograph, etc. The medium greatly influences the final image, so be precise.',
     'Avoid mentioning file formats, "alt text", or "this image". Do not use markdown.',
-    'Return ONLY the prompt text (no labels, no lists). Keep it under 700 characters.',
+    'Return ONLY the prompt text (no labels, no lists). Keep it under 1500 characters.',
     contextSegments.length ? `Context:\n${contextSegments.join('\n')}` : null
   ]
     .filter(Boolean)
@@ -82,9 +82,9 @@ async function generatePromptFromOpenAI(imageUrl: string, userText: string) {
       Authorization: `Bearer ${openAiKey}`
     },
     body: JSON.stringify({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4o',
       temperature: 0.4,
-      max_tokens: 600,
+      max_tokens: 1600,
       messages: [
         {
           role: 'system',
@@ -216,7 +216,7 @@ export async function POST(
     const record: PromptThisRecord = {
       imageId,
       prompt: ai.payload.prompt,
-      model: 'gpt-4o-mini',
+      model: 'gpt-4o',
       provider: 'openai',
       createdAt: existing?.createdAt || now,
       updatedAt: now

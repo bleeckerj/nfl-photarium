@@ -11,7 +11,8 @@ const makeImage = (overrides: Partial<GalleryImage> = {}): GalleryImage => ({
   tags: overrides.tags,
   altTag: overrides.altTag,
   parentId: overrides.parentId,
-  originalUrl: overrides.originalUrl
+  originalUrl: overrides.originalUrl,
+  promptThis: overrides.promptThis
 });
 
 describe('filterImagesForGallery', () => {
@@ -82,5 +83,26 @@ describe('filterImagesForGallery', () => {
     });
 
     expect(result.map(img => img.id)).toContain('4');
+  });
+
+  it('matches search when Prompt This contains the text', () => {
+    const extendedImages = [
+      ...images,
+      makeImage({
+        id: '5',
+        filename: 'prompt-image.png',
+        promptThis: 'A neon-lit alleyway, rain, cyberpunk vibes',
+        folder: 'internal'
+      })
+    ];
+
+    const result = filterImagesForGallery(extendedImages, {
+      selectedFolder: 'all',
+      selectedTag: '',
+      searchTerm: 'cyberpunk',
+      onlyCanonical: false
+    });
+
+    expect(result.map((img) => img.id)).toContain('5');
   });
 });

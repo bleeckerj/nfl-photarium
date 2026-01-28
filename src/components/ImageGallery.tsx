@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, forwardRef, useImperativeHandle, useMemo, CSSProperties, useRef, useCallback } from 'react';
+import { useState, useEffect, forwardRef, useImperativeHandle, useMemo, CSSProperties, useRef, useCallback, useLayoutEffect } from 'react';
 import { Trash2, Copy, ExternalLink, Sparkles, Layers, AlertTriangle, Settings, Cpu } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -38,6 +38,7 @@ interface CloudflareImage {
   id: string;
   filename: string;
   displayName?: string;
+  promptThis?: string;
   uploaded: string;
   variants: string[];
   folder?: string;
@@ -75,6 +76,7 @@ const DEFAULT_PAGE_SIZE = 30;
 const PAGE_SIZE_OPTIONS = [12, 24, 30, 48, 60, 90, 120];
 const HIDDEN_FOLDERS_STORAGE_KEY = 'galleryHiddenFolders';
 const HIDDEN_TAGS_STORAGE_KEY = 'galleryHiddenTags';
+const GALLERY_RETURN_STATE_KEY = 'galleryReturnStateV1';
 const BROKEN_AUDIT_STORAGE_KEY = 'galleryBrokenAudit';
 const AUDIT_LOG_LIMIT = 200;
 const VARIANT_DIMENSIONS = new Map(IMAGE_VARIANTS.map(variant => [variant.name, variant.width]));
@@ -295,9 +297,67 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           if (month < 0 || month > 11) return null;
           return { year, month };
         })();
-        const normalizedCurrentPage = typeof parsed.currentPage === 'number' && parsed.currentPage > 0
+        let normalizedCurrentPage = typeof parsed.currentPage === 'number' && parsed.currentPage > 0
           ? Math.floor(parsed.currentPage)
           : 1;
+
+        // If coming back from detail, prefer URL param (most deterministic), then sessionStorage.
+        try {
+          const params = new URLSearchParams(window.location.search);
+          const gns = params.get('gns') ?? '';
+          const gpage = params.get('gpage');
+          const activeNamespace = namespace ?? '';
+          if (gns === activeNamespace && gpage) {
+            const parsedPage = Number.parseInt(gpage, 10);
+            if (Number.isFinite(parsedPage) && parsedPage > 0) {
+              normalizedCurrentPage = parsedPage;
+            }
+          }
+        } catch {
+          // ignore
+        }
+
+        try {
+          const rawReturn = window.sessionStorage.getItem(GALLERY_RETURN_STATE_KEY);
+          if (rawReturn) {
+            const returnParsed = JSON.parse(rawReturn) as { currentPage?: number; namespace?: string; savedAt?: number };
+            const savedNamespace = typeof returnParsed?.namespace === 'string' ? returnParsed.namespace : '';
+            const activeNamespace = namespace ?? '';
+            const savedAt = typeof returnParsed?.savedAt === 'number' ? returnParsed.savedAt : 0;
+            const freshEnough = !savedAt || Date.now() - savedAt < 10 * 60 * 1000;
+            if (freshEnough && savedNamespace === activeNamespace && typeof returnParsed?.currentPage === 'number' && returnParsed.currentPage > 0) {
+              normalizedCurrentPage = Math.floor(returnParsed.currentPage);
+            }
+          }
+        } catch {
+          // ignore
+        }
+
+        // If we're returning from a detail view, use the saved page immediately to avoid a visible jump.
+        try {
+          const rawReturn = window.sessionStorage.getItem(GALLERY_RETURN_STATE_KEY);
+          if (rawReturn) {
+            const returnParsed = JSON.parse(rawReturn) as {
+              currentPage?: number;
+              namespace?: string;
+              savedAt?: number;
+            };
+            const savedNamespace = typeof returnParsed?.namespace === 'string' ? returnParsed.namespace : '';
+            const activeNamespace = namespace ?? '';
+            const savedAt = typeof returnParsed?.savedAt === 'number' ? returnParsed.savedAt : 0;
+            const freshEnough = !savedAt || Date.now() - savedAt < 10 * 60 * 1000;
+            if (
+              freshEnough &&
+              savedNamespace === activeNamespace &&
+              typeof returnParsed?.currentPage === 'number' &&
+              returnParsed.currentPage > 0
+            ) {
+              normalizedCurrentPage = Math.floor(returnParsed.currentPage);
+            }
+          }
+        } catch {
+          // ignore
+        }
         return {
           variant: normalizedVariant,
           onlyCanonical: Boolean(parsed.onlyCanonical),
@@ -341,6 +401,26 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   };
 
   const storedPreferencesRef = useRef(getStoredPreferences());
+
+  const initialReturningFromDetail = (() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('gpage')) return true;
+    } catch {
+      // ignore
+    }
+    try {
+      const rawReturn = window.sessionStorage.getItem(GALLERY_RETURN_STATE_KEY);
+      if (!rawReturn) return false;
+      const parsed = JSON.parse(rawReturn) as { currentPage?: number };
+      return typeof parsed?.currentPage === 'number' && parsed.currentPage > 0;
+    } catch {
+      return false;
+    }
+  })();
+
+  const returningFromDetailRef = useRef(initialReturningFromDetail);
 
   const [images, setImages] = useState<CloudflareImage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -396,11 +476,38 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [namespaceSelectValue, setNamespaceSelectValue] = useState('');
   const [registryNamespaces, setRegistryNamespaces] = useState<string[]>([]);
   const [colorMetadataMap, setColorMetadataMap] = useState<Record<string, { dominantColors?: string[]; averageColor?: string }>>({});
+  const [promptThisMap, setPromptThisMap] = useState<Record<string, string | null>>({});
   const requestedColorIdsRef = useRef<Map<string, number>>(new Map());
+  const requestedPromptIdsRef = useRef<Map<string, number>>(new Map());
   const COLOR_METADATA_RETRY_MS = 5 * 60 * 1000;
+  const PROMPT_THIS_RETRY_MS = 60 * 1000;
   const ENABLE_COLOR_METADATA = process.env.NEXT_PUBLIC_ENABLE_COLOR_METADATA === '1';
   const didInitFilterPageRef = useRef(false);
   const utilityButtonClasses = 'text-[0.65rem] font-mono px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 transition';
+  const didRestoreReturnStateRef = useRef(false);
+
+  const saveGalleryReturnState = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.sessionStorage.setItem(
+        GALLERY_RETURN_STATE_KEY,
+        JSON.stringify({
+          currentPage,
+          scrollY: window.scrollY,
+          namespace: namespace ?? '',
+          savedAt: Date.now()
+        })
+      );
+    } catch {
+      // ignore
+    }
+  }, [currentPage, namespace]);
+
+  const galleryReturnHrefSuffix = useMemo(() => {
+    const page = currentPage;
+    const ns = encodeURIComponent(namespace ?? '');
+    return `?gpage=${page}&gns=${ns}`;
+  }, [currentPage, namespace]);
 
   useEffect(() => {
     const next = namespace ?? '';
@@ -532,6 +639,55 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       console.warn('Failed to save gallery prefs', error);
     }
   }, [onlyCanonical, respectAspectRatio, selectedVariant, onlyWithVariants, selectedFolder, selectedTag, searchTerm, viewMode, filtersCollapsed, bulkFolderInput, bulkFolderMode, showDuplicatesOnly, showBrokenOnly, pageSize, dateFilter, currentPage]);
+
+  // Restore scroll position when returning from a detail page.
+  // Page is restored during initial state hydration to avoid a visible jump.
+  useLayoutEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (didRestoreReturnStateRef.current) return;
+    if (loading) return;
+
+    try {
+      const raw = window.sessionStorage.getItem(GALLERY_RETURN_STATE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as {
+        scrollY?: number;
+        namespace?: string;
+      };
+      if (!parsed || typeof parsed !== 'object') return;
+
+      const savedNamespace = typeof parsed.namespace === 'string' ? parsed.namespace : '';
+      const activeNamespace = namespace ?? '';
+      if (savedNamespace !== activeNamespace) return;
+
+      didRestoreReturnStateRef.current = true;
+      window.sessionStorage.removeItem(GALLERY_RETURN_STATE_KEY);
+
+      const targetScrollY = typeof parsed.scrollY === 'number' ? parsed.scrollY : 0;
+
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          window.scrollTo({ top: targetScrollY, behavior: 'auto' });
+        });
+      });
+    } catch {
+      // ignore
+    }
+  }, [loading, namespace]);
+
+  // If we arrived via `/?gpage=...&gns=...`, clean up the URL once mounted.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const url = new URL(window.location.href);
+      if (!url.searchParams.has('gpage') && !url.searchParams.has('gns')) return;
+      url.searchParams.delete('gpage');
+      url.searchParams.delete('gns');
+      window.history.replaceState(window.history.state, '', url.toString());
+    } catch {
+      // ignore
+    }
+  }, []);
   useEffect(() => {
     persistHiddenFolders(hiddenFolders);
   }, [hiddenFolders]);
@@ -626,6 +782,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       setSelectedTag('');
       setSearchTerm('');
       setOnlyCanonical(false); // Disable "Parents Only" as it might hide orphaned variants in the new namespace
+      setPromptThisMap({});
+      requestedPromptIdsRef.current.clear();
       prevNamespaceRef.current = namespace;
     }
 
@@ -635,6 +793,51 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     }
     fetchImages();
   }, [namespace]);
+
+  // Fetch Prompt This text only when a search term is active.
+  // Prompt This records live outside Cloudflare metadata, so we batch-load them on demand.
+  useEffect(() => {
+    if (!searchTerm.trim()) return;
+    if (images.length === 0) return;
+
+    let cancelled = false;
+
+    const fetchPrompts = async () => {
+      try {
+        const idsToFetch = images
+          .map((img) => img.id)
+          .filter((id) => {
+            if (Object.prototype.hasOwnProperty.call(promptThisMap, id)) return false;
+            const lastRequestedAt = requestedPromptIdsRef.current.get(id);
+            return !lastRequestedAt || Date.now() - lastRequestedAt > PROMPT_THIS_RETRY_MS;
+          });
+
+        if (idsToFetch.length === 0) return;
+        idsToFetch.forEach((id) => requestedPromptIdsRef.current.set(id, Date.now()));
+
+        const chunkSize = 50;
+        for (let i = 0; i < idsToFetch.length; i += chunkSize) {
+          if (cancelled) return;
+          const chunk = idsToFetch.slice(i, i + chunkSize);
+          const response = await fetch(`/api/images/prompts?ids=${encodeURIComponent(chunk.join(','))}`);
+          if (!response.ok) continue;
+          const data = await response.json();
+          if (cancelled) return;
+          if (data?.prompts && typeof data.prompts === 'object') {
+            setPromptThisMap((prev) => ({ ...prev, ...data.prompts }));
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to fetch Prompt This text:', error);
+      }
+    };
+
+    void fetchPrompts();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [images, promptThisMap, searchTerm]);
 
   // Expose the refresh function via ref
   useImperativeHandle(ref, () => ({
@@ -1540,9 +1743,19 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     return `${value.slice(0, head)}…${value.slice(value.length - tail)}`;
   };
 
+  const imagesWithPrompts = useMemo(() => {
+    if (Object.keys(promptThisMap).length === 0) {
+      return images;
+    }
+    return images.map((img) => ({
+      ...img,
+      promptThis: promptThisMap[img.id] ?? undefined
+    }));
+  }, [images, promptThisMap]);
+
   // Move baseFilteredImages earlier so duplicateGroups can use the filtered list
   const baseFilteredImages = useMemo(() => {
-    return filterImagesForGallery(images, {
+    return filterImagesForGallery(imagesWithPrompts, {
       selectedFolder,
       selectedTag,
       searchTerm,
@@ -1550,7 +1763,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       hiddenFolders,
       hiddenTags
     });
-  }, [images, selectedFolder, selectedTag, searchTerm, onlyCanonical, hiddenFolders, hiddenTags]);
+  }, [imagesWithPrompts, selectedFolder, selectedTag, searchTerm, onlyCanonical, hiddenFolders, hiddenTags]);
 
   // Compute duplicates from the filtered images, not all images
   // This ensures "show duplicates only" shows duplicates within the current filter selection
@@ -1800,15 +2013,25 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       didInitFilterPageRef.current = true;
       return;
     }
+
+    // When returning from an image detail page, we may still see one-time filter/selection
+    // normalization changes during mount; avoid blowing away the restored page.
+    if (returningFromDetailRef.current) {
+      returningFromDetailRef.current = false;
+      return;
+    }
     setCurrentPage(1);
     scrollGalleryToTop();
   }, [selectedFolder, selectedTag, searchTerm, onlyWithVariants, showDuplicatesOnly, showBrokenOnly, pageSize, dateFilter, scrollGalleryToTop]);
 
   useEffect(() => {
+    // Avoid clamping to page 1 during initial load when `totalPages` is temporarily 1
+    // because `images` haven't been fetched yet.
+    if (loading) return;
     if (currentPage > totalPages) {
       setCurrentPage(totalPages);
     }
-  }, [currentPage, totalPages]);
+  }, [currentPage, loading, totalPages]);
 
   const formatDateRangeLabel = (items: CloudflareImage[]) => {
     if (!items.length) return null;
@@ -2527,7 +2750,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                   } ${bulkSelectionMode ? 'cursor-pointer' : ''}`}
                 >
                   <Link
-                    href={`/images/${image.id}`}
+                    href={`/images/${image.id}${galleryReturnHrefSuffix}`}
                     className={`relative block w-full ${respectAspectRatio ? '' : 'aspect-square'}`}
                     style={
                       respectAspectRatio && image.dimensions
@@ -2540,7 +2763,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                       if (bulkSelectionMode) {
                         e.preventDefault();
                         toggleSelection(image.id);
+                        return;
                       }
+
+                      saveGalleryReturnState();
                     }}
                     onMouseEnter={(e) => handleMouseEnter(image.id, e)}
                     onMouseMove={(e) => handleMouseMove(image.id, e)}
@@ -2751,7 +2977,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                   }`}
                 >
                   <Link
-                    href={`/images/${image.id}`}
+                    href={`/images/${image.id}${galleryReturnHrefSuffix}`}
                     className="w-32 h-32 relative bg-gray-100 rounded-lg overflow-hidden flex-shrink-0 cursor-pointer"
                     onMouseEnter={(e) => handleMouseEnter(image.id, e)}
                     onMouseMove={(e) => handleMouseMove(image.id, e)}
@@ -2760,7 +2986,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                       if (bulkSelectionMode) {
                         e.preventDefault();
                         toggleSelection(image.id);
+                        return;
                       }
+
+                      saveGalleryReturnState();
                     }}
                     prefetch={false}
                   >

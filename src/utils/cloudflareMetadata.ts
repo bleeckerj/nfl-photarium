@@ -59,13 +59,27 @@ function isEmptyValue(value: unknown): boolean {
 }
 
 export function pickCloudflareMetadata(
-  meta: Record<string, unknown>
+  meta: Record<string, unknown>,
+  options?: {
+    /**
+     * When true, include empty values ('' / [] / {}) in the payload.
+     * This is useful for PATCH semantics where omitting a key does not clear it.
+     */
+    includeEmpty?: boolean;
+  }
 ): CloudflareMetadata {
+  const includeEmpty = options?.includeEmpty ?? false;
   const trimmed: Record<string, unknown> = {};
   CLOUDFLARE_METADATA_FIELDS.forEach((key) => {
     const value = meta[key as CloudflareMetadataField];
-    // Exclude undefined AND empty values to reduce byte count
-    if (!isEmptyValue(value)) {
+    if (value === undefined || value === null) {
+      return;
+    }
+    // Exclude empty values by default to reduce byte count.
+    if (!includeEmpty && isEmptyValue(value)) {
+      return;
+    }
+    if (includeEmpty || !isEmptyValue(value)) {
       trimmed[key] = value;
     }
   });

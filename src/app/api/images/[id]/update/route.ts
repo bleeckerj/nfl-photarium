@@ -100,7 +100,7 @@ export async function PATCH(
 
     const existingMeta = parseCloudflareMetadata(fetchedImageResult.result?.meta);
     const parentProvided = Object.prototype.hasOwnProperty.call(body, 'parentId');
-    const cleanParentId = cleanString(typeof parentId === 'string' ? parentId : '');
+    const cleanParentId = typeof parentId === 'string' ? parentId.trim() : '';
 
     const metadata = {
       ...existingMeta,
@@ -108,7 +108,8 @@ export async function PATCH(
     } as Record<string, unknown>;
 
     if (folderProvided) {
-      metadata.folder = cleanFolder;
+      // Explicitly allow clearing the folder.
+      metadata.folder = cleanFolder ?? '';
     }
 
     if (tagsProvided) {
@@ -134,6 +135,7 @@ export async function PATCH(
     }
 
     if (parentProvided) {
+      // Explicitly allow clearing the parent.
       metadata.variationParentId = cleanParentId;
     }
 
@@ -158,7 +160,9 @@ export async function PATCH(
       }
     }
 
-    const metadataPayload = pickCloudflareMetadata(metadata);
+    // IMPORTANT: Cloudflare PATCH semantics do not clear keys that are omitted.
+    // Use includeEmpty so that user-cleared values ('' / []) are sent explicitly.
+    const metadataPayload = pickCloudflareMetadata(metadata, { includeEmpty: true });
 
     // Update image metadata in Cloudflare using JSON body
     const response = await fetch(
@@ -183,19 +187,19 @@ export async function PATCH(
       );
     }
 
-    const finalParentId = metadataPayload.variationParentId as string | undefined;
+    const finalParentId = cleanString(metadataPayload.variationParentId as string | undefined);
 
-    const finalFolder = metadataPayload.folder as string | undefined;
+    const finalFolder = cleanString(metadataPayload.folder as string | undefined);
     const finalTags = Array.isArray(metadataPayload.tags) ? metadataPayload.tags : [];
-    const finalDescription = metadataPayload.description as string | undefined;
-    const finalOriginalUrl = metadataPayload.originalUrl as string | undefined;
-    const finalSourceUrl = metadataPayload.sourceUrl as string | undefined;
+    const finalDescription = cleanString(metadataPayload.description as string | undefined) ?? '';
+    const finalOriginalUrl = cleanString(metadataPayload.originalUrl as string | undefined);
+    const finalSourceUrl = cleanString(metadataPayload.sourceUrl as string | undefined);
     const finalDisplayName =
       (metadataPayload.displayName as string | undefined) ?? fetchedImageResult.result.filename;
-    const finalAltTag = metadataPayload.altTag as string | undefined;
+    const finalAltTag = cleanString(metadataPayload.altTag as string | undefined) ?? '';
     const finalVariationSort =
       typeof metadataPayload.variationSort === 'number' ? metadataPayload.variationSort : undefined;
-    const finalNamespace = metadataPayload.namespace as string | undefined;
+    const finalNamespace = cleanString(metadataPayload.namespace as string | undefined);
 
     const cachedImage = transformApiImageToCached({
       id: fetchedImageResult.result.id,

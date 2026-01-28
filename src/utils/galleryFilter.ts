@@ -2,6 +2,7 @@ export interface GalleryImage {
   id: string;
   filename: string;
   displayName?: string;
+  promptThis?: string;
   uploaded: string;
   variants: string[];
   folder?: string;
@@ -58,6 +59,7 @@ const matchesSearchFilter = (image: GalleryImage, searchTerm: string) => {
     normalize(image.id),
     normalize(image.filename),
     normalize(image.displayName),
+    normalize(image.promptThis),
     normalize(image.folder),
     normalize(image.altTag),
     normalize(image.description),

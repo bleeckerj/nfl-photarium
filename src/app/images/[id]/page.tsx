@@ -21,7 +21,23 @@ import { downloadImageToFile, formatDownloadFileName } from '@/utils/downloadUti
 import { useImageAspectRatio } from '@/hooks/useImageAspectRatio';
 import QRCode from 'qrcode';
 
-import { useParams } from 'next/navigation';
+import { AltTextEditor } from '@/components/image-detail/AltTextEditor';
+import { CloudflareMetadataHeader } from '@/components/image-detail/CloudflareMetadataHeader';
+import { DescriptionEditor } from '@/components/image-detail/DescriptionEditor';
+import { PromptThisEditor } from '@/components/image-detail/PromptThisEditor';
+import { ExifSection } from '@/components/image-detail/ExifSection';
+import { OriginalUrlSection } from '@/components/image-detail/OriginalUrlSection';
+import { ShareSection } from '@/components/image-detail/ShareSection';
+import { SourceUrlSection } from '@/components/image-detail/SourceUrlSection';
+import { VariantLinksSection } from '@/components/image-detail/VariantLinksSection';
+import { VariationsSection } from '@/components/image-detail/VariationsSection';
+import { AdoptVariationSection } from '@/components/image-detail/AdoptVariationSection';
+import { UploadVariationSection } from '@/components/image-detail/UploadVariationSection';
+import { ParentInfoSection } from '@/components/image-detail/ParentInfoSection';
+
+import { useParentReassignment } from '@/hooks/useParentReassignment';
+
+import { useParams, useRouter } from 'next/navigation';
 
 const handleImageDragStart = (e: React.DragEvent, image: CloudflareImage) => {
   e.stopPropagation();
@@ -138,11 +154,39 @@ const formatEntriesAsYaml = (entries: { url: string; altText: string }[]) => {
 
 export default function ImageDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const rawId = params?.id;
   const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const [image, setImage] = useState<CloudflareImage | null>(null);
   const [loading, setLoading] = useState(true);
   const toast = useToast();
+
+  const handleBackToGallery = useCallback(() => {
+    if (typeof window === 'undefined') {
+      router.push('/');
+      return;
+    }
+
+    // If we navigated here from the gallery, return deterministically to the same page.
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const gpage = params.get('gpage');
+      const gns = params.get('gns') ?? '';
+      if (gpage) {
+        router.push(`/?gpage=${encodeURIComponent(gpage)}&gns=${encodeURIComponent(gns)}`, { scroll: false });
+        return;
+      }
+    } catch {
+      // ignore
+    }
+
+    // Fallback: go back if possible (preserves history), else go home.
+    if (window.history.length > 1) {
+      router.back();
+      return;
+    }
+    router.push('/');
+  }, [router]);
 
   const [allImages, setAllImages] = useState<CloudflareImage[]>([]);
   const [reassignParentId, setReassignParentId] = useState('');
@@ -433,10 +477,11 @@ export default function ImageDetailPage() {
     return image?.parentId ? siblingVariations : variationChildren;
   }, [image?.parentId, siblingVariations, variationChildren]);
 
-  const parentImage = useMemo(() => {
-    if (!image?.parentId) return null;
-    return allImages.find((img) => img.id === image.parentId) || null;
-  }, [allImages, image?.parentId]);
+  const { parentImage, adoptableImages, reassignParentOptions } = useParentReassignment({
+    allImages,
+    currentImage: image,
+    excludeId: id
+  });
 
   const displayedVariations = useMemo(() => {
     if (!variationCandidates.length) {
@@ -487,21 +532,6 @@ export default function ImageDetailPage() {
   const totalVariationPages = Math.max(
     1,
     Math.ceil(displayedVariations.length / VARIATION_PAGE_SIZE)
-  );
-
-  const parentWithChildren = useMemo(() => {
-    const set = new Set<string>();
-    allImages.forEach((img) => {
-      if (img.parentId) {
-        set.add(img.parentId);
-      }
-    });
-    return set;
-  }, [allImages]);
-
-  const adoptableImages = useMemo(
-    () => allImages.filter((img) => !img.parentId && !parentWithChildren.has(img.id) && img.id !== id),
-    [allImages, id, parentWithChildren]
   );
 
   const filteredAdoptableImages = useMemo(() => {
@@ -663,7 +693,7 @@ export default function ImageDetailPage() {
     metadata.displayName = cleanedDisplayName ?? '';
     const cleanAltTag = cleanString(altTextInput) ?? '';
     metadata.altTag = cleanAltTag;
-    const compact = pickCloudflareMetadata(metadata);
+    const compact = pickCloudflareMetadata(metadata, { includeEmpty: true });
     try {
       const encoder = new TextEncoder();
       const size = encoder.encode(JSON.stringify(compact)).length;
@@ -861,17 +891,6 @@ export default function ImageDetailPage() {
       { value: '__create__', label: 'Create new folder…' }
     ],
     [uniqueFolders]
-  );
-
-  const reassignParentOptions = useMemo(
-    () => [
-      { value: '', label: 'No parent (make canonical)' },
-      ...adoptableImages.map((candidate) => ({
-        value: candidate.id,
-        label: candidate.filename || candidate.id
-      }))
-    ],
-    [adoptableImages]
   );
 
   const adoptFolderOptions = useMemo(
@@ -2112,9 +2131,9 @@ export default function ImageDetailPage() {
       <div id="image-detail-container" className="max-w-5xl mx-auto bg-white rounded-lg shadow-md overflow-hidden">
         <div className="p-6">
           <div id="detail-navigation" className="flex items-center justify-between mb-4">
-            <Link href="/" className="text-xs text-blue-600 underline">
+            <button type="button" onClick={handleBackToGallery} className="text-xs text-blue-600 underline">
               ← Back to gallery
-            </Link>
+            </button>
           </div>
           <div id="image-hero-section" className="w-full mb-4">
             <div className="relative w-full aspect-[3/2] bg-gray-100 rounded overflow-hidden group">
@@ -2400,158 +2419,49 @@ export default function ImageDetailPage() {
           </div>
 
           <div id="image-metadata-section" className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-[11px] font-mono text-gray-700 bg-gray-100 border border-gray-200 rounded-full px-3 py-1">
-                Cloudflare meta (pending): {metadataByteSize} bytes
-                {metadataPrunedByteSize > 0 && metadataPrunedByteSize !== metadataByteSize && (
-                  <>  pruned: {metadataPrunedByteSize}/1024</>
-                )}
-              </span>
-              {metadataLargestFields.length > 0 && (
-                <span className="text-[10px] text-gray-500">
-                  Largest: {metadataLargestFields.map((field) => `${field.key} (${field.bytes}b)`).join(', ')}
-                </span>
-              )}
-              {metadataPrunedDroppedFields.length > 0 && (
-                <span className="text-[10px] text-amber-700">
-                  Would drop to fit: {metadataPrunedDroppedFields.slice(0, 5).join(', ')}{metadataPrunedDroppedFields.length > 5 ? '' : ''}
-                </span>
-              )}
-              <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                <span className={`px-2 py-1 rounded-full border ${isMetadataDirty ? 'border-amber-300 bg-amber-50 text-amber-800' : pendingAutoSave ? 'border-blue-200 bg-blue-50 text-blue-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
-                  {isMetadataDirty ? 'Unsaved changes' : pendingAutoSave ? 'Saving…' : 'All changes saved'}
-                </span>
-                <button
-                  onClick={handleCancelMetadata}
-                  disabled={!isMetadataDirty || saving}
-                  className="px-2 py-1 text-[11px] border border-gray-300 rounded-md text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                >
-                  Discard
-                </button>
-                <button
-                  onClick={handleSaveMetadata}
-                  disabled={!isMetadataDirty || saving}
-                  className="px-2 py-1 text-[11px] border border-gray-300 rounded-md text-blue-600 hover:bg-blue-50 disabled:opacity-50"
-                >
-                  {saving ? 'Saving…' : 'Save changes'}
-                </button>
-              </div>
-            </div>
-            <div id="description-section">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-xs font-mono font-medum text-gray-700">Description</p>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={generateDescription}
-                    disabled={descriptionGenerating}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border border-gray-200 text-gray-700 hover:border-gray-300 disabled:opacity-50"
-                  >
-                    <Sparkles className="h-4 w-4" />
-                    {descriptionGenerating ? 'Generating…' : 'Generate description'}
-                  </button>
-                  {hasVariations && (
-                    <button
-                      onClick={applyDescriptionToVariations}
-                      disabled={bulkDescriptionApplying || !descriptionInput.trim()}
-                      className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border border-gray-200 text-gray-700 hover:border-gray-300 disabled:opacity-50"
-                    >
-                      {bulkDescriptionApplying ? 'Applying…' : 'Apply to variations'}
-                    </button>
-                  )}
-                </div>
-              </div>
-              <textarea
-                value={descriptionInput}
-                onChange={(e) => setDescriptionInput(e.target.value)}
-                className="w-full font-mono text-xs border border-gray-300 rounded-md px-3 py-2 mt-2"
-                rows={3}
-                placeholder="Add a short description"
-              />
-            </div>
+            <CloudflareMetadataHeader
+              metadataByteSize={metadataByteSize}
+              metadataPrunedByteSize={metadataPrunedByteSize}
+              metadataLargestFields={metadataLargestFields}
+              metadataPrunedDroppedFields={metadataPrunedDroppedFields}
+              isMetadataDirty={isMetadataDirty}
+              pendingAutoSave={pendingAutoSave}
+              saving={saving}
+              onDiscard={handleCancelMetadata}
+              onSave={handleSaveMetadata}
+            />
 
-            <div id="alt-text-section">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-mono font-medum text-gray-700">Alt text</p>
-                  <p className="text-[10px] text-gray-500">Used by screen readers and assistive tech.</p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() => generateAltTag(image.id)}
-                    disabled={Boolean(altLoadingMap[image.id])}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border border-gray-200 text-gray-700 hover:border-gray-300 disabled:opacity-50"
-                  >
-                    <Sparkles className="h-4 w-4" />
-                    {altLoadingMap[image.id] ? 'Generating…' : image.altTag ? 'Refresh ALT text' : 'Generate ALT text'}
-                  </button>
-                  {hasVariations && (
-                    <button
-                      onClick={applyAltToVariations}
-                      disabled={bulkAltApplying || !altTextInput.trim()}
-                      className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border border-gray-200 text-gray-700 hover:border-gray-300 disabled:opacity-50"
-                    >
-                      {bulkAltApplying ? 'Applying…' : 'Apply to variations'}
-                    </button>
-                  )}
-                </div>
-              </div>
-              <textarea
-                value={altTextInput}
-                onChange={(e) => setAltTextInput(e.target.value)}
-                placeholder="No ALT text yet"
-                className="w-full font-mono text-xs border border-gray-300 rounded-md px-3 py-2 mt-2 bg-white text-gray-800 min-h-[80px]"
-              />
-            </div>
+            <DescriptionEditor
+              descriptionInput={descriptionInput}
+              setDescriptionInput={setDescriptionInput}
+              descriptionGenerating={descriptionGenerating}
+              onGenerateDescription={generateDescription}
+              hasVariations={hasVariations}
+              bulkDescriptionApplying={bulkDescriptionApplying}
+              onApplyToVariations={applyDescriptionToVariations}
+            />
 
-            <div id="prompt-this-section">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-mono font-medum text-gray-700">Prompt This</p>
-                  <p className="text-[10px] text-gray-500">Generate a text-to-image prompt from the image.</p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() => generatePromptThis(false)}
-                    disabled={promptThisGenerating}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border border-gray-200 text-gray-700 hover:border-gray-300 disabled:opacity-50"
-                  >
-                    <Sparkles className="h-4 w-4" />
-                    {promptThisGenerating ? 'Generating…' : promptThisInput ? 'Refresh prompt' : 'Generate prompt'}
-                  </button>
-                  <button
-                    onClick={() => generatePromptThis(true)}
-                    disabled={promptThisGenerating}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border border-gray-200 text-gray-700 hover:border-gray-300 disabled:opacity-50"
-                    title="Force regenerate"
-                  >
-                    <RotateCcw className="h-4 w-4" />
-                    Regenerate
-                  </button>
-                  <button
-                    onClick={() => copyToClipboard(promptThisInput || '', 'Prompt', 'Prompt copied')}
-                    disabled={!promptThisInput}
-                    className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border border-gray-200 text-gray-700 hover:border-gray-300 disabled:opacity-50"
-                  >
-                    Copy
-                  </button>
-                </div>
-              </div>
+            <AltTextEditor
+              imageId={image.id}
+              imageHasAlt={Boolean(image.altTag)}
+              altTextInput={altTextInput}
+              setAltTextInput={setAltTextInput}
+              altLoading={Boolean(altLoadingMap[image.id])}
+              onGenerateAlt={generateAltTag}
+              hasVariations={hasVariations}
+              bulkAltApplying={bulkAltApplying}
+              onApplyToVariations={applyAltToVariations}
+            />
 
-              <textarea
-                value={promptThisInput}
-                onChange={(e) => setPromptThisInput(e.target.value)}
-                placeholder={promptThisLoading ? 'Loading…' : 'No prompt yet'}
-                className="w-full font-mono text-xs border border-gray-300 rounded-md px-3 py-2 mt-2 bg-white text-gray-800 min-h-[96px]"
-                rows={4}
-              />
-
-              {promptThisMeta?.updatedAt && (
-                <div className="mt-1 text-[10px] text-gray-500">
-                  Updated: {new Date(promptThisMeta.updatedAt).toLocaleString()} {promptThisMeta?.model ? `• ${promptThisMeta.model}` : ''}{' '}
-                  {promptThisMeta?.saved === false ? '• not saved' : ''}
-                </div>
-              )}
-            </div>
+            <PromptThisEditor
+              promptThisInput={promptThisInput}
+              setPromptThisInput={setPromptThisInput}
+              promptThisLoading={promptThisLoading}
+              promptThisGenerating={promptThisGenerating}
+              promptThisMeta={promptThisMeta}
+              onGenerate={generatePromptThis}
+              onCopy={() => copyToClipboard(promptThisInput || '', 'Prompt', 'Prompt copied')}
+            />
 
             <div id="folder-section">
               <div className="flex items-center justify-between">
@@ -2673,696 +2583,141 @@ export default function ImageDetailPage() {
               </p>
             </div>
 
-            <div id="original-url-section">
-              <div className="flex items-center gap-2">
-                <p className="text-xs font-mono font-medum text-gray-700">Original URL</p>
-                {originalUrlTooLong && (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-mono text-amber-800">
-                    ⚠ {originalUrlByteLength} bytes
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-3 mt-2">
-                <input
-                  value={originalUrlInput}
-                  onChange={(e) => setOriginalUrlInput(e.target.value)}
-                  className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-xs"
-                  placeholder="Original source URL"
-                />
-                <button
-                  type="button"
-                  onClick={() => setOriginalUrlInput('')}
-                  className="px-3 py-1 border border-gray-300 rounded text-xs text-gray-600 hover:bg-gray-50"
-                  disabled={!originalUrlInput}
-                >
-                  Clear
-                </button>
-                <button
-                  onClick={async () => { await copyToClipboard(originalUrlInput || originalDeliveryUrl, 'Original'); }}
-                  className="px-3 py-1 bg-blue-600 text-white rounded text-xs cursor-pointer transition transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-300"
-                >
-                  Copy
-                </button>
-              </div>
-              <div className="mt-3 space-y-1 text-[11px] font-mono text-gray-600">
-                <div className="flex items-center gap-2">
-                  <span className="text-gray-700">Normalized:</span>
-                  <span className="truncate" title={image?.originalUrlNormalized || '—'}>
-                    {image?.originalUrlNormalized || '—'}
-                  </span>
-                  {image?.originalUrlNormalized && (
-                    <button
-                      onClick={async () => { await copyToClipboard(image.originalUrlNormalized as string, 'Normalized URL'); }}
-                      className="px-2 py-0.5 border border-gray-300 rounded hover:bg-gray-100 text-[10px]"
-                    >
-                      Copy
-                    </button>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-gray-700">Hash:</span>
-                  <span className="truncate" title={image?.contentHash || '—'}>
-                    {image?.contentHash || '—'}
-                  </span>
-                  {image?.contentHash && (
-                    <button
-                      onClick={async () => { await copyToClipboard(image.contentHash as string, 'Content hash'); }}
-                      className="px-2 py-0.5 border border-gray-300 rounded hover:bg-gray-100 text-[10px]"
-                    >
-                      Copy
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
+            <OriginalUrlSection
+              originalUrlInput={originalUrlInput}
+              setOriginalUrlInput={setOriginalUrlInput}
+              originalUrlTooLong={originalUrlTooLong}
+              originalUrlByteLength={originalUrlByteLength}
+              originalDeliveryUrl={originalDeliveryUrl}
+              originalUrlNormalized={image?.originalUrlNormalized}
+              contentHash={image?.contentHash}
+              onCopyToClipboard={copyToClipboard}
+            />
 
-            <div id="source-url-section">
-              <p className="text-xs font-mono font-medum text-gray-700">Source URL</p>
-              <div className="flex items-center gap-3 mt-2">
-                <input
-                  value={sourceUrlInput}
-                  onChange={(e) => setSourceUrlInput(e.target.value)}
-                  className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-xs"
-                  placeholder="Page or site URL"
-                />
-                <button
-                  onClick={async () => { await copyToClipboard(sourceUrlInput || '', 'Source'); }}
-                  className="px-3 py-1 bg-blue-600 text-white rounded text-xs cursor-pointer transition transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-300"
-                  disabled={!sourceUrlInput}
-                >
-                  Copy
-                </button>
-              </div>
-              <div className="mt-3 space-y-1 text-[11px] font-mono text-gray-600">
-                <div className="flex items-center gap-2">
-                  <span className="text-gray-700">Normalized:</span>
-                  <span className="truncate" title={image?.sourceUrlNormalized || '—'}>
-                    {image?.sourceUrlNormalized || '—'}
-                  </span>
-                  {image?.sourceUrlNormalized && (
-                    <button
-                      onClick={async () => { await copyToClipboard(image.sourceUrlNormalized as string, 'Normalized URL'); }}
-                      className="px-2 py-0.5 border border-gray-300 rounded hover:bg-gray-100 text-[10px]"
-                    >
-                      Copy
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
+            <SourceUrlSection
+              sourceUrlInput={sourceUrlInput}
+              setSourceUrlInput={setSourceUrlInput}
+              sourceUrlNormalized={image?.sourceUrlNormalized}
+              onCopyToClipboard={copyToClipboard}
+            />
 
-            <div id="share-section" className="space-y-3">
-              <p className="text-xs font-mono font-medum text-gray-700">Share (QR)</p>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex-1 space-y-2">
-                  <label className="block text-[11px] text-gray-600">
-                    Share base URL
-                    <input
-                      value={shareBaseUrl}
-                      onChange={(e) => setShareBaseUrl(e.target.value)}
-                      className="mt-1 w-full border border-gray-300 rounded-md px-3 py-2 text-xs"
-                      placeholder="http://192.168.x.x:3000"
-                    />
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <label className="text-[11px] text-gray-600">Share size</label>
-                    <MonoSelect
-                      id="share-variant"
-                      value={shareVariant}
-                      onChange={setShareVariant}
-                      options={shareVariantOptions}
-                      className="w-40 text-[11px]"
-                    />
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      value={shareUrl}
-                      readOnly
-                      className="flex-1 border border-gray-200 rounded-md px-3 py-2 text-xs bg-gray-50 text-gray-600"
-                      placeholder="Share URL"
-                    />
-                    <button
-                      onClick={async () => { if (shareUrl) await copyToClipboard(shareUrl, 'Share'); }}
-                      className="px-3 py-1 bg-blue-600 text-white rounded text-xs cursor-pointer transition transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-300"
-                      disabled={!shareUrl}
-                    >
-                      Copy
-                    </button>
-                  </div>
-                  <p className="text-[10px] text-gray-500">
-                    Use your network URL (from `next dev`) so your phone can reach it.
-                  </p>
-                </div>
-                <div className="flex items-center justify-center w-full sm:w-auto">
-                  {shareQrDataUrl ? (
-                    <img
-                      src={shareQrDataUrl}
-                      alt="Share QR code"
-                      className="w-[140px] h-[140px] border border-gray-200 rounded-md bg-white"
-                    />
-                  ) : (
-                    <div className="w-[140px] h-[140px] border border-dashed border-gray-200 rounded-md flex items-center justify-center text-[10px] text-gray-400">
-                      QR unavailable
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
+            <ShareSection
+              shareBaseUrl={shareBaseUrl}
+              setShareBaseUrl={setShareBaseUrl}
+              shareVariant={shareVariant}
+              setShareVariant={setShareVariant}
+              shareVariantOptions={shareVariantOptions}
+              shareUrl={shareUrl}
+              shareQrDataUrl={shareQrDataUrl}
+              onCopyToClipboard={copyToClipboard}
+            />
 
-            {exifEntries.length > 0 && (
-              <div id="exif-section">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs font-mono font-medum text-gray-700">EXIF</p>
-                    <p className="text-[10px] text-gray-500">{exifEntries.length} fields</p>
-                  </div>
-                  <button
-                    onClick={() => setClearExif(!clearExif)}
-                    className={`px-2 py-0.5 text-[10px] rounded border transition-colors ${
-                      clearExif 
-                        ? 'border-red-400 bg-red-50 text-red-700 hover:bg-red-100' 
-                        : 'border-gray-300 text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    {clearExif ? '✓ Will clear EXIF on save' : 'Clear EXIF'}
-                  </button>
-                </div>
-                {clearExif && (
-                  <p className="text-[10px] text-amber-600 mt-1">
-                    EXIF data will be removed when you save. Press &quot;Discard&quot; to cancel.
-                  </p>
-                )}
-                <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {exifEntries.map(([key, value]) => (
-                    <div key={key} className={`flex items-start justify-between gap-3 border rounded px-2 py-1 text-[11px] ${clearExif ? 'opacity-50 line-through' : ''}`}>
-                      <span className="text-gray-600 font-mono">{key}</span>
-                      <span className="text-gray-900 font-mono break-all text-right">{value}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            <ExifSection exifEntries={exifEntries} clearExif={clearExif} setClearExif={setClearExif} />
 
-            <div id="variant-links-section">
-              <p className="text-xs font-mono font-medum text-gray-700">Available variants</p>
-              <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {Object.entries(variants).map(([variant, url]) => {
-                  const widthLabel = getVariantWidthLabel(String(variant));
-                  return (
-                    <div key={variant} className="flex flex-col gap-2 p-2 border rounded sm:flex-row sm:items-center sm:justify-between">
-                      <div className="min-w-0">
-                        <div className="text-xs font-mono font-semibold text-gray-900 capitalize flex items-center gap-2">
-                          <span>{variant}</span>
-                          {widthLabel && <span className="text-gray-400 normal-case">{widthLabel}</span>}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-                        <a href={url} target="_blank" rel="noreferrer" className="text-xs text-blue-600">Open</a>
-                        <button
-                          onClick={async (event) => { await handleCopyUrl(event, url, String(variant), image.altTag); }}
-                          className="px-2 py-1 bg-blue-100 hover:bg-blue-200 active:bg-blue-300 rounded text-xs font-medium cursor-pointer transition transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-300"
-                        >
-                          Copy
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <p className="text-[10px] text-gray-500 mt-2">Tip: Shift+Copy adds ALT text.</p>
-            </div>
+            <VariantLinksSection
+              variants={variants}
+              getVariantWidthLabel={getVariantWidthLabel}
+              onHandleCopyUrl={handleCopyUrl}
+              imageAltTag={image.altTag}
+            />
 
             <div className="space-y-4">
               {parentImage && (
-                <div id="parent-info-section" className="border border-yellow-200 bg-yellow-50 rounded-lg p-4 space-y-3">
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-                    <div className="flex-1">
-                      {/* <p className="text-xs font-semibold text-yellow-800">
-                        Member of {parentImage.filename || 'parent image'}
-                      </p> */}
-                      <p className="text-xs text-yellow-700">This image is stored as a variation.</p>
-                    </div>
-                    <Link
-                      href={`/images/${parentImage.id}`}
-                      className="flex items-center gap-3 text-left group"
-                      onMouseMove={(e) =>
-                        handleThumbMouseMove(
-                          getCloudflareImageUrl(parentImage.id, 'w=800'),
-                          parentImage.filename || 'Parent image',
-                          e
-                        )
-                      }
-                      onMouseLeave={handleThumbLeave}
-                      prefetch={false}
-                    >
-                      <div className="relative w-40 h-28 sm:w-48 sm:h-32 rounded-xl overflow-hidden border-2 border-yellow-300 bg-white shadow-sm">
-                        <Image
-                          src={getCloudflareImageUrl(parentImage.id, 'w=600')}
-                          alt={parentImage.filename || 'Parent image'}
-                          fill
-                          className="object-cover transition-transform duration-200 group-hover:scale-105"
-                          sizes="192px"
-                          unoptimized
-                        />
-                      </div>
-                      <div>
-                        <p className="text-xs uppercase tracking-wide text-yellow-700">Parent image</p>
-                        <p className="text-xs font-semibold text-blue-700 underline decoration-dotted group-hover:text-blue-800">
-                          View parent details →
-                        </p>
-                        <p className="text-xs text-gray-600 truncate max-w-[12rem]">
-                          {parentImage.filename || parentImage.id}
-                        </p>
-                      </div>
-                    </Link>
-                    <button
-                      onClick={handleDetachFromParent}
-                      disabled={parentActionLoading}
-                      className="px-3 py-1 text-xs border border-yellow-500 text-yellow-800 rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {parentActionLoading ? 'Detaching…' : 'Detach'}
-                    </button>
-                  </div>
-                  <div className="space-y-2">
-                    <label htmlFor="reassign-parent" className="text-xs font-medium text-gray-700">
-                      Parent
-                    </label>
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                      <MonoSelect
-                        id="reassign-parent"
-                        value={reassignParentId}
-                        onChange={setReassignParentId}
-                        options={reassignParentOptions}
-                        className="flex-1"
-                        placeholder="Select parent"
-                      />
-                      <button
-                        onClick={handleReassignParent}
-                        disabled={
-                          parentActionLoading ||
-                          reassignParentId === (image.parentId ?? '')
-                        }
-                        className="px-3 py-2 text-xs bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {parentActionLoading ? 'Updating…' : 'Update parent'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                <ParentInfoSection
+                  parentImage={parentImage}
+                  parentActionLoading={parentActionLoading}
+                  reassignParentId={reassignParentId}
+                  setReassignParentId={setReassignParentId}
+                  reassignParentOptions={reassignParentOptions}
+                  currentParentId={image.parentId ?? ''}
+                  onDetach={handleDetachFromParent}
+                  onUpdateParent={handleReassignParent}
+                  getCloudflareImageUrl={getCloudflareImageUrl}
+                  onThumbMouseMove={handleThumbMouseMove}
+                  onThumbMouseLeave={handleThumbLeave}
+                />
               )}
 
-              <div id="variations-section" className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-mono font-medum text-gray-700">
-                      {isChildImage ? 'Other variations from this parent' : 'Variations'}
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <p className="text-xs text-gray-500">
-                        {variationCount}{' '}
-                        {isChildImage ? 'other variation' : 'variation'}
-                        {variationCount !== 1 ? 's' : ''}
-                      </p>
-                      {!isChildImage && (
-                        <>
-                        <div className="flex items-center gap-2">
-                          <label htmlFor="copy-list-variant" className="text-[11px] text-gray-500">
-                            List size
-                          </label>
-                          <MonoSelect
-                            id="copy-list-variant"
-                            value={listVariant}
-                            onChange={setListVariant}
-                            options={listVariantOptions}
-                            className="w-32 text-[11px]"
-                          />
-                        </div>
-                        <button
-                          onClick={handleCopyList}
-                          className="px-2 py-1 text-[11px] border border-gray-300 rounded-md text-blue-600 hover:bg-blue-50"
-                        >
-                          Copy list
-                        </button>
-                        <button
-                          onClick={handleResetVariationOrder}
-                          disabled={variationOrderSaving || !variationCandidates.length}
-                          className="px-2 py-1 text-[11px] border border-gray-300 rounded-md text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                        >
-                          Reset order
-                        </button>
-                        <button
-                          onClick={handleReverseVariationOrder}
-                          disabled={variationOrderSaving || !variationCandidates.length}
-                          className="px-2 py-1 text-[11px] border border-gray-300 rounded-md text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                        >
-                          Reverse order
-                        </button>
-                        <button
-                          onClick={handleSortVariationOrder}
-                          disabled={variationOrderSaving || !variationCandidates.length}
-                          className="px-2 py-1 text-[11px] border border-gray-300 rounded-md text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                        >
-                          Sort A→Z
-                        </button>
-                        <button
-                          onClick={handleDeleteParent}
-                          className="px-2 py-1 text-[11px] border border-red-300 rounded-md text-red-600 hover:bg-red-50"
-                        >
-                          Delete image
-                        </button>
-                        <button
-                          onClick={handleDeleteFamily}
-                          className="px-2 py-1 text-[11px] border border-red-500 rounded-md text-red-700 bg-red-50 hover:bg-red-100"
-                          title="Delete this image and all variations"
-                        >
-                          Delete family
-                        </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-
-                {variationCount === 0 ? (
-                  <p className="text-xs text-gray-500">
-                    {isChildImage
-                      ? 'No other variations exist for this parent yet.'
-                      : 'No variations have been added yet.'}
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-600">
-                      <span>{selectedVariationCount} selected</span>
-                      <button
-                        onClick={selectAllVariationsOnPage}
-                        className="px-2 py-1 border border-gray-200 rounded hover:bg-gray-50"
-                      >
-                        Select page
-                      </button>
-                      <button
-                        onClick={clearVariationSelection}
-                        className="px-2 py-1 border border-gray-200 rounded hover:bg-gray-50"
-                      >
-                        Clear
-                      </button>
-                      <button
-                        onClick={generateAltForSelectedVariations}
-                        disabled={variationAltBusy || selectedVariationCount === 0}
-                        className="px-2 py-1 border border-gray-300 rounded text-blue-600 hover:bg-blue-50 disabled:opacity-50"
-                      >
-                        {variationAltBusy ? 'Generating ALT…' : 'Generate ALT'}
-                      </button>
-                    </div>
-                    {pagedVariations.map((child) => (
-                      <div
-                        key={child.id}
-                        className={`flex items-center gap-4 border border-gray-200 rounded-lg p-3 relative ${dragOverVariationId === child.id ? 'bg-blue-50 border-blue-200' : ''}`}
-                        onMouseLeave={handleThumbLeave}
-                        draggable={!isChildImage}
-                        onDragStart={(event) => {
-                          if (isChildImage) return;
-                          setDraggingVariationId(child.id);
-                          event.dataTransfer.effectAllowed = 'move';
-                          event.dataTransfer.setData('text/plain', child.id);
-                        }}
-                        onDragEnd={() => {
-                          setDraggingVariationId(null);
-                          setDragOverVariationId(null);
-                        }}
-                        onDragOver={(event) => {
-                          if (isChildImage) return;
-                          event.preventDefault();
-                          setDragOverVariationId(child.id);
-                        }}
-                        onDrop={async (event) => {
-                          if (isChildImage) return;
-                          event.preventDefault();
-                          await handleDropVariation(child.id);
-                          setDraggingVariationId(null);
-                          setDragOverVariationId(null);
-                        }}
-                      >
-                        {(() => {
-                          if (isChildImage) {
-                            return null;
-                          }
-                          const orderIndex = variationOrderIndex.get(child.id) ?? -1;
-                          const canMoveUp = orderIndex > 0;
-                          const canMoveDown = orderIndex >= 0 && orderIndex < displayedVariations.length - 1;
-                          return (
-                            <div className="flex flex-col gap-1">
-                              <button
-                                onClick={() => handleMoveVariation(child.id, -1)}
-                                disabled={variationOrderSaving || !canMoveUp}
-                                className="p-1 border rounded text-gray-600 hover:bg-gray-100 disabled:opacity-30"
-                                title="Move up"
-                                aria-label="Move variation up"
-                              >
-                                <ChevronUp className="h-3 w-3" />
-                              </button>
-                              <button
-                                onClick={() => handleMoveVariation(child.id, 1)}
-                                disabled={variationOrderSaving || !canMoveDown}
-                                className="p-1 border rounded text-gray-600 hover:bg-gray-100 disabled:opacity-30"
-                                title="Move down"
-                                aria-label="Move variation down"
-                              >
-                                <ChevronDown className="h-3 w-3" />
-                              </button>
-                              <div className="mt-1 flex items-center justify-center text-gray-400">
-                                <GripVertical className="h-3 w-3" />
-                              </div>
-                            </div>
-                          );
-                        })()}
-                        <label className="flex items-center gap-2 text-xs text-gray-500">
-                          <input
-                            type="checkbox"
-                            checked={selectedVariationIds.has(child.id)}
-                            onChange={() => toggleVariationSelection(child.id)}
-                            className="h-3 w-3 text-blue-600 border-gray-300 rounded"
-                          />
-                          select
-                        </label>
-                        <Link
-                          href={`/images/${child.id}`}
-                          className="w-32 h-24 relative rounded overflow-hidden bg-gray-100 block"
-                          onMouseMove={(e) => handleThumbMouseMove(getCloudflareImageUrl(child.id, 'w=600'), child.filename || 'Variation', e)}
-                        >
-                          <Image
-                            draggable
-                            onDragStart={(e) => handleImageDragStart(e, child)}
-                            src={getCloudflareImageUrl(child.id, 'w=300')}
-                            alt={child.filename || 'Variation'}
-                            fill
-                            className="object-cover"
-                            sizes="64px"
-                            unoptimized
-                          />
-                        </Link>
-                        <div className="flex-1 min-w-0 space-y-1">
-                          <p className="text-xs font-mono font-medum text-gray-900 truncate">{child.filename}</p>
-                          <p className="text-xs text-gray-500">
-                            Uploaded {new Date(child.uploaded).toLocaleDateString()}
-                          </p>
-                          <AspectRatioDisplay imageId={child.id} />
-                          <div className="text-[11px] text-gray-500 break-words">
-                            ALT: {child.altTag || '—'}
-                          </div>
-                          <button
-                            onClick={() => setVariantModalState({ target: child })}
-                            className="inline-flex items-center gap-1 text-xs text-blue-600 underline"
-                          >
-                            View sizes
-                          </button>
-                        </div>
-                        <div className="flex flex-col gap-2 items-end">
-                          <button
-                            onClick={async (event) => await handleCopyUrl(event, getCloudflareImageUrl(child.id, 'original'), 'Variation', child.altTag)}
-                            className="text-xs text-blue-600 hover:underline"
-                          >
-                            Copy URL
-                          </button>
-                          {!isChildImage && (
-                            <button
-                              onClick={() => handleDetachChild(child.id)}
-                              disabled={childDetachingId === child.id}
-                              className="px-3 py-1 text-xs bg-red-100 text-red-700 rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                              {childDetachingId === child.id ? 'Detaching…' : 'Detach'}
-                            </button>
-                          )}
-                          <button
-                            onClick={() => handleDeleteChild(child.id)}
-                            className="px-3 py-1 text-[11px] border border-red-300 text-red-600 rounded-md hover:bg-red-50"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {variationCount > VARIATION_PAGE_SIZE && (
-                  <div className="flex items-center justify-between text-xs text-gray-600 pt-1">
-                    <div>
-                      Page {variationPage} of {totalVariationPages}
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => setVariationPage((p) => Math.max(1, p - 1))}
-                        disabled={variationPage === 1}
-                        className="px-2 py-1 border rounded disabled:opacity-50"
-                      >
-                        Prev
-                      </button>
-                      <button
-                        onClick={() => setVariationPage((p) => Math.min(totalVariationPages, p + 1))}
-                        disabled={variationPage === totalVariationPages}
-                        className="px-2 py-1 border rounded disabled:opacity-50"
-                      >
-                        Next
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
+              <VariationsSection
+                isChildImage={isChildImage}
+                variationCount={variationCount}
+                listVariant={listVariant}
+                setListVariant={setListVariant}
+                listVariantOptions={listVariantOptions}
+                onCopyList={handleCopyList}
+                variationCandidatesLength={variationCandidates.length}
+                variationOrderSaving={variationOrderSaving}
+                onResetVariationOrder={handleResetVariationOrder}
+                onReverseVariationOrder={handleReverseVariationOrder}
+                onSortVariationOrder={handleSortVariationOrder}
+                onDeleteParent={handleDeleteParent}
+                onDeleteFamily={handleDeleteFamily}
+                selectedVariationCount={selectedVariationCount}
+                onSelectAllOnPage={selectAllVariationsOnPage}
+                onClearSelection={clearVariationSelection}
+                onGenerateAltForSelected={generateAltForSelectedVariations}
+                variationAltBusy={variationAltBusy}
+                pagedVariations={pagedVariations}
+                displayedVariations={displayedVariations}
+                variationOrderIndex={variationOrderIndex}
+                selectedVariationIds={selectedVariationIds}
+                toggleVariationSelection={toggleVariationSelection}
+                dragOverVariationId={dragOverVariationId}
+                setDraggingVariationId={setDraggingVariationId}
+                setDragOverVariationId={setDragOverVariationId}
+                onDropVariation={handleDropVariation}
+                onMoveVariation={handleMoveVariation}
+                getCloudflareImageUrl={getCloudflareImageUrl}
+                onHandleThumbMouseMove={handleThumbMouseMove}
+                onHandleThumbLeave={handleThumbLeave}
+                onHandleImageDragStart={handleImageDragStart}
+                onHandleCopyUrl={handleCopyUrl}
+                onOpenVariantSizes={(target) => setVariantModalState({ target })}
+                childDetachingId={childDetachingId}
+                onDetachChild={handleDetachChild}
+                onDeleteChild={handleDeleteChild}
+                AspectRatioDisplay={AspectRatioDisplay}
+                variationPage={variationPage}
+                setVariationPage={setVariationPage}
+                totalVariationPages={totalVariationPages}
+                variationPageSize={VARIATION_PAGE_SIZE}
+              />
 
             {!image.parentId && (
               <>
-                <div id="adopt-variation-section" className="space-y-3 border border-dashed rounded-lg p-3 bg-gray-50">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <label htmlFor="adopt-search" className="text-xs font-medium text-gray-700">
-                      Adopt existing image as a variation
-                    </label>
-                    <input
-                      id="adopt-search"
-                      type="text"
-                      value={adoptSearch}
-                      onChange={(e) => setAdoptSearch(e.target.value)}
-                      placeholder="Search by name, folder, or tag"
-                      className="w-full sm:w-64 border border-gray-300 rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                    <label htmlFor="adopt-folder" className="text-xs font-medium text-gray-700">Filter by folder</label>
-                    <MonoSelect
-                      id="adopt-folder"
-                      value={adoptFolderFilter}
-                      onChange={setAdoptFolderFilter}
-                      options={adoptFolderOptions}
-                      className="w-full sm:w-48"
-                      placeholder="All folders"
-                    />
-                  </div>
-                  {filteredAdoptableImages.length === 0 ? (
-                    <p className="text-xs text-gray-500">No canonical images found. Upload a base image first.</p>
-                  ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      {pagedAdoptableImages.map((candidate) => (
-                        <div
-                          key={candidate.id}
-                          className="flex items-center gap-3 p-2 border rounded-md bg-white"
-                          onMouseLeave={handleThumbLeave}
-                        >
-                          <Link
-                            href={`/images/${candidate.id}`}
-                            className="w-14 h-14 relative rounded overflow-hidden bg-gray-100 block"
-                            onMouseMove={(e) => handleThumbMouseMove(getCloudflareImageUrl(candidate.id, 'w=600'), candidate.filename || 'Image', e)}
-                          >
-                            <Image
-                              draggable
-                              onDragStart={(e) => handleImageDragStart(e, candidate)}
-                              src={getCloudflareImageUrl(candidate.id, 'w=300')}
-                              alt={candidate.filename || 'Image'}
-                              fill
-                              className="object-cover"
-                              unoptimized
-                            />
-                          </Link>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs font-mono font-medum text-gray-900 truncate">{candidate.filename}</p>
-                            <p className="text-xs text-gray-500 truncate">{candidate.folder || '[no folder]'}</p>
-                          </div>
-                <button
-                  onClick={() => handleAssignExistingAsChild(candidate.id)}
-                  disabled={assigningId === candidate.id}
-                  className="px-3 py-1 text-xs bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {assigningId === candidate.id ? 'Assigning…' : 'Assign'}
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-                  {filteredAdoptableImages.length > ADOPT_PAGE_SIZE && (
-                    <div className="flex items-center justify-between text-xs text-gray-600 pt-1">
-                      <div>
-                        Page {adoptPage} of {totalAdoptPages}
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => setAdoptPage((p) => Math.max(1, p - 1))}
-                          disabled={adoptPage === 1}
-                          className="px-2 py-1 border rounded disabled:opacity-50"
-                        >
-                          Prev
-                        </button>
-                        <button
-                          onClick={() => setAdoptPage((p) => Math.min(totalAdoptPages, p + 1))}
-                          disabled={adoptPage === totalAdoptPages}
-                          className="px-2 py-1 border rounded disabled:opacity-50"
-                        >
-                          Next
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                <AdoptVariationSection
+                  adoptSearch={adoptSearch}
+                  setAdoptSearch={setAdoptSearch}
+                  adoptFolderFilter={adoptFolderFilter}
+                  setAdoptFolderFilter={setAdoptFolderFilter}
+                  adoptFolderOptions={adoptFolderOptions}
+                  filteredAdoptableImages={filteredAdoptableImages}
+                  pagedAdoptableImages={pagedAdoptableImages}
+                  adoptPage={adoptPage}
+                  setAdoptPage={setAdoptPage}
+                  totalAdoptPages={totalAdoptPages}
+                  adoptPageSize={ADOPT_PAGE_SIZE}
+                  getCloudflareImageUrl={getCloudflareImageUrl}
+                  onHandleThumbMouseMove={handleThumbMouseMove}
+                  onHandleThumbLeave={handleThumbLeave}
+                  onHandleImageDragStart={handleImageDragStart}
+                  onAssignExistingAsChild={handleAssignExistingAsChild}
+                  assigningId={assigningId}
+                />
 
-                <div id="upload-variation-section" className="space-y-3 border border-dashed rounded-lg p-3 bg-blue-50">
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                    <div>
-                      <h3 className="text-xs font-mono font-medum text-gray-800">Upload a new variation</h3>
-                      <p className="text-xs text-gray-600">Files automatically inherit this image's folder and tags.</p>
-                      <p className="text-[11px] text-gray-500">.zip uploads are supported.</p>
-                    </div>
-                  </div>
-                  <div
-                    {...getVariantDropzoneProps()}
-                    className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors cursor-pointer ${isVariantDragActive ? 'border-blue-500 bg-blue-100' : 'border-gray-300 bg-white hover:border-gray-400'}`}
-                  >
-                    <input {...getVariantInputProps()} />
-                    <p className="text-xs font-mono text-gray-900 mb-1">Drag & drop images or a .zip here</p>
-                    <p className="text-[11px] text-gray-500">or click to browse files (.zip supported)</p>
-                  </div>
-                  <div className="text-[11px] text-gray-600 bg-white/70 border border-gray-200 rounded-md p-2">
-                    <p>Folder: <span className="font-mono">{childUploadFolder || image.folder || '[none]'}</span></p>
-                    <p>Tags: <span className="font-mono">{childUploadTags || (image.tags && image.tags.length > 0 ? image.tags.join(', ') : '[none]')}</span></p>
-                  </div>
-                  {childUploadFiles.length > 0 && (
-                    <div className="text-xs text-gray-700 space-y-1">
-                      {childUploadFiles.map((file, idx) => (
-                        <p key={`${file.name}-${idx}`} className="truncate">
-                          • {file.name}
-                        </p>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() => setChildUploadFiles([])}
-                        className="mt-2 px-2 py-1 text-[11px] text-red-600 border border-red-200 rounded-md hover:bg-red-50"
-                      >
-                        Clear selected files
-                      </button>
-                    </div>
-                  )}
-                  <button
-                    onClick={handleChildUpload}
-                    disabled={childUploadLoading || childUploadFiles.length === 0}
-                    className="px-4 py-2 text-xs bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {childUploadLoading ? 'Uploading…' : 'Upload variation(s)'}
-                  </button>
-                </div>
+                <UploadVariationSection
+                  getVariantDropzoneProps={getVariantDropzoneProps}
+                  getVariantInputProps={getVariantInputProps}
+                  isVariantDragActive={isVariantDragActive}
+                  childUploadFolder={childUploadFolder}
+                  childUploadTags={childUploadTags}
+                  fallbackFolder={image.folder || ''}
+                  fallbackTags={image.tags || []}
+                  childUploadFiles={childUploadFiles}
+                  onClearSelectedFiles={() => setChildUploadFiles([])}
+                  onUpload={handleChildUpload}
+                  childUploadLoading={childUploadLoading}
+                />
               </>
             )}
           </div>

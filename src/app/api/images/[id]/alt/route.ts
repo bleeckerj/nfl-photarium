@@ -127,7 +127,7 @@ export async function POST(
         Authorization: `Bearer ${openAiKey}`,
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: 'gpt-4o',
         temperature: 0.2,
         max_tokens: 150,
         messages: [

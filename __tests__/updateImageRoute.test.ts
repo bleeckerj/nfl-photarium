@@ -113,7 +113,7 @@ describe('PATCH /api/images/:id/update', () => {
     const patchCall = mockFetch.mock.calls[1];
     const submittedBody = patchCall?.[1]?.body;
     const parsed = JSON.parse(String(submittedBody));
-    expect(parsed.metadata.variationParentId).toBeUndefined();
+    expect(parsed.metadata.variationParentId).toBe('');
     expect(payload.folder).toBeUndefined();
     expect(payload.tags).toEqual([]);
   });
