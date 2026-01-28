@@ -11,23 +11,21 @@ import { Database } from 'lucide-react';
 export default function Home() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const galleryRef = useRef<{ refreshImages: () => void }>(null);
-  // Initialize with the environment variable default to avoid "no namespace" flash/defaulting
-  const [namespace, setNamespace] = useState<string>(process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || '');
+  // Initialize from localStorage (client-only) to avoid a second namespace update
+  // that would otherwise re-fetch images and trigger another /api/images/colors call.
+  const [namespace, setNamespace] = useState<string>(() => {
+    const envDefault = process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || '';
+    if (typeof window === 'undefined') return envDefault;
+    const stored = window.localStorage.getItem('imageNamespace');
+    if (stored === '__none__') return '';
+    if (stored === '__all__') return '__all__';
+    return stored || envDefault;
+  });
   const [isVectorReady, setIsVectorReady] = useState(false);
   const [showRedisInfo, setShowRedisInfo] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const stored = window.localStorage.getItem('imageNamespace');
-    const envDefault = process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || '';
-    if (stored === '__none__') {
-      setNamespace('');
-    } else if (stored === '__all__') {
-      setNamespace('__all__');
-    } else {
-      setNamespace(stored || envDefault);
-    }
-
     // Check availability of vector search
     fetch('/api/images/vectors/status')
       .then(res => res.json())
@@ -102,7 +100,7 @@ export default function Home() {
               onNamespaceChange={handleNamespaceChange}
             />
           </section>
-          <section id="uploader-section" className="max-w-4xl">
+          <section id="uploader-section" className="max-w-5xl">
             <p className="text-sm font-mono text-gray-900 mb-2">
               Cloudflare Image Upload
             </p>

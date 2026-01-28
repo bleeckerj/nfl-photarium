@@ -64,6 +64,22 @@ interface CloudflareImage {
   averageColor?: string;
 }
 
+type DeleteFamilyJobStatus = {
+  jobId: string;
+  status: 'running' | 'completed' | 'failed';
+  requestedId: string;
+  rootId: string;
+  total: number;
+  attempted: number;
+  deleted: number;
+  failed: number;
+  concurrency: number;
+  vectorsDeleted: boolean;
+  startedAt: number;
+  finishedAt?: number;
+  lastError?: string;
+};
+
 const DEFAULT_LIST_VARIANT = 'full';
 const VARIANT_DIMENSIONS = new Map(IMAGE_VARIANTS.map(variant => [variant.name, variant.width]));
 
@@ -205,6 +221,10 @@ export default function ImageDetailPage() {
   const [rotationLoading, setRotationLoading] = useState(false);
   const [rotationError, setRotationError] = useState<string | null>(null);
   const [rotatedAsset, setRotatedAsset] = useState<{ id: string; url: string; info?: string } | null>(null);
+
+  const [deleteFamilyJobId, setDeleteFamilyJobId] = useState<string | null>(null);
+  const [deleteFamilyStatus, setDeleteFamilyStatus] = useState<DeleteFamilyJobStatus | null>(null);
+  const [deleteFamilyOpen, setDeleteFamilyOpen] = useState(false);
 
   const generateEmbeddings = useCallback(async () => {
     if (!image || !id) {
@@ -1376,7 +1396,7 @@ export default function ImageDetailPage() {
 
   const handleDeleteParent = useCallback(async () => {
     if (!image) return;
-    if (!confirm('Delete this image permanently? All variations will be detached.')) return;
+    if (!confirm('Delete this image permanently? Variations will remain (and may need reassignment).')) return;
     try {
       const response = await fetch(`/api/images/${image.id}`, { method: 'DELETE' });
       if (!response.ok) {
@@ -1395,7 +1415,7 @@ export default function ImageDetailPage() {
     if (!image) return;
     const prompt = isChildImage
       ? 'Delete this image variation permanently?'
-      : 'Delete this image permanently? All variations will be detached.';
+      : 'Delete this image permanently? Variations will remain (and may need reassignment).';
     if (!confirm(prompt)) return;
     try {
       const response = await fetch(`/api/images/${image.id}`, { method: 'DELETE' });
@@ -1410,6 +1430,93 @@ export default function ImageDetailPage() {
       toast.push(message);
     }
   }, [image, isChildImage, toast]);
+
+  const handleDeleteFamily = useCallback(async () => {
+    if (!image) return;
+
+    const warning =
+      'This will permanently delete this image AND all variations in its family.\n\n' +
+      'Type DELETE FAMILY to confirm.';
+    const typed = window.prompt(warning);
+    if (typed !== 'DELETE FAMILY') {
+      return;
+    }
+
+    try {
+      setDeleteFamilyOpen(true);
+      setDeleteFamilyStatus(null);
+      setDeleteFamilyJobId(null);
+
+      const response = await fetch(`/api/images/${image.id}/delete-family`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: 'DELETE_FAMILY', async: true }),
+      });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error || 'Failed to start delete-family job');
+      }
+
+      const jobId = typeof payload.jobId === 'string' ? payload.jobId : null;
+      if (!jobId) {
+        throw new Error('Delete-family job did not return a jobId');
+      }
+
+      setDeleteFamilyJobId(jobId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to delete image family';
+      toast.push(message);
+      setDeleteFamilyOpen(false);
+    }
+  }, [image, toast]);
+
+  useEffect(() => {
+    if (!deleteFamilyOpen) return;
+    if (!deleteFamilyJobId) return;
+
+    let cancelled = false;
+    let interval: number | null = null;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/jobs/delete-family/${deleteFamilyJobId}`, { cache: 'no-store' });
+        const data = (await res.json()) as DeleteFamilyJobStatus;
+        if (cancelled) return;
+
+        if (!res.ok) {
+          throw new Error((data as unknown as { error?: string })?.error || 'Failed to fetch job status');
+        }
+
+        setDeleteFamilyStatus(data);
+
+        if (data.status !== 'running') {
+          if (interval !== null) window.clearInterval(interval);
+          interval = null;
+
+          if (data.status === 'completed') {
+            toast.push(`Deleted ${data.deleted} images${data.failed ? `; ${data.failed} failed` : ''}`);
+            window.location.href = '/';
+          } else {
+            toast.push(data.lastError || 'Delete family failed');
+          }
+        }
+      } catch (error) {
+        if (!cancelled) {
+          const message = error instanceof Error ? error.message : 'Failed to fetch delete progress';
+          toast.push(message);
+        }
+      }
+    };
+
+    void poll();
+    interval = window.setInterval(poll, 500);
+
+    return () => {
+      cancelled = true;
+      if (interval !== null) window.clearInterval(interval);
+    };
+  }, [deleteFamilyJobId, deleteFamilyOpen, toast]);
 
   const handleAdoptImage = useCallback(async () => {
     if (!adoptImageId || !id) {
@@ -1924,7 +2031,7 @@ export default function ImageDetailPage() {
 
   return (
     <div id="image-detail-page" className="p-6 relative">
-      <div id="image-detail-container" className="max-w-4xl mx-auto bg-white rounded-lg shadow-md overflow-hidden">
+      <div id="image-detail-container" className="max-w-5xl mx-auto bg-white rounded-lg shadow-md overflow-hidden">
         <div className="p-6">
           <div id="detail-navigation" className="flex items-center justify-between mb-4">
             <Link href="/" className="text-xs text-blue-600 underline">
@@ -2106,6 +2213,59 @@ export default function ImageDetailPage() {
                     {/* Concept Radar and Semantic Neighbors */}
                     <div className="grid md:grid-cols-2 gap-4">
                       <div>
+                      {deleteFamilyOpen && (
+                        <div className="fixed inset-0 z-[70] bg-black/60 flex items-center justify-center px-4">
+                          <div className="bg-white rounded-lg shadow-2xl max-w-lg w-full overflow-hidden">
+                            <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+                              <div>
+                                <h3 className="text-sm font-mono text-gray-900">Deleting image family…</h3>
+                                <p className="text-[11px] text-gray-500">This can take a while for large families.</p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setDeleteFamilyOpen(false)}
+                                className="text-xs px-2 py-1 border rounded text-gray-700 hover:bg-gray-50"
+                              >
+                                Hide
+                              </button>
+                            </div>
+                            <div className="p-4 space-y-3">
+                              {deleteFamilyStatus ? (
+                                (() => {
+                                  const total = Math.max(1, deleteFamilyStatus.total);
+                                  const attempted = deleteFamilyStatus.attempted;
+                                  const pct = Math.min(100, Math.round((attempted / total) * 100));
+                                  return (
+                                    <>
+                                      <div className="flex items-center justify-between text-xs text-gray-700">
+                                        <span className="font-mono">{attempted}/{total} attempted</span>
+                                        <span className="font-mono">{pct}%</span>
+                                      </div>
+                                      <div className="h-2 w-full bg-gray-100 rounded">
+                                        <div className="h-2 bg-red-500 rounded" style={{ width: `${pct}%` }} />
+                                      </div>
+                                      <div className="flex items-center justify-between text-[11px] text-gray-600">
+                                        <span>Deleted: <span className="font-mono">{deleteFamilyStatus.deleted}</span></span>
+                                        <span>Failed: <span className="font-mono">{deleteFamilyStatus.failed}</span></span>
+                                        <span>Concurrency: <span className="font-mono">{deleteFamilyStatus.concurrency}</span></span>
+                                      </div>
+                                      {deleteFamilyStatus.lastError && (
+                                        <div className="text-[11px] text-red-700 bg-red-50 border border-red-100 rounded p-2">
+                                          {deleteFamilyStatus.lastError}
+                                        </div>
+                                      )}
+                                    </>
+                                  );
+                                })()
+                              ) : (
+                                <div className="text-xs text-gray-600">
+                                  Starting job…
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                         <ConceptRadar 
                           imageId={image.id} 
                           size={320}
@@ -2713,6 +2873,13 @@ export default function ImageDetailPage() {
                         >
                           Delete image
                         </button>
+                        <button
+                          onClick={handleDeleteFamily}
+                          className="px-2 py-1 text-[11px] border border-red-500 rounded-md text-red-700 bg-red-50 hover:bg-red-100"
+                          title="Delete this image and all variations"
+                        >
+                          Delete family
+                        </button>
                         </>
                       )}
                     </div>
@@ -3059,6 +3226,16 @@ export default function ImageDetailPage() {
           >
             Delete image
           </button>
+          {(variationCount > 0 || isChildImage) && (
+            <button
+              onClick={handleDeleteFamily}
+              className="px-4 py-2 text-xs border border-red-500 text-red-800 rounded-md bg-red-50 hover:bg-red-100"
+              disabled={saving}
+              title="Delete this image and all variations in its family"
+            >
+              Delete family
+            </button>
+          )}
           <button
             onClick={handleSaveMetadata}
             className="px-4 py-2 text-xs bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"

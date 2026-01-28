@@ -34,21 +34,24 @@ export async function GET(request: NextRequest) {
     }
 
     const colorMap = await batchGetColorMetadata(imageIds);
-    
-    // Convert Map to plain object for JSON serialization
+
+    // Convert Map to plain object for JSON serialization.
+    // IMPORTANT: include ALL requested ids so the client can mark "missing" metadata
+    // as fetched and avoid repeatedly re-requesting the same ids.
     const colors: Record<string, {
       dominantColors?: string[];
       averageColor?: string;
       hasClipEmbedding: boolean;
       hasColorEmbedding: boolean;
     }> = {};
-    
-    for (const [imageId, metadata] of colorMap) {
+
+    for (const imageId of imageIds) {
+      const metadata = colorMap.get(imageId);
       colors[imageId] = {
-        dominantColors: metadata.dominantColors,
-        averageColor: metadata.averageColor,
-        hasClipEmbedding: metadata.hasClipEmbedding,
-        hasColorEmbedding: metadata.hasColorEmbedding,
+        dominantColors: metadata?.dominantColors,
+        averageColor: metadata?.averageColor,
+        hasClipEmbedding: metadata?.hasClipEmbedding ?? false,
+        hasColorEmbedding: metadata?.hasColorEmbedding ?? false,
       };
     }
 

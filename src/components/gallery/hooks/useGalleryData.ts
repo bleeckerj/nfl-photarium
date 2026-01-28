@@ -31,6 +31,9 @@ export function useGalleryData({ namespace, refreshTrigger }: UseGalleryDataOpti
   const [refreshingCache, setRefreshingCache] = useState(false);
   const [colorMetadataMap, setColorMetadataMap] = useState<Record<string, ColorMetadata>>({});
   const [registryNamespaces, setRegistryNamespaces] = useState<string[]>([]);
+  const requestedColorIdsRef = useRef<Map<string, number>>(new Map());
+  const COLOR_METADATA_RETRY_MS = 5 * 60 * 1000;
+  const ENABLE_COLOR_METADATA = process.env.NEXT_PUBLIC_ENABLE_COLOR_METADATA === '1';
   
   const abortControllerRef = useRef<AbortController | null>(null);
   const prevNamespaceRef = useRef(namespace);
@@ -135,15 +138,26 @@ export function useGalleryData({ namespace, refreshTrigger }: UseGalleryDataOpti
 
   // Fetch color metadata from Redis for displayed images
   useEffect(() => {
+    if (!ENABLE_COLOR_METADATA) return;
     if (images.length === 0) return;
 
     const fetchColorMetadata = async () => {
+      const requestedNow: string[] = [];
       try {
         const idsToFetch = images
-          .filter(img => !colorMetadataMap[img.id])
-          .map(img => img.id);
+          .map(img => img.id)
+          .filter(id => {
+            if (colorMetadataMap[id]) return false;
+            const lastRequestedAt = requestedColorIdsRef.current.get(id);
+            return !lastRequestedAt || Date.now() - lastRequestedAt > COLOR_METADATA_RETRY_MS;
+          });
 
         if (idsToFetch.length === 0) return;
+
+        for (const id of idsToFetch) {
+          requestedColorIdsRef.current.set(id, Date.now());
+          requestedNow.push(id);
+        }
 
         // Batch in chunks of 100
         const chunkSize = 100;
@@ -163,7 +177,7 @@ export function useGalleryData({ namespace, refreshTrigger }: UseGalleryDataOpti
     };
 
     fetchColorMetadata();
-  }, [images, colorMetadataMap]);
+  }, [images, colorMetadataMap, ENABLE_COLOR_METADATA]);
 
   return {
     images,

@@ -9,6 +9,7 @@ import { extractSnagx } from '@/utils/snagx';
 import { extractExifSummary } from '@/utils/exif';
 import { upsertRegistryNamespace } from '@/server/namespaceRegistry';
 import { sanitizeFilename } from '@/server/uploadService';
+import { queueAutoEmbeddingsForImage } from '@/server/autoEmbeddings';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -258,15 +259,15 @@ export async function POST(request: NextRequest) {
 
     const imageData = result.result;
     const baseMeta = imageData.meta ?? limitedMetadata;
-    upsertCachedImage(
-      transformApiImageToCached({
-        id: imageData.id,
-        filename: imageData.filename,
-        uploaded: imageData.uploaded,
-        variants: imageData.variants,
-        meta: baseMeta
-      })
-    );
+    const cachedPrimary = transformApiImageToCached({
+      id: imageData.id,
+      filename: imageData.filename,
+      uploaded: imageData.uploaded,
+      variants: imageData.variants,
+      meta: baseMeta
+    });
+    upsertCachedImage(cachedPrimary);
+    const autoEmbeddings = await queueAutoEmbeddingsForImage(cachedPrimary);
 
     let webpVariantId: string | undefined;
     if (file.type === 'image/svg+xml') {
@@ -306,15 +307,15 @@ export async function POST(request: NextRequest) {
           const webpResult = webpJson.result;
           webpVariantId = webpResult?.id;
           if (webpResult) {
-            upsertCachedImage(
-              transformApiImageToCached({
-                id: webpResult.id,
-                filename: webpResult.filename,
-                uploaded: webpResult.uploaded,
-                variants: webpResult.variants,
-                meta: webpResult.meta ?? limitedWebpMetadata
-              })
-            );
+            const cachedWebp = transformApiImageToCached({
+              id: webpResult.id,
+              filename: webpResult.filename,
+              uploaded: webpResult.uploaded,
+              variants: webpResult.variants,
+              meta: webpResult.meta ?? limitedWebpMetadata
+            });
+            upsertCachedImage(cachedWebp);
+            await queueAutoEmbeddingsForImage(cachedWebp);
           }
         }
       } catch (err) {
@@ -376,6 +377,7 @@ export async function POST(request: NextRequest) {
       parentId: cleanParentId,
       linkedAssetId: webpVariantId,
       webpVariantId,
+      autoEmbeddings,
     }));
 
   } catch (error) {

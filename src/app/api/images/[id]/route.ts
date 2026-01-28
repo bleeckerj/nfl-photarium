@@ -6,6 +6,7 @@ import {
   upsertCachedImage
 } from '@/server/cloudflareImageCache';
 import { fetchCloudflareImage, getCloudflareCredentials } from '@/server/cloudflareClient';
+import { deleteImageVectors, isVectorSearchAvailable } from '@/server/vectorSearch';
 
 export async function DELETE(
   request: NextRequest,
@@ -45,6 +46,16 @@ export async function DELETE(
     }
 
     removeCachedImage(imageId);
+
+    // Best-effort cleanup of vector metadata in Redis.
+    try {
+      const redisAvailable = await isVectorSearchAvailable();
+      if (redisAvailable) {
+        await deleteImageVectors(imageId);
+      }
+    } catch {
+      // ignore
+    }
 
     return NextResponse.json({ success: true });
 

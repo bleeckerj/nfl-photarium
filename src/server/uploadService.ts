@@ -8,6 +8,7 @@ import { enforceCloudflareMetadataLimit } from '@/utils/cloudflareMetadata';
 import { extractExifSummary } from '@/utils/exif';
 import { extractSnagx } from '@/utils/snagx';
 import { sanitizeFilename, MAX_FILENAME_LENGTH } from '@/utils/filename';
+import { queueAutoEmbeddingsForImage, type AutoEmbeddingsStatus } from '@/server/autoEmbeddings';
 
 // Re-export for backward compatibility
 export { sanitizeFilename, MAX_FILENAME_LENGTH } from '@/utils/filename';
@@ -49,6 +50,7 @@ export type UploadSuccess = {
   parentId?: string;
   linkedAssetId?: string;
   webpVariantId?: string;
+  autoEmbeddings?: AutoEmbeddingsStatus;
 };
 
 export type UploadFailure = {
@@ -287,6 +289,8 @@ export async function uploadImageBuffer({
   });
   upsertCachedImage(primaryCached);
 
+  const autoEmbeddings = await queueAutoEmbeddingsForImage(primaryCached);
+
   let webpVariantId: string | undefined;
   if (fileType === 'image/svg+xml') {
     try {
@@ -333,6 +337,7 @@ export async function uploadImageBuffer({
               : webpMetadataPayload
           });
           upsertCachedImage(cachedVariant);
+          await queueAutoEmbeddingsForImage(cachedVariant);
         }
       }
     } catch (err) {
@@ -397,6 +402,7 @@ export async function uploadImageBuffer({
       parentId: parentId,
       linkedAssetId: webpVariantId,
       webpVariantId,
+      autoEmbeddings,
     }
   };
 }

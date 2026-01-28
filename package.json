@@ -16,6 +16,7 @@
     "redis:logs": "docker compose logs -f redis",
     "redis:status": "docker compose ps",
     "embeddings:generate": "node scripts/generate-embeddings.mjs",
+    "embeddings:backfill": "node scripts/backfill-embeddings.mjs",
     "embeddings:status": "curl -s http://localhost:3000/api/images/vectors/status | jq",
     "count:folder": "node scripts/count-folder-images.mjs",
     "refresh:hash-cache": "node scripts/refresh-hash-cache.mjs",
@@ -24,6 +25,8 @@
     "watch:drop-off": "node scripts/watch-drop-off.mjs",
     "namespace:backfill": "node scripts/backfill-namespace.mjs",
     "namespace:scan": "node scripts/scan-namespaces.mjs"
+    ,
+    "variants:folderize": "node scripts/folder-to-variants.mjs"
   },
   "dependencies": {
     "adm-zip": "^0.5.16",

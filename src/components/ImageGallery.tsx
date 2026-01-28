@@ -396,6 +396,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [namespaceSelectValue, setNamespaceSelectValue] = useState('');
   const [registryNamespaces, setRegistryNamespaces] = useState<string[]>([]);
   const [colorMetadataMap, setColorMetadataMap] = useState<Record<string, { dominantColors?: string[]; averageColor?: string }>>({});
+  const requestedColorIdsRef = useRef<Map<string, number>>(new Map());
+  const COLOR_METADATA_RETRY_MS = 5 * 60 * 1000;
+  const ENABLE_COLOR_METADATA = process.env.NEXT_PUBLIC_ENABLE_COLOR_METADATA === '1';
   const didInitFilterPageRef = useRef(false);
   const utilityButtonClasses = 'text-[0.65rem] font-mono px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 transition';
 
@@ -699,16 +702,29 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
 
   // Fetch color metadata from Redis for displayed images
   useEffect(() => {
+    if (!ENABLE_COLOR_METADATA) return;
     if (images.length === 0) return;
     
     const fetchColorMetadata = async () => {
+      const requestedNow: string[] = [];
       try {
         // Only fetch for images we don't already have metadata for
         const idsToFetch = images
-          .filter(img => !colorMetadataMap[img.id])
-          .map(img => img.id);
+          .map(img => img.id)
+          .filter(id => {
+            if (colorMetadataMap[id]) return false;
+            const lastRequestedAt = requestedColorIdsRef.current.get(id);
+            return !lastRequestedAt || Date.now() - lastRequestedAt > COLOR_METADATA_RETRY_MS;
+          });
         
         if (idsToFetch.length === 0) return;
+
+        // Mark ids as requested so we don't spam the server if the gallery refreshes
+        // or if React re-runs effects in dev.
+        for (const id of idsToFetch) {
+          requestedColorIdsRef.current.set(id, Date.now());
+          requestedNow.push(id);
+        }
         
         // Batch in chunks of 100
         const chunkSize = 100;
@@ -728,7 +744,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     };
     
     fetchColorMetadata();
-  }, [images]);
+  }, [images, ENABLE_COLOR_METADATA]);
 
   const deleteImage = async (imageId: string) => {
     try {

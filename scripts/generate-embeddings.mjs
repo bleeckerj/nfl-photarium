@@ -9,6 +9,10 @@
  *   npm run embeddings:generate
  *   npm run embeddings:generate -- --clip-only
  *   npm run embeddings:generate -- --color-only
+ *   npm run embeddings:generate -- --namespace cf-signals-images
+ *   npm run embeddings:generate -- --namespace=cf-signals-images
+ *   npm run embeddings:generate -- --namespace __none__
+ *   npm run embeddings:generate -- --namespace __all__
  *   npm run embeddings:generate -- --limit 100
  *   npm run embeddings:generate -- --force
  */
@@ -36,6 +40,24 @@ const args = process.argv.slice(2);
 const clipOnly = args.includes('--clip-only');
 const colorOnly = args.includes('--color-only');
 const force = args.includes('--force');
+
+const namespaceEq = args.find(a => a.startsWith('--namespace='));
+const namespaceFlagIndex = args.findIndex(a => a === '--namespace');
+const namespaceRaw = namespaceEq
+  ? namespaceEq.split('=')[1]
+  : namespaceFlagIndex >= 0
+    ? args[namespaceFlagIndex + 1]
+    : undefined;
+
+// Match API semantics: __all__ = no filter; __none__ = only images with no namespace.
+const namespace = (() => {
+  if (typeof namespaceRaw !== 'string') return null; // no filter
+  const trimmed = namespaceRaw.trim();
+  if (trimmed === '__all__') return null;
+  if (trimmed === '__none__') return '';
+  return trimmed;
+})();
+
 const limitArg = args.findIndex(a => a === '--limit');
 const limit = limitArg >= 0 ? parseInt(args[limitArg + 1]) : undefined;
 
@@ -71,8 +93,18 @@ async function main() {
 
   // Get all images
   console.log('→ Loading image cache...');
-  const images = await getCachedImages();
-  console.log(`✔ Found ${images.length} images\n`);
+  const allImages = await getCachedImages();
+  const images = namespace === null
+    ? allImages
+    : namespace === ''
+      ? allImages.filter(img => !img.namespace)
+      : allImages.filter(img => img.namespace === namespace);
+  const scopeLabel = namespace === null
+    ? 'all namespaces'
+    : namespace === ''
+      ? 'namespace: (none)'
+      : `namespace: ${namespace}`;
+  console.log(`✔ Found ${images.length} images (${scopeLabel})\n`);
 
   // Filter to images needing embeddings
   let toProcess = images;
