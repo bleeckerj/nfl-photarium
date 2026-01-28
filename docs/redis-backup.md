@@ -73,6 +73,7 @@ Redis Backup
 Container:   photarium-redis
 Backup dir:  ./backups/redis
 Backup file: redis-backup-20260117-230436.rdb
+Bundle file: redis-backup-20260117-230436.tgz
 Keep count:  10
 ───────────────────────────────────────────────────────
 
@@ -80,14 +81,21 @@ Step 1: Triggering Redis BGSAVE...
          Waiting for save to complete...
          Last save: 1768719876
 
+Step 1b: Triggering Redis BGREWRITEAOF (compact AOF)...
+         Waiting for rewrite to complete...
+
 Step 2: Copying dump.rdb from container...
          Created: ./backups/redis/redis-backup-20260117-230436.rdb (5.0M)
+
+Step 2b: Creating bundle with dump.rdb + AOF file(s)...
+         Created: ./backups/redis/redis-backup-20260117-230436.tgz (5.1M)
 
 Step 3: Rotating old backups (keeping last 10)...
          1 backups found, no rotation needed
 
 ───────────────────────────────────────────────────────
 Current backups:
+  -rw-r--r--  1 julian  staff  5.1M Jan 17 23:04 redis-backup-20260117-230436.tgz
   -rw-r--r--  1 julian  staff  5.0M Jan 17 23:04 redis-backup-20260117-230436.rdb
 
 ✓ Backup complete!
@@ -165,8 +173,26 @@ docker stop photarium-redis
 # List available backups
 ls -la ./backups/redis/
 
-# Copy the desired backup (replace filename)
-docker cp ./backups/redis/redis-backup-20260117-230436.rdb photarium-redis:/data/dump.rdb
+# Option A (recommended): Restore from the bundle (.tgz)
+# This restores dump.rdb and any AOF artifacts that were present.
+mkdir -p /tmp/photarium-redis-restore
+tar -xzf ./backups/redis/redis-backup-20260117-230436.tgz -C /tmp/photarium-redis-restore
+
+docker cp /tmp/photarium-redis-restore/dump.rdb photarium-redis:/data/dump.rdb
+
+# If present, restore Redis 7+ multi-part AOF directory
+if [ -d /tmp/photarium-redis-restore/appendonlydir ]; then
+  docker cp /tmp/photarium-redis-restore/appendonlydir photarium-redis:/data/appendonlydir
+fi
+
+# If present, restore classic single-file AOF
+if [ -f /tmp/photarium-redis-restore/appendonly.aof ]; then
+  docker cp /tmp/photarium-redis-restore/appendonly.aof photarium-redis:/data/appendonly.aof
+fi
+
+# Option B: Restore from the RDB-only snapshot (.rdb)
+# This is a point-in-time snapshot and may not include the latest writes if AOF was enabled.
+# docker cp ./backups/redis/redis-backup-20260117-230436.rdb photarium-redis:/data/dump.rdb
 ```
 
 ### Step 3: Restart Redis

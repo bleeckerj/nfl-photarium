@@ -619,8 +619,21 @@ launchctl load ~/Library/LaunchAgents/com.photarium.redis-backup.plist
 # Stop the Redis container
 docker stop photarium-redis
 
-# Copy backup into container
-docker cp ./backups/redis/redis-backup-YYYYMMDD-HHMMSS.rdb photarium-redis:/data/dump.rdb
+# Option A (recommended): restore from bundle (.tgz)
+mkdir -p /tmp/photarium-redis-restore
+tar -xzf ./backups/redis/redis-backup-YYYYMMDD-HHMMSS.tgz -C /tmp/photarium-redis-restore
+docker cp /tmp/photarium-redis-restore/dump.rdb photarium-redis:/data/dump.rdb
+
+# Restore AOF artifacts if present
+if [ -d /tmp/photarium-redis-restore/appendonlydir ]; then
+  docker cp /tmp/photarium-redis-restore/appendonlydir photarium-redis:/data/appendonlydir
+fi
+if [ -f /tmp/photarium-redis-restore/appendonly.aof ]; then
+  docker cp /tmp/photarium-redis-restore/appendonly.aof photarium-redis:/data/appendonly.aof
+fi
+
+# Option B: restore from snapshot-only (.rdb)
+# docker cp ./backups/redis/redis-backup-YYYYMMDD-HHMMSS.rdb photarium-redis:/data/dump.rdb
 
 # Restart container
 docker start photarium-redis

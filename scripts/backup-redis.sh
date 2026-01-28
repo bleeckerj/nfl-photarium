@@ -78,6 +78,7 @@ error() {
 # Timestamp for backup file
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 BACKUP_FILE="redis-backup-${TIMESTAMP}.rdb"
+BACKUP_BUNDLE_FILE="redis-backup-${TIMESTAMP}.tgz"
 
 log "═══════════════════════════════════════════════════════"
 log "Redis Backup"
@@ -85,8 +86,29 @@ log "═════════════════════════
 log "Container:   $CONTAINER"
 log "Backup dir:  $BACKUP_DIR"
 log "Backup file: $BACKUP_FILE"
+log "Bundle file: $BACKUP_BUNDLE_FILE"
 log "Keep count:  $KEEP_COUNT"
 log "───────────────────────────────────────────────────────"
+
+wait_for_redis_field_zero() {
+  local field="$1"
+  local timeout_seconds="${2:-600}"
+  local elapsed=0
+
+  while true; do
+    local value
+    value=$(docker exec "$CONTAINER" redis-cli INFO persistence 2>/dev/null | awk -F: -v f="$field" '$1==f {gsub("\r","",$2); print $2; exit}')
+    if [ -z "$value" ] || [ "$value" = "0" ]; then
+      return 0
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+    if [ "$elapsed" -ge "$timeout_seconds" ]; then
+      error "Timed out waiting for $field to become 0"
+      return 1
+    fi
+  done
+}
 
 # Check if container is running
 if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
@@ -103,14 +125,22 @@ log ""
 log "Step 1: Triggering Redis BGSAVE..."
 if [ "$DRY_RUN" = false ]; then
   docker exec "$CONTAINER" redis-cli BGSAVE > /dev/null
-  
+
   # Wait for background save to complete
   log "         Waiting for save to complete..."
-  sleep 2
+  wait_for_redis_field_zero "rdb_bgsave_in_progress" 1200 || true
   
   # Check if save succeeded
   LASTSAVE=$(docker exec "$CONTAINER" redis-cli LASTSAVE)
   log "         Last save: $LASTSAVE"
+fi
+
+log ""
+log "Step 1b: Triggering Redis BGREWRITEAOF (compact AOF)..."
+if [ "$DRY_RUN" = false ]; then
+  docker exec "$CONTAINER" redis-cli BGREWRITEAOF > /dev/null || true
+  log "         Waiting for rewrite to complete..."
+  wait_for_redis_field_zero "aof_rewrite_in_progress" 1800 || true
 fi
 
 log ""
@@ -126,6 +156,44 @@ else
 fi
 
 log ""
+log "Step 2b: Creating bundle with dump.rdb + AOF file(s)..."
+if [ "$DRY_RUN" = false ]; then
+  AOF_TMP_DIR="${BACKUP_DIR}/.aof-tmp-${TIMESTAMP}"
+  rm -rf "$AOF_TMP_DIR" 2>/dev/null || true
+  mkdir -p "$AOF_TMP_DIR"
+
+  # Include the just-copied dump.rdb in the bundle.
+  cp "${BACKUP_DIR}/${BACKUP_FILE}" "${AOF_TMP_DIR}/dump.rdb"
+
+  # Copy AOF artifacts if present.
+  HAS_AOF=false
+  if docker exec "$CONTAINER" sh -lc 'test -f /data/appendonly.aof' >/dev/null 2>&1; then
+    docker cp "${CONTAINER}:/data/appendonly.aof" "${AOF_TMP_DIR}/appendonly.aof"
+    HAS_AOF=true
+  fi
+  if docker exec "$CONTAINER" sh -lc 'test -d /data/appendonlydir' >/dev/null 2>&1; then
+    docker cp "${CONTAINER}:/data/appendonlydir" "${AOF_TMP_DIR}/appendonlydir"
+    HAS_AOF=true
+  fi
+
+  if [ "$HAS_AOF" = true ]; then
+    tar -czf "${BACKUP_DIR}/${BACKUP_BUNDLE_FILE}" -C "$AOF_TMP_DIR" .
+    BUNDLE_SIZE=$(ls -lh "${BACKUP_DIR}/${BACKUP_BUNDLE_FILE}" | awk '{print $5}')
+    log "         Created: ${BACKUP_DIR}/${BACKUP_BUNDLE_FILE} ($BUNDLE_SIZE)"
+  else
+    # Still create a bundle with dump.rdb for a single-file restore path, but tell the user AOF was absent.
+    tar -czf "${BACKUP_DIR}/${BACKUP_BUNDLE_FILE}" -C "$AOF_TMP_DIR" dump.rdb
+    BUNDLE_SIZE=$(ls -lh "${BACKUP_DIR}/${BACKUP_BUNDLE_FILE}" | awk '{print $5}')
+    log "         Created: ${BACKUP_DIR}/${BACKUP_BUNDLE_FILE} ($BUNDLE_SIZE)"
+    log "         Note: No AOF artifacts found in /data (appendonly.aof/appendonlydir)."
+  fi
+
+  rm -rf "$AOF_TMP_DIR" 2>/dev/null || true
+else
+  log "         [DRY RUN] Would create ${BACKUP_DIR}/${BACKUP_BUNDLE_FILE} containing dump.rdb + AOF file(s)"
+fi
+
+log ""
 log "Step 3: Rotating old backups (keeping last $KEEP_COUNT)..."
 if [ "$DRY_RUN" = false ]; then
   # Count existing backups
@@ -138,8 +206,15 @@ if [ "$DRY_RUN" = false ]; then
     
     # Delete oldest backups
     ls -1t "${BACKUP_DIR}"/redis-backup-*.rdb | tail -n "$DELETE_COUNT" | while read -r file; do
-      log "         Removing: $(basename "$file")"
+      base=$(basename "$file")
+      ts="${base#redis-backup-}"
+      ts="${ts%.rdb}"
+      log "         Removing: $base"
       rm "$file"
+      if [ -f "${BACKUP_DIR}/redis-backup-${ts}.tgz" ]; then
+        log "         Removing: redis-backup-${ts}.tgz"
+        rm "${BACKUP_DIR}/redis-backup-${ts}.tgz"
+      fi
     done
   else
     log "         $BACKUP_COUNT backups found, no rotation needed"
@@ -154,6 +229,9 @@ log "─────────────────────────
 # List current backups
 if [ "$QUIET" = false ] && [ "$DRY_RUN" = false ]; then
   log "Current backups:"
+  ls -lht "${BACKUP_DIR}"/redis-backup-*.tgz 2>/dev/null | head -"$KEEP_COUNT" | while read -r line; do
+    echo "  $line"
+  done
   ls -lht "${BACKUP_DIR}"/redis-backup-*.rdb 2>/dev/null | head -"$KEEP_COUNT" | while read -r line; do
     echo "  $line"
   done
