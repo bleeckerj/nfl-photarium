@@ -544,6 +544,7 @@ PYTHON_EXECUTABLE=python3
 |-----------|--------------|-----------|
 | Cloudflare Images | N/A (managed service) | Automatic |
 | Redis embeddings | `backup-redis.sh` | Daily recommended |
+| Extra image metadata (Prompt This, etc.) | Redis volume backup | Daily recommended |
 | `.env.local` | Manual copy | After changes |
 
 ### Redis Backup Script
@@ -776,6 +777,12 @@ PYTHON_EXECUTABLE=python3         # for local CLIP
 # Redis
 CACHE_STORAGE_TYPE=redis
 REDIS_URL=redis://localhost:6379
+
+# Extra metadata (Prompt This, etc.)
+# Stored outside Cloudflare metadata and outside the versioned cache store.
+# Default is `auto` (uses Redis when CACHE_STORAGE_TYPE=redis or REDIS_URL is set).
+EXTRAS_STORAGE_TYPE=auto          # auto|redis|file
+EXTRAS_STORAGE_DIR=.extras        # only used when EXTRAS_STORAGE_TYPE=file
 
 # Search
 NEXT_PUBLIC_SEARCH_LIMIT=48       # max results

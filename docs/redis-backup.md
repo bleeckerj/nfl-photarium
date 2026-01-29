@@ -1,12 +1,16 @@
 # Redis Backup & Restore
 
-This guide covers backing up and restoring the Redis database that stores CLIP and color embeddings for Photarium's semantic search features.
+This guide covers backing up and restoring the Redis database used by Photarium.
+
+Redis typically stores:
+- Embeddings + vector search indexes (semantic search)
+- Extra per-image metadata stored outside Cloudflare metadata (e.g. Prompt This)
 
 ## Overview
 
 Photarium uses Redis Stack with RediSearch for vector similarity search. The embeddings are computationally expensive to generate (~5-10 seconds per image), so regular backups are essential.
 
-**What's stored in Redis:**
+**What's stored in Redis (typical):**
 - CLIP embeddings (512-dimensional vectors)
 - Color embeddings (dominant colors, average color)
 - Vector search indexes

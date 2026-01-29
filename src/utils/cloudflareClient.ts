@@ -13,6 +13,7 @@ export interface CloudflareImageRecord {
   uploaded: string;
   variants: string[];
   folder?: string;
+  namespace?: string;
   linkedAssetId?: string;
 }
 
@@ -40,6 +41,7 @@ export async function fetchCloudflareImages(): Promise<CloudflareImageRecord[]> 
     ? json.result.images.map((image: any) => {
         const meta = parseCloudflareMetadata(image.meta);
         const folder = cleanString(typeof meta.folder === 'string' ? meta.folder : undefined);
+        const namespace = cleanString(typeof meta.namespace === 'string' ? meta.namespace : undefined);
         const linkedAssetId = cleanString(typeof meta.linkedAssetId === 'string' ? meta.linkedAssetId : undefined);
         return {
           id: image.id,
@@ -47,6 +49,7 @@ export async function fetchCloudflareImages(): Promise<CloudflareImageRecord[]> 
           uploaded: image.uploaded,
           variants: Array.isArray(image.variants) ? image.variants : [],
           folder,
+          namespace,
           linkedAssetId,
         };
       })

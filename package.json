@@ -19,6 +19,7 @@
     "embeddings:backfill": "node scripts/backfill-embeddings.mjs",
     "embeddings:status": "curl -s http://localhost:3000/api/images/vectors/status | jq",
     "prompts:backfill": "node scripts/backfill-prompts.mjs",
+    "migrate:description-alt": "node scripts/migrate-description-alt-to-extras.mjs",
     "count:folder": "node scripts/count-folder-images.mjs",
     "refresh:hash-cache": "node scripts/refresh-hash-cache.mjs",
     "diag:duplicates": "node scripts/diagnose-duplicates.mjs",

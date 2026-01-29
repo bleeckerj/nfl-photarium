@@ -236,3 +236,58 @@ export async function POST(
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id: imageId } = await params;
+    if (!imageId) {
+      return NextResponse.json({ error: 'Image ID is required' }, { status: 400 });
+    }
+
+    let body: any = null;
+    if (request.headers.get('content-type')?.includes('application/json')) {
+      try {
+        body = await request.json();
+      } catch {
+        body = null;
+      }
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(body ?? {}, 'prompt')) {
+      return NextResponse.json({ error: 'Missing prompt' }, { status: 400 });
+    }
+
+    const prompt = cleanString(body?.prompt);
+    if (!prompt) {
+      return NextResponse.json({ error: 'Prompt is empty' }, { status: 422 });
+    }
+
+    const existing = await getPromptThisRecord(imageId);
+    const now = new Date().toISOString();
+
+    const record: PromptThisRecord = {
+      imageId,
+      prompt,
+      model: 'manual',
+      provider: 'manual',
+      createdAt: existing?.createdAt || now,
+      updatedAt: now
+    };
+
+    let saved = true;
+    try {
+      await setPromptThisRecord(record);
+    } catch (storageError) {
+      console.warn('[PromptThis] Failed to persist manual prompt edit:', storageError);
+      saved = false;
+    }
+
+    return NextResponse.json({ imageId, record, saved });
+  } catch (error) {
+    console.error('[PromptThis] PATCH error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}

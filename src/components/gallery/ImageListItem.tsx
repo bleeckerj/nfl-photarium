@@ -23,6 +23,7 @@ interface ImageListItemProps {
   isSelected: boolean;
   bulkSelectionMode: boolean;
   isDuplicate: boolean;
+  hrefSuffix?: string;
   variationChildren?: CloudflareImage[];
   colorMetadata?: ColorMetadata;
   embeddingPending?: EmbeddingPendingEntry;
@@ -34,6 +35,8 @@ interface ImageListItemProps {
   onGenerateAlt: (imageId: string) => void;
   onCopyUrl: (imageId: string) => void;
   onCopyNamespace: (namespace: string) => void;
+  onBeforeNavigate?: () => void;
+  onDragStart?: (event: React.DragEvent, image: CloudflareImage) => void;
   // Hover preview
   onMouseEnter: (imageId: string, event: React.MouseEvent) => void;
   onMouseMove: (imageId: string, event: React.MouseEvent) => void;
@@ -59,6 +62,7 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
   isSelected,
   bulkSelectionMode,
   isDuplicate,
+  hrefSuffix,
   variationChildren,
   colorMetadata,
   embeddingPending,
@@ -69,6 +73,8 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
   onGenerateAlt,
   onCopyUrl,
   onCopyNamespace,
+  onBeforeNavigate,
+  onDragStart,
   onMouseEnter,
   onMouseMove,
   onMouseLeave,
@@ -76,6 +82,13 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
   const svgImage = isSvgImage(image);
   const imageUrl = getCloudflareImageUrl(image.id, selectedVariant === 'public' ? 'original' : selectedVariant);
   const displayUrl = svgImage ? getCloudflareImageUrl(image.id, 'original') : imageUrl;
+  const handleDragStart = (event: React.DragEvent) => {
+    if (onDragStart) {
+      onDragStart(event, image);
+      return;
+    }
+    handleImageDragStart(event, image);
+  };
 
   return (
     <div
@@ -84,7 +97,7 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
       }`}
     >
       <Link
-        href={`/images/${image.id}`}
+        href={`/images/${image.id}${hrefSuffix ?? ''}`}
         className="w-32 h-32 relative bg-gray-100 rounded-lg overflow-hidden flex-shrink-0 cursor-pointer"
         onMouseEnter={(e) => onMouseEnter(image.id, e)}
         onMouseMove={(e) => onMouseMove(image.id, e)}
@@ -93,14 +106,16 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
           if (bulkSelectionMode) {
             e.preventDefault();
             onToggleSelection(image.id);
+            return;
           }
+          onBeforeNavigate?.();
         }}
         prefetch={false}
       >
         {svgImage ? (
           <img
             draggable
-            onDragStart={(e) => handleImageDragStart(e, image)}
+            onDragStart={handleDragStart}
             src={displayUrl}
             alt={image.filename}
             className="absolute inset-0 w-full h-full object-contain bg-white"
@@ -108,7 +123,7 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
         ) : (
           <Image
             draggable
-            onDragStart={(e) => handleImageDragStart(e, image)}
+            onDragStart={handleDragStart}
             src={displayUrl}
             alt={image.filename}
             fill

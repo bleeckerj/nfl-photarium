@@ -1,0 +1,282 @@
+import { Cpu, Settings } from 'lucide-react';
+import DateNavigator, { type DateFilter } from '@/components/DateNavigator';
+import MonoSelect from '@/components/MonoSelect';
+
+export type LegacyTopBarImage = { id: string; uploaded: string };
+
+interface LegacyTopBarProps {
+  filteredCount: number;
+  totalCount: number;
+  namespaceLabel?: string;
+  namespace?: string;
+  showPagination: boolean;
+  currentPageRangeLabel: string | null;
+  prevPageRangeLabel: string | null;
+  nextPageRangeLabel: string | null;
+  pageIndex: number;
+  totalPages: number;
+  sortedImages: LegacyTopBarImage[];
+  dateFilter: DateFilter | null;
+  onDateFilterChange: (filter: DateFilter | null) => void;
+  bulkSelectionMode: boolean;
+  filtersCollapsed: boolean;
+  hasActiveFilters: boolean;
+  pageSize: number;
+  pageSizeOptions: number[];
+  defaultPageSize: number;
+  refreshingCache: boolean;
+  viewMode: 'grid' | 'list';
+  selectedCount: number;
+  bulkEmbeddingGenerating: boolean;
+  bulkDeleting: boolean;
+  onToggleBulkSelection: () => void;
+  onToggleFilters: () => void;
+  onClearFilters: () => void;
+  onPageSizeChange: (size: number) => void;
+  onRefreshCache: () => void;
+  onOpenNamespaceSettings: () => void;
+  onToggleViewMode: () => void;
+  onSelectPage: () => void;
+  onClearSelection: () => void;
+  onOpenBulkEdit: () => void;
+  onGenerateEmbeddings: () => void;
+  onDeleteSelected: () => void;
+  onFirstPage: () => void;
+  onJumpBackTen: () => void;
+  onPrevPage: () => void;
+  onNextPage: () => void;
+  onJumpForwardTen: () => void;
+  onLastPage: () => void;
+}
+
+export default function LegacyTopBar({
+  filteredCount,
+  totalCount,
+  namespaceLabel,
+  namespace,
+  showPagination,
+  currentPageRangeLabel,
+  prevPageRangeLabel,
+  nextPageRangeLabel,
+  pageIndex,
+  totalPages,
+  sortedImages,
+  dateFilter,
+  onDateFilterChange,
+  bulkSelectionMode,
+  filtersCollapsed,
+  hasActiveFilters,
+  pageSize,
+  pageSizeOptions,
+  defaultPageSize,
+  refreshingCache,
+  viewMode,
+  selectedCount,
+  bulkEmbeddingGenerating,
+  bulkDeleting,
+  onToggleBulkSelection,
+  onToggleFilters,
+  onClearFilters,
+  onPageSizeChange,
+  onRefreshCache,
+  onOpenNamespaceSettings,
+  onToggleViewMode,
+  onSelectPage,
+  onClearSelection,
+  onOpenBulkEdit,
+  onGenerateEmbeddings,
+  onDeleteSelected,
+  onFirstPage,
+  onJumpBackTen,
+  onPrevPage,
+  onNextPage,
+  onJumpForwardTen,
+  onLastPage,
+}: LegacyTopBarProps) {
+  return (
+    <div className="flex flex-col gap-3 mb-4">
+      <div id="first-row-controls" className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <p className="text-[0.7em] font-mono text-gray-900">
+            Image Gallery ({filteredCount}/{totalCount})
+          </p>
+          {namespace && (
+            <p className="font-mono text-[0.7em] text-gray-500">Namespace: {namespaceLabel}</p>
+          )}
+          {showPagination && currentPageRangeLabel && (
+            <p className="font-mono text-[0.7em] text-gray-500">
+              Showing uploads from {currentPageRangeLabel}
+            </p>
+          )}
+        </div>
+        {showPagination && (
+          <div className="flex items-center gap-2 text-[0.7em] font-mono text-gray-600">
+            <button
+              onClick={onFirstPage}
+              disabled={pageIndex === 1}
+              className="px-3 py-1 border rounded-md disabled:opacity-40"
+              title="First page"
+            >
+              First
+            </button>
+            <button
+              onClick={onJumpBackTen}
+              disabled={pageIndex === 1}
+              className="px-3 py-1 border rounded-md disabled:opacity-40"
+              title="Back 10 pages"
+            >
+              -10
+            </button>
+            <button
+              onClick={onPrevPage}
+              disabled={pageIndex === 1}
+              className="px-3 py-1 border rounded-md disabled:opacity-40"
+              title={prevPageRangeLabel ? `Previous (${prevPageRangeLabel})` : 'Previous page'}
+            >
+              Prev
+            </button>
+            <span>
+              Page {pageIndex} / {totalPages}
+            </span>
+            <button
+              onClick={onNextPage}
+              disabled={pageIndex === totalPages}
+              className="px-3 py-1 border rounded-md disabled:opacity-40"
+              title={nextPageRangeLabel ? `Next (${nextPageRangeLabel})` : 'Next page'}
+            >
+              Next
+            </button>
+            <button
+              onClick={onJumpForwardTen}
+              disabled={pageIndex === totalPages}
+              className="px-3 py-1 border rounded-md disabled:opacity-40"
+              title="Forward 10 pages"
+            >
+              +10
+            </button>
+            <button
+              onClick={onLastPage}
+              disabled={pageIndex === totalPages}
+              className="px-3 py-1 border rounded-md disabled:opacity-40"
+              title="Last page"
+            >
+              Last
+            </button>
+            <DateNavigator
+              allImages={sortedImages}
+              currentFilter={dateFilter}
+              onFilterChange={onDateFilterChange}
+            />
+          </div>
+        )}
+      </div>
+
+      <div id="second-row-controls" className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onToggleBulkSelection}
+            className="px-3 py-1 text-[0.7em] font-mono border border-gray-200 rounded-md hover:bg-gray-100 transition"
+            aria-pressed={bulkSelectionMode}
+          >
+            {bulkSelectionMode ? 'Done selecting' : 'Select images'}
+          </button>
+          <button
+            onClick={onToggleFilters}
+            className="px-3 py-1 text-[0.7em] font-mono border border-gray-200 rounded-md hover:bg-gray-100 transition"
+            aria-pressed={!filtersCollapsed}
+          >
+            {filtersCollapsed ? 'Show filters' : 'Hide filters'}
+          </button>
+          <button
+            onClick={onClearFilters}
+            disabled={!hasActiveFilters}
+            className="px-3 py-1 text-[0.7em] font-mono border border-gray-200 rounded-md hover:bg-gray-100 transition disabled:opacity-50"
+          >
+            Clear filters
+          </button>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 bg-gray-100/50 rounded-md px-2 py-0.5">
+            <label htmlFor="page-size-toolbar" className="text-[0.65rem] font-mono text-gray-500 whitespace-nowrap">
+              Gallery Size:
+            </label>
+            <MonoSelect
+              id="page-size-toolbar"
+              value={String(pageSize)}
+              onChange={(nextValue) => {
+                const parsed = Number(nextValue);
+                onPageSizeChange(Number.isFinite(parsed) ? parsed : defaultPageSize);
+              }}
+              options={pageSizeOptions.map((size) => ({ value: String(size), label: String(size) }))}
+              className="w-18"
+              size="sm"
+            />
+          </div>
+          <button
+            onClick={onRefreshCache}
+            disabled={refreshingCache}
+            className="px-3 py-1 text-[0.7em] font-mono border border-gray-200 rounded-md hover:bg-gray-100 transition disabled:opacity-50"
+            title="Refresh the server-side Cloudflare cache"
+          >
+            {refreshingCache ? 'Refreshing…' : 'Refresh cache'}
+          </button>
+          <button
+            onClick={onOpenNamespaceSettings}
+            className="px-3 py-1 text-[0.7em] font-mono border border-gray-200 rounded-md hover:bg-gray-100 transition flex items-center gap-2"
+            title="Namespace settings"
+          >
+            <Settings className="h-3 w-3" />
+            Namespace
+          </button>
+          <button
+            onClick={onToggleViewMode}
+            className="px-3 py-1 text-[0.7em] font-mono bg-gray-100 hover:bg-gray-200 rounded-md"
+          >
+            {viewMode === 'grid' ? '📋 List' : '🔲 Grid'}
+          </button>
+        </div>
+      </div>
+
+      {(bulkSelectionMode || selectedCount > 0) && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 text-[0.7em] font-mono text-gray-700">
+          <span>{selectedCount} selected</span>
+          <button
+            onClick={onSelectPage}
+            className="px-2 py-1 border rounded-md hover:bg-gray-100"
+          >
+            Select page
+          </button>
+          <button
+            onClick={onClearSelection}
+            className="px-2 py-1 border rounded-md hover:bg-gray-100"
+          >
+            Clear
+          </button>
+          <button
+            onClick={onOpenBulkEdit}
+            className="px-2 py-1 bg-gray-900 text-white rounded-md hover:bg-black disabled:opacity-40"
+            disabled={!selectedCount}
+          >
+            Bulk edit
+          </button>
+          <button
+            onClick={onGenerateEmbeddings}
+            className="px-2 py-1 border border-green-300 text-green-700 rounded-md hover:bg-green-50 disabled:opacity-40 inline-flex items-center gap-1"
+            disabled={!selectedCount || bulkEmbeddingGenerating}
+            title="Generate CLIP and color embeddings for selected images"
+          >
+            <Cpu className="h-3 w-3" />
+            {bulkEmbeddingGenerating ? 'Generating…' : 'Embeddings'}
+          </button>
+          <button
+            onClick={onDeleteSelected}
+            className="px-2 py-1 border border-red-300 text-red-700 rounded-md hover:bg-red-50 disabled:opacity-40"
+            disabled={!selectedCount || bulkDeleting}
+          >
+            {bulkDeleting ? 'Deleting…' : 'Delete'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

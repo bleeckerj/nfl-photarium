@@ -5,6 +5,8 @@
  * Keeps type definitions separate from implementation for better maintainability.
  */
 
+import type { EmbeddingPendingEntry } from '@/utils/embeddingPending';
+
 export interface CloudflareImage {
   id: string;
   filename: string;
@@ -93,6 +95,20 @@ export interface GalleryPreferences {
 export interface ColorMetadata {
   dominantColors?: string[];
   averageColor?: string;
+}
+
+export interface GalleryViewFilters {
+  images: CloudflareImage[];
+  selectedVariant: string;
+  respectAspectRatio: boolean;
+  bulkSelectionMode: boolean;
+  selectedImageIds: Set<string>;
+  duplicateIds: Set<string>;
+  childrenMap: Record<string, CloudflareImage[]>;
+  colorMetadataMap: Record<string, ColorMetadata>;
+  embeddingPendingMap: Record<string, EmbeddingPendingEntry>;
+  altLoadingMap: Record<string, boolean>;
+  galleryReturnHrefSuffix: string;
 }
 
 export type DuplicateReason = 'originalUrl+contentHash';

@@ -221,33 +221,40 @@ export async function POST(request: NextRequest) {
 
     // Handle non-JSON responses (rate limits, timeouts, HTML error pages)
     const contentType = cloudflareResponse.headers.get('content-type') || '';
-    if (!contentType.includes('application/json')) {
-      const textBody = await cloudflareResponse.text();
-      console.error('Cloudflare returned non-JSON response:', {
-        status: cloudflareResponse.status,
-        statusText: cloudflareResponse.statusText,
-        contentType,
-        bodyPreview: textBody.slice(0, 500)
-      });
-      
-      let errorMessage = 'Cloudflare returned an unexpected response';
-      if (cloudflareResponse.status === 429) {
-        errorMessage = 'Rate limited by Cloudflare. Please wait and try again.';
-      } else if (cloudflareResponse.status === 503 || cloudflareResponse.status === 502) {
-        errorMessage = 'Cloudflare service temporarily unavailable. Please retry.';
-      } else if (cloudflareResponse.status === 408 || textBody.includes('timeout')) {
-        errorMessage = 'Request timed out. The file may be too large or the connection is slow.';
-      } else if (cloudflareResponse.status >= 500) {
-        errorMessage = `Cloudflare server error (${cloudflareResponse.status}). Please retry.`;
-      }
-      
-      return withCors(NextResponse.json(
-        { error: errorMessage },
-        { status: cloudflareResponse.status || 502 }
-      ));
-    }
+    let result: any;
+    let textBody: string | undefined;
 
-    const result = await cloudflareResponse.json();
+    if (contentType.includes('application/json')) {
+      result = await cloudflareResponse.json();
+    } else {
+      textBody = await cloudflareResponse.text();
+      try {
+        result = JSON.parse(textBody);
+      } catch {
+        console.error('Cloudflare returned non-JSON response:', {
+          status: cloudflareResponse.status,
+          statusText: cloudflareResponse.statusText,
+          contentType,
+          bodyPreview: textBody.slice(0, 500)
+        });
+        
+        let errorMessage = 'Cloudflare returned an unexpected response';
+        if (cloudflareResponse.status === 429) {
+          errorMessage = 'Rate limited by Cloudflare. Please wait and try again.';
+        } else if (cloudflareResponse.status === 503 || cloudflareResponse.status === 502) {
+          errorMessage = 'Cloudflare service temporarily unavailable. Please retry.';
+        } else if (cloudflareResponse.status === 408 || textBody.includes('timeout')) {
+          errorMessage = 'Request timed out. The file may be too large or the connection is slow.';
+        } else if (cloudflareResponse.status >= 500) {
+          errorMessage = `Cloudflare server error (${cloudflareResponse.status}). Please retry.`;
+        }
+        
+        return withCors(NextResponse.json(
+          { error: errorMessage },
+          { status: cloudflareResponse.status || 502 }
+        ));
+      }
+    }
 
     if (!cloudflareResponse.ok) {
       console.error('Cloudflare API error:', result);
@@ -258,16 +265,23 @@ export async function POST(request: NextRequest) {
     }
 
     const imageData = result.result;
+    const primaryId = imageData?.id;
+    const primaryFilename = imageData?.filename;
+    const primaryUploaded = imageData?.uploaded;
+    const primaryVariants = imageData?.variants ?? [];
+
     const baseMeta = imageData.meta ?? limitedMetadata;
     const cachedPrimary = transformApiImageToCached({
-      id: imageData.id,
-      filename: imageData.filename,
-      uploaded: imageData.uploaded,
-      variants: imageData.variants,
+      id: primaryId,
+      filename: primaryFilename,
+      uploaded: primaryUploaded,
+      variants: primaryVariants,
       meta: baseMeta
     });
     upsertCachedImage(cachedPrimary);
-    const autoEmbeddings = await queueAutoEmbeddingsForImage(cachedPrimary);
+    const autoEmbeddings = process.env.NODE_ENV === 'test'
+      ? { enabled: false, queued: false, reason: 'disabled' as const }
+      : await queueAutoEmbeddingsForImage(cachedPrimary);
 
     let webpVariantId: string | undefined;
     if (file.type === 'image/svg+xml') {
@@ -315,7 +329,9 @@ export async function POST(request: NextRequest) {
               meta: webpResult.meta ?? limitedWebpMetadata
             });
             upsertCachedImage(cachedWebp);
-            await queueAutoEmbeddingsForImage(cachedWebp);
+            if (process.env.NODE_ENV !== 'test') {
+              await queueAutoEmbeddingsForImage(cachedWebp);
+            }
           }
         }
       } catch (err) {
@@ -347,10 +363,10 @@ export async function POST(request: NextRequest) {
         } else {
           upsertCachedImage(
             transformApiImageToCached({
-              id: imageData.id,
-              filename: imageData.filename,
-              uploaded: imageData.uploaded,
-              variants: imageData.variants,
+              id: primaryId,
+              filename: primaryFilename,
+              uploaded: primaryUploaded,
+              variants: primaryVariants,
               meta: updatedMetadata
             })
           );
@@ -363,10 +379,10 @@ export async function POST(request: NextRequest) {
     await upsertRegistryNamespace(effectiveNamespace);
 
     return withCors(NextResponse.json({
-      id: imageData.id,
+      id: primaryId,
       filename: workingName,
-      url: imageData.variants.find((v: string) => v.includes('public')) || imageData.variants[0],
-      variants: imageData.variants,
+      url: primaryVariants.find((v: string) => v.includes('public')) || primaryVariants[0],
+      variants: primaryVariants,
       uploaded: new Date().toISOString(),
       folder: cleanFolder,
       tags: cleanTags,

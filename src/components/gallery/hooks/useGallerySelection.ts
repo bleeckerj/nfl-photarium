@@ -13,6 +13,8 @@ interface UseGallerySelectionOptions {
   images: CloudflareImage[];
   duplicateGroups: DuplicateGroup[];
   duplicateIds: Set<string>;
+  bulkSelectionMode?: boolean;
+  setBulkSelectionMode?: (value: boolean) => void;
 }
 
 interface UseGallerySelectionReturn {
@@ -31,8 +33,12 @@ export function useGallerySelection({
   images,
   duplicateGroups,
   duplicateIds,
+  bulkSelectionMode: bulkSelectionModeOverride,
+  setBulkSelectionMode: setBulkSelectionModeOverride,
 }: UseGallerySelectionOptions): UseGallerySelectionReturn {
-  const [bulkSelectionMode, setBulkSelectionMode] = useState(false);
+  const [internalBulkSelectionMode, setInternalBulkSelectionMode] = useState(false);
+  const bulkSelectionMode = bulkSelectionModeOverride ?? internalBulkSelectionMode;
+  const setBulkSelectionMode = setBulkSelectionModeOverride ?? setInternalBulkSelectionMode;
   const [selectedImageIds, setSelectedImageIds] = useState<Set<string>>(() => new Set());
 
   const selectedCount = selectedImageIds.size;

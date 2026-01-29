@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { getPromptThisRecord } from '@/server/promptThis';
+import { getPromptThisRecords } from '@/server/promptThis';
 
 const MAX_IDS = 250;
 
@@ -21,19 +21,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ prompts: {} });
     }
 
+    const recordsById = await getPromptThisRecords(ids);
     const prompts: Record<string, string | null> = {};
-
-    // Do small parallel batches to avoid hammering file storage.
-    const BATCH_SIZE = 25;
-    for (let i = 0; i < ids.length; i += BATCH_SIZE) {
-      const batch = ids.slice(i, i + BATCH_SIZE);
-      const records = await Promise.all(batch.map((id) => getPromptThisRecord(id)));
-      records.forEach((record, idx) => {
-        const imageId = batch[idx];
-        const prompt = record?.prompt;
-        prompts[imageId] = typeof prompt === 'string' && prompt.trim() ? prompt : null;
-      });
-    }
+    ids.forEach((imageId) => {
+      const prompt = recordsById[imageId]?.prompt;
+      prompts[imageId] = typeof prompt === 'string' && prompt.trim() ? prompt : null;
+    });
 
     return NextResponse.json({ prompts });
   } catch (error) {

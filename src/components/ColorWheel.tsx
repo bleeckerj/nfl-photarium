@@ -23,18 +23,21 @@ function hslToHex(h: number, s: number, l: number): string {
 function hexToHsl(hex: string): { h: number; s: number; l: number } {
   // Remove # if present
   hex = hex.replace(/^#/, '');
-  
+  if (!/^[0-9A-Fa-f]{6}$/.test(hex)) {
+    return { h: 217, s: 91, l: 60 };
+  }
   // Parse hex
   const r = parseInt(hex.substring(0, 2), 16) / 255;
   const g = parseInt(hex.substring(2, 4), 16) / 255;
   const b = parseInt(hex.substring(4, 6), 16) / 255;
-
+  if ([r, g, b].some((v) => isNaN(v))) {
+    return { h: 217, s: 91, l: 60 };
+  }
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
   let h = 0;
   let s = 0;
   const l = (max + min) / 2;
-
   if (max !== min) {
     const d = max - min;
     s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
@@ -50,7 +53,9 @@ function hexToHsl(hex: string): { h: number; s: number; l: number } {
         break;
     }
   }
-
+  if ([h, s, l].some((v) => isNaN(v))) {
+    return { h: 217, s: 91, l: 60 };
+  }
   return { h, s: s * 100, l: l * 100 };
 }
 
@@ -58,11 +63,11 @@ export default function ColorWheel({ value, onChange, size = 180 }: ColorWheelPr
   const wheelRef = useRef<HTMLCanvasElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [hsl, setHsl] = useState(() => {
-    try {
-      return hexToHsl(value || '#3B82F6');
-    } catch {
+    const hsl = hexToHsl(value || '#3B82F6');
+    if ([hsl.h, hsl.s, hsl.l].some((v) => isNaN(v))) {
       return { h: 217, s: 91, l: 60 };
     }
+    return hsl;
   });
 
   // Draw the color wheel
@@ -205,14 +210,11 @@ export default function ColorWheel({ value, onChange, size = 180 }: ColorWheelPr
   // Sync from external value changes
   useEffect(() => {
     if (value && /^#[0-9A-Fa-f]{6}$/.test(value)) {
-      try {
-        const newHsl = hexToHsl(value);
-        // Only update if significantly different to avoid feedback loops
-        if (Math.abs(newHsl.h - hsl.h) > 1 || Math.abs(newHsl.s - hsl.s) > 1 || Math.abs(newHsl.l - hsl.l) > 1) {
-          setHsl(newHsl);
-        }
-      } catch {
-        // Invalid hex, ignore
+      const newHsl = hexToHsl(value);
+      if ([newHsl.h, newHsl.s, newHsl.l].some((v) => isNaN(v))) return;
+      // Only update if significantly different to avoid feedback loops
+      if (Math.abs(newHsl.h - hsl.h) > 1 || Math.abs(newHsl.s - hsl.s) > 1 || Math.abs(newHsl.l - hsl.l) > 1) {
+        setHsl(newHsl);
       }
     }
   }, [value, hsl.h, hsl.s, hsl.l]);

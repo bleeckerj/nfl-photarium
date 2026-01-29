@@ -79,6 +79,8 @@ Before you start, you'll need:
 - **Optional:** OpenAI API key for AI ALT text generation
 - **Optional:** Redis Stack (via Docker or Cloud) for AI Semantic Search Features
 
+See [docs/image-extras.md](docs/image-extras.md) for how Photarium stores rich per-image metadata outside Cloudflare metadata limits.
+
 ---
 
 ## Deployment Options
@@ -322,6 +324,7 @@ npm run lint
 
 ## Documentation
 
+- **[FAQ](./docs/faq.md)** — Common questions about search, Redis, and namespaces
 - **[Namespaces](./docs/namespace.md)** — Multi-tenant and multi-app setups
 - **[External API](./EXTERNAL_UPLOAD_API.md)** — Full API reference and examples
 - **[Image Variants](./docs/variants.md)** — Responsive image sizing

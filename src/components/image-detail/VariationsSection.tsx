@@ -41,6 +41,8 @@ export interface VariationsSectionProps {
   onClearSelection: () => void;
   onGenerateAltForSelected: () => void | Promise<void>;
   variationAltBusy: boolean;
+  onDeleteSelectedVariations: () => void | Promise<void>;
+  deletingSelectedVariations: boolean;
 
   pagedVariations: ImageLike[];
   displayedVariations: ImageLike[];
@@ -72,6 +74,8 @@ export interface VariationsSectionProps {
   childDetachingId: string | null;
   onDetachChild: (childId: string) => void | Promise<void>;
   onDeleteChild: (childId: string) => void | Promise<void>;
+  swappingParentId: string | null;
+  onSwapParent: (childId: string) => void | Promise<void>;
 
   AspectRatioDisplay: React.ComponentType<{ imageId: string; className?: string }>;
 
@@ -101,6 +105,8 @@ export function VariationsSection(props: VariationsSectionProps) {
     onClearSelection,
     onGenerateAltForSelected,
     variationAltBusy,
+    onDeleteSelectedVariations,
+    deletingSelectedVariations,
     pagedVariations,
     displayedVariations,
     variationOrderIndex,
@@ -120,6 +126,8 @@ export function VariationsSection(props: VariationsSectionProps) {
     childDetachingId,
     onDetachChild,
     onDeleteChild,
+    swappingParentId,
+    onSwapParent,
     AspectRatioDisplay,
     variationPage,
     setVariationPage,
@@ -226,6 +234,13 @@ export function VariationsSection(props: VariationsSectionProps) {
               className="px-2 py-1 border border-gray-300 rounded text-blue-600 hover:bg-blue-50 disabled:opacity-50"
             >
               {variationAltBusy ? 'Generating ALT…' : 'Generate ALT'}
+            </button>
+            <button
+              onClick={() => void onDeleteSelectedVariations()}
+              disabled={deletingSelectedVariations || selectedVariationCount === 0}
+              className="px-2 py-1 border border-red-300 rounded text-red-600 hover:bg-red-50 disabled:opacity-50"
+            >
+              {deletingSelectedVariations ? 'Deleting…' : 'Delete selected'}
             </button>
           </div>
 
@@ -352,6 +367,16 @@ export function VariationsSection(props: VariationsSectionProps) {
                 >
                   Copy URL
                 </button>
+                {!isChildImage && (
+                  <button
+                    onClick={() => void onSwapParent(child.id)}
+                    disabled={Boolean(swappingParentId)}
+                    className="px-3 py-1 text-xs bg-amber-100 text-amber-800 rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Make this variation the parent image"
+                  >
+                    {swappingParentId === child.id ? 'Swapping…' : 'Make parent'}
+                  </button>
+                )}
                 {!isChildImage && (
                   <button
                     onClick={() => void onDetachChild(child.id)}

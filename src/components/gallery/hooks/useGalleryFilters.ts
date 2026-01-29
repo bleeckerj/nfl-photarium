@@ -9,7 +9,8 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { filterImagesForGallery } from '@/utils/galleryFilter';
 import { loadHiddenFolders, loadHiddenTags, persistHiddenFolders, persistHiddenTags } from '../storage';
-import { computeDuplicateGroups, buildChildrenMap } from '../utils';
+import { computeDuplicateGroups, buildChildrenMap, formatDateRangeLabel } from '../utils';
+import { DEFAULT_PAGE_SIZE } from '../constants';
 import type { CloudflareImage, DateFilter, EmbeddingFilter, DuplicateGroup } from '../types';
 
 interface UseGalleryFiltersOptions {
@@ -24,8 +25,12 @@ interface UseGalleryFiltersOptions {
     showDuplicatesOnly: boolean;
     showBrokenOnly: boolean;
     dateFilter: DateFilter | null;
+    pageSize?: number;
+    currentPage?: number;
   };
   brokenImageIds: Set<string>;
+  isLoading?: boolean;
+  returningFromDetailRef?: React.MutableRefObject<boolean>;
 }
 
 interface UseGalleryFiltersReturn {
@@ -63,18 +68,43 @@ interface UseGalleryFiltersReturn {
   
   // Computed values
   filteredImages: CloudflareImage[];
+  filteredWithVariants: CloudflareImage[];
   sortedImages: CloudflareImage[];
   duplicateGroups: DuplicateGroup[];
   duplicateIds: Set<string>;
   childrenMap: Record<string, CloudflareImage[]>;
   hasActiveFilters: boolean;
   clearFilters: () => void;
+
+  // Pagination
+  currentPage: number;
+  setCurrentPage: (page: number) => void;
+  pageSize: number;
+  setPageSize: (size: number) => void;
+  totalPages: number;
+  pageImages: CloudflareImage[];
+  showPagination: boolean;
+  hasResults: boolean;
+  pageIndex: number;
+  currentPageRangeLabel: string | null;
+  prevPageRangeLabel: string | null;
+  nextPageRangeLabel: string | null;
+  goToPageNumber: (page: number) => void;
+  goToPreviousPage: () => void;
+  goToNextPage: () => void;
+  goToFirstPage: () => void;
+  goToLastPage: () => void;
+  jumpBackTenPages: () => void;
+  jumpForwardTenPages: () => void;
+  scrollGalleryToTop: () => void;
 }
 
 export function useGalleryFilters({
   images,
   initialPreferences,
   brokenImageIds,
+  isLoading = false,
+  returningFromDetailRef,
 }: UseGalleryFiltersOptions): UseGalleryFiltersReturn {
   // Filter state
   const [selectedFolder, setSelectedFolder] = useState(initialPreferences.selectedFolder);
@@ -87,10 +117,13 @@ export function useGalleryFilters({
   const [showBrokenOnly, setShowBrokenOnly] = useState(initialPreferences.showBrokenOnly);
   const [embeddingFilter, setEmbeddingFilter] = useState<EmbeddingFilter>('none');
   const [dateFilter, setDateFilter] = useState<DateFilter | null>(initialPreferences.dateFilter);
+  const [currentPage, setCurrentPage] = useState(initialPreferences.currentPage ?? 1);
+  const [pageSize, setPageSize] = useState(initialPreferences.pageSize ?? DEFAULT_PAGE_SIZE);
   
   // Hidden folders/tags
   const [hiddenFolders, setHiddenFolders] = useState<string[]>(() => loadHiddenFolders());
   const [hiddenTags, setHiddenTags] = useState<string[]>(() => loadHiddenTags());
+  const didInitFilterPageRef = useRef(false);
 
   // Persist hidden folders/tags
   useEffect(() => {
@@ -267,6 +300,7 @@ export function useGalleryFilters({
     onlyWithVariants ||
     showDuplicatesOnly ||
     showBrokenOnly ||
+    embeddingFilter !== 'none' ||
     hiddenFolders.length > 0 ||
     hiddenTags.length > 0 ||
     dateFilter !== null
@@ -282,10 +316,100 @@ export function useGalleryFilters({
     setOnlyWithVariants(false);
     setShowDuplicatesOnly(false);
     setShowBrokenOnly(false);
+    setEmbeddingFilter('none');
     setHiddenFolders([]);
     setHiddenTags([]);
     setDateFilter(null);
   }, []);
+
+  const scrollGalleryToTop = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    window.scrollTo({
+      top: 0,
+      behavior: 'smooth',
+    });
+  }, []);
+
+  const totalPages = Math.max(1, Math.ceil(filteredImages.length / pageSize));
+  const pageIndex = Math.min(currentPage, totalPages);
+  const pageSliceStart = (pageIndex - 1) * pageSize;
+  const pageImages = filteredImages.slice(pageSliceStart, pageSliceStart + pageSize);
+  const showPagination = filteredImages.length > pageSize;
+  const hasResults = filteredImages.length > 0;
+
+  const currentPageRangeLabel = useMemo(() => formatDateRangeLabel(pageImages), [pageImages]);
+
+  const getPageDateRangeLabel = useCallback(
+    (pageNumber: number) => {
+      if (pageNumber < 1 || pageNumber > totalPages) return null;
+      const startIndex = (pageNumber - 1) * pageSize;
+      const slice = filteredImages.slice(startIndex, startIndex + pageSize);
+      return formatDateRangeLabel(slice);
+    },
+    [filteredImages, pageSize, totalPages]
+  );
+
+  const prevPageRangeLabel = useMemo(
+    () => getPageDateRangeLabel(pageIndex - 1),
+    [getPageDateRangeLabel, pageIndex]
+  );
+  const nextPageRangeLabel = useMemo(
+    () => getPageDateRangeLabel(pageIndex + 1),
+    [getPageDateRangeLabel, pageIndex]
+  );
+
+  const goToPageNumber = useCallback(
+    (target: number) => {
+      setCurrentPage(prev => {
+        const next = Math.min(Math.max(1, target), totalPages);
+        if (next !== prev) {
+          scrollGalleryToTop();
+        }
+        return next;
+      });
+    },
+    [scrollGalleryToTop, totalPages]
+  );
+
+  const goToPreviousPage = useCallback(() => goToPageNumber(pageIndex - 1), [goToPageNumber, pageIndex]);
+  const goToNextPage = useCallback(() => goToPageNumber(pageIndex + 1), [goToPageNumber, pageIndex]);
+  const goToFirstPage = useCallback(() => goToPageNumber(1), [goToPageNumber]);
+  const goToLastPage = useCallback(() => goToPageNumber(totalPages), [goToPageNumber, totalPages]);
+  const jumpBackTenPages = useCallback(() => goToPageNumber(pageIndex - 10), [goToPageNumber, pageIndex]);
+  const jumpForwardTenPages = useCallback(() => goToPageNumber(pageIndex + 10), [goToPageNumber, pageIndex]);
+
+  useEffect(() => {
+    if (!didInitFilterPageRef.current) {
+      didInitFilterPageRef.current = true;
+      return;
+    }
+
+    if (returningFromDetailRef?.current) {
+      returningFromDetailRef.current = false;
+      return;
+    }
+    setCurrentPage(1);
+    scrollGalleryToTop();
+  }, [
+    selectedFolder,
+    selectedTag,
+    searchTerm,
+    onlyWithVariants,
+    showDuplicatesOnly,
+    showBrokenOnly,
+    embeddingFilter,
+    pageSize,
+    dateFilter,
+    scrollGalleryToTop,
+    returningFromDetailRef,
+  ]);
+
+  useEffect(() => {
+    if (isLoading) return;
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, isLoading, totalPages]);
 
   return {
     selectedFolder,
@@ -317,11 +441,32 @@ export function useGalleryFilters({
     unhideTagByName,
     clearHiddenTags,
     filteredImages,
+    filteredWithVariants,
     sortedImages,
     duplicateGroups,
     duplicateIds,
     childrenMap,
     hasActiveFilters,
     clearFilters,
+    currentPage,
+    setCurrentPage,
+    pageSize,
+    setPageSize,
+    totalPages,
+    pageImages,
+    showPagination,
+    hasResults,
+    pageIndex,
+    currentPageRangeLabel,
+    prevPageRangeLabel,
+    nextPageRangeLabel,
+    goToPageNumber,
+    goToPreviousPage,
+    goToNextPage,
+    goToFirstPage,
+    goToLastPage,
+    jumpBackTenPages,
+    jumpForwardTenPages,
+    scrollGalleryToTop,
   };
 }

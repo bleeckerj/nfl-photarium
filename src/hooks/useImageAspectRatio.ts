@@ -14,6 +14,25 @@ interface AspectRatioResult {
 const aspectRatioCache = new Map<string, { aspectRatio: string; dimensions: { width: number; height: number } }>();
 
 /**
+ * Get cached dimensions for an image (synchronous)
+ * Returns undefined if not yet calculated
+ */
+export function getCachedDimensions(imageId: string): { width: number; height: number } | undefined {
+  return aspectRatioCache.get(imageId)?.dimensions;
+}
+
+/**
+ * Get all cached dimensions as a Map
+ */
+export function getAllCachedDimensions(): Map<string, { width: number; height: number }> {
+  const result = new Map<string, { width: number; height: number }>();
+  aspectRatioCache.forEach((value, key) => {
+    result.set(key, value.dimensions);
+  });
+  return result;
+}
+
+/**
  * Custom hook to calculate and cache aspect ratios for images
  * @param imageId - The Cloudflare image ID
  * @param shouldCalculate - Whether to calculate the aspect ratio (default: true)

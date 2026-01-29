@@ -2,8 +2,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { fetchCloudflareImages } from '@/utils/cloudflareClient';
 import { addFolder, listStoredFolders } from '@/utils/folderStore';
 
-export async function GET() {
+const resolveNamespaceFilter = (request: NextRequest): string | null => {
+  const namespaceParam = request.nextUrl.searchParams.get('namespace');
+  const defaultNamespace = process.env.IMAGE_NAMESPACE || process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || '';
+  if (namespaceParam === '__all__') return null;
+  if (namespaceParam === '__none__') return '';
+  if (namespaceParam !== null) return namespaceParam.trim();
+  return defaultNamespace;
+};
+
+export async function GET(request: NextRequest) {
   try {
+    const namespace = resolveNamespaceFilter(request);
     const [cloudflareImages, storedFolders] = await Promise.all([
       fetchCloudflareImages().catch((err) => {
         console.error('Failed to fetch Cloudflare images for folder list', err);
@@ -12,15 +22,27 @@ export async function GET() {
       listStoredFolders()
     ]);
 
+    const filteredImages = namespace === null
+      ? cloudflareImages
+      : namespace === ''
+        ? cloudflareImages.filter((image) => !image.namespace)
+        : cloudflareImages.filter((image) => image.namespace === namespace);
+
     const derivedFolders = Array.from(
       new Set(
-        cloudflareImages
+        filteredImages
           .map((image) => image.folder)
           .filter((folder): folder is string => Boolean(folder))
       )
     );
 
-    const allFolders = Array.from(new Set([...storedFolders, ...derivedFolders])).sort((a, b) => a.localeCompare(b));
+    const includeStoredFolders = namespace === null;
+    const allFolders = Array.from(
+      new Set([
+        ...(includeStoredFolders ? storedFolders : []),
+        ...derivedFolders
+      ])
+    ).sort((a, b) => a.localeCompare(b));
 
     return NextResponse.json({ folders: allFolders });
   } catch (error) {

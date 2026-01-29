@@ -167,7 +167,7 @@ export default function ImageDetailPage() {
       return;
     }
 
-    // If we navigated here from the gallery, return deterministically to the same page.
+    // Always go directly to the gallery. Use gpage/gns if present to restore position.
     try {
       const params = new URLSearchParams(window.location.search);
       const gpage = params.get('gpage');
@@ -180,11 +180,6 @@ export default function ImageDetailPage() {
       // ignore
     }
 
-    // Fallback: go back if possible (preserves history), else go home.
-    if (window.history.length > 1) {
-      router.back();
-      return;
-    }
     router.push('/');
   }, [router]);
 
@@ -193,6 +188,7 @@ export default function ImageDetailPage() {
   const [adoptImageId, setAdoptImageId] = useState('');
   const [parentActionLoading, setParentActionLoading] = useState(false);
   const [childDetachingId, setChildDetachingId] = useState<string | null>(null);
+  const [swappingParentId, setSwappingParentId] = useState<string | null>(null);
   const [adoptLoading, setAdoptLoading] = useState(false);
   const [adoptSearch, setAdoptSearch] = useState('');
   const [childUploadFiles, setChildUploadFiles] = useState<File[]>([]);
@@ -209,7 +205,7 @@ export default function ImageDetailPage() {
   const [variationPage, setVariationPage] = useState(1);
   const [adoptPage, setAdoptPage] = useState(1);
   const [listVariant, setListVariant] = useState(DEFAULT_LIST_VARIANT);
-  const VARIATION_PAGE_SIZE = 12;
+  const VARIATION_PAGE_SIZE = 25;
   const ADOPT_PAGE_SIZE = 12;
   const [hoverPreview, setHoverPreview] = useState<{
     url: string;
@@ -244,6 +240,8 @@ export default function ImageDetailPage() {
   const [promptThisInput, setPromptThisInput] = useState('');
   const [promptThisLoading, setPromptThisLoading] = useState(false);
   const [promptThisGenerating, setPromptThisGenerating] = useState(false);
+  const [promptThisSaving, setPromptThisSaving] = useState(false);
+  const [lastSavedPromptThis, setLastSavedPromptThis] = useState<string>('');
   const [promptThisMeta, setPromptThisMeta] = useState<{ saved?: boolean; updatedAt?: string; model?: string } | null>(null);
   const [originalUrlInput, setOriginalUrlInput] = useState('');
   const [sourceUrlInput, setSourceUrlInput] = useState('');
@@ -251,6 +249,13 @@ export default function ImageDetailPage() {
   const [clearExif, setClearExif] = useState(false);
   const [shareBaseUrl, setShareBaseUrl] = useState('');
   const [embeddingGenerating, setEmbeddingGenerating] = useState(false);
+  // Image Extras state (description/altText stored in Redis/file fallback)
+  const [extrasRecord, setExtrasRecord] = useState<{
+    description?: string;
+    altText?: string;
+    promptThis?: { text: string; provider: string; model?: string; updatedAt?: string };
+  } | null>(null);
+  const [extrasLoading, setExtrasLoading] = useState(false);
   const [shareVariant, setShareVariant] = useState('large');
   const [shareQrDataUrl, setShareQrDataUrl] = useState('');
   const [namespace, setNamespace] = useState('');
@@ -460,6 +465,43 @@ export default function ImageDetailPage() {
       mounted = false;
     };
   }, [id, namespace, syncImages]);
+
+  // Fetch Image Extras (description/altText) from Redis/file storage with Cloudflare fallback
+  useEffect(() => {
+    if (!id) {
+      setExtrasRecord(null);
+      return;
+    }
+    let mounted = true;
+    setExtrasLoading(true);
+    (async () => {
+      try {
+        const res = await fetch(`/api/images/${id}/extras`);
+        if (!res.ok) {
+          throw new Error('Failed to fetch extras');
+        }
+        const data = await res.json();
+        if (!mounted) return;
+        setExtrasRecord(data.record || null);
+        // Apply extras values if they exist, otherwise keep Cloudflare values
+        if (data.record?.description) {
+          setDescriptionInput(data.record.description);
+        }
+        if (data.record?.altText) {
+          setAltTextInput(data.record.altText);
+        }
+      } catch (err) {
+        console.error('Failed to fetch image extras', err);
+        // On error, keep the Cloudflare metadata values (already set by syncImages)
+        if (mounted) setExtrasRecord(null);
+      } finally {
+        if (mounted) setExtrasLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [id]);
 
   const variationChildren = useMemo(
     () => (id ? allImages.filter((img) => img.parentId === id) : []),
@@ -1174,13 +1216,14 @@ export default function ImageDetailPage() {
     setFolderSelect(image.folder || '');
     setNewFolderInput('');
     setTagsInput(image.tags ? image.tags.join(', ') : '');
-    setDescriptionInput(image.description || '');
-    setAltTextInput(image.altTag || '');
+    // Use Image Extras values if available, otherwise fall back to Cloudflare metadata
+    setDescriptionInput(extrasRecord?.description || image.description || '');
+    setAltTextInput(extrasRecord?.altText || image.altTag || '');
     setOriginalUrlInput(image.originalUrl || '');
     setSourceUrlInput(image.sourceUrl || '');
     setDisplayNameInput(image.displayName || image.filename || '');
     setClearExif(false);
-  }, [image]);
+  }, [image, extrasRecord]);
 
   const handleSaveMetadata = useCallback(async () => {
     if (!image || !id) {
@@ -1213,6 +1256,26 @@ export default function ImageDetailPage() {
       });
       const body = await res.json() as CloudflareImage | { error: string };
       if (res.ok && !('error' in body)) {
+        // Also save description/altText to Image Extras (primary storage)
+        try {
+          await fetch(`/api/images/${id}/extras`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              description: descriptionInput || null,
+              altText: cleanString(altTextInput) || null,
+            }),
+          });
+          // Update local extras record
+          setExtrasRecord(prev => ({
+            ...prev,
+            description: descriptionInput || undefined,
+            altText: cleanString(altTextInput) || undefined,
+          }));
+        } catch (extrasErr) {
+          console.error('Failed to save to Image Extras', extrasErr);
+          // Continue anyway - Cloudflare metadata was saved
+        }
         toast.push('Metadata updated');
         // Reset clearExif flag after successful save
         setClearExif(false);
@@ -1405,6 +1468,42 @@ export default function ImageDetailPage() {
     [patchParentAssignment, toast]
   );
 
+  const handleSwapParent = useCallback(
+    async (childId: string) => {
+      if (!image) return;
+      if (image.parentId) {
+        toast.push('Open the parent image to swap variants.');
+        return;
+      }
+      if (childId === image.id) return;
+      if (!confirm('Make this variation the parent? The current parent will become a variation.')) return;
+      setSwappingParentId(childId);
+      try {
+        const response = await fetch(`/api/images/${image.id}/swap-parent`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ newParentId: childId })
+        });
+        const payload = await response.json();
+        if (!response.ok) {
+          throw new Error(payload.error || 'Failed to swap parent');
+        }
+        await refreshImageList();
+        if (Array.isArray(payload?.failed) && payload.failed.length > 0) {
+          toast.push('Parent swapped with some failures');
+        } else {
+          toast.push('Parent swapped');
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to swap parent';
+        toast.push(message);
+      } finally {
+        setSwappingParentId(null);
+      }
+    },
+    [image, refreshImageList, toast]
+  );
+
   const handleDeleteChild = useCallback(async (childId: string) => {
     if (!confirm('Delete this variation permanently?')) return;
     try {
@@ -1421,6 +1520,53 @@ export default function ImageDetailPage() {
       toast.push(message);
     }
   }, [toast]);
+
+  const [deletingSelectedVariations, setDeletingSelectedVariations] = useState(false);
+
+  const handleDeleteSelectedVariations = useCallback(async () => {
+    const ids = Array.from(selectedVariationIds);
+    if (ids.length === 0) {
+      toast.push('Select at least one variation');
+      return;
+    }
+    if (!confirm(`Delete ${ids.length} selected variation(s) permanently?`)) return;
+    setDeletingSelectedVariations(true);
+    let deletedCount = 0;
+    const failedIds: string[] = [];
+    try {
+      for (const idValue of ids) {
+        try {
+          const response = await fetch(`/api/images/${idValue}`, { method: 'DELETE' });
+          if (!response.ok) {
+            failedIds.push(idValue);
+            continue;
+          }
+          deletedCount += 1;
+        } catch {
+          failedIds.push(idValue);
+        }
+      }
+      if (deletedCount > 0) {
+        setAllImages(prev => prev.filter(img => !ids.includes(img.id) || failedIds.includes(img.id)));
+        setSelectedVariationIds(prev => {
+          const next = new Set(prev);
+          ids.forEach(id => { if (!failedIds.includes(id)) next.delete(id); });
+          return next;
+        });
+      }
+      if (failedIds.length > 0) {
+        toast.push(`Deleted ${deletedCount}, failed ${failedIds.length}`);
+      } else {
+        toast.push(`Deleted ${deletedCount} variation(s)`);
+      }
+      setVariationPage(1);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to delete variations';
+      toast.push(message);
+    } finally {
+      setDeletingSelectedVariations(false);
+    }
+  }, [selectedVariationIds, toast]);
 
   const handleDeleteParent = useCallback(async () => {
     if (!image) return;
@@ -1751,9 +1897,11 @@ export default function ImageDetailPage() {
       if (record?.prompt && typeof record.prompt === 'string') {
         setPromptThisInput(record.prompt);
         setPromptThisMeta({ saved: true, updatedAt: record.updatedAt, model: record.model });
+        setLastSavedPromptThis(record.prompt);
       } else {
         setPromptThisInput('');
         setPromptThisMeta(null);
+        setLastSavedPromptThis('');
       }
     } catch (error) {
       console.warn('Failed to refresh Prompt This:', error);
@@ -1761,6 +1909,49 @@ export default function ImageDetailPage() {
       setPromptThisLoading(false);
     }
   }, [image?.id]);
+
+  const savePromptThisEdits = useCallback(async () => {
+    if (!image?.id) return;
+
+    const trimmed = (promptThisInput || '').trim();
+    const lastSavedTrimmed = (lastSavedPromptThis || '').trim();
+
+    if (!trimmed) {
+      return;
+    }
+
+    if (trimmed === lastSavedTrimmed) {
+      return;
+    }
+
+    setPromptThisSaving(true);
+    try {
+      const response = await fetch(`/api/images/${image.id}/prompt`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: trimmed })
+      });
+      const data = await response.json();
+      if (!response.ok || !data?.record?.prompt) {
+        toast.push(data?.error || 'Failed to save prompt');
+        return;
+      }
+
+      setPromptThisInput(data.record.prompt);
+      setLastSavedPromptThis(data.record.prompt);
+      setPromptThisMeta({
+        saved: Boolean(data?.saved),
+        updatedAt: data?.record?.updatedAt,
+        model: data?.record?.model
+      });
+      toast.push('Prompt saved');
+    } catch (error) {
+      console.error('Failed to save prompt:', error);
+      toast.push('Failed to save prompt');
+    } finally {
+      setPromptThisSaving(false);
+    }
+  }, [image?.id, lastSavedPromptThis, promptThisInput, toast]);
 
   const generatePromptThis = useCallback(async (force?: boolean) => {
     if (!image?.id) {
@@ -2458,8 +2649,10 @@ export default function ImageDetailPage() {
               setPromptThisInput={setPromptThisInput}
               promptThisLoading={promptThisLoading}
               promptThisGenerating={promptThisGenerating}
+              promptThisSaving={promptThisSaving}
               promptThisMeta={promptThisMeta}
               onGenerate={generatePromptThis}
+              onSave={savePromptThisEdits}
               onCopy={() => copyToClipboard(promptThisInput || '', 'Prompt', 'Prompt copied')}
             />
 
@@ -2468,7 +2661,7 @@ export default function ImageDetailPage() {
                 <p className="text-xs font-mono font-medum text-gray-700">Folder</p>
                 <FolderManagerButton
                   size="sm"
-                  label="Manage"
+                  label="Edit Folders"
                   onFoldersChanged={handleFolderManagerChange}
                 />
               </div>
@@ -2657,6 +2850,8 @@ export default function ImageDetailPage() {
                 onClearSelection={clearVariationSelection}
                 onGenerateAltForSelected={generateAltForSelectedVariations}
                 variationAltBusy={variationAltBusy}
+                onDeleteSelectedVariations={handleDeleteSelectedVariations}
+                deletingSelectedVariations={deletingSelectedVariations}
                 pagedVariations={pagedVariations}
                 displayedVariations={displayedVariations}
                 variationOrderIndex={variationOrderIndex}
@@ -2676,6 +2871,8 @@ export default function ImageDetailPage() {
                 childDetachingId={childDetachingId}
                 onDetachChild={handleDetachChild}
                 onDeleteChild={handleDeleteChild}
+                swappingParentId={swappingParentId}
+                onSwapParent={handleSwapParent}
                 AspectRatioDisplay={AspectRatioDisplay}
                 variationPage={variationPage}
                 setVariationPage={setVariationPage}

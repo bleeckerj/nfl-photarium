@@ -8,6 +8,7 @@ interface FolderManagerButtonProps {
   size?: 'sm' | 'md';
   className?: string;
   label?: string;
+  namespace?: string;
 }
 
 interface FolderResponse {
@@ -18,7 +19,8 @@ export default function FolderManagerButton({
   onFoldersChanged,
   size = 'sm',
   className = 'font-mono',
-  label = 'Manage'
+  label = 'Manage',
+  namespace,
 }: FolderManagerButtonProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -39,11 +41,19 @@ export default function FolderManagerButton({
     ? 'text-[0.7em] font-mono font-mono px-2 py-1 border border-gray-300 rounded-md hover:bg-gray-100'
     : 'text-sm font-mono px-3 py-1.5 border border-gray-300 rounded-md hover:bg-gray-100';
 
+  const getNamespaceQuery = () => {
+    if (namespace === undefined) return '';
+    if (namespace === '__all__') return 'namespace=__all__';
+    if (namespace === '') return 'namespace=__none__';
+    return `namespace=${encodeURIComponent(namespace)}`;
+  };
+
   const loadFolders = async () => {
     try {
       setLoading(true);
       setError(null);
-      const resp = await fetch('/api/folders');
+      const query = getNamespaceQuery();
+      const resp = await fetch(query ? `/api/folders?${query}` : '/api/folders');
       if (!resp.ok) {
         throw new Error('Failed to load folders');
       }
@@ -105,7 +115,8 @@ export default function FolderManagerButton({
     }
     try {
       setLoading(true);
-      const resp = await fetch(`/api/folders/${encodeURIComponent(folder)}`, {
+      const query = getNamespaceQuery();
+      const resp = await fetch(`${`/api/folders/${encodeURIComponent(folder)}`}${query ? `?${query}` : ''}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newName: renameValue.trim() })
@@ -130,7 +141,8 @@ export default function FolderManagerButton({
     }
     try {
       setLoading(true);
-      const resp = await fetch(`/api/folders/${encodeURIComponent(folder)}`, {
+      const query = getNamespaceQuery();
+      const resp = await fetch(`${`/api/folders/${encodeURIComponent(folder)}`}${query ? `?${query}` : ''}`, {
         method: 'DELETE'
       });
       if (!resp.ok) {

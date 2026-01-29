@@ -35,6 +35,9 @@ export default function RootLayout({
             <Link href="/docs" className="text-xs font-mono text-stone-600 hover:text-stone-900 transition-colors">
               Docs
             </Link>
+            <Link href="/faq" className="text-xs font-mono text-stone-600 hover:text-stone-900 transition-colors">
+              FAQ
+            </Link>
           </div>
           <div className="flex items-center gap-4">
             <RedisStatusBanner />

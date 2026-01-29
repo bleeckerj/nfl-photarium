@@ -38,6 +38,12 @@ interface GalleryFiltersProps {
   onShowVariationsOnlyChange: (value: boolean) => void;
   showOnlyMissingEmbeddings: boolean;
   onShowOnlyMissingEmbeddingsChange: (value: boolean) => void;
+  onlyCanonical: boolean;
+  onOnlyCanonicalChange: (value: boolean) => void;
+  respectAspectRatio: boolean;
+  onRespectAspectRatioChange: (value: boolean) => void;
+  showBrokenOnly: boolean;
+  onShowBrokenOnlyChange: (value: boolean) => void;
   
   // Clear all
   onClearFilters: () => void;
@@ -65,6 +71,12 @@ export const GalleryFilters: React.FC<GalleryFiltersProps> = ({
   onShowVariationsOnlyChange,
   showOnlyMissingEmbeddings,
   onShowOnlyMissingEmbeddingsChange,
+  onlyCanonical,
+  onOnlyCanonicalChange,
+  respectAspectRatio,
+  onRespectAspectRatioChange,
+  showBrokenOnly,
+  onShowBrokenOnlyChange,
   onClearFilters,
   hasActiveFilters,
 }) => {
@@ -83,7 +95,7 @@ export const GalleryFilters: React.FC<GalleryFiltersProps> = ({
   const tagOptions = [
     { value: '', label: 'All Tags' },
     ...allTags
-      .filter((t) => !hiddenTags.has(t))
+      .filter((t) => !hiddenTags.has(t.toLowerCase()))
       .map((t) => ({ value: t, label: t })),
   ];
 
@@ -112,7 +124,7 @@ export const GalleryFilters: React.FC<GalleryFiltersProps> = ({
         </div>
 
         {/* Folder filter */}
-        <div className="relative">
+        <div className="relative flex items-center">
           <MonoSelect
             options={folderOptions}
             value={selectedFolder}
@@ -124,7 +136,7 @@ export const GalleryFilters: React.FC<GalleryFiltersProps> = ({
             className="ml-1 px-1.5 py-1 text-[0.7em] font-mono bg-white border rounded hover:bg-gray-100 transition"
             title="Manage hidden folders"
           >
-            👁
+            ≡
           </button>
           
           {/* Folder visibility dropdown */}
@@ -165,7 +177,7 @@ export const GalleryFilters: React.FC<GalleryFiltersProps> = ({
         </div>
 
         {/* Tag filter */}
-        <div className="relative">
+        <div className="relative flex items-center">
           <MonoSelect
             options={tagOptions}
             value={selectedTag}
@@ -177,7 +189,7 @@ export const GalleryFilters: React.FC<GalleryFiltersProps> = ({
             className="ml-1 px-1.5 py-1 text-[0.7em] font-mono bg-white border rounded hover:bg-gray-100 transition"
             title="Manage hidden tags"
           >
-            👁
+            ≡
           </button>
           
           {/* Tag visibility dropdown */}
@@ -203,7 +215,7 @@ export const GalleryFilters: React.FC<GalleryFiltersProps> = ({
                   >
                     <input
                       type="checkbox"
-                      checked={!hiddenTags.has(tag)}
+                       checked={!hiddenTags.has(tag.toLowerCase())}
                       onChange={() => onToggleHiddenTag(tag)}
                       className="rounded"
                     />
@@ -228,6 +240,30 @@ export const GalleryFilters: React.FC<GalleryFiltersProps> = ({
 
       {/* Row 2: Toggle checkboxes */}
       <div className="flex flex-wrap items-center gap-4">
+        <label className="flex items-center gap-1.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={onlyCanonical}
+            onChange={(e) => onOnlyCanonicalChange(e.target.checked)}
+            className="rounded"
+          />
+          <span className="text-[0.7em] font-mono text-gray-700">
+            Canonical Only
+          </span>
+        </label>
+
+        <label className="flex items-center gap-1.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={respectAspectRatio}
+            onChange={(e) => onRespectAspectRatioChange(e.target.checked)}
+            className="rounded"
+          />
+          <span className="text-[0.7em] font-mono text-gray-700">
+            Respect Aspect Ratio
+          </span>
+        </label>
+
         <label className="flex items-center gap-1.5 cursor-pointer">
           <input
             type="checkbox"
@@ -261,6 +297,17 @@ export const GalleryFilters: React.FC<GalleryFiltersProps> = ({
           />
           <span className="text-[0.7em] font-mono text-gray-700">
             Missing Embeddings
+          </span>
+        </label>
+        <label className="flex items-center gap-1.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showBrokenOnly}
+            onChange={(e) => onShowBrokenOnlyChange(e.target.checked)}
+            className="rounded"
+          />
+          <span className="text-[0.7em] font-mono text-gray-700">
+            Broken Only
           </span>
         </label>
       </div>

@@ -6,8 +6,10 @@ export function PromptThisEditor(props: {
   setPromptThisInput: (value: string) => void;
   promptThisLoading: boolean;
   promptThisGenerating: boolean;
+  promptThisSaving?: boolean;
   promptThisMeta: { saved?: boolean; updatedAt?: string; model?: string } | null;
   onGenerate: (force?: boolean) => void;
+  onSave?: () => void;
   onCopy: () => void;
 }) {
   const {
@@ -15,8 +17,10 @@ export function PromptThisEditor(props: {
     setPromptThisInput,
     promptThisLoading,
     promptThisGenerating,
+    promptThisSaving,
     promptThisMeta,
     onGenerate,
+    onSave,
     onCopy
   } = props;
 
@@ -52,12 +56,23 @@ export function PromptThisEditor(props: {
           >
             Copy
           </button>
+          {onSave && (
+            <button
+              onClick={onSave}
+              disabled={!promptThisInput || Boolean(promptThisSaving)}
+              className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border border-gray-200 text-gray-700 hover:border-gray-300 disabled:opacity-50"
+              title="Save your edits"
+            >
+              {promptThisSaving ? 'Saving…' : 'Save'}
+            </button>
+          )}
         </div>
       </div>
 
       <textarea
         value={promptThisInput}
         onChange={(e) => setPromptThisInput(e.target.value)}
+        onBlur={() => onSave?.()}
         placeholder={promptThisLoading ? 'Loading…' : 'No prompt yet'}
         className="w-full font-mono text-xs border border-gray-300 rounded-md px-3 py-2 mt-2 bg-white text-gray-800 min-h-[96px]"
         rows={4}
