@@ -11,7 +11,7 @@ import { filterImagesForGallery } from '@/utils/galleryFilter';
 import { loadHiddenFolders, loadHiddenTags, persistHiddenFolders, persistHiddenTags } from '../storage';
 import { computeDuplicateGroups, buildChildrenMap, formatDateRangeLabel } from '../utils';
 import { DEFAULT_PAGE_SIZE } from '../constants';
-import type { CloudflareImage, DateFilter, EmbeddingFilter, DuplicateGroup } from '../types';
+import type { CloudflareImage, DateFilter, EmbeddingFilter, DuplicateGroup, AspectRatioClass } from '../types';
 
 interface UseGalleryFiltersOptions {
   images: CloudflareImage[];
@@ -24,6 +24,7 @@ interface UseGalleryFiltersOptions {
     onlyWithVariants: boolean;
     showDuplicatesOnly: boolean;
     showBrokenOnly: boolean;
+    aspectRatioFilters?: AspectRatioClass[];
     dateFilter: DateFilter | null;
     pageSize?: number;
     currentPage?: number;
@@ -53,6 +54,8 @@ interface UseGalleryFiltersReturn {
   setShowBrokenOnly: (value: boolean) => void;
   embeddingFilter: EmbeddingFilter;
   setEmbeddingFilter: (filter: EmbeddingFilter) => void;
+  aspectRatioFilters: AspectRatioClass[];
+  setAspectRatioFilters: (filters: AspectRatioClass[]) => void;
   dateFilter: DateFilter | null;
   setDateFilter: (filter: DateFilter | null) => void;
   
@@ -116,6 +119,9 @@ export function useGalleryFilters({
   const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(initialPreferences.showDuplicatesOnly);
   const [showBrokenOnly, setShowBrokenOnly] = useState(initialPreferences.showBrokenOnly);
   const [embeddingFilter, setEmbeddingFilter] = useState<EmbeddingFilter>('none');
+  const [aspectRatioFilters, setAspectRatioFilters] = useState<AspectRatioClass[]>(
+    initialPreferences.aspectRatioFilters ?? []
+  );
   const [dateFilter, setDateFilter] = useState<DateFilter | null>(initialPreferences.dateFilter);
   const [currentPage, setCurrentPage] = useState(initialPreferences.currentPage ?? 1);
   const [pageSize, setPageSize] = useState(initialPreferences.pageSize ?? DEFAULT_PAGE_SIZE);
@@ -265,15 +271,31 @@ export function useGalleryFilters({
     });
   }, [brokenFilteredImages, embeddingFilter]);
 
+  const aspectRatioFilteredImages = useMemo(() => {
+    if (!aspectRatioFilters.length) return embeddingFilteredImages;
+    return embeddingFilteredImages.filter(image => {
+      if (!image.dimensions?.width || !image.dimensions?.height) return false;
+      const ratio = image.dimensions.width / image.dimensions.height;
+      const isSquare = Math.abs(ratio - 1) <= 0.05;
+      const isHorizontal = ratio > 1.05;
+      const isVertical = ratio < 0.95;
+      return (
+        (aspectRatioFilters.includes('square') && isSquare) ||
+        (aspectRatioFilters.includes('horizontal') && isHorizontal) ||
+        (aspectRatioFilters.includes('vertical') && isVertical)
+      );
+    });
+  }, [embeddingFilteredImages, aspectRatioFilters]);
+
   const filteredWithVariants = useMemo(() => {
-    if (!onlyWithVariants) return embeddingFilteredImages;
+    if (!onlyWithVariants) return aspectRatioFilteredImages;
     const parentIdsWithChildren = new Set(
       Object.entries(childrenMap)
         .filter(([, value]) => (value?.length ?? 0) > 0)
         .map(([key]) => key)
     );
-    return embeddingFilteredImages.filter(image => parentIdsWithChildren.has(image.id));
-  }, [embeddingFilteredImages, onlyWithVariants, childrenMap]);
+    return aspectRatioFilteredImages.filter(image => parentIdsWithChildren.has(image.id));
+  }, [aspectRatioFilteredImages, onlyWithVariants, childrenMap]);
 
   const sortedImages = useMemo(() => {
     return [...filteredWithVariants].sort(
@@ -301,6 +323,7 @@ export function useGalleryFilters({
     showDuplicatesOnly ||
     showBrokenOnly ||
     embeddingFilter !== 'none' ||
+    aspectRatioFilters.length > 0 ||
     hiddenFolders.length > 0 ||
     hiddenTags.length > 0 ||
     dateFilter !== null
@@ -317,6 +340,7 @@ export function useGalleryFilters({
     setShowDuplicatesOnly(false);
     setShowBrokenOnly(false);
     setEmbeddingFilter('none');
+    setAspectRatioFilters([]);
     setHiddenFolders([]);
     setHiddenTags([]);
     setDateFilter(null);
@@ -430,6 +454,8 @@ export function useGalleryFilters({
     setShowBrokenOnly,
     embeddingFilter,
     setEmbeddingFilter,
+    aspectRatioFilters,
+    setAspectRatioFilters,
     dateFilter,
     setDateFilter,
     hiddenFolders,

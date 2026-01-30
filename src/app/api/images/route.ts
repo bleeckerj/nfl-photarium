@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCachedImages, getCacheStats } from '@/server/cloudflareImageCache';
-import { batchGetColorMetadata, isVectorSearchAvailable } from '@/server/vectorSearch';
+import { batchGetAspectMetadata, batchGetColorMetadata, isVectorSearchAvailable } from '@/server/vectorSearch';
 
 export async function GET(request: NextRequest) {
   try {
     const forceRefresh = request.nextUrl.searchParams.get('refresh') === '1';
+    const aspectRatioClass = request.nextUrl.searchParams.get('aspectRatioClass')?.trim();
+    const aspectRatio = request.nextUrl.searchParams.get('aspectRatio')?.trim();
     const namespaceParam = request.nextUrl.searchParams.get('namespace');
     const defaultNamespace = process.env.IMAGE_NAMESPACE || process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || '';
     const namespace =
@@ -29,9 +31,11 @@ export async function GET(request: NextRequest) {
       if (redisAvailable && filtered.length > 0) {
         const imageIds = filtered.map(img => img.id);
         const colorMetadata = await batchGetColorMetadata(imageIds);
+        const aspectMetadata = await batchGetAspectMetadata(imageIds);
         
         imagesWithEmbeddings = filtered.map(img => {
           const meta = colorMetadata.get(img.id);
+          const aspect = aspectMetadata.get(img.id);
           if (meta) {
             return {
               ...img,
@@ -39,6 +43,19 @@ export async function GET(request: NextRequest) {
               hasColorEmbedding: meta.hasColorEmbedding,
               dominantColors: meta.dominantColors ?? img.dominantColors,
               averageColor: meta.averageColor ?? img.averageColor,
+              aspectRatio: aspect?.aspectRatio ?? img.aspectRatio,
+              dimensions: aspect?.width && aspect?.height
+                ? { width: aspect.width, height: aspect.height }
+                : img.dimensions,
+            };
+          }
+          if (aspect) {
+            return {
+              ...img,
+              aspectRatio: aspect.aspectRatio ?? img.aspectRatio,
+              dimensions: aspect.width && aspect.height
+                ? { width: aspect.width, height: aspect.height }
+                : img.dimensions,
             };
           }
           return img;
@@ -49,8 +66,28 @@ export async function GET(request: NextRequest) {
       console.warn('[ImagesAPI] Redis unavailable for embedding status:', redisError);
     }
     
+    let finalImages = imagesWithEmbeddings;
+    if (aspectRatioClass || aspectRatio) {
+      finalImages = imagesWithEmbeddings.filter((image) => {
+        if (aspectRatioClass) {
+          const ratio = image.dimensions
+            ? image.dimensions.width / image.dimensions.height
+            : null;
+          const isSquare = ratio !== null && Math.abs(ratio - 1) <= 0.05;
+          if (aspectRatioClass === 'square') return Boolean(isSquare);
+          if (aspectRatioClass === 'horizontal') return ratio !== null && ratio > 1.05;
+          if (aspectRatioClass === 'vertical') return ratio !== null && ratio < 0.95;
+          return false;
+        }
+        if (aspectRatio) {
+          return image.aspectRatio === aspectRatio;
+        }
+        return true;
+      });
+    }
+
     const cache = getCacheStats();
-    return NextResponse.json({ images: imagesWithEmbeddings, cache, namespace: namespace ?? null });
+    return NextResponse.json({ images: finalImages, cache, namespace: namespace ?? null });
   } catch (error) {
     console.error('Fetch images error:', error);
     return NextResponse.json(

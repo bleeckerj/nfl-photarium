@@ -9,6 +9,9 @@ import { extractExifSummary } from '@/utils/exif';
 import { extractSnagx } from '@/utils/snagx';
 import { sanitizeFilename, MAX_FILENAME_LENGTH } from '@/utils/filename';
 import { queueAutoEmbeddingsForImage, type AutoEmbeddingsStatus } from '@/server/autoEmbeddings';
+import { calculateAspectRatio } from '@/utils/imageUtils';
+import { classifyAspectRatio } from '@/server/aspectRatio';
+import { storeImageAspectMetadata } from '@/server/vectorSearch';
 
 // Re-export for backward compatibility
 export { sanitizeFilename, MAX_FILENAME_LENGTH } from '@/utils/filename';
@@ -62,6 +65,23 @@ export type UploadFailure = {
 
 const logIssue = (message: string, details?: Record<string, unknown>) => {
   console.warn('[upload] ' + message, details);
+};
+
+const persistAspectMetadataFromBuffer = async (imageId: string, buffer: Buffer) => {
+  try {
+    const metadata = await sharp(buffer).metadata();
+    if (!metadata.width || !metadata.height) return;
+    const ratio = calculateAspectRatio(metadata.width, metadata.height);
+    await storeImageAspectMetadata({
+      imageId,
+      aspectRatio: ratio.common,
+      aspectRatioClass: classifyAspectRatio(metadata.width, metadata.height),
+      width: metadata.width,
+      height: metadata.height,
+    });
+  } catch (error) {
+    console.warn('[upload] Failed to persist aspect ratio metadata', error);
+  }
 };
 
 const shrinkIfNeeded = async (input: Buffer, type: string): Promise<Buffer> => {
@@ -289,6 +309,8 @@ export async function uploadImageBuffer({
   });
   upsertCachedImage(primaryCached);
 
+  await persistAspectMetadataFromBuffer(imageData.id, finalBuffer);
+
   const autoEmbeddings = await queueAutoEmbeddingsForImage(primaryCached);
 
   let webpVariantId: string | undefined;
@@ -337,6 +359,7 @@ export async function uploadImageBuffer({
               : webpMetadataPayload
           });
           upsertCachedImage(cachedVariant);
+          await persistAspectMetadataFromBuffer(webpResult.id, webpBuffer);
           await queueAutoEmbeddingsForImage(cachedVariant);
         }
       }

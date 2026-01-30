@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import sharp, { FormatEnum } from 'sharp';
 import { parseCloudflareMetadata } from '@/utils/cloudflareMetadata';
+import { calculateAspectRatio } from '@/utils/imageUtils';
 import { transformApiImageToCached, upsertCachedImage } from '@/server/cloudflareImageCache';
 import { fetchCloudflareImage, getCloudflareCredentials } from '@/server/cloudflareClient';
+import { classifyAspectRatio } from '@/server/aspectRatio';
+import { storeImageAspectMetadata } from '@/server/vectorSearch';
 
 type SharpFormat = keyof FormatEnum;
 
@@ -149,6 +152,21 @@ export async function POST(
         meta: newImage.meta ?? rotatedMetadata
       })
     );
+
+    try {
+      if (info.width && info.height) {
+        const ratio = calculateAspectRatio(info.width, info.height);
+        await storeImageAspectMetadata({
+          imageId: newImage.id,
+          aspectRatio: ratio.common,
+          aspectRatioClass: classifyAspectRatio(info.width, info.height),
+          width: info.width,
+          height: info.height,
+        });
+      }
+    } catch (err) {
+      console.warn('[rotate] Failed to store aspect ratio metadata', err);
+    }
 
     const publicUrl = newImage.variants.find((variant: string) => variant.includes('/public')) ?? newImage.variants[0];
 

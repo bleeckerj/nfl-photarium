@@ -94,7 +94,10 @@ describe('POST /api/upload/external', () => {
     expect(payload.id).toBe('abc123');
     expect(payload.url).toContain('public');
     expect(payload.folder).toBe('astro-uploads');
-    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://api.cloudflare.com/client/v4/accounts/acct/images/v1',
+      expect.objectContaining({ method: 'POST' })
+    );
   });
 
   it('creates a webp variant when uploading an SVG', async () => {

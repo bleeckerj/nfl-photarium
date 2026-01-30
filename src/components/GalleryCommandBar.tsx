@@ -25,6 +25,7 @@ interface GalleryCommandBarProps {
   onGoToPage: (page: number) => void;
   embeddingFilter: 'none' | 'missing-clip' | 'missing-color' | 'missing-any';
   onSetEmbeddingFilter: (filter: 'none' | 'missing-clip' | 'missing-color' | 'missing-any') => void;
+  onClose?: () => void;
 }
 
 const baseHelp = [
@@ -71,7 +72,8 @@ export default function GalleryCommandBar({
   totalPages,
   onGoToPage,
   embeddingFilter,
-  onSetEmbeddingFilter
+  onSetEmbeddingFilter,
+  onClose
 }: GalleryCommandBarProps) {
   const [inputValue, setInputValue] = useState('');
   const [statusLine, setStatusLine] = useState(baseHelp);
@@ -460,11 +462,23 @@ export default function GalleryCommandBar({
 
   return (
     <div className="bg-slate-950/90 border border-slate-800 rounded-lg px-3 py-3">
-      <div className="flex items-center gap-2 text-[0.6rem] uppercase tracking-wide text-slate-400">
-        <span className="text-green-300">Gallery CLI</span>
-        <span className="text-slate-500 lowercase">
-          hide folder maintenance | page {currentPage}/{totalPages}
-        </span>
+      <div className="flex items-center justify-between gap-2 text-[0.6rem] uppercase tracking-wide text-slate-400">
+        <div className="flex items-center gap-2">
+          <span className="text-green-300">Gallery CLI</span>
+          <span className="text-slate-500 lowercase">
+            hide folder maintenance | page {currentPage}/{totalPages}
+          </span>
+        </div>
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-slate-400 hover:text-slate-200"
+            aria-label="Hide CLI"
+          >
+            ✕
+          </button>
+        )}
       </div>
       <form onSubmit={handleSubmit} className="flex items-center gap-2 mt-2">
         <span className="text-green-300 text-sm">$</span>

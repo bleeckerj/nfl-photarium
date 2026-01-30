@@ -36,6 +36,10 @@ const KEY_PREFIX = 'image:';
 // Vector field names
 const CLIP_FIELD = 'clip_embedding';
 const COLOR_FIELD = 'color_histogram';
+const ASPECT_RATIO_FIELD = 'aspect_ratio';
+const ASPECT_RATIO_CLASS_FIELD = 'aspect_ratio_class';
+const WIDTH_FIELD = 'width';
+const HEIGHT_FIELD = 'height';
 
 export interface VectorSearchResult {
   imageId: string;
@@ -52,6 +56,18 @@ export interface ImageVectorData {
   colorHistogram?: number[];
   dominantColors?: string[];
   averageColor?: string;
+  aspectRatio?: string;
+  aspectRatioClass?: string;
+  width?: number;
+  height?: number;
+}
+
+export interface ImageAspectMetadata {
+  imageId: string;
+  aspectRatio?: string;
+  aspectRatioClass?: string;
+  width?: number;
+  height?: number;
 }
 
 // Singleton client instance
@@ -210,7 +226,50 @@ export async function storeImageVectors(data: ImageVectorData): Promise<void> {
     fields.average_color = data.averageColor;
   }
 
+  if (data.aspectRatio) {
+    fields[ASPECT_RATIO_FIELD] = data.aspectRatio;
+  }
+
+  if (data.aspectRatioClass) {
+    fields[ASPECT_RATIO_CLASS_FIELD] = data.aspectRatioClass;
+  }
+
+  if (typeof data.width === 'number') {
+    fields[WIDTH_FIELD] = data.width;
+  }
+
+  if (typeof data.height === 'number') {
+    fields[HEIGHT_FIELD] = data.height;
+  }
+
   await client.hset(key, fields);
+}
+
+export async function storeImageAspectMetadata(data: ImageAspectMetadata): Promise<void> {
+  const client = await getRedisClient();
+  const key = `${KEY_PREFIX}${data.imageId}`;
+
+  const fields: Record<string, string | number> = {};
+
+  if (data.aspectRatio) {
+    fields[ASPECT_RATIO_FIELD] = data.aspectRatio;
+  }
+
+  if (data.aspectRatioClass) {
+    fields[ASPECT_RATIO_CLASS_FIELD] = data.aspectRatioClass;
+  }
+
+  if (typeof data.width === 'number') {
+    fields[WIDTH_FIELD] = data.width;
+  }
+
+  if (typeof data.height === 'number') {
+    fields[HEIGHT_FIELD] = data.height;
+  }
+
+  if (Object.keys(fields).length > 0) {
+    await client.hset(key, fields);
+  }
 }
 
 /**
@@ -553,6 +612,14 @@ export interface ImageColorMetadata {
   hasColorEmbedding: boolean;
 }
 
+export interface ImageAspectRatioMetadata {
+  imageId: string;
+  aspectRatio?: string;
+  aspectRatioClass?: string;
+  width?: number;
+  height?: number;
+}
+
 /**
  * Get color metadata for multiple images in batch
  * Returns only color info (dominant colors, average color) and embedding status flags
@@ -601,6 +668,51 @@ export async function batchGetColorMetadata(imageIds: string[]): Promise<Map<str
           : undefined,
         hasClipEmbedding: !!clipRaw,
         hasColorEmbedding: !!colorRaw,
+      });
+    }
+  }
+
+  return results;
+}
+
+export async function batchGetAspectMetadata(imageIds: string[]): Promise<Map<string, ImageAspectRatioMetadata>> {
+  const client = await getRedisClient();
+  const results = new Map<string, ImageAspectRatioMetadata>();
+
+  const pipeline = (client as unknown as { pipeline: () => {
+    hget: (key: string, field: string) => unknown;
+    exec: () => Promise<[Error | null, unknown][]>;
+  } }).pipeline();
+
+  for (const imageId of imageIds) {
+    const key = `${KEY_PREFIX}${imageId}`;
+    pipeline.hget(key, ASPECT_RATIO_FIELD);
+    pipeline.hget(key, ASPECT_RATIO_CLASS_FIELD);
+    pipeline.hget(key, WIDTH_FIELD);
+    pipeline.hget(key, HEIGHT_FIELD);
+  }
+
+  const responses = await pipeline.exec();
+  if (!responses) return results;
+
+  for (let i = 0; i < imageIds.length; i++) {
+    const imageId = imageIds[i];
+    const baseIdx = i * 4;
+
+    const [, aspectRatioRaw] = responses[baseIdx] || [];
+    const [, aspectRatioClassRaw] = responses[baseIdx + 1] || [];
+    const [, widthRaw] = responses[baseIdx + 2] || [];
+    const [, heightRaw] = responses[baseIdx + 3] || [];
+
+    if (aspectRatioRaw || aspectRatioClassRaw || widthRaw || heightRaw) {
+      const width = typeof widthRaw === 'string' ? Number(widthRaw) : undefined;
+      const height = typeof heightRaw === 'string' ? Number(heightRaw) : undefined;
+      results.set(imageId, {
+        imageId,
+        aspectRatio: typeof aspectRatioRaw === 'string' ? aspectRatioRaw : undefined,
+        aspectRatioClass: typeof aspectRatioClassRaw === 'string' ? aspectRatioClassRaw : undefined,
+        width: Number.isFinite(width as number) ? (width as number) : undefined,
+        height: Number.isFinite(height as number) ? (height as number) : undefined,
       });
     }
   }

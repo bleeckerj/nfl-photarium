@@ -37,6 +37,8 @@ interface ImageCardProps {
   onGenerateAlt: (imageId: string) => void;
   onCopyUrl: (imageId: string) => void;
   onCopyNamespace: (namespace: string) => void;
+  onBeforeNavigate?: () => void;
+  galleryReturnHrefSuffix?: string;
   // Hover preview
   onMouseEnter: (imageId: string, event: React.MouseEvent) => void;
   onMouseMove: (imageId: string, event: React.MouseEvent) => void;
@@ -73,6 +75,8 @@ export const ImageCard: React.FC<ImageCardProps> = ({
   onGenerateAlt,
   onCopyUrl,
   onCopyNamespace,
+  onBeforeNavigate,
+  galleryReturnHrefSuffix,
   onMouseEnter,
   onMouseMove,
   onMouseLeave,
@@ -88,7 +92,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
       } ${bulkSelectionMode ? 'cursor-pointer' : ''}`}
     >
       <Link
-        href={`/images/${image.id}`}
+        href={`/images/${image.id}${galleryReturnHrefSuffix ?? ''}`}
         className={`relative block w-full ${respectAspectRatio ? '' : 'aspect-square'}`}
         style={
           respectAspectRatio && image.dimensions
@@ -101,7 +105,9 @@ export const ImageCard: React.FC<ImageCardProps> = ({
           if (bulkSelectionMode) {
             e.preventDefault();
             onToggleSelection(image.id);
+            return;
           }
+          onBeforeNavigate?.();
         }}
         onMouseEnter={(e) => onMouseEnter(image.id, e)}
         onMouseMove={(e) => onMouseMove(image.id, e)}
@@ -205,14 +211,6 @@ export const ImageCard: React.FC<ImageCardProps> = ({
             ) : (
               <p className="text-gray-400">🏷️ [no tags]</p>
             )}
-            <p
-              className={`text-[0.6rem] truncate leading-snug ${
-                image.altTag ? 'text-gray-600' : 'text-gray-400 italic'
-              }`}
-              title={image.altTag || undefined}
-            >
-              {image.altTag ? `📝 ${image.altTag}` : 'No ALT text yet'}
-            </p>
             {variationChildren && variationChildren.length > 0 && (
               <p className="text-[0.6rem] text-blue-600 flex items-center gap-1" title="Has variations">
                 <Layers className="h-3.5 w-3.5" />

@@ -49,6 +49,7 @@ export type BulkFolderMode = 'existing' | 'new';
 export type BulkTagsMode = 'replace' | 'append';
 export type BulkDisplayNameMode = 'custom' | 'auto' | 'clear';
 export type EmbeddingFilter = 'none' | 'missing-clip' | 'missing-color' | 'missing-any';
+export type AspectRatioClass = 'horizontal' | 'vertical' | 'square';
 
 export interface DateFilter {
   year: number;

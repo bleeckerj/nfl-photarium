@@ -151,6 +151,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         bulkFolderMode: 'existing' as 'existing' | 'new',
         showDuplicatesOnly: false,
         showBrokenOnly: false,
+        aspectRatioFilters: [],
+        showCli: true,
         pageSize: DEFAULT_PAGE_SIZE,
         dateFilter: null as DateFilter | null,
         currentPage: 1
@@ -173,6 +175,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           bulkFolderMode?: 'existing' | 'new';
           showDuplicatesOnly?: boolean;
           showBrokenOnly?: boolean;
+          aspectRatioFilters?: ('horizontal' | 'vertical' | 'square')[];
+          showCli?: boolean;
           pageSize?: number;
           dateFilter?: { year: number; month: number } | null;
           currentPage?: number;
@@ -268,6 +272,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           bulkFolderMode: (parsed.bulkFolderMode === 'new' ? 'new' : 'existing') as 'existing' | 'new',
           showDuplicatesOnly: Boolean(parsed.showDuplicatesOnly),
           showBrokenOnly: Boolean(parsed.showBrokenOnly),
+          aspectRatioFilters: Array.isArray(parsed.aspectRatioFilters)
+            ? parsed.aspectRatioFilters.filter((value) => value === 'horizontal' || value === 'vertical' || value === 'square')
+            : [],
+          showCli: parsed.showCli !== false,
           pageSize: normalizedPageSize,
           dateFilter: normalizedDateFilter,
           currentPage: normalizedCurrentPage
@@ -290,6 +298,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       bulkFolderMode: 'existing',
       showDuplicatesOnly: false,
       showBrokenOnly: false,
+      aspectRatioFilters: [],
+      showCli: true,
       pageSize: DEFAULT_PAGE_SIZE,
       dateFilter: null as DateFilter | null,
       currentPage: 1
@@ -324,6 +334,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [openCopyMenu, setOpenCopyMenu] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>((storedPreferencesRef.current.viewMode ?? 'grid') as 'grid' | 'list');
   const [filtersCollapsed, setFiltersCollapsed] = useState(storedPreferencesRef.current.filtersCollapsed ?? false);
+  const [showCli, setShowCli] = useState(storedPreferencesRef.current.showCli ?? true);
   const [bulkState, dispatchBulk] = useReducer(
     bulkReducer,
     {
@@ -668,6 +679,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       setSelectedTag('');
       setSearchTerm('');
       setOnlyCanonical(false); // Disable "Parents Only" as it might hide orphaned variants in the new namespace
+      setAspectRatioFilters([]);
       setPromptThisMap({});
       requestedPromptIdsRef.current.clear();
       prevNamespaceRef.current = namespace;
@@ -901,6 +913,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     setShowBrokenOnly,
     embeddingFilter,
     setEmbeddingFilter,
+    aspectRatioFilters,
+    setAspectRatioFilters,
     dateFilter,
     setDateFilter,
     hiddenFolders,
@@ -948,6 +962,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       onlyWithVariants: storedPreferencesRef.current.onlyWithVariants,
       showDuplicatesOnly: storedPreferencesRef.current.showDuplicatesOnly ?? false,
       showBrokenOnly: storedPreferencesRef.current.showBrokenOnly ?? false,
+      aspectRatioFilters: storedPreferencesRef.current.aspectRatioFilters ?? [],
       dateFilter: storedPreferencesRef.current.dateFilter ?? null,
       pageSize: storedPreferencesRef.current.pageSize ?? DEFAULT_PAGE_SIZE,
       currentPage: storedPreferencesRef.current.currentPage ?? 1,
@@ -1011,6 +1026,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         bulkFolderMode,
         showDuplicatesOnly,
         showBrokenOnly,
+        aspectRatioFilters,
+        showCli,
         pageSize,
         dateFilter,
         currentPage
@@ -1032,6 +1049,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     bulkFolderMode,
     showDuplicatesOnly,
     showBrokenOnly,
+    aspectRatioFilters,
+    showCli,
     pageSize,
     dateFilter,
     currentPage,
@@ -1415,15 +1434,15 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       )}
 
       <div
-        className={`overflow-hidden transition-[max-height] duration-300 ease-in-out ${filtersCollapsed ? 'max-h-0' : 'max-h-[1200px]'}`}
+        className={`transition-[max-height] duration-300 ease-in-out ${filtersCollapsed ? 'max-h-0 overflow-hidden' : 'max-h-[1200px] overflow-visible'}`}
         aria-hidden={filtersCollapsed}
       >
         <div
           id="gallery-filter-controls"
-          className={`space-y-4 p-4 bg-gray-50 rounded-lg transition-opacity duration-300 ${filtersCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+          className={`relative z-[2000] space-y-4 p-4 bg-gray-50 rounded-lg transition-opacity duration-300 ${filtersCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
         >
-          <div className="grid grid-cols-1 lg:grid-cols-6 gap-4 items-start">
-            <div className="lg:col-span-4">
+          <div className="grid grid-cols-1 gap-4 items-start">
+            <div>
               <GalleryFilters
                 searchTerm={searchTerm}
                 onSearchChange={setSearchTerm}
@@ -1443,6 +1462,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                   hiddenTagSet.has(tag.toLowerCase()) ? unhideTagByName(tag) : hideTagByName(tag)
                 }
                 onShowAllTags={clearHiddenTags}
+                aspectRatioFilters={aspectRatioFilters}
+                onAspectRatioFiltersChange={setAspectRatioFilters}
                 onlyCanonical={onlyCanonical}
                 onOnlyCanonicalChange={setOnlyCanonical}
                 respectAspectRatio={respectAspectRatio}
@@ -1462,53 +1483,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
               />
             </div>
 
-            <div className="lg:col-span-2 space-y-3">
-              <div>
-                <label htmlFor="variant-select" className="block text-[0.7em] font-mono font-mono font-medum text-gray-700 mb-1">
-                  Image Size
-                </label>
-                <MonoSelect
-                  id="variant-select"
-                  value={selectedVariant}
-                  onChange={setSelectedVariant}
-                  options={variantOptions}
-                  className="w-full"
-                  size="sm"
-                />
-              </div>
-              <div className="flex justify-start lg:justify-end">
-                <FolderManagerButton
-                  onFoldersChanged={handleFoldersChanged}
-                  size="sm"
-                  label="Edit Folders"
-                  namespace={namespace}
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3 text-[0.65rem] font-mono text-gray-600">
-            <button
-              onClick={runBrokenAudit}
-              disabled={auditLoading}
-              className="inline-flex items-center gap-2 px-3 py-1 border border-gray-300 rounded-md bg-white hover:bg-gray-100 disabled:opacity-50"
-            >
-              <AlertTriangle className="h-3 w-3" />
-              {auditLoading ? 'Auditing…' : 'Audit broken URLs'}
-            </button>
-            <span>
-              Broken: {brokenAudit.ids.length}
-            </span>
-            {brokenAudit.checkedAt && (
-              <span>
-                Last audit: {new Date(brokenAudit.checkedAt).toLocaleString()}
-              </span>
-            )}
-            {(auditLoading || auditProgress.checked > 0) && (
-              <span>
-                Checked: {auditProgress.checked}/{auditProgress.total}
-              </span>
-            )}
+            <div className="sr-only" aria-hidden="true" />
           </div>
 
           {(auditLoading || auditEntries.length > 0) && (
@@ -1543,29 +1518,32 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             </div>
           )}
 
-          <GalleryCommandBar
-            hiddenFolders={hiddenFolders}
-            hiddenTags={hiddenTags}
-            knownFolders={uniqueFolders}
-            knownTags={uniqueTags}
-            onHideFolder={hideFolderByName}
-            onUnhideFolder={unhideFolderByName}
-            onClearHidden={clearHiddenFolders}
-            onHideTag={hideTagByName}
-            onUnhideTag={unhideTagByName}
-            onClearHiddenTags={clearHiddenTags}
-            onSelectFolder={setSelectedFolder}
-            selectedTag={selectedTag}
-            onSelectTag={setSelectedTag}
-            onClearTagFilter={() => setSelectedTag('')}
-            showParentsOnly={onlyWithVariants}
-            onSetParentsOnly={setOnlyWithVariants}
-            currentPage={pageIndex}
-            totalPages={totalPages}
-            onGoToPage={goToPageNumber}
-            embeddingFilter={embeddingFilter}
-            onSetEmbeddingFilter={setEmbeddingFilter}
-          />
+          {showCli && (
+            <GalleryCommandBar
+              hiddenFolders={hiddenFolders}
+              hiddenTags={hiddenTags}
+              knownFolders={uniqueFolders}
+              knownTags={uniqueTags}
+              onHideFolder={hideFolderByName}
+              onUnhideFolder={unhideFolderByName}
+              onClearHidden={clearHiddenFolders}
+              onHideTag={hideTagByName}
+              onUnhideTag={unhideTagByName}
+              onClearHiddenTags={clearHiddenTags}
+              onSelectFolder={setSelectedFolder}
+              selectedTag={selectedTag}
+              onSelectTag={setSelectedTag}
+              onClearTagFilter={() => setSelectedTag('')}
+              showParentsOnly={onlyWithVariants}
+              onSetParentsOnly={setOnlyWithVariants}
+              currentPage={pageIndex}
+              totalPages={totalPages}
+              onGoToPage={goToPageNumber}
+              embeddingFilter={embeddingFilter}
+              onSetEmbeddingFilter={setEmbeddingFilter}
+              onClose={() => setShowCli(false)}
+            />
+          )}
         </div>
       </div>
 
@@ -1594,6 +1572,13 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
               aria-pressed={!filtersCollapsed}
             >
               {filtersCollapsed ? 'Show filters' : 'Hide filters'}
+            </button>
+            <button
+              onClick={() => setShowCli(prev => !prev)}
+              className={`${utilityButtonClasses} text-left bg-white/10 hover:bg-white/20`}
+              aria-pressed={showCli}
+            >
+              {showCli ? 'Hide CLI' : 'Show CLI'}
             </button>
             {selectedCount > 0 && (
               <div className="flex flex-col gap-1 text-[0.6rem] text-white">
@@ -1726,7 +1711,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             onStartEdit={startEdit}
             onDelete={deleteImage}
             onGenerateAlt={generateAltTag}
-            onDragStart={(event, img) => setDragPayloadForImage(event, img)}
             onMouseEnter={handleMouseEnter}
             onMouseMove={handleMouseMove}
             onMouseLeave={handleMouseLeave}
@@ -1748,6 +1732,52 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           />
         )
       )}
+
+      <div className="mt-4 flex flex-wrap items-end justify-between gap-3">
+        <div className="flex-1 min-w-[200px]">
+          <label htmlFor="variant-select" className="block text-[0.7em] font-mono font-medum text-gray-700 mb-1">
+            Image Size
+          </label>
+          <MonoSelect
+            id="variant-select"
+            value={selectedVariant}
+            onChange={setSelectedVariant}
+            options={variantOptions}
+            className="w-full"
+            size="sm"
+          />
+        </div>
+        <FolderManagerButton
+          onFoldersChanged={handleFoldersChanged}
+          size="sm"
+          label="Edit Folders"
+          namespace={namespace}
+        />
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-3 text-[0.65rem] font-mono text-gray-600">
+        <button
+          onClick={runBrokenAudit}
+          disabled={auditLoading}
+          className="inline-flex items-center gap-2 px-3 py-1 border border-gray-300 rounded-md bg-white hover:bg-gray-100 disabled:opacity-50"
+        >
+          <AlertTriangle className="h-3 w-3" />
+          {auditLoading ? 'Auditing…' : 'Audit broken URLs'}
+        </button>
+        <span>
+          Broken: {brokenAudit.ids.length}
+        </span>
+        {brokenAudit.checkedAt && (
+          <span>
+            Last audit: {new Date(brokenAudit.checkedAt).toLocaleString()}
+          </span>
+        )}
+        {(auditLoading || auditProgress.checked > 0) && (
+          <span>
+            Checked: {auditProgress.checked}/{auditProgress.total}
+          </span>
+        )}
+      </div>
 
       {showPagination && hasResults && (
         <div className="flex flex-wrap items-center justify-between gap-3 mt-6 text-[0.7em] font-mono text-gray-600 border-t border-gray-100 pt-4">
