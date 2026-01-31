@@ -1548,7 +1548,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       </div>
 
       <div
-        className="hidden sm:block fixed right-4 top-1/2 -translate-y-1/2 z-30"
+        className="hidden sm:block fixed right-4 top-1/2 -translate-y-1/2 z-[3000]"
         onMouseEnter={() => setUtilityExpanded(true)}
         onMouseLeave={() => setUtilityExpanded(false)}
         onFocusCapture={() => setUtilityExpanded(true)}

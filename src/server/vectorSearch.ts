@@ -321,11 +321,13 @@ export async function deleteImageVectors(imageId: string): Promise<void> {
  * 
  * @param embedding - Query embedding (512-dim)
  * @param limit - Maximum results to return (default: 4)
+ * @param offset - Number of results to skip (default: 0)
  * @returns Most dissimilar images sorted by distance (highest first)
  */
 export async function searchCLIPStrangers(
   embedding: number[],
-  limit = 4
+  limit = 4,
+  offset = 0
 ): Promise<VectorSearchResult[]> {
   const client = await getRedisClient();
 
@@ -351,8 +353,8 @@ export async function searchCLIPStrangers(
   // Cosine distance: 0 = identical, 2 = opposite
   allResults.sort((a, b) => b.score - a.score);
   
-  // Return the top N most distant images
-  return allResults.slice(0, limit);
+  // Return the requested slice of most distant images
+  return allResults.slice(offset, offset + limit);
 }
 
 /**
@@ -366,9 +368,10 @@ export async function searchCLIPStrangers(
 export async function searchByCLIP(
   embedding: number[],
   limit = 10,
-  filter?: string
+  filter?: string,
+  offset = 0
 ): Promise<VectorSearchResult[]> {
-  console.log('[VectorSearch] searchByCLIP called with limit:', limit);
+  console.log('[VectorSearch] searchByCLIP called with limit:', limit, 'offset:', offset);
   const client = await getRedisClient();
 
   // Build KNN query
@@ -377,9 +380,11 @@ export async function searchByCLIP(
   //   SORTBY score
   //   RETURN 3 filename folder score
   //   DIALECT 2
+  // Note: KNN needs to fetch offset+limit to allow pagination
+  const knnCount = offset + limit;
 
   const queryParts = filter ? `(${filter})` : '*';
-  const query = `${queryParts}=>[KNN ${limit} @${CLIP_FIELD} $vec AS score]`;
+  const query = `${queryParts}=>[KNN ${knnCount} @${CLIP_FIELD} $vec AS score]`;
   console.log('[VectorSearch] Redis query:', query);
 
   const result = await client.call(
@@ -388,7 +393,7 @@ export async function searchByCLIP(
     query,
     'PARAMS', '2', 'vec', vectorToBuffer(embedding),
     'SORTBY', 'score',
-    'LIMIT', '0', limit.toString(),
+    'LIMIT', offset.toString(), limit.toString(),
     'RETURN', '3', 'filename', 'folder', 'score',
     'DIALECT', '2'
   ) as [number, ...unknown[]];
@@ -408,12 +413,16 @@ export async function searchByCLIP(
 export async function searchByColor(
   histogram: number[],
   limit = 10,
-  filter?: string
+  filter?: string,
+  offset = 0
 ): Promise<VectorSearchResult[]> {
   const client = await getRedisClient();
 
+  // Note: KNN needs to fetch offset+limit to allow pagination
+  const knnCount = offset + limit;
+
   const queryParts = filter ? `(${filter})` : '*';
-  const query = `${queryParts}=>[KNN ${limit} @${COLOR_FIELD} $vec AS score]`;
+  const query = `${queryParts}=>[KNN ${knnCount} @${COLOR_FIELD} $vec AS score]`;
 
   const result = await client.call(
     'FT.SEARCH',
@@ -421,7 +430,7 @@ export async function searchByColor(
     query,
     'PARAMS', '2', 'vec', vectorToBuffer(histogram),
     'SORTBY', 'score',
-    'LIMIT', '0', limit.toString(),
+    'LIMIT', offset.toString(), limit.toString(),
     'RETURN', '3', 'filename', 'folder', 'score',
     'DIALECT', '2'
   ) as [number, ...unknown[]];

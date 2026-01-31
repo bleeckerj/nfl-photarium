@@ -42,13 +42,17 @@ export async function GET(
   const { searchParams } = new URL(request.url);
   
   const searchType = searchParams.get('type') ?? 'clip';
-  const limit = Math.min(50, Math.max(1, parseInt(searchParams.get('limit') ?? '10')));
+  const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') ?? '10')));
+  const offset = Math.max(0, parseInt(searchParams.get('offset') ?? '0'));
   const strangersLimitParam = searchParams.get('strangersLimit');
-  const strangersLimit = strangersLimitParam ? Math.min(50, Math.max(1, parseInt(strangersLimitParam))) : Math.ceil(limit / 2);
+  const strangersLimit = strangersLimitParam ? Math.min(100, Math.max(1, parseInt(strangersLimitParam))) : Math.ceil(limit / 2);
+  const strangersOffset = Math.max(0, parseInt(searchParams.get('strangersOffset') ?? '0'));
   const includeStrangers = searchParams.get('includeStrangers') === 'true';
   const namespace = normalizeNamespace(searchParams.get('namespace'));
   const internalLimit = namespace === null ? limit : Math.min(250, limit * 10);
+  const internalOffset = namespace === null ? offset : offset * 10;
   const internalStrangersLimit = namespace === null ? strangersLimit : Math.min(250, strangersLimit * 10);
+  const internalStrangersOffset = namespace === null ? strangersOffset : strangersOffset * 10;
 
   try {
     // Check if vector search is available
@@ -92,7 +96,7 @@ export async function GET(
           { status: 404 }
         );
       }
-      results = await searchByColor(vectors.colorHistogram, internalLimit + 1);
+      results = await searchByColor(vectors.colorHistogram, internalLimit + 1, undefined, internalOffset);
     } else {
       if (!vectors.clipEmbedding) {
         return NextResponse.json(
@@ -100,11 +104,11 @@ export async function GET(
           { status: 404 }
         );
       }
-      results = await searchByCLIP(vectors.clipEmbedding, internalLimit + 1);
+      results = await searchByCLIP(vectors.clipEmbedding, internalLimit + 1, undefined, internalOffset);
       
       // Get strangers if requested (only for CLIP search)
       if (includeStrangers) {
-        strangers = await searchCLIPStrangers(vectors.clipEmbedding, internalStrangersLimit + 1);
+        strangers = await searchCLIPStrangers(vectors.clipEmbedding, internalStrangersLimit + 1, internalStrangersOffset);
         strangers = strangers.filter(r => r.imageId !== id);
       }
     }

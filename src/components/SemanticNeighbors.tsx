@@ -59,8 +59,18 @@ export function SemanticNeighbors({
   const [neighbors, setNeighbors] = useState<SimilarResult[]>([]);
   const [strangers, setStrangers] = useState<SimilarResult[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState<'neighbors' | 'strangers' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hoverPreview, setHoverPreview] = useState<HoverPreview | null>(null);
+  
+  // Pagination state for scrolling through results
+  const PAGE_SIZE = 4;
+  const FETCH_BATCH = 20; // How many to fetch at a time from API
+  const [neighborsPage, setNeighborsPage] = useState(0);
+  const [strangersPage, setStrangersPage] = useState(0);
+  // Track if we've reached the end of available results
+  const [neighborsHasMore, setNeighborsHasMore] = useState(true);
+  const [strangersHasMore, setStrangersHasMore] = useState(true);
 
   const handleMouseEnter = useCallback((e: React.MouseEvent, result: SimilarResult) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -122,11 +132,13 @@ export function SemanticNeighbors({
     
     setLoading(true);
     setError(null);
+    // Reset pagination when fetching new results
+    setNeighborsPage(0);
+    setStrangersPage(0);
+    setNeighborsHasMore(true);
+    setStrangersHasMore(true);
     
     try {
-      // For semantic neighbors, split limit between neighbors and strangers
-      const neighborsLimit = showStrangers ? Math.ceil(limit / 2) : limit;
-      const strangersLimit = showStrangers ? Math.floor(limit / 2) : 0;
       const includeStrangers = showStrangers && type === 'clip';
       
       const nsParam = (() => {
@@ -138,7 +150,7 @@ export function SemanticNeighbors({
       const nsQuery = nsParam ? `&namespace=${encodeURIComponent(nsParam)}` : '';
 
       const response = await fetch(
-        `/api/images/${imageId}/similar?type=${type}&limit=${neighborsLimit}&strangersLimit=${strangersLimit}&includeStrangers=${includeStrangers}${nsQuery}`
+        `/api/images/${imageId}/similar?type=${type}&limit=${FETCH_BATCH}&strangersLimit=${FETCH_BATCH}&includeStrangers=${includeStrangers}${nsQuery}`
       );
       const data = await response.json();
       
@@ -146,14 +158,82 @@ export function SemanticNeighbors({
         throw new Error(data.error || 'Failed to fetch similar images');
       }
       
-      setNeighbors(data.results || []);
-      setStrangers(data.strangers || []);
+      const newNeighbors = data.results || [];
+      const newStrangers = data.strangers || [];
+      setNeighbors(newNeighbors);
+      setStrangers(newStrangers);
+      // If we got fewer than FETCH_BATCH, there's no more
+      setNeighborsHasMore(newNeighbors.length >= FETCH_BATCH);
+      setStrangersHasMore(newStrangers.length >= FETCH_BATCH);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setLoading(false);
     }
-  }, [imageId, type, limit, showStrangers, namespace, searchAllNamespaces]);
+  }, [imageId, type, showStrangers, namespace, searchAllNamespaces]);
+
+  // Fetch more results when reaching the end
+  const fetchMoreNeighbors = useCallback(async () => {
+    if (!imageId || loadingMore || !neighborsHasMore) return;
+    
+    setLoadingMore('neighbors');
+    try {
+      const nsParam = (() => {
+        if (namespace === '__all__') return null;
+        if (searchAllNamespaces) return null;
+        if (!namespace) return '__none__';
+        return namespace;
+      })();
+      const nsQuery = nsParam ? `&namespace=${encodeURIComponent(nsParam)}` : '';
+      
+      const response = await fetch(
+        `/api/images/${imageId}/similar?type=${type}&limit=${FETCH_BATCH}&offset=${neighbors.length}&includeStrangers=false${nsQuery}`
+      );
+      const data = await response.json();
+      
+      if (response.ok && data.results?.length > 0) {
+        setNeighbors(prev => [...prev, ...data.results]);
+        setNeighborsHasMore(data.results.length >= FETCH_BATCH);
+      } else {
+        setNeighborsHasMore(false);
+      }
+    } catch (err) {
+      console.error('Failed to fetch more neighbors:', err);
+    } finally {
+      setLoadingMore(null);
+    }
+  }, [imageId, type, namespace, searchAllNamespaces, neighbors.length, loadingMore, neighborsHasMore]);
+
+  const fetchMoreStrangers = useCallback(async () => {
+    if (!imageId || loadingMore || !strangersHasMore) return;
+    
+    setLoadingMore('strangers');
+    try {
+      const nsParam = (() => {
+        if (namespace === '__all__') return null;
+        if (searchAllNamespaces) return null;
+        if (!namespace) return '__none__';
+        return namespace;
+      })();
+      const nsQuery = nsParam ? `&namespace=${encodeURIComponent(nsParam)}` : '';
+      
+      const response = await fetch(
+        `/api/images/${imageId}/similar?type=clip&limit=1&strangersLimit=${FETCH_BATCH}&strangersOffset=${strangers.length}&includeStrangers=true${nsQuery}`
+      );
+      const data = await response.json();
+      
+      if (response.ok && data.strangers?.length > 0) {
+        setStrangers(prev => [...prev, ...data.strangers]);
+        setStrangersHasMore(data.strangers.length >= FETCH_BATCH);
+      } else {
+        setStrangersHasMore(false);
+      }
+    } catch (err) {
+      console.error('Failed to fetch more strangers:', err);
+    } finally {
+      setLoadingMore(null);
+    }
+  }, [imageId, namespace, searchAllNamespaces, strangers.length, loadingMore, strangersHasMore]);
 
   useEffect(() => {
     fetchSimilar();
@@ -207,8 +287,33 @@ export function SemanticNeighbors({
   const renderImageGrid = (
     results: SimilarResult[],
     label: string,
-    isStranger: boolean = false
-  ) => (
+    isStranger: boolean = false,
+    currentPage: number,
+    setPage: (page: number) => void,
+    hasMore: boolean,
+    onFetchMore: () => void,
+    isLoadingMore: boolean
+  ) => {
+    const totalPages = Math.ceil(results.length / PAGE_SIZE);
+    const startIdx = currentPage * PAGE_SIZE;
+    const visibleResults = results.slice(startIdx, startIdx + PAGE_SIZE);
+    const hasPrev = currentPage > 0;
+    // Can go next if there are more pages OR if we can fetch more
+    const hasNext = currentPage < totalPages - 1 || hasMore;
+    
+    const handleNext = () => {
+      if (currentPage < totalPages - 1) {
+        // Just navigate to next page
+        setPage(currentPage + 1);
+      } else if (hasMore && !isLoadingMore) {
+        // At the last page, fetch more and then navigate
+        onFetchMore();
+        // Optimistically move to next page (will show when data arrives)
+        setPage(currentPage + 1);
+      }
+    };
+    
+    return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
         <h5 className="text-xs font-3270 uppercase tracking-wider text-gray-500">
@@ -217,9 +322,42 @@ export function SemanticNeighbors({
         <span className="text-[10px] text-gray-600">
           ({results.length})
         </span>
+        {/* Pagination controls */}
+        {(totalPages > 1 || hasMore) && (
+          <div className="flex items-center gap-1 ml-auto">
+            <button
+              onClick={() => setPage(currentPage - 1)}
+              disabled={!hasPrev}
+              className={`text-[10px] px-1.5 py-0.5 rounded ${
+                hasPrev 
+                  ? 'text-gray-400 hover:text-white hover:bg-gray-700' 
+                  : 'text-gray-600 cursor-not-allowed'
+              }`}
+              title="Previous"
+            >
+              ‹‹
+            </button>
+            <span className="text-[9px] text-gray-500 font-3270 min-w-[40px] text-center">
+              {currentPage + 1}{hasMore ? '+' : `/${totalPages}`}
+            </span>
+            <button
+              onClick={handleNext}
+              disabled={!hasNext || isLoadingMore}
+              className={`text-[10px] px-1.5 py-0.5 rounded ${
+                hasNext && !isLoadingMore
+                  ? 'text-gray-400 hover:text-white hover:bg-gray-700' 
+                  : 'text-gray-600 cursor-not-allowed'
+              }`}
+              title={hasMore ? "Load more" : "Next"}
+            >
+              {isLoadingMore ? '...' : '››'}
+            </button>
+          </div>
+        )}
       </div>
       <div className="grid grid-cols-4 gap-2">
-        {results.map((result, index) => {
+        {visibleResults.map((result) => {
+          const globalIndex = results.indexOf(result);
           const proximityTerm = getProximityTerm(result.score);
           return (
             <div
@@ -257,7 +395,7 @@ export function SemanticNeighbors({
               <div className={`absolute top-1 left-1 w-4 h-4 rounded-full flex items-center justify-center ${
                 isStranger ? 'bg-red-900/80' : 'bg-black/70'
               }`}>
-                <span className="text-[9px] text-gray-300">{index + 1}</span>
+                <span className="text-[9px] text-gray-300">{globalIndex + 1}</span>
               </div>
             </div>
           );
@@ -265,6 +403,7 @@ export function SemanticNeighbors({
       </div>
     </div>
   );
+  };
 
   return (
     <div className={className}>
@@ -290,13 +429,23 @@ export function SemanticNeighbors({
         {neighbors.length > 0 && renderImageGrid(
           neighbors,
           'Neighbors',
-          false
+          false,
+          neighborsPage,
+          setNeighborsPage,
+          neighborsHasMore,
+          fetchMoreNeighbors,
+          loadingMore === 'neighbors'
         )}
         
         {strangers.length > 0 && renderImageGrid(
           strangers,
           'Strangers',
-          true
+          true,
+          strangersPage,
+          setStrangersPage,
+          strangersHasMore,
+          fetchMoreStrangers,
+          loadingMore === 'strangers'
         )}
       </div>
       
@@ -316,16 +465,14 @@ export function SemanticNeighbors({
             transform: 'translate(-50%, -100%)',
           }}
         >
-          <div className="bg-gray-900 rounded-lg shadow-2xl border border-gray-700 overflow-hidden">
-            <div className="relative w-48 h-48">
-              <Image
-                src={getCloudflareImageUrl(hoverPreview.imageId, 'medium')}
-                alt={hoverPreview.filename || 'Preview'}
-                fill
-                className="object-cover"
-                sizes="192px"
-              />
-            </div>
+          <div className="bg-gray-900 rounded-lg shadow-2xl border border-gray-700 overflow-hidden max-w-xs">
+            <Image
+              src={getCloudflareImageUrl(hoverPreview.imageId, 'medium')}
+              alt={hoverPreview.filename || 'Preview'}
+              width={320}
+              height={320}
+              className="w-auto h-auto max-w-[320px] max-h-[320px]"
+            />
             {hoverPreview.filename && (
               <div className="px-2 py-1 bg-black/80 text-[10px] text-gray-300 truncate text-center">
                 {hoverPreview.filename}
