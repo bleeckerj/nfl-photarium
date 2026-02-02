@@ -235,11 +235,11 @@ export async function storeImageVectors(data: ImageVectorData): Promise<void> {
   }
 
   if (typeof data.width === 'number') {
-    fields[WIDTH_FIELD] = data.width;
+    fields[WIDTH_FIELD] = String(data.width);
   }
 
   if (typeof data.height === 'number') {
-    fields[HEIGHT_FIELD] = data.height;
+    fields[HEIGHT_FIELD] = String(data.height);
   }
 
   await client.hset(key, fields);

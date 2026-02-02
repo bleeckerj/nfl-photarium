@@ -40,6 +40,10 @@ export interface CachedCloudflareImage {
   dominantColors?: string[];
   /** Average color of image (hex code) */
   averageColor?: string;
+  /** Stored aspect ratio label if available (e.g., "3:2") */
+  aspectRatio?: string;
+  /** Stored image dimensions if available */
+  dimensions?: { width: number; height: number };
 }
 
 interface CacheState {

@@ -19,7 +19,6 @@ import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { useDropzone } from 'react-dropzone';
 import { downloadImageToFile, formatDownloadFileName } from '@/utils/downloadUtils';
 import { useImageAspectRatio } from '@/hooks/useImageAspectRatio';
-import QRCode from 'qrcode';
 
 import { AltTextEditor } from '@/components/image-detail/AltTextEditor';
 import { CloudflareMetadataHeader } from '@/components/image-detail/CloudflareMetadataHeader';
@@ -36,6 +35,12 @@ import { UploadVariationSection } from '@/components/image-detail/UploadVariatio
 import { ParentInfoSection } from '@/components/image-detail/ParentInfoSection';
 
 import { useParentReassignment } from '@/hooks/useParentReassignment';
+import { useVariationUpload } from '@/hooks/useVariationUpload';
+import { useParentAssignment } from '@/hooks/useParentAssignment';
+import { useBulkVariationMetadata } from '@/hooks/useBulkVariationMetadata';
+import { useAltDescriptionGeneration } from '@/hooks/useAltDescriptionGeneration';
+import { useDeleteImageFamily } from '@/hooks/useDeleteImageFamily';
+import { useShareLinks } from '@/hooks/useShareLinks';
 
 import { useParams, useRouter } from 'next/navigation';
 
@@ -79,22 +84,6 @@ interface CloudflareImage {
   dominantColors?: string[];
   averageColor?: string;
 }
-
-type DeleteFamilyJobStatus = {
-  jobId: string;
-  status: 'running' | 'completed' | 'failed';
-  requestedId: string;
-  rootId: string;
-  total: number;
-  attempted: number;
-  deleted: number;
-  failed: number;
-  concurrency: number;
-  vectorsDeleted: boolean;
-  startedAt: number;
-  finishedAt?: number;
-  lastError?: string;
-};
 
 const DEFAULT_LIST_VARIANT = 'full';
 const VARIANT_DIMENSIONS = new Map(IMAGE_VARIANTS.map(variant => [variant.name, variant.width]));
@@ -186,22 +175,11 @@ export default function ImageDetailPage() {
   const [allImages, setAllImages] = useState<CloudflareImage[]>([]);
   const [reassignParentId, setReassignParentId] = useState('');
   const [adoptImageId, setAdoptImageId] = useState('');
-  const [parentActionLoading, setParentActionLoading] = useState(false);
   const [childDetachingId, setChildDetachingId] = useState<string | null>(null);
   const [swappingParentId, setSwappingParentId] = useState<string | null>(null);
   const [adoptLoading, setAdoptLoading] = useState(false);
   const [adoptSearch, setAdoptSearch] = useState('');
-  const [childUploadFiles, setChildUploadFiles] = useState<File[]>([]);
-  const [childUploadTags, setChildUploadTags] = useState('');
-  const [childUploadFolder, setChildUploadFolder] = useState('');
-  const [childUploadLoading, setChildUploadLoading] = useState(false);
   const [adoptFolderFilter, setAdoptFolderFilter] = useState('');
-  const [altLoadingMap, setAltLoadingMap] = useState<Record<string, boolean>>({});
-  const [bulkDescriptionApplying, setBulkDescriptionApplying] = useState(false);
-  const [bulkAltApplying, setBulkAltApplying] = useState(false);
-  const [bulkFolderApplying, setBulkFolderApplying] = useState(false);
-  const [bulkTagsAppending, setBulkTagsAppending] = useState(false);
-  const [bulkTagsReplacing, setBulkTagsReplacing] = useState(false);
   const [variationPage, setVariationPage] = useState(1);
   const [adoptPage, setAdoptPage] = useState(1);
   const [listVariant, setListVariant] = useState(DEFAULT_LIST_VARIANT);
@@ -213,30 +191,11 @@ export default function ImageDetailPage() {
     x: number;
     y: number;
   } | null>(null);
-  const onVariantDrop = useCallback((acceptedFiles: File[]) => {
-    if (acceptedFiles.length === 0) return;
-    setChildUploadFiles((prev) => [...prev, ...acceptedFiles]);
-  }, []);
-
-  const {
-    getRootProps: getVariantDropzoneProps,
-    getInputProps: getVariantInputProps,
-    isDragActive: isVariantDragActive
-  } = useDropzone({
-    onDrop: onVariantDrop,
-    accept: {
-      'image/*': ['.jpeg', '.jpg', '.png', '.gif', '.webp', '.svg'],
-      'application/zip': ['.zip'],
-      'application/x-zip-compressed': ['.zip']
-    },
-    multiple: true
-  });
 
   const [folderSelect, setFolderSelect] = useState('');
   const [tagsInput, setTagsInput] = useState('');
   const [altTextInput, setAltTextInput] = useState('');
   const [descriptionInput, setDescriptionInput] = useState('');
-  const [descriptionGenerating, setDescriptionGenerating] = useState(false);
   const [promptThisInput, setPromptThisInput] = useState('');
   const [promptThisLoading, setPromptThisLoading] = useState(false);
   const [promptThisGenerating, setPromptThisGenerating] = useState(false);
@@ -257,7 +216,6 @@ export default function ImageDetailPage() {
   } | null>(null);
   const [extrasLoading, setExtrasLoading] = useState(false);
   const [shareVariant, setShareVariant] = useState('large');
-  const [shareQrDataUrl, setShareQrDataUrl] = useState('');
   const [namespace, setNamespace] = useState('');
   const [saving, setSaving] = useState(false);
   const [embeddingPendingMap, setEmbeddingPendingMap] = useState<Record<string, EmbeddingPendingEntry>>({});
@@ -269,7 +227,6 @@ export default function ImageDetailPage() {
   const [draggingVariationId, setDraggingVariationId] = useState<string | null>(null);
   const [dragOverVariationId, setDragOverVariationId] = useState<string | null>(null);
   const [selectedVariationIds, setSelectedVariationIds] = useState<Set<string>>(() => new Set());
-  const [variationAltLoadingMap, setVariationAltLoadingMap] = useState<Record<string, boolean>>({});
   const [previewRotation, setPreviewRotation] = useState(0);
   const [rotationLoading, setRotationLoading] = useState(false);
   const [rotationError, setRotationError] = useState<string | null>(null);
@@ -277,9 +234,6 @@ export default function ImageDetailPage() {
 
   const [semanticSearchAllNamespaces, setSemanticSearchAllNamespaces] = useState(false);
 
-  const [deleteFamilyJobId, setDeleteFamilyJobId] = useState<string | null>(null);
-  const [deleteFamilyStatus, setDeleteFamilyStatus] = useState<DeleteFamilyJobStatus | null>(null);
-  const [deleteFamilyOpen, setDeleteFamilyOpen] = useState(false);
 
   const generateEmbeddings = useCallback(async () => {
     if (!image || !id) {
@@ -386,8 +340,6 @@ export default function ImageDetailPage() {
         setSourceUrlInput(found.sourceUrl || '');
         setDisplayNameInput(found.displayName || found.filename || '');
         setReassignParentId(found.parentId || '');
-        setChildUploadFolder(found.folder || '');
-        setChildUploadTags(Array.isArray(found.tags) ? found.tags.join(', ') : '');
       } else {
         setFolderSelect('');
         setTagsInput('');
@@ -397,8 +349,6 @@ export default function ImageDetailPage() {
         setSourceUrlInput('');
         setDisplayNameInput('');
         setReassignParentId('');
-        setChildUploadFolder('');
-        setChildUploadTags('');
       }
       const folders = Array.from(
         new Set(
@@ -433,6 +383,61 @@ export default function ImageDetailPage() {
       console.error('Failed to refresh images', error);
     }
   }, [syncImages, id, namespace]);
+
+  const {
+    parentActionLoading,
+    patchParentAssignment,
+    handleDetachFromParent,
+    handleReassignParent
+  } = useParentAssignment({
+    image,
+    reassignParentId,
+    refreshImageList,
+    toast
+  });
+
+  const {
+    childUploadFiles,
+    setChildUploadFiles,
+    childUploadTags,
+    childUploadFolder,
+    childUploadLoading,
+    childUploadUrl,
+    childUploadUrlLoading,
+    setChildUploadUrl,
+    childImportUrl,
+    childImportLoading,
+    childImportError,
+    setChildImportUrl,
+    handleImportFromUrl,
+    handleChildUpload,
+    handleChildUploadByUrl
+  } = useVariationUpload({
+    imageId: typeof id === 'string' ? id : undefined,
+    imageFolder: image?.folder,
+    imageTags: image?.tags,
+    refreshImageList,
+    toast
+  });
+
+  const onVariantDrop = useCallback((acceptedFiles: File[]) => {
+    if (acceptedFiles.length === 0) return;
+    setChildUploadFiles((prev) => [...prev, ...acceptedFiles]);
+  }, [setChildUploadFiles]);
+
+  const {
+    getRootProps: getVariantDropzoneProps,
+    getInputProps: getVariantInputProps,
+    isDragActive: isVariantDragActive
+  } = useDropzone({
+    onDrop: onVariantDrop,
+    accept: {
+      'image/*': ['.jpeg', '.jpg', '.png', '.gif', '.webp', '.svg'],
+      'application/zip': ['.zip'],
+      'application/x-zip-compressed': ['.zip']
+    },
+    multiple: true
+  });
 
   useEffect(() => {
     let mounted = true;
@@ -637,42 +642,6 @@ export default function ImageDetailPage() {
     [id]
   );
 
-  const shareUrl = useMemo(() => {
-    if (!id) return '';
-    if (!shareBaseUrl.trim()) return '';
-    try {
-      const url = new URL(`/api/images/${id}/share`, shareBaseUrl.trim());
-      if (shareVariant) {
-        url.searchParams.set('variant', shareVariant);
-      }
-      return url.toString();
-    } catch {
-      return '';
-    }
-  }, [id, shareBaseUrl, shareVariant]);
-
-  useEffect(() => {
-    if (!shareUrl) {
-      setShareQrDataUrl('');
-      return;
-    }
-    let cancelled = false;
-    QRCode.toDataURL(shareUrl, { margin: 1, width: 220 })
-      .then((dataUrl) => {
-        if (!cancelled) {
-          setShareQrDataUrl(dataUrl);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setShareQrDataUrl('');
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [shareUrl]);
-
   const heroRotationStyle = useMemo<CSSProperties>(
     () => ({
       transform: `rotate(${previewRotation}deg)`,
@@ -811,6 +780,59 @@ export default function ImageDetailPage() {
   const isChildImage = Boolean(image?.parentId);
   const hasVariations = !isChildImage && variationChildren.length > 0;
   const variationCount = displayedVariations.length;
+  const {
+    bulkDescriptionApplying,
+    bulkAltApplying,
+    bulkFolderApplying,
+    bulkTagsAppending,
+    bulkTagsReplacing,
+    applyDescriptionToVariations,
+    applyAltToVariations,
+    applyFolderToVariations,
+    applyTagsToVariations
+  } = useBulkVariationMetadata({
+    imageId: typeof id === 'string' ? id : undefined,
+    isChildImage,
+    variationChildren,
+    parentTags,
+    effectiveParentFolder,
+    descriptionInput,
+    altTextInput,
+    setAllImages,
+    toast,
+    isMetadataLimitError,
+    formatFailureNames
+  });
+  const {
+    altLoadingMap,
+    variationAltBusy,
+    descriptionGenerating,
+    generateAltTag,
+    generateAltForSelectedVariations,
+    generateDescription
+  } = useAltDescriptionGeneration({
+    imageId: typeof id === 'string' ? id : undefined,
+    descriptionInput,
+    selectedVariationIds,
+    setDescriptionInput,
+    setAltTextInput,
+    setImage,
+    setAllImages,
+    toast
+  });
+
+  const {
+    deleteFamilyOpen,
+    deleteFamilyStatus,
+    closeDeleteFamilyModal,
+    handleDeleteParent,
+    handleDeleteCurrent,
+    handleDeleteFamily
+  } = useDeleteImageFamily({
+    image,
+    isChildImage,
+    toast
+  });
   const hasMissingVariationSort = useMemo(() => {
     return variationCandidates.some((child) => !Number.isFinite(child.variationSort));
   }, [variationCandidates]);
@@ -818,10 +840,6 @@ export default function ImageDetailPage() {
     return new Map(displayedVariations.map((child, index) => [child.id, index]));
   }, [displayedVariations]);
   const selectedVariationCount = selectedVariationIds.size;
-  const variationAltBusy = useMemo(
-    () => Object.keys(variationAltLoadingMap).length > 0,
-    [variationAltLoadingMap]
-  );
   const isMetadataDirty = useMemo(() => {
     if (!image) {
       return false;
@@ -943,53 +961,12 @@ export default function ImageDetailPage() {
     [uniqueFolders]
   );
 
-  const copyToClipboard = async (text: string, label?: string, successMessage?: string) => {
-    try {
-      if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(text);
-        toast.push(successMessage || (label ? `${label} URL copied` : 'Text copied to clipboard'));
-        return;
-      }
-
-      const textArea = document.createElement('textarea');
-      textArea.value = text;
-      textArea.style.position = 'fixed';
-      textArea.style.left = '-999999px';
-      textArea.style.top = '-999999px';
-      document.body.appendChild(textArea);
-      textArea.focus();
-      textArea.select();
-      try {
-        document.execCommand('copy');
-        toast.push(successMessage || (label ? `${label} URL copied` : 'Text copied to clipboard'));
-      } catch (e) {
-        console.error('Fallback copy failed', e);
-        prompt('Copy this text manually:', text);
-      }
-      document.body.removeChild(textArea);
-    } catch (err) {
-      console.error('Failed to copy', err);
-      prompt('Copy this text manually:', text);
-    }
-  };
-
-  const formatCopyPayload = (url: string, altText?: string, includeAlt?: boolean) => {
-    if (!includeAlt) {
-      return url;
-    }
-    return `url: ${JSON.stringify(url)},\naltText: ${JSON.stringify(altText ?? '')}`;
-  };
-
-  const handleCopyUrl = async (
-    event: React.MouseEvent<HTMLButtonElement>,
-    url: string,
-    label?: string,
-    altText?: string,
-    successMessage?: string
-  ) => {
-    const payload = formatCopyPayload(url, altText, event.shiftKey);
-    await copyToClipboard(payload, label, successMessage);
-  };
+  const { shareUrl, shareQrDataUrl, handleCopyUrl, handleCopyText } = useShareLinks({
+    imageId: typeof id === 'string' ? id : undefined,
+    shareBaseUrl,
+    shareVariant,
+    toast
+  });
 
   const getOrientationIcon = (aspectRatioString: string) => {
     const parts = aspectRatioString.split(':');
@@ -1101,8 +1078,8 @@ export default function ImageDetailPage() {
     });
     const entries = [buildEntry(image), ...displayedVariations.map(buildEntry)];
     const payload = formatEntriesAsYaml(entries);
-    await copyToClipboard(payload, undefined, 'Variant list copied');
-  }, [copyToClipboard, displayedVariations, image, listVariant]);
+    await handleCopyText(payload, 'Variant list copied');
+  }, [displayedVariations, handleCopyText, image, listVariant]);
 
   const persistVariationOrder = useCallback(
     async (nextOrder: string[], changedIds: string[]) => {
@@ -1340,48 +1317,6 @@ export default function ImageDetailPage() {
     setSelectedVariationIds(new Set());
   }, []);
 
-  const generateAltForSelectedVariations = useCallback(async () => {
-    const ids = Array.from(selectedVariationIds);
-    if (ids.length === 0) {
-      toast.push('Select at least one variation');
-      return;
-    }
-    setVariationAltLoadingMap((prev) => {
-      const next = { ...prev };
-      ids.forEach((idValue) => {
-        next[idValue] = true;
-      });
-      return next;
-    });
-    let updatedCount = 0;
-    try {
-      for (const idValue of ids) {
-        const response = await fetch(`/api/images/${idValue}/alt`, { method: 'POST' });
-        const data = await response.json();
-        if (!response.ok || !data?.altTag) {
-          continue;
-        }
-        updatedCount += 1;
-        setAllImages((prev) =>
-          prev.map((img) => (img.id === idValue ? { ...img, altTag: data.altTag } : img))
-        );
-        setImage((prev) => (prev?.id === idValue ? { ...prev, altTag: data.altTag } : prev));
-      }
-      toast.push(updatedCount ? `ALT text generated for ${updatedCount} variation(s)` : 'No ALT text generated');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to generate ALT text';
-      toast.push(message);
-    } finally {
-      setVariationAltLoadingMap((prev) => {
-        const next = { ...prev };
-        ids.forEach((idValue) => {
-          delete next[idValue];
-        });
-        return next;
-      });
-    }
-  }, [selectedVariationIds, toast]);
-
   const handleDropVariation = useCallback(
     async (targetId: string) => {
       if (!draggingVariationId || draggingVariationId === targetId) {
@@ -1403,54 +1338,6 @@ export default function ImageDetailPage() {
     },
     [displayedVariations, draggingVariationId, persistVariationOrder]
   );
-
-  const patchParentAssignment = useCallback(
-    async (targetId: string, parentIdValue: string) => {
-      const response = await fetch(`/api/images/${targetId}/update`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ parentId: parentIdValue }),
-      });
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload.error || 'Failed to update parent relationship');
-      }
-      await refreshImageList();
-      return payload;
-    },
-    [refreshImageList]
-  );
-
-  const handleDetachFromParent = useCallback(async () => {
-    if (!image) return;
-    setParentActionLoading(true);
-    try {
-      await patchParentAssignment(image.id, '');
-      toast.push('Image detached from its parent');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to detach image';
-      toast.push(message);
-    } finally {
-      setParentActionLoading(false);
-    }
-  }, [image, patchParentAssignment, toast]);
-
-  const handleReassignParent = useCallback(async () => {
-    if (!image) return;
-    if (reassignParentId === (image.parentId ?? '')) {
-      return;
-    }
-    setParentActionLoading(true);
-    try {
-      await patchParentAssignment(image.id, reassignParentId || '');
-      toast.push('Parent updated');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to update parent';
-      toast.push(message);
-    } finally {
-      setParentActionLoading(false);
-    }
-  }, [image, patchParentAssignment, reassignParentId, toast]);
 
   const handleDetachChild = useCallback(
     async (childId: string) => {
@@ -1568,130 +1455,6 @@ export default function ImageDetailPage() {
     }
   }, [selectedVariationIds, toast]);
 
-  const handleDeleteParent = useCallback(async () => {
-    if (!image) return;
-    if (!confirm('Delete this image permanently? Variations will remain (and may need reassignment).')) return;
-    try {
-      const response = await fetch(`/api/images/${image.id}`, { method: 'DELETE' });
-      if (!response.ok) {
-        const payload = await response.json();
-        throw new Error(payload.error || 'Failed to delete image');
-      }
-      toast.push('Image deleted');
-      window.location.href = '/';
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to delete image';
-      toast.push(message);
-    }
-  }, [image, toast]);
-
-  const handleDeleteCurrent = useCallback(async () => {
-    if (!image) return;
-    const prompt = isChildImage
-      ? 'Delete this image variation permanently?'
-      : 'Delete this image permanently? Variations will remain (and may need reassignment).';
-    if (!confirm(prompt)) return;
-    try {
-      const response = await fetch(`/api/images/${image.id}`, { method: 'DELETE' });
-      if (!response.ok) {
-        const payload = await response.json();
-        throw new Error(payload.error || 'Failed to delete image');
-      }
-      toast.push('Image deleted');
-      window.location.href = '/';
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to delete image';
-      toast.push(message);
-    }
-  }, [image, isChildImage, toast]);
-
-  const handleDeleteFamily = useCallback(async () => {
-    if (!image) return;
-
-    const warning =
-      'This will permanently delete this image AND all variations in its family.\n\n' +
-      'Type DELETE FAMILY to confirm.';
-    const typed = window.prompt(warning);
-    if (typed !== 'DELETE FAMILY') {
-      return;
-    }
-
-    try {
-      setDeleteFamilyOpen(true);
-      setDeleteFamilyStatus(null);
-      setDeleteFamilyJobId(null);
-
-      const response = await fetch(`/api/images/${image.id}/delete-family`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ confirm: 'DELETE_FAMILY', async: true }),
-      });
-      const payload = await response.json();
-
-      if (!response.ok) {
-        throw new Error(payload.error || 'Failed to start delete-family job');
-      }
-
-      const jobId = typeof payload.jobId === 'string' ? payload.jobId : null;
-      if (!jobId) {
-        throw new Error('Delete-family job did not return a jobId');
-      }
-
-      setDeleteFamilyJobId(jobId);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to delete image family';
-      toast.push(message);
-      setDeleteFamilyOpen(false);
-    }
-  }, [image, toast]);
-
-  useEffect(() => {
-    if (!deleteFamilyOpen) return;
-    if (!deleteFamilyJobId) return;
-
-    let cancelled = false;
-    let interval: number | null = null;
-
-    const poll = async () => {
-      try {
-        const res = await fetch(`/api/jobs/delete-family/${deleteFamilyJobId}`, { cache: 'no-store' });
-        const data = (await res.json()) as DeleteFamilyJobStatus;
-        if (cancelled) return;
-
-        if (!res.ok) {
-          throw new Error((data as unknown as { error?: string })?.error || 'Failed to fetch job status');
-        }
-
-        setDeleteFamilyStatus(data);
-
-        if (data.status !== 'running') {
-          if (interval !== null) window.clearInterval(interval);
-          interval = null;
-
-          if (data.status === 'completed') {
-            toast.push(`Deleted ${data.deleted} images${data.failed ? `; ${data.failed} failed` : ''}`);
-            window.location.href = '/';
-          } else {
-            toast.push(data.lastError || 'Delete family failed');
-          }
-        }
-      } catch (error) {
-        if (!cancelled) {
-          const message = error instanceof Error ? error.message : 'Failed to fetch delete progress';
-          toast.push(message);
-        }
-      }
-    };
-
-    void poll();
-    interval = window.setInterval(poll, 500);
-
-    return () => {
-      cancelled = true;
-      if (interval !== null) window.clearInterval(interval);
-    };
-  }, [deleteFamilyJobId, deleteFamilyOpen, toast]);
-
   const handleAdoptImage = useCallback(async () => {
     if (!adoptImageId || !id) {
       return;
@@ -1724,68 +1487,6 @@ export default function ImageDetailPage() {
     }
   }, [id, patchParentAssignment, toast]);
 
-  const handleChildUpload = useCallback(async () => {
-    if (!id || childUploadFiles.length === 0) return;
-    setChildUploadLoading(true);
-    try {
-      const defaultFolder = childUploadFolder.trim() || image?.folder || '';
-      const defaultTags = childUploadTags.trim() || (image?.tags ? image.tags.join(', ') : '');
-      let successCount = 0;
-      const failures: { filename: string; error: string }[] = [];
-      const skipped: { filename: string; reason: string }[] = [];
-      for (const file of childUploadFiles) {
-        const formData = new FormData();
-        formData.append('file', file);
-        if (defaultFolder) formData.append('folder', defaultFolder);
-        if (defaultTags) formData.append('tags', defaultTags);
-        formData.append('parentId', id);
-
-        const response = await fetch('/api/upload', {
-          method: 'POST',
-          body: formData,
-        });
-        const payload = await response.json();
-        if (!response.ok) {
-          failures.push({
-            filename: file.name,
-            error: payload.error || 'Upload failed'
-          });
-          continue;
-        }
-        if (payload && Array.isArray(payload.results)) {
-          successCount += payload.results.length;
-          if (Array.isArray(payload.failures)) {
-            failures.push(...payload.failures);
-          }
-          if (Array.isArray(payload.skipped)) {
-            skipped.push(...payload.skipped);
-          }
-        } else {
-          successCount += 1;
-        }
-      }
-      if (successCount > 0) {
-        toast.push(`Uploaded ${successCount} variation(s)`);
-        await refreshImageList();
-      } else {
-        toast.push('No variations uploaded');
-      }
-      if (failures.length) {
-        const failureNames: BulkUpdateFailure[] = failures.map(item => ({ id: item.filename, name: item.filename }));
-        toast.push(`Failed: ${formatFailureNames(failureNames)}`);
-      }
-      if (skipped.length) {
-        const skippedNames: BulkUpdateFailure[] = skipped.map(item => ({ id: item.filename, name: item.filename }));
-        toast.push(`Skipped: ${formatFailureNames(skippedNames)}`);
-      }
-      setChildUploadFiles([]);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to upload variation';
-      toast.push(message);
-    } finally {
-      setChildUploadLoading(false);
-    }
-  }, [childUploadFiles, childUploadFolder, childUploadTags, id, refreshImageList, toast]);
 
   const handleFolderManagerChange = useCallback(async () => {
     await refreshImageList();
@@ -1803,84 +1504,6 @@ export default function ImageDetailPage() {
   const handleThumbLeave = useCallback(() => {
     setHoverPreview(null);
   }, []);
-
-  const generateAltTag = useCallback(async (targetId: string) => {
-    setAltLoadingMap(prev => ({ ...prev, [targetId]: true }));
-    try {
-      const response = await fetch(`/api/images/${targetId}/alt`, { method: 'POST' });
-      const data = await response.json();
-      if (!response.ok || !data?.altTag) {
-        toast.push(data?.error || 'Failed to generate ALT text');
-        return;
-      }
-      setImage(prev => prev && prev.id === targetId ? { ...prev, altTag: data.altTag } : prev);
-      if (targetId === id) {
-        setAltTextInput(data.altTag);
-      }
-      setAllImages(prev => prev.map(img => img.id === targetId ? { ...img, altTag: data.altTag } : img));
-      if (data?.saved === false) {
-        toast.push(data?.warning || 'ALT text generated (not saved)');
-      } else {
-        toast.push('ALT text updated');
-      }
-    } catch (error) {
-      console.error('Failed to generate ALT text:', error);
-      toast.push('Failed to generate ALT text');
-    } finally {
-      setAltLoadingMap(prev => {
-        const next = { ...prev };
-        delete next[targetId];
-        return next;
-      });
-    }
-  }, [toast, id]);
-
-  const generateDescription = useCallback(async () => {
-    if (!image?.id) {
-      return;
-    }
-    setDescriptionGenerating(true);
-    try {
-      const response = await fetch(`/api/images/${image.id}/description`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          existingDescription: descriptionInput || ''
-        })
-      });
-      const data = await response.json();
-      if (!response.ok || !data?.description) {
-        toast.push(data?.error || 'Failed to generate description');
-        return;
-      }
-      const generatedText: string = data.description;
-      const appendText = (current?: string | null) => {
-        const base = typeof current === 'string' ? current : '';
-        return base.trim() ? `${base}\n\n${generatedText}` : generatedText;
-      };
-      setDescriptionInput(prev => appendText(prev));
-      setImage(prev => {
-        if (!prev || prev.id !== image.id) {
-          return prev;
-        }
-        return {
-          ...prev,
-          description: appendText(prev.description)
-        };
-      });
-      setAllImages(prev =>
-        prev.map(img =>
-          img.id === image.id ? { ...img, description: appendText(img.description) } : img
-        )
-      );
-      toast.push('Generated description appended (Save to persist)');
-    } catch (error) {
-      console.error('Failed to generate description:', error);
-      toast.push('Failed to generate description');
-    } finally {
-      setDescriptionGenerating(false);
-    }
-  }, [image, descriptionInput, toast]);
 
   const refreshPromptThis = useCallback(async () => {
     if (!image?.id) {
@@ -1992,310 +1615,6 @@ export default function ImageDetailPage() {
     refreshPromptThis();
   }, [refreshPromptThis]);
 
-  const applyDescriptionToVariations = useCallback(async () => {
-    if (isChildImage) {
-      return;
-    }
-    const trimmed = descriptionInput.trim();
-    if (!trimmed) {
-      toast.push('Add a description first');
-      return;
-    }
-    if (!variationChildren.length) {
-      toast.push('No variations to update');
-      return;
-    }
-    setBulkDescriptionApplying(true);
-    try {
-      const results = await Promise.all(
-        variationChildren.map(async (child) => {
-          try {
-            const res = await fetch(`/api/images/${child.id}/update`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ description: trimmed })
-            });
-            const payload = await res.json().catch(() => ({}));
-            return { ok: res.ok, error: payload?.error, id: child.id };
-          } catch (err) {
-            console.error('Bulk description apply error', err);
-            return { ok: false, error: 'Network error', id: child.id };
-          }
-        })
-      );
-      const failures = results.filter(result => !result.ok);
-      const successCount = results.length - failures.length;
-      if (successCount) {
-        setAllImages(prev =>
-          prev.map(img => (img.parentId === id ? { ...img, description: trimmed } : img))
-        );
-      }
-      if (failures.length) {
-        toast.push(`Updated ${successCount}/${variationChildren.length} variations (some failed)`);
-      } else {
-        toast.push(`Description applied to ${variationChildren.length} variations`);
-      }
-    } catch (err) {
-      console.error('Failed to bulk apply description', err);
-      toast.push('Failed to apply description to variations');
-    } finally {
-      setBulkDescriptionApplying(false);
-    }
-  }, [descriptionInput, variationChildren, isChildImage, toast, id]);
-
-  const applyAltToVariations = useCallback(async () => {
-    if (isChildImage) {
-      return;
-    }
-    const trimmed = altTextInput.trim();
-    if (!trimmed) {
-      toast.push('Add ALT text first');
-      return;
-    }
-    if (!variationChildren.length) {
-      toast.push('No variations to update');
-      return;
-    }
-    setBulkAltApplying(true);
-    try {
-      const results = await Promise.all(
-        variationChildren.map(async (child) => {
-          try {
-            const res = await fetch(`/api/images/${child.id}/update`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ altTag: trimmed })
-            });
-            const payload = await res.json().catch(() => ({}));
-            return { ok: res.ok, error: payload?.error, id: child.id };
-          } catch (err) {
-            console.error('Bulk ALT apply error', err);
-            return { ok: false, error: 'Network error', id: child.id };
-          }
-        })
-      );
-      const failures = results.filter(result => !result.ok);
-      const successCount = results.length - failures.length;
-      if (successCount) {
-        setAllImages(prev =>
-          prev.map(img => (img.parentId === id ? { ...img, altTag: trimmed } : img))
-        );
-      }
-      if (failures.length) {
-        toast.push(`Updated ${successCount}/${variationChildren.length} variations (some failed)`);
-      } else {
-        toast.push(`ALT text applied to ${variationChildren.length} variations`);
-      }
-    } catch (err) {
-      console.error('Failed to bulk apply ALT text', err);
-      toast.push('Failed to apply ALT text to variations');
-    } finally {
-      setBulkAltApplying(false);
-    }
-  }, [altTextInput, variationChildren, isChildImage, toast, id]);
-
-  const applyFolderToVariations = useCallback(async () => {
-    if (isChildImage) {
-      return;
-    }
-    if (!variationChildren.length) {
-      toast.push('No variations to update');
-      return;
-    }
-    if (!effectiveParentFolder) {
-      toast.push('Parent has no folder set');
-      return;
-    }
-    setBulkFolderApplying(true);
-    try {
-      type BulkUpdateResult =
-        | { ok: true; id: string }
-        | ({ ok: false } & BulkUpdateFailure);
-      const results: BulkUpdateResult[] = await Promise.all(
-        variationChildren.map(async (child) => {
-          try {
-            const res = await fetch(`/api/images/${child.id}/update`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ folder: effectiveParentFolder })
-            });
-            const payload = await res.json().catch(() => ({}));
-            if (!res.ok) {
-              const errorMessage = payload?.error || 'Failed to update folder';
-              return {
-                ok: false,
-                id: child.id,
-                name: child.filename || child.id,
-                error: errorMessage,
-                reason: isMetadataLimitError(errorMessage) ? 'metadata' : 'unknown'
-              };
-            }
-            return { ok: true, id: child.id };
-          } catch (err) {
-            console.error('Bulk folder apply error', err);
-            return {
-              ok: false,
-              id: child.id,
-              name: child.filename || child.id,
-              error: 'Network error',
-              reason: 'network'
-            };
-          }
-        })
-      );
-
-      const failures = results.filter((result): result is ({ ok: false } & BulkUpdateFailure) => !result.ok);
-      const successIds = new Set(results.filter((result) => result.ok).map((result) => result.id));
-      if (successIds.size) {
-        setAllImages((prev) =>
-          prev.map((img) => (successIds.has(img.id) ? { ...img, folder: effectiveParentFolder } : img))
-        );
-      }
-
-      if (failures.length) {
-        const metadataFailures = failures.filter((failure) => failure.reason === 'metadata');
-        if (metadataFailures.length) {
-          console.warn('Metadata too large for variations:', metadataFailures);
-          toast.push(
-            `Metadata too large for ${metadataFailures.length} variation(s): ${formatFailureNames(metadataFailures)}`
-          );
-        }
-        const otherFailures = failures.filter((failure) => failure.reason !== 'metadata');
-        if (otherFailures.length) {
-          toast.push(`Failed to update ${otherFailures.length} variation(s)`);
-        }
-        const successCount = variationChildren.length - failures.length;
-        if (successCount) {
-          toast.push(`Updated ${successCount}/${variationChildren.length} variations`);
-        }
-      } else {
-        toast.push(`Folder applied to ${variationChildren.length} variations`);
-      }
-    } catch (err) {
-      console.error('Failed to bulk apply folder', err);
-      toast.push('Failed to apply folder to variations');
-    } finally {
-      setBulkFolderApplying(false);
-    }
-  }, [effectiveParentFolder, isChildImage, toast, variationChildren]);
-
-  const applyTagsToVariations = useCallback(
-    async (mode: 'append' | 'replace') => {
-      if (isChildImage) {
-        return;
-      }
-      if (!variationChildren.length) {
-        toast.push('No variations to update');
-        return;
-      }
-      if (mode === 'append' && parentTags.length === 0) {
-        toast.push('No parent tags to append');
-        return;
-      }
-
-      if (mode === 'append') {
-        setBulkTagsAppending(true);
-      } else {
-        setBulkTagsReplacing(true);
-      }
-
-      try {
-        type BulkUpdateResult =
-          | { ok: true; id: string; tags: string[] }
-          | ({ ok: false } & BulkUpdateFailure);
-        const results: BulkUpdateResult[] = await Promise.all(
-          variationChildren.map(async (child) => {
-            const existingTags = Array.isArray(child.tags) ? child.tags : [];
-            const nextTags =
-              mode === 'append'
-                ? Array.from(new Set([...existingTags, ...parentTags].map((tag) => tag.trim()).filter(Boolean)))
-                : [...parentTags];
-            try {
-              const res = await fetch(`/api/images/${child.id}/update`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tags: nextTags })
-              });
-              const payload = await res.json().catch(() => ({}));
-              if (!res.ok) {
-                const errorMessage = payload?.error || 'Failed to update tags';
-                return {
-                  ok: false,
-                  id: child.id,
-                  name: child.filename || child.id,
-                  error: errorMessage,
-                  reason: isMetadataLimitError(errorMessage) ? 'metadata' : 'unknown'
-                };
-              }
-              return { ok: true, id: child.id, tags: nextTags };
-            } catch (err) {
-              console.error('Bulk tags apply error', err);
-              return {
-                ok: false,
-                id: child.id,
-                name: child.filename || child.id,
-                error: 'Network error',
-                reason: 'network'
-              };
-            }
-          })
-        );
-
-        const failures = results.filter((result): result is ({ ok: false } & BulkUpdateFailure) => !result.ok);
-        const tagsById = new Map(
-          results.filter((result): result is { ok: true; id: string; tags: string[] } => result.ok).map((result) => [
-            result.id,
-            result.tags
-          ])
-        );
-
-        if (tagsById.size) {
-          setAllImages((prev) =>
-            prev.map((img) => {
-              const nextTags = tagsById.get(img.id);
-              if (!nextTags) return img;
-              return { ...img, tags: nextTags };
-            })
-          );
-        }
-
-        if (failures.length) {
-          const metadataFailures = failures.filter((failure) => failure.reason === 'metadata');
-          if (metadataFailures.length) {
-            console.warn('Metadata too large for variations:', metadataFailures);
-            toast.push(
-              `Metadata too large for ${metadataFailures.length} variation(s): ${formatFailureNames(metadataFailures)}`
-            );
-          }
-          const otherFailures = failures.filter((failure) => failure.reason !== 'metadata');
-          if (otherFailures.length) {
-            toast.push(`Failed to update ${otherFailures.length} variation(s)`);
-          }
-          const successCount = variationChildren.length - failures.length;
-          if (successCount) {
-            toast.push(`Updated ${successCount}/${variationChildren.length} variations`);
-          }
-        } else {
-          toast.push(
-            mode === 'append'
-              ? `Tags appended to ${variationChildren.length} variations`
-              : `Tags replaced on ${variationChildren.length} variations`
-          );
-        }
-      } catch (err) {
-        console.error('Failed to bulk apply tags', err);
-        toast.push('Failed to apply tags to variations');
-      } finally {
-        if (mode === 'append') {
-          setBulkTagsAppending(false);
-        } else {
-          setBulkTagsReplacing(false);
-        }
-      }
-    },
-    [isChildImage, parentTags, toast, variationChildren]
-  );
-
   if (!id) {
     return (
       <div className="p-6">
@@ -2400,7 +1719,7 @@ export default function ImageDetailPage() {
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => copyToClipboard(rotatedAsset.url, 'Rotated image', 'Rotated URL copied')}
+                      onClick={() => handleCopyText(rotatedAsset.url, 'Rotated URL copied')}
                       className="px-2 py-1 border border-blue-200 rounded text-[11px] text-blue-700 hover:border-blue-300"
                     >
                       Copy new CDN URL
@@ -2477,7 +1796,7 @@ export default function ImageDetailPage() {
               <span className="text-gray-500">Image ID</span>
               <span className="font-mono text-gray-800">{image.id}</span>
               <button
-                onClick={async () => { await copyToClipboard(image.id, 'Image ID', 'Image ID copied'); }}
+                onClick={() => handleCopyText(image.id, 'Image ID copied')}
                 className="px-2 py-0.5 border border-gray-300 rounded hover:bg-gray-100 text-[10px]"
               >
                 Copy
@@ -2525,7 +1844,7 @@ export default function ImageDetailPage() {
                               </div>
                               <button
                                 type="button"
-                                onClick={() => setDeleteFamilyOpen(false)}
+                                onClick={closeDeleteFamilyModal}
                                 className="text-xs px-2 py-1 border rounded text-gray-700 hover:bg-gray-50"
                               >
                                 Hide
@@ -2653,7 +1972,7 @@ export default function ImageDetailPage() {
               promptThisMeta={promptThisMeta}
               onGenerate={generatePromptThis}
               onSave={savePromptThisEdits}
-              onCopy={() => copyToClipboard(promptThisInput || '', 'Prompt', 'Prompt copied')}
+              onCopy={() => handleCopyText(promptThisInput || '', 'Prompt copied')}
             />
 
             <div id="folder-section">
@@ -2784,14 +2103,14 @@ export default function ImageDetailPage() {
               originalDeliveryUrl={originalDeliveryUrl}
               originalUrlNormalized={image?.originalUrlNormalized}
               contentHash={image?.contentHash}
-              onCopyToClipboard={copyToClipboard}
+              onCopyToClipboard={handleCopyText}
             />
 
             <SourceUrlSection
               sourceUrlInput={sourceUrlInput}
               setSourceUrlInput={setSourceUrlInput}
               sourceUrlNormalized={image?.sourceUrlNormalized}
-              onCopyToClipboard={copyToClipboard}
+              onCopyToClipboard={handleCopyText}
             />
 
             <ShareSection
@@ -2802,7 +2121,7 @@ export default function ImageDetailPage() {
               shareVariantOptions={shareVariantOptions}
               shareUrl={shareUrl}
               shareQrDataUrl={shareQrDataUrl}
-              onCopyToClipboard={copyToClipboard}
+              onCopyToClipboard={handleCopyText}
             />
 
             <ExifSection exifEntries={exifEntries} clearExif={clearExif} setClearExif={setClearExif} />
@@ -2914,6 +2233,15 @@ export default function ImageDetailPage() {
                   onClearSelectedFiles={() => setChildUploadFiles([])}
                   onUpload={handleChildUpload}
                   childUploadLoading={childUploadLoading}
+                  childUploadUrl={childUploadUrl}
+                  onChildUploadUrlChange={setChildUploadUrl}
+                  onUploadUrl={handleChildUploadByUrl}
+                  childUploadUrlLoading={childUploadUrlLoading}
+                  childImportUrl={childImportUrl}
+                  childImportLoading={childImportLoading}
+                  childImportError={childImportError}
+                  onChildImportUrlChange={setChildImportUrl}
+                  onImportFromUrl={handleImportFromUrl}
                 />
               </>
             )}

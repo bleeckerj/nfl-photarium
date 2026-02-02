@@ -98,7 +98,7 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
   onClose,
 }) => {
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] px-4">
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] px-4">
       <div className="bg-white rounded-lg w-full max-w-lg p-6 space-y-4 text-[0.7em] font-mono">
         <div className="flex items-center justify-between">
           <p className="text-gray-900 font-semibold">Bulk edit ({selectedCount} images)</p>

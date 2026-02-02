@@ -15,6 +15,17 @@ export interface UploadVariationSectionProps {
 
   onUpload: () => void | Promise<void>;
   childUploadLoading: boolean;
+
+  childUploadUrl: string;
+  onChildUploadUrlChange: (value: string) => void;
+  onUploadUrl: () => void | Promise<void>;
+  childUploadUrlLoading: boolean;
+
+  childImportUrl: string;
+  childImportLoading: boolean;
+  childImportError: string | null;
+  onChildImportUrlChange: (value: string) => void;
+  onImportFromUrl: () => void | Promise<void>;
 }
 
 export function UploadVariationSection(props: UploadVariationSectionProps) {
@@ -29,7 +40,16 @@ export function UploadVariationSection(props: UploadVariationSectionProps) {
     childUploadFiles,
     onClearSelectedFiles,
     onUpload,
-    childUploadLoading
+    childUploadLoading,
+    childUploadUrl,
+    onChildUploadUrlChange,
+    onUploadUrl,
+    childUploadUrlLoading,
+    childImportUrl,
+    childImportLoading,
+    childImportError,
+    onChildImportUrlChange,
+    onImportFromUrl
   } = props;
 
   const effectiveFolder = childUploadFolder || fallbackFolder || '';
@@ -79,6 +99,59 @@ export function UploadVariationSection(props: UploadVariationSectionProps) {
           </button>
         </div>
       )}
+
+      <div className="space-y-2">
+        <label className="text-[11px] font-mono text-gray-700" htmlFor="child-import-url">
+          Import image from URL
+        </label>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input
+            id="child-import-url"
+            type="url"
+            inputMode="url"
+            placeholder="https://example.com/asset.jpg"
+            value={childImportUrl}
+            onChange={(event) => onChildImportUrlChange(event.target.value)}
+            className="flex-1 px-2 py-2 text-xs border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          <button
+            type="button"
+            onClick={() => void onImportFromUrl()}
+            disabled={childImportLoading || !childImportUrl.trim()}
+            className="px-4 py-2 text-xs bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {childImportLoading ? 'Fetching…' : 'Fetch image'}
+          </button>
+        </div>
+        {childImportError && <p className="text-[11px] text-red-600">{childImportError}</p>}
+        <p className="text-[11px] text-gray-500">Fetched images are added to the queue below.</p>
+      </div>
+
+      <div className="space-y-2">
+        <label className="text-[11px] font-mono text-gray-700" htmlFor="child-variation-url">
+          Upload by URL
+        </label>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input
+            id="child-variation-url"
+            type="url"
+            inputMode="url"
+            placeholder="https://example.com/image.jpg"
+            value={childUploadUrl}
+            onChange={(event) => onChildUploadUrlChange(event.target.value)}
+            className="flex-1 px-2 py-2 text-xs border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          <button
+            type="button"
+            onClick={() => void onUploadUrl()}
+            disabled={childUploadUrlLoading || !childUploadUrl.trim()}
+            className="px-4 py-2 text-xs bg-slate-800 text-white rounded-md hover:bg-slate-900 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {childUploadUrlLoading ? 'Uploading…' : 'Upload URL'}
+          </button>
+        </div>
+        <p className="text-[11px] text-gray-500">URL uploads use the same folder and tags as file uploads.</p>
+      </div>
 
       <button
         onClick={() => void onUpload()}
