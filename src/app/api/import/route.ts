@@ -24,6 +24,8 @@ const IMAGE_EXTENSION_MIME_MAP: Record<string, string> = {
   avif: 'image/avif',
   bmp: 'image/bmp',
   ico: 'image/x-icon',
+  tiff: 'image/tiff',
+  tif: 'image/tiff',
 };
 
 const getMimeFromExtension = (value: string) => {

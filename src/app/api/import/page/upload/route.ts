@@ -16,7 +16,7 @@ const IMAGE_EXTENSION_MIME_MAP: Record<string, string> = {
   ico: 'image/x-icon',
 };
 
-const MIN_IMAGE_BYTES = 8 * 1024;
+const MIN_IMAGE_BYTES = 4 * 1024;
 
 const insecureAgent = new Agent({
   connect: {
@@ -240,7 +240,7 @@ export async function POST(request: NextRequest) {
           failures.push({
             clientId: item.clientId,
             filename: item.url,
-            error: 'Image smaller than 8KB',
+            error: 'Image smaller than 4KB',
             reason: 'unsupported'
           });
           continue;
