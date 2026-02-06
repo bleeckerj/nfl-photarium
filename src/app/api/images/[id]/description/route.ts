@@ -108,6 +108,8 @@ export async function POST(
       .filter(Boolean)
       .join('\n\n');
 
+    const descriptionModel = process.env.OPENAI_DESCRIPTION_MODEL || 'gpt-4o';
+
     const openAiResponse = await fetch(OPENAI_API_URL, {
       method: 'POST',
       headers: {
@@ -115,7 +117,7 @@ export async function POST(
         Authorization: `Bearer ${openAiKey}`
       },
       body: JSON.stringify({
-        model: 'gpt-4o',
+        model: descriptionModel,
         temperature: 0.5,
         max_tokens: 400,
         messages: [
