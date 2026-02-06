@@ -201,7 +201,7 @@ export default function MonoSelect({
         <div
           role="listbox"
           id={id ? `${id}-listbox` : undefined}
-          className="absolute z-40 mt-1 w-full max-h-64 overflow-auto rounded-md border border-gray-200 bg-white shadow-xl"
+          className="absolute z-[3000] mt-1 w-full max-h-64 overflow-auto rounded-md border border-gray-200 bg-white shadow-xl"
         >
           {searchable && (
             <div className="sticky top-0 bg-white border-b border-gray-200 px-2 py-2">

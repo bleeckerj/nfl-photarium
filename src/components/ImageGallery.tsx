@@ -741,6 +741,15 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
 
   const toast = useToast();
 
+  const [backupInfo, setBackupInfo] = useState<{
+    timestamp: string;
+    date: Date;
+    sizeHuman: string;
+    type: 'bundle' | 'rdb';
+  } | null>(null);
+  const [backupLoading, setBackupLoading] = useState(false);
+  const [backupError, setBackupError] = useState<string | null>(null);
+
   const {
     brokenAudit,
     brokenImageIds,
@@ -757,6 +766,105 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const { embeddingPendingMap } = useGalleryEmbedding({
     images,
   });
+
+  const parseBackupTimestamp = useCallback((timestamp: string) => {
+    const match = timestamp.match(/(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})([+-]\d{4})?/);
+    if (!match) return null;
+    const [, year, month, day, hour, minute, second, tzOffset] = match;
+    const utcMs = Date.UTC(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second)
+    );
+    if (!tzOffset) {
+      return new Date(utcMs);
+    }
+    const sign = tzOffset.startsWith('-') ? -1 : 1;
+    const offsetHours = Number(tzOffset.slice(1, 3));
+    const offsetMinutes = Number(tzOffset.slice(3, 5));
+    const offsetTotalMinutes = sign * (offsetHours * 60 + offsetMinutes);
+    return new Date(utcMs - offsetTotalMinutes * 60 * 1000);
+  }, []);
+
+  const fetchLatestBackup = useCallback(async () => {
+    try {
+      setBackupError(null);
+      const response = await fetch('/api/backup');
+      if (!response.ok) {
+        throw new Error('Failed to load backups');
+      }
+      const data = await response.json();
+      const backups = (data?.backups ?? []) as Array<{
+        timestamp: string;
+        sizeHuman: string;
+        type: 'bundle' | 'rdb';
+      }>;
+      if (!backups.length) {
+        setBackupInfo(null);
+        return;
+      }
+      const latestTimestamp = backups
+        .map((b) => b.timestamp)
+        .sort()
+        .reverse()[0];
+      const latestBundle = backups.find(
+        (b) => b.timestamp === latestTimestamp && b.type === 'bundle'
+      );
+      const latestRdb = backups.find(
+        (b) => b.timestamp === latestTimestamp && b.type === 'rdb'
+      );
+      const chosen = latestBundle ?? latestRdb;
+      if (!chosen) {
+        setBackupInfo(null);
+        return;
+      }
+      const date = parseBackupTimestamp(chosen.timestamp);
+      if (!date) {
+        setBackupInfo(null);
+        return;
+      }
+      setBackupInfo({
+        timestamp: chosen.timestamp,
+        date,
+        sizeHuman: chosen.sizeHuman,
+        type: chosen.type,
+      });
+    } catch (error) {
+      console.error('Failed to load backup info', error);
+      setBackupError(error instanceof Error ? error.message : 'Backup info unavailable');
+    }
+  }, [parseBackupTimestamp]);
+
+  useEffect(() => {
+    fetchLatestBackup();
+  }, [fetchLatestBackup]);
+
+  const handleCreateBackup = useCallback(async () => {
+    try {
+      setBackupLoading(true);
+      setBackupError(null);
+      const response = await fetch('/api/backup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data?.error || 'Failed to create backup');
+      }
+      toast.push('Backup created');
+      await fetchLatestBackup();
+    } catch (error) {
+      console.error('Backup failed', error);
+      setBackupError(error instanceof Error ? error.message : 'Backup failed');
+      toast.push('Backup failed');
+    } finally {
+      setBackupLoading(false);
+    }
+  }, [fetchLatestBackup, toast]);
 
   const handleCopyUrl = async (
     event: React.MouseEvent<HTMLButtonElement>,
@@ -1332,6 +1440,13 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     altLoadingMap,
     galleryReturnHrefSuffix,
   ]);
+  const backupAgeDays = backupInfo
+    ? (Date.now() - backupInfo.date.getTime()) / (1000 * 60 * 60 * 24)
+    : null;
+  const backupAgeLabel = backupAgeDays !== null ? `${backupAgeDays.toFixed(1)}d old` : '—';
+  const backupTimeLabel = backupInfo ? backupInfo.date.toLocaleString() : '—';
+  const backupSizeLabel = backupInfo ? backupInfo.sizeHuman : '—';
+
   if (loading) {
     return (
       <div id="image-gallery-loading" className="bg-white rounded-lg shadow-lg p-6">
@@ -1351,7 +1466,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     <div id="image-gallery-card" ref={galleryTopRef} className="overscroll-none bg-white rounded-lg shadow-lg p-6">
       <div
         id="gallery-top-bar"
-        className="sticky top-0 z-20 -m-6 mb-6 p-6 pb-4 bg-white/95 backdrop-blur rounded-t-lg border-b border-gray-100"
+        className="sticky top-0 z-[3000] -m-6 mb-6 p-6 pb-4 bg-white/95 backdrop-blur rounded-t-lg border-b border-gray-100 relative"
       >
         <LegacyTopBar
           filteredCount={filteredWithVariants.length}
@@ -1397,6 +1512,30 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           onJumpForwardTen={jumpForwardTenPages}
           onLastPage={goToLastPage}
         />
+        <div className="mt-3 flex items-end justify-end gap-2 text-[0.6rem] font-mono text-gray-500">
+          <div className="text-right leading-tight">
+            <div>Last backup: {backupTimeLabel}</div>
+            <div className="text-gray-400">{backupSizeLabel} • {backupAgeLabel}</div>
+            {backupError && <div className="text-red-500">{backupError}</div>}
+          </div>
+          <button
+            type="button"
+            onClick={handleCreateBackup}
+            disabled={backupLoading}
+            className="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-200 bg-white/80 text-gray-600 hover:bg-white disabled:opacity-50"
+            title="Create backup"
+            aria-label="Create backup"
+          >
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="4" y="3" width="16" height="18" rx="2" />
+              <circle cx="12" cy="12" r="3" />
+              <path d="M12 9v6" />
+              <path d="M9 12h6" />
+              <path d="M7 7h2" />
+              <path d="M15 7h2" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {duplicateGroupCount > 0 && (
@@ -1439,7 +1578,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       >
         <div
           id="gallery-filter-controls"
-          className={`relative z-[2000] space-y-4 p-4 bg-gray-50 rounded-lg transition-opacity duration-300 ${filtersCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+          className={`relative z-10 space-y-4 p-4 bg-gray-50 rounded-lg transition-opacity duration-300 ${filtersCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
         >
           <div className="grid grid-cols-1 gap-4 items-start">
             <div>

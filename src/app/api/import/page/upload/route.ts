@@ -4,6 +4,9 @@ import { toDuplicateSummary } from '@/server/duplicateDetector';
 import { MAX_IMAGE_BYTES, SUPPORTED_IMAGE_TYPES, uploadImageBuffer } from '@/server/uploadService';
 import type { UploadFailure, UploadSuccess } from '@/server/uploadService';
 
+// Use a browser-like User-Agent to avoid sites (e.g. Google Drive) redirecting to login pages
+const BROWSER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
 const IMAGE_EXTENSION_MIME_MAP: Record<string, string> = {
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
@@ -32,7 +35,10 @@ const isCertError = (error: unknown) => {
 };
 
 const fetchWithCertFallback = async (url: string, allowInsecure: boolean, init?: RequestInit) => {
-  const firstInit = allowInsecure ? { ...(init as any), dispatcher: insecureAgent } : init;
+  const baseHeaders = { 'User-Agent': BROWSER_USER_AGENT, ...(init?.headers || {}) };
+  const firstInit = allowInsecure
+    ? { ...(init as any), headers: baseHeaders, dispatcher: insecureAgent }
+    : { ...init, headers: baseHeaders };
   try {
     return await fetch(url, firstInit as any);
   } catch (error) {

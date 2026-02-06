@@ -120,6 +120,8 @@ export async function POST(
 
     const prompt = 'You are an accessibility assistant. Provide a concise, objective alt text (max 120 characters) that describes the main subject and context of the image.';
 
+    const altModel = process.env.OPENAI_ALT_MODEL || 'gpt-4o';
+
     const openAiResponse = await fetch(OPENAI_API_URL, {
       method: 'POST',
       headers: {
@@ -127,7 +129,7 @@ export async function POST(
         Authorization: `Bearer ${openAiKey}`,
       },
       body: JSON.stringify({
-        model: 'gpt-4o',
+        model: altModel,
         temperature: 0.2,
         max_tokens: 150,
         messages: [

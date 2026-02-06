@@ -3,6 +3,9 @@ import { Agent } from 'undici';
 
 const DEFAULT_MIN_BYTES = 8 * 1024;
 
+// Use a browser-like User-Agent to avoid sites (e.g. Google Drive) redirecting to login pages
+const BROWSER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
 const insecureAgent = new Agent({
   connect: {
     rejectUnauthorized: false
@@ -17,7 +20,10 @@ const isCertError = (error: unknown) => {
 };
 
 const fetchWithCertFallback = async (url: string, allowInsecure: boolean, init?: RequestInit) => {
-  const firstInit = allowInsecure ? { ...(init as any), dispatcher: insecureAgent } : init;
+  const baseHeaders = { 'User-Agent': BROWSER_USER_AGENT, ...(init?.headers || {}) };
+  const firstInit = allowInsecure
+    ? { ...(init as any), headers: baseHeaders, dispatcher: insecureAgent }
+    : { ...init, headers: baseHeaders };
   try {
     return await fetch(url, firstInit);
   } catch (error) {

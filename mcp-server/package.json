@@ -1,7 +1,7 @@
 {
   "name": "photarium-mcp",
-  "version": "0.1.0",
-  "description": "MCP server for Photarium image gallery",
+  "version": "0.2.0",
+  "description": "MCP server for Photarium image gallery - enables LLMs to browse, search, manage, and curate Cloudflare Images",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
@@ -9,6 +9,13 @@
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts"
   },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "cloudflare-images",
+    "image-gallery",
+    "ai-tools"
+  ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0"
   },

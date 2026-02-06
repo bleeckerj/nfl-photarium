@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useDropzone } from "react-dropzone";
 import { Upload, X, CheckCircle, AlertCircle, Loader2, Zap, CloudUpload, Cpu, Sparkles } from "lucide-react";
 import clsx from "clsx";
+import JSZip from "jszip";
 import MonoSelect from "./MonoSelect";
 import { normalizeOriginalUrl } from "@/utils/urlNormalization";
 import { setEmbeddingPendingEntry } from "@/utils/embeddingPending";
@@ -49,10 +50,14 @@ interface QueuedFile {
   selected?: boolean;
   originalUrl?: string;
   sourceUrl?: string;
+  sourcePath?: string;
   folder?: string;
   tags?: string;
   description?: string;
   captureDate?: string;
+  groupId?: string;
+  groupIndex?: number;
+  processingNote?: string;
 }
 
 interface GalleryImageSummary {
@@ -256,30 +261,171 @@ const isZipFile = (file: File) => (
   file.name.toLowerCase().endsWith('.zip')
 );
 
-const isImageFile = (file: File) => file.type.startsWith('image/');
+const isKeynoteFile = (file: File) => file.name.toLowerCase().endsWith('.key');
 
-const shrinkImageFile = async (file: File): Promise<File> => {
-  if (!isImageFile(file)) return file;
-  if (file.size <= MAX_BYTES) return file;
-  const imageBitmap = await createImageBitmap(file);
-  const canvas = document.createElement('canvas');
-  const maxDim = 4000;
-  const scale = Math.min(1, maxDim / Math.max(imageBitmap.width, imageBitmap.height));
-  canvas.width = Math.round(imageBitmap.width * scale);
-  canvas.height = Math.round(imageBitmap.height * scale);
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return file;
-  ctx.drawImage(imageBitmap, 0, 0, canvas.width, canvas.height);
-  let quality = 0.85;
-  let blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
-  while (blob && blob.size > MAX_BYTES && quality > 0.4) {
-    quality -= 0.1;
-    blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+const isArchiveFile = (file: File) => isZipFile(file) || isKeynoteFile(file);
+
+const isImageFile = (file: File) => file.type.startsWith('image/');
+const KEYNOTE_IMAGE_EXTENSIONS = ['.jpeg', '.jpg', '.png', '.gif', '.webp', '.svg'];
+const MIME_BY_EXTENSION: Record<string, string> = {
+  '.jpeg': 'image/jpeg',
+  '.jpg': 'image/jpeg',
+  '.png': 'image/png',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml'
+};
+
+const isSupportedImageName = (name: string) => {
+  const lower = name.toLowerCase();
+  return KEYNOTE_IMAGE_EXTENSIONS.some((ext) => lower.endsWith(ext));
+};
+
+const normalizeEntryName = (entryName: string) => {
+  const parts = entryName.split(/[\\/]/);
+  return parts[parts.length - 1] || entryName;
+};
+
+const getMimeTypeFromFilename = (filename: string) => {
+  const lower = filename.toLowerCase();
+  const match = Object.keys(MIME_BY_EXTENSION).find((ext) => lower.endsWith(ext));
+  return match ? MIME_BY_EXTENSION[match] : undefined;
+};
+
+const getFileSourcePath = (file: File) => {
+  const relative = 'webkitRelativePath' in file ? (file as File & { webkitRelativePath?: string }).webkitRelativePath : undefined;
+  return relative && relative.trim() ? relative : undefined;
+};
+
+const formatBytesMB = (bytes?: number) => {
+  if (typeof bytes !== 'number') return 'Size unknown';
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+};
+
+const renderBitmapToBlob = (bitmap: ImageBitmap, width: number, height: number, type: string, quality: number) =>
+  new Promise<Blob | null>((resolve) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      resolve(null);
+      return;
+    }
+    ctx.drawImage(bitmap, 0, 0, width, height);
+    canvas.toBlob((blob) => resolve(blob), type, quality);
+  });
+
+const reduceImageFileToLimit = async (file: File, maxBytes: number) => {
+  const bitmap = await createImageBitmap(file);
+  const startWidth = bitmap.width;
+  const startHeight = bitmap.height;
+  const candidates = ['image/webp', 'image/jpeg'];
+  const qualityByType: Record<string, number> = { 'image/webp': 0.85, 'image/jpeg': 0.85 };
+  let bestBlob: Blob | null = null;
+  let bestType = 'image/jpeg';
+
+  for (const type of candidates) {
+    const blob = await renderBitmapToBlob(bitmap, startWidth, startHeight, type, qualityByType[type]);
+    if (!blob) continue;
+    if (!bestBlob || blob.size < bestBlob.size) {
+      bestBlob = blob;
+      bestType = type;
+    }
+    if (blob.size <= maxBytes) {
+      bitmap.close();
+      return {
+        blob,
+        type,
+        width: startWidth,
+        height: startHeight,
+        note: `Converted to ${type === 'image/webp' ? 'WebP' : 'JPEG'}`
+      };
+    }
   }
-  if (blob && blob.size <= MAX_BYTES) {
-    return new File([blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
+
+  let width = startWidth;
+  let height = startHeight;
+  let resizedBlob = bestBlob;
+  let attempts = 0;
+  const minDimension = 320;
+  const targetType = bestBlob ? bestType : 'image/jpeg';
+  const targetQuality = targetType === 'image/webp' ? 0.82 : 0.8;
+
+  while (
+    resizedBlob &&
+    resizedBlob.size > maxBytes &&
+    attempts < 8 &&
+    Math.max(width, height) > minDimension
+  ) {
+    width = Math.max(minDimension, Math.round(width * 0.85));
+    height = Math.max(minDimension, Math.round(height * 0.85));
+    resizedBlob = await renderBitmapToBlob(bitmap, width, height, targetType, targetQuality);
+    attempts += 1;
   }
-  return file;
+
+  bitmap.close();
+
+  if (resizedBlob && resizedBlob.size <= maxBytes) {
+    return {
+      blob: resizedBlob,
+      type: targetType,
+      width,
+      height,
+      note: `Converted to ${targetType === 'image/webp' ? 'WebP' : 'JPEG'} and resized`
+    };
+  }
+
+  return null;
+};
+
+const extractKeynoteImages = async (file: File) => {
+  const buffer = await file.arrayBuffer();
+  const zip = await JSZip.loadAsync(buffer);
+  const entries = Object.values(zip.files)
+    .filter((entry) => !entry.dir)
+    .filter((entry) => {
+      const normalized = entry.name.replace(/\\/g, '/').toLowerCase();
+      return (normalized.startsWith('data/') || normalized.includes('/data/')) && isSupportedImageName(normalized);
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const extracted: Array<{ filename: string; file: File }> = [];
+  for (const entry of entries) {
+    const blob = await entry.async('blob');
+    const filename = normalizeEntryName(entry.name);
+    const blobType = (blob as Blob).type || '';
+    const fileType = blobType || getMimeTypeFromFilename(filename) || 'application/octet-stream';
+    extracted.push({
+      filename,
+      file: new File([blob], filename, { type: fileType })
+    });
+  }
+
+  return extracted;
+};
+
+const extractZipImages = async (file: File) => {
+  const buffer = await file.arrayBuffer();
+  const zip = await JSZip.loadAsync(buffer);
+  const entries = Object.values(zip.files)
+    .filter((entry) => !entry.dir)
+    .filter((entry) => isSupportedImageName(entry.name))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const extracted: Array<{ filename: string; file: File }> = [];
+  for (const entry of entries) {
+    const blob = await entry.async('blob');
+    const filename = normalizeEntryName(entry.name);
+    const blobType = (blob as Blob).type || '';
+    const fileType = blobType || getMimeTypeFromFilename(filename) || 'application/octet-stream';
+    extracted.push({
+      filename,
+      file: new File([blob], filename, { type: fileType })
+    });
+  }
+
+  return extracted;
 };
 
 export default function ImageUploader({ onImageUploaded, namespace }: ImageUploaderProps) {
@@ -319,6 +465,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     imageCount: number;
     pageNum?: number;
   } | null>(null);
+  const [reducingQueueItems, setReducingQueueItems] = useState<Record<string, boolean>>({});
   const [previewFailures, setPreviewFailures] = useState<Record<string, boolean>>({});
   const [animateFps, setAnimateFps] = useState<string>('');
   const [animateFpsTouched, setAnimateFpsTouched] = useState(false);
@@ -364,6 +511,49 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       prev.map((item) => (item.id === id ? { ...item, ...updates } : item))
     );
   }, []);
+
+  const reduceQueuedFileSize = useCallback(async (id: string) => {
+    const target = queuedFiles.find((item) => item.id === id);
+    if (!target?.file) return;
+    if (!isImageFile(target.file)) return;
+    if (target.file.size <= MAX_BYTES) return;
+
+    setReducingQueueItems((prev) => ({ ...prev, [id]: true }));
+    try {
+      const reduced = await reduceImageFileToLimit(target.file, MAX_BYTES);
+      if (!reduced) {
+        updateQueuedFile(id, {
+          processingNote: 'Unable to reduce below 10MB'
+        });
+        return;
+      }
+      const ext = reduced.type === 'image/webp' ? '.webp' : '.jpg';
+      const baseName = target.filename.replace(/\.[^.]+$/, '');
+      const nextFilename = `${baseName}${ext}`;
+      const nextFile = new File([reduced.blob], nextFilename, { type: reduced.type });
+      if (target.previewUrl && target.previewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(target.previewUrl);
+      }
+      updateQueuedFile(id, {
+        file: nextFile,
+        filename: nextFilename,
+        previewUrl: URL.createObjectURL(nextFile),
+        processingNote: reduced.note
+      });
+      setPreviewFailures((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    } catch (error) {
+      console.error('Failed to reduce file size', error);
+      updateQueuedFile(id, {
+        processingNote: 'Size reduction failed'
+      });
+    } finally {
+      setReducingQueueItems((prev) => ({ ...prev, [id]: false }));
+    }
+  }, [queuedFiles, updateQueuedFile]);
 
   const processEmbeddingQueue = useCallback(async () => {
     if (embeddingWorkerRef.current) {
@@ -729,7 +919,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
           descriptionInput: descriptionToSend,
           originalUrlInput: originalUrlToSend || undefined,
           sourceUrlInput: sourceUrlToSend || undefined,
-          parentId: selectedParentId || undefined
+          parentId: entry.groupId ? undefined : (selectedParentId || undefined)
         };
       });
 
@@ -738,15 +928,25 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         return [...prev.filter((img) => !ids.has(img.id)), ...initialImages];
       });
 
+      const groupParentMap = new Map<string, string>();
+      const groupFirstId = new Map<string, string>();
+      filesToUpload.forEach((entry) => {
+        if (entry.groupId && !groupFirstId.has(entry.groupId)) {
+          groupFirstId.set(entry.groupId, entry.id);
+        }
+      });
+
       // Upload each file
       for (let i = 0; i < filesToUpload.length; i++) {
         const {
           file,
           originalUrl: queuedOriginalUrl,
           sourceUrl: queuedSourceUrl,
+          sourcePath: queuedSourcePath,
           folder: queuedFolder,
           tags: queuedTags,
           description: queuedDescription,
+          groupId: queuedGroupId,
           id: queuedId
         } = filesToUpload[i];
         const imageId = queuedId;
@@ -757,16 +957,34 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
             : originalUrl.trim() || '';
         const sourceUrlToSend =
           queuedSourceUrl !== undefined ? queuedSourceUrl : sourceUrl.trim() || '';
+        const sourcePathToSend = queuedSourcePath && queuedSourcePath.trim() ? queuedSourcePath.trim() : '';
         const folderToSend = queuedFolder !== undefined ? queuedFolder : folderToUse;
         const tagsToSend = queuedTags !== undefined ? queuedTags : tags;
         const descriptionToSend =
           queuedDescription !== undefined ? queuedDescription : description;
+        const groupId = queuedGroupId || '';
+        const groupParentId = groupId ? groupParentMap.get(groupId) : undefined;
+        const isGroupParent = groupId ? groupFirstId.get(groupId) === imageId : false;
+        const parentIdToSend = groupId
+          ? (isGroupParent ? undefined : groupParentId)
+          : (selectedParentId || undefined);
 
         if (!file) {
           setUploadedImages((prev) =>
             prev.map((img) =>
               img.id === imageId
                 ? { ...img, status: "error", error: "Missing file data" }
+                : img
+            )
+          );
+          continue;
+        }
+
+        if (groupId && !isGroupParent && !groupParentId) {
+          setUploadedImages((prev) =>
+            prev.map((img) =>
+              img.id === imageId
+                ? { ...img, status: "error", error: "Missing parent image for Keynote group" }
                 : img
             )
           );
@@ -791,11 +1009,14 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
           if (sourceUrlToSend) {
             formData.append("sourceUrl", sourceUrlToSend);
           }
+          if (sourcePathToSend) {
+            formData.append("sourcePath", sourcePathToSend);
+          }
           if (namespace) {
             formData.append("namespace", namespace);
           }
-          if (selectedParentId) {
-            formData.append("parentId", selectedParentId);
+          if (parentIdToSend) {
+            formData.append("parentId", parentIdToSend);
           }
 
           // Add delay between uploads to avoid rate limits (except first file)
@@ -870,6 +1091,9 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
               const serverId = typedResult && typeof typedResult === 'object' && 'id' in typedResult && typeof typedResult.id === 'string'
                 ? typedResult.id
                 : imageId;
+              if (groupId && isGroupParent && serverId) {
+                groupParentMap.set(groupId, serverId);
+              }
               setUploadedImages((prev) =>
                 prev.map((img) =>
                   img.id === imageId
@@ -1145,29 +1369,88 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
   // Handle drag and drop - either queue or upload immediately
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     const resizedPromises = acceptedFiles.map(async (file) => {
-      if (isZipFile(file)) {
+      if (isArchiveFile(file)) {
         return file;
       }
-      return shrinkImageFile(file);
+      return file;
     });
     const resizedFiles = await Promise.all(resizedPromises);
-    setQueuedFiles((prev) => [
-      ...prev,
-      ...resizedFiles.map((file) => {
-        const lowerName = file.name.toLowerCase();
-        const isSnagx = lowerName.endsWith('.snagx');
-        const tagOverride = isZipFile(file) ? 'zip' : isSnagx ? 'snagx' : undefined;
-        return {
-          id: createQueueId(),
-          file,
-          filename: file.name,
-          tags: tagOverride,
-          previewUrl: isImageFile(file) ? URL.createObjectURL(file) : undefined,
-          selected: true
-        };
-      })
-    ]);
-  }, [createQueueId]);
+    const queued: QueuedFile[] = [];
+    let firstKeynoteName: string | null = null;
+
+    for (const file of resizedFiles) {
+      if (isKeynoteFile(file)) {
+        const keynoteName = file.name.replace(/\.[^.]+$/, '');
+        const sourcePath = getFileSourcePath(file) || file.name;
+        const groupId = createQueueId();
+        if (!firstKeynoteName) {
+          firstKeynoteName = keynoteName;
+        }
+        try {
+          const extracted = await extractKeynoteImages(file);
+          extracted.forEach((entry, index) => {
+            queued.push({
+              id: createQueueId(),
+              file: entry.file,
+              filename: entry.filename,
+              tags: 'keynote',
+              description: keynoteName,
+              sourcePath,
+              groupId,
+              groupIndex: index,
+              previewUrl: isImageFile(entry.file) ? URL.createObjectURL(entry.file) : undefined,
+              selected: true
+            });
+          });
+        } catch (error) {
+          console.error('Failed to extract Keynote images', error);
+        }
+        continue;
+      }
+
+      if (isZipFile(file)) {
+        const sourcePath = getFileSourcePath(file) || file.name;
+        try {
+          const extracted = await extractZipImages(file);
+          extracted.forEach((entry) => {
+            queued.push({
+              id: createQueueId(),
+              file: entry.file,
+              filename: entry.filename,
+              tags: 'zip',
+              sourcePath,
+              previewUrl: isImageFile(entry.file) ? URL.createObjectURL(entry.file) : undefined,
+              selected: true
+            });
+          });
+        } catch (error) {
+          console.error('Failed to extract zip images', error);
+        }
+        continue;
+      }
+
+      const lowerName = file.name.toLowerCase();
+      const isSnagx = lowerName.endsWith('.snagx');
+      const tagOverride = isSnagx ? 'snagx' : undefined;
+      queued.push({
+        id: createQueueId(),
+        file,
+        filename: file.name,
+        tags: tagOverride,
+        sourcePath: getFileSourcePath(file),
+        previewUrl: isImageFile(file) ? URL.createObjectURL(file) : undefined,
+        selected: true
+      });
+    }
+
+    if (queued.length > 0) {
+      setQueuedFiles((prev) => [...prev, ...queued]);
+    }
+    if (firstKeynoteName) {
+      setTags('keynote');
+      setDescription(firstKeynoteName);
+    }
+  }, [createQueueId, setTags, setDescription]);
 
   // Manual upload button handler
   const handleManualUpload = async () => {
@@ -1181,13 +1464,14 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       const processed: QueuedFile[] = [];
       for (const item of localItems) {
         if (!item.file) continue;
-        const processedFile = isZipFile(item.file) ? item.file : await shrinkImageFile(item.file);
+        const processedFile = isArchiveFile(item.file) ? item.file : item.file;
         processed.push({
           file: processedFile,
           filename: processedFile.name,
           id: item.id,
           originalUrl: item.originalUrl,
           sourceUrl: item.sourceUrl,
+          sourcePath: item.sourcePath,
           folder: item.folder,
           tags: item.tags,
           description: item.description,
@@ -1224,9 +1508,11 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     onDrop,
     accept: {
       "image/*": [".jpeg", ".jpg", ".png", ".gif", ".webp"],
-      "application/octet-stream": [".snagx"],
-      "application/zip": [".zip", ".snagx"],
-      "application/x-zip-compressed": [".zip"]
+      "application/octet-stream": [".snagx", ".key"],
+      "application/zip": [".zip", ".snagx", ".key"],
+      "application/x-zip-compressed": [".zip", ".key"],
+      "application/vnd.apple.keynote": [".key"],
+      "application/x-iwork-keynote-sffkey": [".key"]
     },
     multiple: true,
   });
@@ -1793,10 +2079,10 @@ A long list of filenames is not user friendly and essentially useless for select
           <Upload className="mx-auto h-8 w-8 text-gray-400 mb-4" />
         )}
         <p className="text-xs font-mono font-medium text-gray-900 mb-2">
-          {isUploading ? "Uploading..." : isDragActive ? "Drop images or a .zip here" : "Drag & drop images or a .zip here"}
+          {isUploading ? "Uploading..." : isDragActive ? "Drop images or a .zip/.key here" : "Drag & drop images or a .zip/.key here"}
         </p>
         <p className="text-xs font-mono text-gray-500">
-          {isUploading ? "Please wait while your images are being uploaded" : "or click to select files (.zip supported)"}
+          {isUploading ? "Please wait while your images are being uploaded" : "or click to select files (.zip/.key supported)"}
         </p>
       </div>
 
@@ -2089,6 +2375,7 @@ A long list of filenames is not user friendly and essentially useless for select
               const previewUrl = item.previewUrl || item.remoteUrl;
               const previewFailed = Boolean(previewFailures[item.id]);
               const displaySizeBytes = item.file?.size ?? item.sizeBytes;
+              const overMaxBytes = typeof displaySizeBytes === 'number' && displaySizeBytes > MAX_BYTES;
               const previewFolder = selectedFolder.trim()
                 ? selectedFolder.trim()
                 : newFolder.trim()
@@ -2148,13 +2435,43 @@ A long list of filenames is not user friendly and essentially useless for select
                       )}
                     </div>
                     <p className="text-xs text-gray-500">
-                      {typeof displaySizeBytes === 'number'
-                        ? `${(displaySizeBytes / 1024 / 1024).toFixed(2)} MB`
-                        : "Size unknown"}
+                      {formatBytesMB(displaySizeBytes)}
                       {item.filename.length > MAX_FILENAME_LENGTH && (
                         <span className="ml-2 text-amber-600">⚠ Long filename ({item.filename.length} chars)</span>
                       )}
                     </p>
+                    {(item.tags || item.description) && (
+                      <div className="text-[11px] text-gray-600 space-y-0.5">
+                        {item.tags && (
+                          <p className="truncate" title={item.tags}>
+                            Tags (prefill): {item.tags}
+                          </p>
+                        )}
+                        {item.description && (
+                          <p className="truncate" title={item.description}>
+                            Description (prefill): {item.description}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    {item.processingNote && (
+                      <p className="text-[11px] text-emerald-700">{item.processingNote}</p>
+                    )}
+                    {overMaxBytes && (
+                      <div className="mt-1 flex flex-wrap items-center gap-2">
+                        <p className="text-[11px] text-amber-700">
+                          File exceeds 10MB. Suggest converting to JPEG/WebP, then reducing dimensions.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => reduceQueuedFileSize(item.id)}
+                          disabled={Boolean(reducingQueueItems[item.id]) || isUploading}
+                          className="px-2 py-1 text-[11px] bg-amber-100 hover:bg-amber-200 text-amber-800 rounded border border-amber-300 disabled:opacity-50"
+                        >
+                          {reducingQueueItems[item.id] ? 'Reducing…' : 'Reduce size'}
+                        </button>
+                      </div>
+                    )}
                     {effectiveOriginalUrl && (
                       <p className="text-[11px] text-gray-600 truncate" title={effectiveOriginalUrl}>
                         🔗 {effectiveOriginalUrl}

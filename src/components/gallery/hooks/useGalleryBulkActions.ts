@@ -225,7 +225,7 @@ export const useGalleryBulkActions = ({
     setBulkAnimateLoading(true);
     setBulkAnimateError(null);
     try {
-      const response = await fetch('/api/images/animate', {
+      const response = await fetch('/api/animate/selection', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

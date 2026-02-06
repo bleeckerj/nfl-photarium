@@ -75,8 +75,8 @@ error() {
   echo "ERROR: $@" >&2
 }
 
-# Timestamp for backup file
-TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+# Timestamp for backup file (include timezone offset, e.g. 20260206-091937-0800)
+TIMESTAMP=$(date +%Y%m%d-%H%M%S%z)
 BACKUP_FILE="redis-backup-${TIMESTAMP}.rdb"
 BACKUP_BUNDLE_FILE="redis-backup-${TIMESTAMP}.tgz"
 

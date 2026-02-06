@@ -94,7 +94,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'A valid image URL is required' }, { status: 400 });
     }
 
-    const response = await fetch(sourceUrl);
+    // Use a browser-like User-Agent to avoid sites (e.g. Google Drive) redirecting to login pages
+    const response = await fetch(sourceUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+    });
     if (!response.ok) {
       return NextResponse.json({ error: 'Failed to download the image' }, { status: 400 });
     }
