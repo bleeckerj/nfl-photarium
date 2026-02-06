@@ -75,6 +75,8 @@ async function generatePromptFromOpenAI(imageUrl: string, userText: string) {
     return { ok: false as const, status: 500, payload: { error: 'OpenAI API key not configured' } };
   }
 
+  const promptModel = process.env.OPENAI_PROMPT_MODEL || 'gpt-4o';
+
   const openAiResponse = await fetch(OPENAI_API_URL, {
     method: 'POST',
     headers: {
@@ -82,7 +84,7 @@ async function generatePromptFromOpenAI(imageUrl: string, userText: string) {
       Authorization: `Bearer ${openAiKey}`
     },
     body: JSON.stringify({
-      model: 'gpt-4o',
+      model: promptModel,
       temperature: 0.4,
       max_tokens: 1600,
       messages: [
@@ -216,7 +218,7 @@ export async function POST(
     const record: PromptThisRecord = {
       imageId,
       prompt: ai.payload.prompt,
-      model: 'gpt-4o',
+      model: promptModel,
       provider: 'openai',
       createdAt: existing?.createdAt || now,
       updatedAt: now
