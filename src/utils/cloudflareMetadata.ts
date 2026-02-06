@@ -6,6 +6,7 @@ export type CloudflareMetadata = {
   originalUrlNormalized?: string;
   sourceUrl?: string;
   sourceUrlNormalized?: string;
+  sourcePath?: string;
   namespace?: string;
   contentHash?: string;
   altTag?: string;
@@ -28,6 +29,7 @@ export const CLOUDFLARE_METADATA_FIELDS = [
   'originalUrlNormalized',
   'sourceUrl',
   'sourceUrlNormalized',
+  'sourcePath',
   'namespace',
   'contentHash',
   'altTag',
@@ -157,6 +159,7 @@ export function enforceCloudflareMetadataLimit(
     'tags',
     'originalUrl',
     'sourceUrl',
+    'sourcePath',
     'namespace',
     'folder'
   ];

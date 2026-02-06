@@ -22,6 +22,10 @@ const MIME_BY_EXTENSION: Record<string, string> = {
 const isZipFile = (file: File) =>
   file.type === 'application/zip' || file.type === 'application/x-zip-compressed' || file.name.toLowerCase().endsWith('.zip');
 
+const isKeynoteFile = (file: File) => file.name.toLowerCase().endsWith('.key');
+
+const isArchiveFile = (file: File) => isZipFile(file) || isKeynoteFile(file);
+
 const getMimeTypeFromFilename = (filename: string) => {
   const lower = filename.toLowerCase();
   const match = Object.keys(MIME_BY_EXTENSION).find((ext) => lower.endsWith(ext));
@@ -31,6 +35,21 @@ const getMimeTypeFromFilename = (filename: string) => {
 const normalizeFilename = (filename: string) => {
   const parts = filename.split(/[\\/]/);
   return parts[parts.length - 1] || filename;
+};
+
+const stripExtension = (filename: string) => filename.replace(/\.[^.]+$/, '');
+
+const isKeynoteDataEntry = (entryName: string) => {
+  const normalized = entryName.replace(/\\/g, '/');
+  const lower = normalized.toLowerCase();
+  return lower.startsWith('data/') || lower.includes('/data/');
+};
+
+const isKeynoteSourcePath = (value?: string) => value ? value.toLowerCase().endsWith('.key') : false;
+
+const keynoteDescriptionFromPath = (value?: string) => {
+  if (!value) return undefined;
+  return stripExtension(normalizeFilename(value));
 };
 
 export async function POST(request: NextRequest) {
@@ -63,6 +82,7 @@ export async function POST(request: NextRequest) {
     const description = formData.get('description') as string;
     const originalUrl = formData.get('originalUrl') as string;
     const sourceUrl = formData.get('sourceUrl') as string;
+    const sourcePath = formData.get('sourcePath') as string;
     const namespace = formData.get('namespace') as string;
     const parentIdRaw = formData.get('parentId');
     
@@ -72,6 +92,7 @@ export async function POST(request: NextRequest) {
     const cleanDescription = description && description.trim() && description !== 'undefined' ? description.trim() : undefined;
     const cleanOriginalUrl = originalUrl && originalUrl.trim() && originalUrl !== 'undefined' ? originalUrl.trim() : undefined;
     const cleanSourceUrl = sourceUrl && sourceUrl.trim() && sourceUrl !== 'undefined' ? sourceUrl.trim() : undefined;
+    const cleanSourcePath = sourcePath && sourcePath.trim() && sourcePath !== 'undefined' ? sourcePath.trim() : undefined;
     const rawNamespace = typeof namespace === 'string' ? namespace.trim() : '';
     const cleanNamespace =
       rawNamespace && rawNamespace !== 'undefined' && rawNamespace !== '__all__' && rawNamespace !== '__none__'
@@ -82,19 +103,27 @@ export async function POST(request: NextRequest) {
     const parentIdValue = typeof parentIdRaw === 'string' ? parentIdRaw.trim() : '';
     const cleanParentId = parentIdValue && parentIdValue !== 'undefined' ? parentIdValue : undefined;
 
+    const keynoteSource = isKeynoteSourcePath(cleanSourcePath);
+    const forcedTags = keynoteSource
+      ? Array.from(new Set([...cleanTags, 'keynote']))
+      : cleanTags;
+    const forcedDescription = cleanDescription || (keynoteSource ? keynoteDescriptionFromPath(cleanSourcePath) : undefined);
+
     const uploadContext = {
       accountId,
       apiToken,
       folder: cleanFolder,
-      tags: cleanTags,
-      description: cleanDescription,
+      tags: forcedTags,
+      description: forcedDescription,
       originalUrl: cleanOriginalUrl,
       sourceUrl: cleanSourceUrl,
+      sourcePath: cleanSourcePath,
       namespace: effectiveNamespace,
       parentId: cleanParentId
     };
 
-    if (isZipFile(file)) {
+    if (isArchiveFile(file)) {
+      const isKeynote = isKeynoteFile(file);
       if (file.size > MAX_ZIP_BYTES) {
         logIssue('Rejected oversized zip upload', { filename: file.name, bytes: file.size, limit: MAX_ZIP_BYTES });
         return NextResponse.json(
@@ -106,11 +135,33 @@ export async function POST(request: NextRequest) {
       const zipBuffer = Buffer.from(await file.arrayBuffer());
       const zip = new AdmZip(zipBuffer);
       const entries = zip.getEntries();
+      const keynoteName = isKeynote ? stripExtension(file.name) : undefined;
+      const keynoteTags = isKeynote
+        ? Array.from(new Set([...cleanTags, 'keynote']))
+        : cleanTags;
+      const keynoteDescription = isKeynote ? keynoteName : cleanDescription;
+      const keynoteSourcePath = isKeynote ? (cleanSourcePath || file.name) : cleanSourcePath;
+      const keynoteContext = isKeynote
+        ? {
+            ...uploadContext,
+            tags: keynoteTags,
+            description: keynoteDescription,
+            sourcePath: keynoteSourcePath
+          }
+        : uploadContext;
+
+      const orderedEntries = isKeynote
+        ? entries
+          .filter((entry) => !entry.isDirectory && isKeynoteDataEntry(entry.entryName))
+          .sort((a, b) => a.entryName.localeCompare(b.entryName))
+        : entries;
+
       const results: UploadSuccess[] = [];
       const failures: UploadFailure[] = [];
       const skipped: { filename: string; reason: string }[] = [];
+      let keynoteParentId: string | undefined;
 
-      for (const entry of entries) {
+      for (const entry of orderedEntries) {
         if (entry.isDirectory) {
           continue;
         }
@@ -122,17 +173,26 @@ export async function POST(request: NextRequest) {
         }
 
         const entryBuffer = entry.getData();
+        const entryContext = isKeynote
+          ? {
+              ...keynoteContext,
+              parentId: keynoteParentId
+            }
+          : uploadContext;
         const outcome = await uploadImageBuffer({
           buffer: entryBuffer,
           originalBuffer: entryBuffer,
           fileName: entryName,
           fileType: entryType,
           fileSize: entryBuffer.byteLength,
-          context: uploadContext
+          context: entryContext
         });
 
         if (outcome.ok) {
           results.push(outcome.data);
+          if (isKeynote && !keynoteParentId) {
+            keynoteParentId = outcome.data.id;
+          }
         } else {
           failures.push({
             filename: entryName,

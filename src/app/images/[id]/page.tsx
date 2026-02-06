@@ -433,8 +433,10 @@ export default function ImageDetailPage() {
     onDrop: onVariantDrop,
     accept: {
       'image/*': ['.jpeg', '.jpg', '.png', '.gif', '.webp', '.svg'],
-      'application/zip': ['.zip'],
-      'application/x-zip-compressed': ['.zip']
+      'application/zip': ['.zip', '.key'],
+      'application/x-zip-compressed': ['.zip', '.key'],
+      'application/vnd.apple.keynote': ['.key'],
+      'application/x-iwork-keynote-sffkey': ['.key']
     },
     multiple: true
   });

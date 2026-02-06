@@ -61,7 +61,7 @@ export function UploadVariationSection(props: UploadVariationSectionProps) {
         <div>
           <h3 className="text-xs font-mono font-medum text-gray-800">Upload a new variation</h3>
           <p className="text-xs text-gray-600">Files automatically inherit this image's folder and tags.</p>
-          <p className="text-[11px] text-gray-500">.zip uploads are supported.</p>
+          <p className="text-[11px] text-gray-500">.zip and .key uploads are supported.</p>
         </div>
       </div>
 
@@ -70,8 +70,8 @@ export function UploadVariationSection(props: UploadVariationSectionProps) {
         className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors cursor-pointer ${isVariantDragActive ? 'border-blue-500 bg-blue-100' : 'border-gray-300 bg-white hover:border-gray-400'}`}
       >
         <input {...getVariantInputProps()} />
-        <p className="text-xs font-mono text-gray-900 mb-1">Drag & drop images or a .zip here</p>
-        <p className="text-[11px] text-gray-500">or click to browse files (.zip supported)</p>
+        <p className="text-xs font-mono text-gray-900 mb-1">Drag & drop images or a .zip/.key here</p>
+        <p className="text-[11px] text-gray-500">or click to browse files (.zip/.key supported)</p>
       </div>
 
       <div className="text-[11px] text-gray-600 bg-white/70 border border-gray-200 rounded-md p-2">

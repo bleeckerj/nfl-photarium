@@ -34,6 +34,7 @@ export type UploadContext = {
   description?: string;
   originalUrl?: string;
   sourceUrl?: string;
+  sourcePath?: string;
   namespace?: string;
   parentId?: string;
 };
@@ -131,6 +132,7 @@ export async function uploadImageBuffer({
     description,
     originalUrl,
     sourceUrl,
+    sourcePath,
     namespace,
     parentId
   } = context;
@@ -229,6 +231,7 @@ export async function uploadImageBuffer({
     originalUrlNormalized: normalizedOriginalUrl,
     sourceUrl: sourceUrl,
     sourceUrlNormalized: normalizedSourceUrl,
+    sourcePath: sourcePath,
     namespace: namespace,
     contentHash,
     variationParentId: parentId,
