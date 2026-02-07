@@ -1,4 +1,6 @@
 import React from 'react';
+import { useToast } from '@/components/Toast';
+import { downloadImageToFile, formatDownloadFileName } from '@/utils/downloadUtils';
 
 export function VariantLinksSection(props: {
   variants: Record<string, string>;
@@ -10,8 +12,42 @@ export function VariantLinksSection(props: {
     altText?: string
   ) => Promise<void>;
   imageAltTag?: string;
+  imageFilename?: string;
 }) {
-  const { variants, getVariantWidthLabel, onHandleCopyUrl, imageAltTag } = props;
+  const { variants, getVariantWidthLabel, onHandleCopyUrl, imageAltTag, imageFilename } = props;
+  const toast = useToast();
+  const formatOptions = [
+    { label: 'PNG', format: 'png', extension: 'png' },
+    { label: 'JPG', format: 'jpeg', extension: 'jpg' },
+    { label: 'WEBP', format: 'webp', extension: 'webp' }
+  ] as const;
+
+  const buildFormatUrl = (sourceUrl: string, format: string) => {
+    if (!sourceUrl) {
+      return sourceUrl;
+    }
+    try {
+      const url = new URL(sourceUrl);
+      url.searchParams.set('format', format);
+      return url.toString();
+    } catch {
+      const [base, query] = sourceUrl.split('?');
+      const params = new URLSearchParams(query || '');
+      params.set('format', format);
+      return `${base}?${params.toString()}`;
+    }
+  };
+
+  const handleDownload = async (sourceUrl: string, format: string, extension: string) => {
+    try {
+      const downloadName = formatDownloadFileName(imageFilename || 'image', extension);
+      await downloadImageToFile(buildFormatUrl(sourceUrl, format), downloadName);
+      toast.push('Download started');
+    } catch (error) {
+      console.error('Failed to download variant', error);
+      toast.push('Failed to download image');
+    }
+  };
 
   return (
     <div id="variant-links-section">
@@ -42,6 +78,19 @@ export function VariantLinksSection(props: {
                 >
                   Copy
                 </button>
+                <div className="flex items-center gap-1 flex-wrap">
+                  <span className="text-[10px] font-mono text-gray-400">DL</span>
+                  {formatOptions.map((option) => (
+                    <button
+                      key={option.label}
+                      onClick={() => handleDownload(url, option.format, option.extension)}
+                      className="px-2 py-0.5 border border-gray-300 rounded text-[10px] font-mono text-gray-700 hover:bg-gray-50"
+                      title={`Download ${variant} as ${option.label}`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           );

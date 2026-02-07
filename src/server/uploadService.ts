@@ -12,6 +12,7 @@ import { queueAutoEmbeddingsForImage, type AutoEmbeddingsStatus } from '@/server
 import { calculateAspectRatio } from '@/utils/imageUtils';
 import { classifyAspectRatio } from '@/server/aspectRatio';
 import { storeImageAspectMetadata } from '@/server/vectorSearch';
+import { detectComfyMetadata } from '@/utils/comfyMetadata';
 
 // Re-export for backward compatibility
 export { sanitizeFilename, MAX_FILENAME_LENGTH } from '@/utils/filename';
@@ -198,6 +199,7 @@ export async function uploadImageBuffer({
   const finalBuffer = await shrinkIfNeeded(workingBuffer, workingFileType);
   const contentHash = createHash('sha256').update(finalBuffer).digest('hex');
   const exifSummary = await extractExifSummary(workingOriginalBuffer);
+  const comfyDetection = await detectComfyMetadata(workingOriginalBuffer, { mimeType: workingFileType });
 
   duplicateMatches = await findDuplicatesByContentHash(contentHash, namespace);
   if (duplicateMatches.length) {
@@ -236,6 +238,9 @@ export async function uploadImageBuffer({
     contentHash,
     variationParentId: parentId,
     exif: exifSummary,
+    generatedBy: comfyDetection.detected ? 'comfyui' : undefined,
+    comfyMetadataDetected: comfyDetection.detected ? true : undefined,
+    comfyMetadataSource: comfyDetection.source,
   };
 
   const { metadata: limitedMetadata, dropped, size, limitBytes } = enforceCloudflareMetadataLimit(metadataPayload);

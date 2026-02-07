@@ -27,6 +27,9 @@ export interface CachedCloudflareImage {
   altTag?: string;
   displayName?: string;
   exif?: Record<string, string | number>;
+  generatedBy?: string;
+  comfyMetadataDetected?: boolean;
+  comfyMetadataSource?: string;
   parentId?: string;
   linkedAssetId?: string;
   variationSort?: number;
@@ -143,6 +146,9 @@ const buildMetadataOverride = (image: CachedCloudflareImage): CloudflareMetadata
   assign('contentHash', image.contentHash);
   assign('altTag', image.altTag);
   assign('displayName', image.displayName);
+  assign('generatedBy', image.generatedBy);
+  assign('comfyMetadataDetected', image.comfyMetadataDetected);
+  assign('comfyMetadataSource', image.comfyMetadataSource);
   assign('variationParentId', image.parentId);
   assign('linkedAssetId', image.linkedAssetId);
   assign('variationSort', image.variationSort);
@@ -211,6 +217,18 @@ const transformImage = (image: CloudflareImageApiResponse): CachedCloudflareImag
     mergedMeta.exif && typeof mergedMeta.exif === 'object' && !Array.isArray(mergedMeta.exif)
       ? (mergedMeta.exif as Record<string, string | number>)
       : undefined;
+  const cleanGeneratedBy =
+    mergedMeta.generatedBy && mergedMeta.generatedBy !== 'undefined'
+      ? String(mergedMeta.generatedBy)
+      : undefined;
+  const comfyMetadataDetected =
+    mergedMeta.comfyMetadataDetected === true || cleanGeneratedBy === 'comfyui'
+      ? true
+      : undefined;
+  const comfyMetadataSource =
+    mergedMeta.comfyMetadataSource && mergedMeta.comfyMetadataSource !== 'undefined'
+      ? String(mergedMeta.comfyMetadataSource)
+      : undefined;
   const cleanVariationSort = (() => {
     if (typeof mergedMeta.variationSort === 'number' && Number.isFinite(mergedMeta.variationSort)) {
       return mergedMeta.variationSort;
@@ -241,6 +259,9 @@ const transformImage = (image: CloudflareImageApiResponse): CachedCloudflareImag
     altTag: cleanAltTag,
     displayName: displayName ?? (image.filename || parsedMeta.filename || undefined),
     exif: cleanExif,
+    generatedBy: cleanGeneratedBy,
+    comfyMetadataDetected,
+    comfyMetadataSource,
     variationSort: cleanVariationSort,
     parentId,
     linkedAssetId

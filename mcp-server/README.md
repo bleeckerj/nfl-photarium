@@ -1,20 +1,19 @@
-# Photarium MCP Server
+# Photarium MCP Server (photarium-mcp-server)
 
-MCP (Model Context Protocol) server that exposes the Photarium image gallery to AI agents, enabling LLMs to browse, search, manage, and curate a Cloudflare Images catalog.
+MCP (Model Context Protocol) server that exposes the full Photarium API surface to AI agents, enabling LLMs to browse, search, manage, and curate a Cloudflare Images catalog.
 
 ## Tools
 
+
 ### Discovery & Search
 
-| Tool | Description |
-|------|-------------|
-| `photarium_search` | **Semantic search** using CLIP embeddings - finds images by concept, mood, visual characteristics |
-| `photarium_search_text` | **Text search** - matches filename, folder, tags, description, alt text |
-| `photarium_search_color` | **Color search** - finds images by dominant color |
-| `photarium_similar` | Find visually similar images (by CLIP or color) |
-| `photarium_antipode` | Find semantic/color opposites of an image |
-| `photarium_list` | List images with folder/namespace filters |
-| `photarium_get` | Get detailed info for a specific image |
+- `photarium_search`
+- `photarium_search_text`
+- `photarium_search_color`
+- `photarium_similar`
+- `photarium_antipode`
+- `photarium_list`
+- `photarium_get`
 
 #### Search Methods Explained
 
@@ -24,39 +23,51 @@ MCP (Model Context Protocol) server that exposes the Photarium image gallery to 
 
 - **`photarium_search_color`** (Color): Finds images with matching dominant colors. "#FF5733" finds orange-toned images.
 
+
 ### Organization
 
-| Tool | Description |
-|------|-------------|
-| `photarium_list_folders` | List available folders |
-| `photarium_create_folder` | Create a new folder |
-| `photarium_list_namespaces` | List all namespaces |
-| `photarium_update_metadata` | Update image metadata (folder, tags, description, etc.) |
-| `photarium_delete` | Delete an image |
+- `photarium_list_folders`
+- `photarium_create_folder`
+- `photarium_list_namespaces`
+- `photarium_update_metadata`
+- `photarium_delete`
+
 
 ### Upload
 
-| Tool | Description |
-|------|-------------|
-| `photarium_upload_url` | Upload an image from a URL |
+- `photarium_upload_url`
+- `photarium_upload_image`
+
 
 ### AI Features
 
-| Tool | Description |
-|------|-------------|
-| `photarium_generate_alt` | Generate accessibility alt text using AI vision |
-| `photarium_generate_description` | Generate detailed description using AI vision |
-| `photarium_generate_prompt` | Generate text-to-image prompt for the image |
-| `photarium_concepts` | Get semantic concept scores (warm/cold, minimal/complex, etc.) |
+- `photarium_generate_alt`
+- `photarium_generate_description`
+- `photarium_generate_prompt`
+- `photarium_concepts`
+
 
 ### System
 
-| Tool | Description |
-|------|-------------|
-| `photarium_vector_status` | Check embedding/search system status |
-| `photarium_generate_embeddings` | Generate CLIP/color embeddings for an image |
-| `photarium_backup` | Trigger a Redis database backup |
-| `photarium_list_backups` | List existing Redis backups |
+- `photarium_vector_status`
+- `photarium_generate_embeddings`
+- `photarium_backup`
+- `photarium_list_backups`
+
+
+### Download
+
+- `photarium_download_image`
+
+### Additional API Coverage
+
+This MCP server also wraps the remaining Photarium endpoints, including:
+
+- Imports, internal uploads, external uploads, animations, and upload downloads
+- Prompt records (get + bulk), extras get/patch, and haiku generation
+- Embedding status + batch generation, vector index creation, colors bulk lookup
+- Family operations (swap parent, delete family, delete-family job status)
+- Share URL generation, rotation, and audit utilities
 
 ## Setup
 
@@ -153,6 +164,7 @@ Once connected, you can ask the AI:
 
 **Upload & Management:**
 - "Upload this image URL to the 'editorial' namespace"
+- "Upload this base64 image into the comfyui folder"
 - "Delete image abc123"
 
 ## Integration with Editorial Workflow

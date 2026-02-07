@@ -47,6 +47,9 @@ interface CloudflareImage {
   sourceUrlNormalized?: string;
   contentHash?: string;
   namespace?: string;
+  generatedBy?: string;
+  comfyMetadataDetected?: boolean;
+  comfyMetadataSource?: string;
   // Embedding status fields
   hasClipEmbedding?: boolean;
   hasColorEmbedding?: boolean;

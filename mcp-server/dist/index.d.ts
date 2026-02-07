@@ -30,6 +30,7 @@
  * Tools - System:
  *   - photarium_vector_status: Check embedding/search system status
  *   - photarium_generate_embeddings: Generate embeddings for an image
+ *   - (plus uploads, prompts, extras, audits, batch ops, and family management)
  *
  * Configuration:
  *   PHOTARIUM_BASE_URL - Base URL of Photarium instance (default: http://localhost:3000)

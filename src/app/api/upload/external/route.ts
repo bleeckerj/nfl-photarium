@@ -10,6 +10,7 @@ import { extractExifSummary } from '@/utils/exif';
 import { upsertRegistryNamespace } from '@/server/namespaceRegistry';
 import { sanitizeFilename } from '@/server/uploadService';
 import { queueAutoEmbeddingsForImage } from '@/server/autoEmbeddings';
+import { detectComfyMetadata } from '@/utils/comfyMetadata';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -157,6 +158,7 @@ export async function POST(request: NextRequest) {
 
     const contentHash = computeContentHash(workingBuffer);
     const exifSummary = await extractExifSummary(workingBuffer);
+    const comfyDetection = await detectComfyMetadata(workingBuffer, { mimeType: workingType });
 
     if (!normalizedOriginalUrl) {
       duplicateMatches = await findDuplicatesByContentHash(contentHash, effectiveNamespace);
@@ -198,6 +200,9 @@ export async function POST(request: NextRequest) {
       contentHash,
       variationParentId: cleanParentId,
       exif: exifSummary,
+      generatedBy: comfyDetection.detected ? 'comfyui' : undefined,
+      comfyMetadataDetected: comfyDetection.detected ? true : undefined,
+      comfyMetadataSource: comfyDetection.source,
     };
 
     const { metadata: limitedMetadata, dropped, size, limitBytes } = enforceCloudflareMetadataLimit(metadataPayload);

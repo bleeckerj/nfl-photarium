@@ -1,7 +1,7 @@
 {
-  "name": "photarium-mcp",
-  "version": "0.2.0",
-  "description": "MCP server for Photarium image gallery - enables LLMs to browse, search, manage, and curate Cloudflare Images",
+  "name": "photarium-mcp-server",
+  "version": "0.3.0",
+  "description": "MCP server for Photarium image gallery - wraps the full Photarium API surface for LLM tooling",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
