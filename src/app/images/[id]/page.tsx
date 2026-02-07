@@ -75,6 +75,9 @@ interface CloudflareImage {
   contentHash?: string;
   altTag?: string;
   exif?: Record<string, string | number>;
+  generatedBy?: string;
+  comfyMetadataDetected?: boolean;
+  comfyMetadataSource?: string;
   parentId?: string;
   linkedAssetId?: string;
   variationSort?: number;
@@ -2133,6 +2136,7 @@ export default function ImageDetailPage() {
               getVariantWidthLabel={getVariantWidthLabel}
               onHandleCopyUrl={handleCopyUrl}
               imageAltTag={image.altTag}
+              imageFilename={image.filename}
             />
 
             <div className="space-y-4">

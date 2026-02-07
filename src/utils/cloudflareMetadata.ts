@@ -15,6 +15,9 @@ export type CloudflareMetadata = {
   variationParentId?: string;
   linkedAssetId?: string;
   exif?: Record<string, string | number>;
+  generatedBy?: string;
+  comfyMetadataDetected?: boolean;
+  comfyMetadataSource?: string;
   uploadedAt?: string;
   updatedAt?: string;
   variationSort?: number;
@@ -37,6 +40,9 @@ export const CLOUDFLARE_METADATA_FIELDS = [
   'variationParentId',
   'linkedAssetId',
   'exif',
+  'generatedBy',
+  'comfyMetadataDetected',
+  'comfyMetadataSource',
   'variationSort',
   'updatedAt'
 ] as const;
@@ -149,6 +155,9 @@ export function enforceCloudflareMetadataLimit(
     'displayName',
     'filename',
     'contentHash',
+    'generatedBy',
+    'comfyMetadataDetected',
+    'comfyMetadataSource',
     'uploadedAt',
     'type',
     'size',

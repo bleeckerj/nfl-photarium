@@ -2,6 +2,9 @@
 	"folders": [
 		{
 			"path": "."
+		},
+		{
+			"path": "../nfl-comfymcp"
 		}
 	],
 	"settings": {}

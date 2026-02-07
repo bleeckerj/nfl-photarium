@@ -139,12 +139,12 @@ export function VariationsSection(props: VariationsSectionProps) {
     <div id="variations-section" className="space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs font-mono font-medum text-gray-700">
-          {isChildImage ? 'Other variations from this parent' : 'Variations'}
+          {isChildImage ? 'Other vars from this parent' : 'Vars'}
         </p>
         <div className="flex items-center gap-2">
           <p className="text-xs text-gray-500">
             {variationCount}{' '}
-            {isChildImage ? 'other variation' : 'variation'}
+            {isChildImage ? 'other var' : 'var'}
             {variationCount !== 1 ? 's' : ''}
           </p>
           {!isChildImage && (

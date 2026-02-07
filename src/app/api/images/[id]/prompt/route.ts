@@ -129,7 +129,7 @@ async function generatePromptFromOpenAI(imageUrl: string, userText: string) {
     return { ok: false as const, status: 422, payload: { error: 'OpenAI response did not contain prompt text' } };
   }
 
-  return { ok: true as const, status: 200, payload: { prompt } };
+  return { ok: true as const, status: 200, payload: { prompt, model: promptModel } };
 }
 
 export async function GET(
@@ -218,7 +218,7 @@ export async function POST(
     const record: PromptThisRecord = {
       imageId,
       prompt: ai.payload.prompt,
-      model: promptModel,
+      model: ai.payload.model,
       provider: 'openai',
       createdAt: existing?.createdAt || now,
       updatedAt: now
