@@ -10,7 +10,9 @@ import { extractExifSummary } from '@/utils/exif';
 import { upsertRegistryNamespace } from '@/server/namespaceRegistry';
 import { sanitizeFilename } from '@/server/uploadService';
 import { queueAutoEmbeddingsForImage } from '@/server/autoEmbeddings';
-import { detectComfyMetadata } from '@/utils/comfyMetadata';
+import { extractComfyWorkflowMetadata } from '@/utils/comfyMetadata';
+import { ingestComfyWorkflowForImage } from '@/server/comfy/workflowIngestion';
+import type { ComfyWorkflowExtraction } from '@/utils/comfyMetadata';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -18,11 +20,68 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
+type CloudflareUploadApiResult = {
+  result?: {
+    id?: string;
+    filename?: string;
+    uploaded?: string;
+    variants?: string[];
+    meta?: Record<string, unknown>;
+  };
+  errors?: Array<{ message?: string }>;
+};
+
 function withCors(response: NextResponse) {
   Object.entries(corsHeaders).forEach(([key, value]) => {
     response.headers.set(key, value);
   });
   return response;
+}
+
+const MAX_WORKFLOW_JSON_BYTES = 2_000_000;
+
+function parseOptionalWorkflowJson(
+  value: FormDataEntryValue | null
+): { ok: true; workflowJson?: unknown } | { ok: false; error: string } {
+  if (value === null) return { ok: true };
+  if (typeof value !== 'string') {
+    return { ok: false, error: 'Invalid comfyWorkflowJson: expected a JSON string' };
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) return { ok: true };
+
+  if (Buffer.byteLength(trimmed, 'utf8') > MAX_WORKFLOW_JSON_BYTES) {
+    return { ok: false, error: 'Invalid comfyWorkflowJson: payload too large' };
+  }
+
+  try {
+    return {
+      ok: true,
+      workflowJson: JSON.parse(trimmed),
+    };
+  } catch {
+    return { ok: false, error: 'Invalid comfyWorkflowJson: malformed JSON' };
+  }
+}
+
+function applyWorkflowOverride(
+  extraction: ComfyWorkflowExtraction,
+  workflowJson?: unknown
+): ComfyWorkflowExtraction {
+  if (workflowJson === undefined) return extraction;
+
+  const source = 'request:comfyWorkflowJson';
+  const mergedSources = Array.from(new Set([...(extraction.sources ?? []), source]));
+
+  return {
+    ...extraction,
+    detected: true,
+    source,
+    sources: mergedSources,
+    workflowJson,
+    workflowSourceKey: source,
+  };
 }
 
 export async function OPTIONS() {
@@ -88,6 +147,15 @@ export async function POST(request: NextRequest) {
     const sourceUrl = formData.get('sourceUrl') as string;
     const namespace = formData.get('namespace') as string;
     const parentIdRaw = formData.get('parentId');
+    const workflowJsonField = parseOptionalWorkflowJson(formData.get('comfyWorkflowJson'));
+
+    if (!workflowJsonField.ok) {
+      logExternalIssue('Rejected invalid comfy workflow payload', { reason: workflowJsonField.error });
+      return withCors(NextResponse.json(
+        { error: workflowJsonField.error },
+        { status: 400 }
+      ));
+    }
 
     const cleanFolder = folder && folder.trim() && folder !== 'undefined' ? folder.trim() : undefined;
     const cleanTags = tags && tags.trim() ? tags.trim().split(',').map(t => t.trim()).filter(Boolean) : [];
@@ -139,7 +207,7 @@ export async function POST(request: NextRequest) {
         workingType = 'image/png';
         // Sanitize the extracted filename too
         workingName = sanitizeFilename(extracted.filename);
-      } catch (error) {
+      } catch {
         logExternalIssue('Failed to extract .snagx image', { filename: file.name });
         return withCors(NextResponse.json(
           { error: 'Failed to extract image from .snagx file' },
@@ -158,7 +226,10 @@ export async function POST(request: NextRequest) {
 
     const contentHash = computeContentHash(workingBuffer);
     const exifSummary = await extractExifSummary(workingBuffer);
-    const comfyDetection = await detectComfyMetadata(workingBuffer, { mimeType: workingType });
+    const comfyExtraction = applyWorkflowOverride(
+      await extractComfyWorkflowMetadata(workingBuffer, { mimeType: workingType }),
+      workflowJsonField.workflowJson
+    );
 
     if (!normalizedOriginalUrl) {
       duplicateMatches = await findDuplicatesByContentHash(contentHash, effectiveNamespace);
@@ -200,9 +271,9 @@ export async function POST(request: NextRequest) {
       contentHash,
       variationParentId: cleanParentId,
       exif: exifSummary,
-      generatedBy: comfyDetection.detected ? 'comfyui' : undefined,
-      comfyMetadataDetected: comfyDetection.detected ? true : undefined,
-      comfyMetadataSource: comfyDetection.source,
+      generatedBy: comfyExtraction.detected ? 'comfyui' : undefined,
+      comfyMetadataDetected: comfyExtraction.detected ? true : undefined,
+      comfyMetadataSource: comfyExtraction.source,
     };
 
     const { metadata: limitedMetadata, dropped, size, limitBytes } = enforceCloudflareMetadataLimit(metadataPayload);
@@ -226,15 +297,21 @@ export async function POST(request: NextRequest) {
 
     // Handle non-JSON responses (rate limits, timeouts, HTML error pages)
     const contentType = cloudflareResponse.headers.get('content-type') || '';
-    let result: any;
+    let result: CloudflareUploadApiResult = {};
     let textBody: string | undefined;
 
     if (contentType.includes('application/json')) {
-      result = await cloudflareResponse.json();
+      const jsonPayload = await cloudflareResponse.json();
+      if (jsonPayload && typeof jsonPayload === 'object') {
+        result = jsonPayload as CloudflareUploadApiResult;
+      }
     } else {
       textBody = await cloudflareResponse.text();
       try {
-        result = JSON.parse(textBody);
+        const parsedPayload = JSON.parse(textBody);
+        if (parsedPayload && typeof parsedPayload === 'object') {
+          result = parsedPayload as CloudflareUploadApiResult;
+        }
       } catch {
         console.error('Cloudflare returned non-JSON response:', {
           status: cloudflareResponse.status,
@@ -269,11 +346,30 @@ export async function POST(request: NextRequest) {
       ));
     }
 
-    const imageData = result.result;
+    const imageData = result.result ?? {};
     const primaryId = imageData?.id;
     const primaryFilename = imageData?.filename;
     const primaryUploaded = imageData?.uploaded;
     const primaryVariants = imageData?.variants ?? [];
+
+    if (typeof primaryId !== 'string' || !primaryId) {
+      return withCors(NextResponse.json(
+        { error: 'Cloudflare response missing image id.' },
+        { status: 502 }
+      ));
+    }
+    if (typeof primaryUploaded !== 'string') {
+      return withCors(NextResponse.json(
+        { error: 'Cloudflare response missing upload timestamp.' },
+        { status: 502 }
+      ));
+    }
+    if (!Array.isArray(primaryVariants)) {
+      return withCors(NextResponse.json(
+        { error: 'Cloudflare response missing variants.' },
+        { status: 502 }
+      ));
+    }
 
     const baseMeta = imageData.meta ?? limitedMetadata;
     const cachedPrimary = transformApiImageToCached({
@@ -284,6 +380,26 @@ export async function POST(request: NextRequest) {
       meta: baseMeta
     });
     upsertCachedImage(cachedPrimary);
+
+    if (typeof primaryId === 'string' && primaryId) {
+      try {
+        await ingestComfyWorkflowForImage({
+          imageId: primaryId,
+          comfyExtraction,
+          imageDescription: {
+            description: cleanDescription,
+          },
+          embeddingModel: 'clip-ViT-B-32',
+          embeddingVersion: 'v1',
+        });
+      } catch (error) {
+        console.warn('[upload/external] Failed to ingest comfy workflow extras', {
+          imageId: primaryId,
+          error,
+        });
+      }
+    }
+
     const autoEmbeddings = process.env.NODE_ENV === 'test'
       ? { enabled: false, queued: false, reason: 'disabled' as const }
       : await queueAutoEmbeddingsForImage(cachedPrimary);

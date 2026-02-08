@@ -141,8 +141,9 @@ describe('POST /api/upload/external', () => {
       }
     });
 
-    // Valid SVG with explicit dimensions for sharp to process
-    const validSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="red"/></svg>';
+    // Valid SVG with explicit dimensions for sharp to process and unique content to avoid duplicate hash cache collisions
+    const uniqueSvgSeed = `${Date.now()}-${Math.random()}`;
+    const validSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="red"/><desc>${uniqueSvgSeed}</desc></svg>`;
     const file = new File([validSvg], 'vector.svg', { type: 'image/svg+xml' });
     const formData = new FormData();
     formData.append('file', file);
@@ -158,5 +159,78 @@ describe('POST /api/upload/external', () => {
     // At least 3 calls: SVG upload, WebP upload, PATCH link (plus potential cache refresh)
     expect(mockFetch).toHaveBeenCalled();
     expect(callCount).toBeGreaterThanOrEqual(3);
+  });
+
+  it('accepts comfyWorkflowJson and marks upload as comfy-generated', async () => {
+    process.env.CLOUDFLARE_ACCOUNT_ID = 'acct';
+    process.env.CLOUDFLARE_API_TOKEN = 'token';
+
+    let uploadedMetadata: Record<string, unknown> | undefined;
+    vi.spyOn(globalThis, 'fetch').mockImplementation((url, init) => {
+      if (typeof url === 'string' && url.endsWith('/images/v1') && init?.method === 'POST') {
+        const body = init.body as FormData;
+        const metadataRaw = body.get('metadata');
+        uploadedMetadata = metadataRaw ? JSON.parse(String(metadataRaw)) : undefined;
+
+        return Promise.resolve(new Response(
+          JSON.stringify({
+            result: {
+              id: 'wf123',
+              variants: ['https://imagedelivery.net/hash/wf123/public'],
+              images: [],
+            },
+          }),
+          { status: 200 }
+        ));
+      }
+
+      return Promise.resolve(new Response(
+        JSON.stringify({ result: { images: [] } }),
+        { status: 200 }
+      ));
+    });
+
+    const uniqueContent = `workflow-upload-${Date.now()}-${Math.random()}`;
+    const file = new File([uniqueContent], 'image.png', { type: 'image/png' });
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('folder', 'comfy');
+    formData.append(
+      'comfyWorkflowJson',
+      JSON.stringify({
+        '1': {
+          class_type: 'CLIPTextEncode',
+          inputs: { text: 'moody portrait lighting' },
+        },
+      })
+    );
+
+    const response = await POST(createRequest(formData));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.id).toBe('wf123');
+    expect(uploadedMetadata?.generatedBy).toBe('comfyui');
+    expect(uploadedMetadata?.comfyMetadataDetected).toBe(true);
+    expect(uploadedMetadata?.comfyMetadataSource).toBe('request:comfyWorkflowJson');
+  });
+
+  it('rejects malformed comfyWorkflowJson', async () => {
+    process.env.CLOUDFLARE_ACCOUNT_ID = 'acct';
+    process.env.CLOUDFLARE_API_TOKEN = 'token';
+
+    const mockFetch = vi.spyOn(globalThis, 'fetch');
+
+    const file = new File(['bad-json-image'], 'image.png', { type: 'image/png' });
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('comfyWorkflowJson', '{bad-json');
+
+    const response = await POST(createRequest(formData));
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/Invalid comfyWorkflowJson/i);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 });

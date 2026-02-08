@@ -7,12 +7,13 @@ import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { enforceCloudflareMetadataLimit } from '@/utils/cloudflareMetadata';
 import { extractExifSummary } from '@/utils/exif';
 import { extractSnagx } from '@/utils/snagx';
-import { sanitizeFilename, MAX_FILENAME_LENGTH } from '@/utils/filename';
+import { sanitizeFilename } from '@/utils/filename';
 import { queueAutoEmbeddingsForImage, type AutoEmbeddingsStatus } from '@/server/autoEmbeddings';
 import { calculateAspectRatio } from '@/utils/imageUtils';
 import { classifyAspectRatio } from '@/server/aspectRatio';
 import { storeImageAspectMetadata } from '@/server/vectorSearch';
-import { detectComfyMetadata } from '@/utils/comfyMetadata';
+import { extractComfyWorkflowMetadata } from '@/utils/comfyMetadata';
+import { ingestComfyWorkflowForImage } from '@/server/comfy/workflowIngestion';
 
 // Re-export for backward compatibility
 export { sanitizeFilename, MAX_FILENAME_LENGTH } from '@/utils/filename';
@@ -169,7 +170,7 @@ export async function uploadImageBuffer({
       workingFileSize = extracted.buffer.byteLength;
       // Sanitize the extracted filename too
       normalizedName = sanitizeFilename(extracted.filename);
-    } catch (error) {
+    } catch {
       logIssue('Failed to extract .snagx image', { filename: fileName });
       return { ok: false, error: 'Failed to extract image from .snagx file', status: 400, reason: 'unsupported' };
     }
@@ -199,7 +200,7 @@ export async function uploadImageBuffer({
   const finalBuffer = await shrinkIfNeeded(workingBuffer, workingFileType);
   const contentHash = createHash('sha256').update(finalBuffer).digest('hex');
   const exifSummary = await extractExifSummary(workingOriginalBuffer);
-  const comfyDetection = await detectComfyMetadata(workingOriginalBuffer, { mimeType: workingFileType });
+  const comfyExtraction = await extractComfyWorkflowMetadata(workingOriginalBuffer, { mimeType: workingFileType });
 
   duplicateMatches = await findDuplicatesByContentHash(contentHash, namespace);
   if (duplicateMatches.length) {
@@ -238,9 +239,9 @@ export async function uploadImageBuffer({
     contentHash,
     variationParentId: parentId,
     exif: exifSummary,
-    generatedBy: comfyDetection.detected ? 'comfyui' : undefined,
-    comfyMetadataDetected: comfyDetection.detected ? true : undefined,
-    comfyMetadataSource: comfyDetection.source,
+    generatedBy: comfyExtraction.detected ? 'comfyui' : undefined,
+    comfyMetadataDetected: comfyExtraction.detected ? true : undefined,
+    comfyMetadataSource: comfyExtraction.source,
   };
 
   const { metadata: limitedMetadata, dropped, size, limitBytes } = enforceCloudflareMetadataLimit(metadataPayload);
@@ -316,6 +317,23 @@ export async function uploadImageBuffer({
     meta: baseMeta
   });
   upsertCachedImage(primaryCached);
+
+  try {
+    await ingestComfyWorkflowForImage({
+      imageId: imageData.id,
+      comfyExtraction,
+      imageDescription: {
+        description,
+      },
+      embeddingModel: 'clip-ViT-B-32',
+      embeddingVersion: 'v1',
+    });
+  } catch (error) {
+    console.warn('[upload] Failed to ingest comfy workflow extras', {
+      imageId: imageData.id,
+      error,
+    });
+  }
 
   await persistAspectMetadataFromBuffer(imageData.id, finalBuffer);
 

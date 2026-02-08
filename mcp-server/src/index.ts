@@ -959,6 +959,14 @@ function buildShareUrl(imageId: string, variant?: string): string {
 
 // Tool definitions
 const TOOLS: Tool[] = [
+  {
+    name: 'list_tools',
+    description: 'Return tool definitions for this MCP server.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+  },
   // ===== Discovery & Search =====
   {
     name: 'photarium_search',
@@ -2053,6 +2061,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   try {
     switch (name) {
+      case 'list_tools': {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({ tools: TOOLS }, null, 2),
+            },
+          ],
+        };
+      }
+
       // ===== Discovery & Search =====
       case 'photarium_search': {
         const { query, limit, namespace } = args as { query: string; limit?: number; namespace?: string | null };

@@ -1754,6 +1754,23 @@ export default function ImageDetailPage() {
           <div id="image-summary-section" className="mb-6">
             <div className="flex items-center gap-2">
               <p className="text-xs mono font-semibold text-gray-900">{image.filename || 'Image'}</p>
+              {(image.generatedBy === 'comfyui' || image.comfyMetadataDetected === true) && (
+                <span
+                  id={`image-detail-comfy-indicator-${image.id}`}
+                  className="inline-flex items-center gap-1 rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-[11px] text-orange-700"
+                  title="ComfyUI output detected"
+                  aria-label="ComfyUI output detected"
+                >
+                  <Image
+                    src="/icons/comfyui.svg"
+                    alt="ComfyUI"
+                    width={14}
+                    height={14}
+                    className="h-3.5 w-3.5"
+                  />
+                  ComfyUI
+                </span>
+              )}
               <EmbeddingStatusIcon
                 hasClipEmbedding={image.hasClipEmbedding}
                 hasColorEmbedding={image.hasColorEmbedding}

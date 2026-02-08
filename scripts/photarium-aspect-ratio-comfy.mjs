@@ -161,10 +161,13 @@ const downloadComfyOutput = async (comfyBaseUrl, imageInfo) => {
   return { buffer: Buffer.from(arrayBuffer), contentType };
 };
 
-const uploadToPhotarium = async (baseUrl, buffer, filename, contentType, folder) => {
+const uploadToPhotarium = async (baseUrl, buffer, filename, contentType, folder, workflowJson) => {
   const formData = new FormData();
   formData.append('file', new Blob([new Uint8Array(buffer)], { type: contentType }), filename);
   if (folder) formData.append('folder', folder);
+  if (workflowJson && typeof workflowJson === 'object') {
+    formData.append('comfyWorkflowJson', JSON.stringify(workflowJson));
+  }
   let resp;
   try {
     resp = await fetch(`${baseUrl}/api/upload/external`, { method: 'POST', body: formData });
@@ -262,7 +265,14 @@ const main = async () => {
   const outputFilename = outputImages[0].filename || `${path.parse(source.filename).name}_${aspectRatio.replace(/\W+/g, 'x')}.png`;
 
   console.log('Uploading to Photarium...');
-  const uploaded = await uploadToPhotarium(photariumBase, output.buffer, outputFilename, output.contentType, folder);
+  const uploaded = await uploadToPhotarium(
+    photariumBase,
+    output.buffer,
+    outputFilename,
+    output.contentType,
+    folder,
+    workflow
+  );
 
   console.log('Done.');
   console.log(JSON.stringify({

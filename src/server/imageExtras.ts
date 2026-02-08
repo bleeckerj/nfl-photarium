@@ -10,6 +10,25 @@ export type PromptThisEntry = {
   updatedAt: string;
 };
 
+export type WorkflowImageDescriptionEntry = {
+  altText?: string;
+  description?: string;
+  aiCaption?: string;
+};
+
+export type ComfyWorkflowEntry = {
+  workflowJson: unknown;
+  promptCandidates: string[];
+  imageDescription?: WorkflowImageDescriptionEntry;
+  workflowIntentText: string;
+  nodeTypeSignatures: string[];
+  nodeSettingSignatures: string[];
+  intentTextVersion: string;
+  embeddingModel?: string;
+  embeddingVersion?: string;
+  updatedAt: string;
+};
+
 export type ImageExtrasRecordV1 = {
   schemaVersion: 1;
   imageId: string;
@@ -24,6 +43,9 @@ export type ImageExtrasRecordV1 = {
 
   /** Prompt This (generated prompt for recreating the image). */
   promptThis?: PromptThisEntry;
+
+  /** Comfy workflow intelligence for semantic retrieval and diagnostics. */
+  comfyWorkflow?: ComfyWorkflowEntry;
 
   /**
    * Optional future slots (kept here to document intent; not used yet).
