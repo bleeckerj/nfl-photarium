@@ -82,6 +82,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
   onMouseLeave,
 }) => {
   const svgImage = isSvgImage(image);
+  const isComfyOutput = image.generatedBy === 'comfyui' || image.comfyMetadataDetected === true;
   const imageUrl = getCloudflareImageUrl(image.id, selectedVariant === 'public' ? 'original' : selectedVariant);
   const displayUrl = svgImage ? getCloudflareImageUrl(image.id, 'original') : imageUrl;
 
@@ -154,6 +155,22 @@ export const ImageCard: React.FC<ImageCardProps> = ({
             title={getExclusionTooltip(image.tags)}
           >
             <SearchExclusionIcon className="h-4 w-4 text-white" title={getExclusionTooltip(image.tags)} />
+          </div>
+        )}
+        {isComfyOutput && (
+          <div
+            id={`image-card-comfy-indicator-${image.id}`}
+            className="absolute top-2 right-2 inline-flex items-center justify-center rounded-md border border-gray-200 bg-white/95 p-1 shadow"
+            title="ComfyUI output detected"
+            aria-label="ComfyUI output detected"
+          >
+            <Image
+              src="/icons/comfyui.svg"
+              alt="ComfyUI"
+              width={12}
+              height={12}
+              className="h-3 w-3"
+            />
           </div>
         )}
       </Link>

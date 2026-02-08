@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectComfyMetadata } from '@/utils/comfyMetadata';
+import { detectComfyMetadata, extractComfyWorkflowMetadata } from '@/utils/comfyMetadata';
 
 const BASE_PNG_1X1 = Buffer.from(
   '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6360000000020001e527d4a20000000049454e44ae426082',
@@ -50,5 +50,21 @@ describe('detectComfyMetadata', () => {
     const result = await detectComfyMetadata(BASE_PNG_1X1, { mimeType: 'image/png' });
     expect(result.detected).toBe(false);
     expect(result.sources).toEqual([]);
+  });
+});
+
+describe('extractComfyWorkflowMetadata', () => {
+  it('extracts workflow JSON payload from prompt metadata', async () => {
+    const promptNodeMap = {
+      '1': { class_type: 'CLIPTextEncode', inputs: { text: 'stormy sea cliffs' } },
+    };
+    const chunkData = Buffer.from(`prompt\0${JSON.stringify(promptNodeMap)}`, 'utf8');
+    const png = addChunkBeforeIend(BASE_PNG_1X1, 'tEXt', chunkData);
+
+    const result = await extractComfyWorkflowMetadata(png, { mimeType: 'image/png' });
+
+    expect(result.detected).toBe(true);
+    expect(result.workflowSourceKey).toBe('prompt');
+    expect(result.workflowJson).toEqual(promptNodeMap);
   });
 });

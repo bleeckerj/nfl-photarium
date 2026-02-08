@@ -8,6 +8,17 @@ export type ComfyMetadataDetection = {
   sources: string[];
 };
 
+type ComfyMetadataEvidence = {
+  source: string;
+  key: string;
+  json: unknown;
+};
+
+export type ComfyWorkflowExtraction = ComfyMetadataDetection & {
+  workflowJson?: unknown;
+  workflowSourceKey?: string;
+};
+
 type DetectComfyMetadataOptions = {
   mimeType?: string;
 };
@@ -81,14 +92,23 @@ const maybeAddComfyEvidence = (
   key: string,
   value: string,
   sourcePrefix: string,
-  sources: Set<string>
+  sources: Set<string>,
+  onEvidence?: (evidence: ComfyMetadataEvidence) => void
 ) => {
   const normalizedKey = key.trim().toLowerCase();
   if (!COMFY_METADATA_KEYS.has(normalizedKey)) return;
   const parsed = safeParseJson(value.trim());
   if (!parsed) return;
   if (!looksLikeComfyWorkflow(parsed)) return;
-  sources.add(`${sourcePrefix}:${normalizedKey}`);
+  const source = `${sourcePrefix}:${normalizedKey}`;
+  sources.add(source);
+  if (onEvidence) {
+    onEvidence({
+      source,
+      key: normalizedKey,
+      json: parsed,
+    });
+  }
 };
 
 const walkStrings = (value: unknown, visit: (value: string) => void, depth = 0) => {
@@ -110,7 +130,11 @@ const walkStrings = (value: unknown, visit: (value: string) => void, depth = 0) 
   }
 };
 
-const detectFromPngChunks = (buffer: Buffer, sources: Set<string>) => {
+const detectFromPngChunks = (
+  buffer: Buffer,
+  sources: Set<string>,
+  onEvidence?: (evidence: ComfyMetadataEvidence) => void
+) => {
   const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   if (buffer.length < 8 || !buffer.subarray(0, 8).equals(pngSignature)) return;
 
@@ -121,7 +145,7 @@ const detectFromPngChunks = (buffer: Buffer, sources: Set<string>) => {
     if (nullIdx <= 0) return;
     const key = data.subarray(0, nullIdx).toString('latin1');
     const value = data.subarray(nullIdx + 1).toString('utf8');
-    maybeAddComfyEvidence(key, value, 'png', sources);
+    maybeAddComfyEvidence(key, value, 'png', sources, onEvidence);
   };
 
   const parseCompressedTextChunk = (data: Buffer) => {
@@ -131,7 +155,7 @@ const detectFromPngChunks = (buffer: Buffer, sources: Set<string>) => {
     const compressed = data.subarray(nullIdx + 2);
     try {
       const value = inflateSync(compressed).toString('utf8');
-      maybeAddComfyEvidence(key, value, 'png', sources);
+      maybeAddComfyEvidence(key, value, 'png', sources, onEvidence);
     } catch {
       // ignore malformed chunk
     }
@@ -155,7 +179,7 @@ const detectFromPngChunks = (buffer: Buffer, sources: Set<string>) => {
     const textBytes = data.subarray(cursor);
     try {
       const value = (compressed ? inflateSync(textBytes) : textBytes).toString('utf8');
-      maybeAddComfyEvidence(key, value, 'png', sources);
+      maybeAddComfyEvidence(key, value, 'png', sources, onEvidence);
     } catch {
       // ignore malformed chunk
     }
@@ -166,7 +190,7 @@ const detectFromPngChunks = (buffer: Buffer, sources: Set<string>) => {
     if (nullIdx <= 0) return;
     const key = data.subarray(0, nullIdx).toString('latin1');
     const value = data.subarray(nullIdx + 1).toString('latin1');
-    maybeAddComfyEvidence(key, value, 'png-comf', sources);
+    maybeAddComfyEvidence(key, value, 'png-comf', sources, onEvidence);
   };
 
   while (offset + 8 <= buffer.length) {
@@ -189,7 +213,11 @@ const detectFromPngChunks = (buffer: Buffer, sources: Set<string>) => {
   }
 };
 
-const detectFromSvgMetadata = (buffer: Buffer, sources: Set<string>) => {
+const detectFromSvgMetadata = (
+  buffer: Buffer,
+  sources: Set<string>,
+  onEvidence?: (evidence: ComfyMetadataEvidence) => void
+) => {
   const text = buffer.toString('utf8');
   if (!text.includes('<svg') || !text.toLowerCase().includes('<metadata')) return;
 
@@ -215,11 +243,23 @@ const detectFromSvgMetadata = (buffer: Buffer, sources: Set<string>) => {
     ('prompt' in payload && looksLikeComfyWorkflow(payload.prompt)) ||
     ('workflow' in payload && looksLikeComfyWorkflow(payload.workflow))
   ) {
-    sources.add('svg:metadata');
+    const source = 'svg:metadata';
+    sources.add(source);
+    if (onEvidence) {
+      if ('workflow' in payload && looksLikeComfyWorkflow(payload.workflow)) {
+        onEvidence({ source, key: 'workflow', json: payload.workflow });
+      } else if ('prompt' in payload && looksLikeComfyWorkflow(payload.prompt)) {
+        onEvidence({ source, key: 'prompt', json: payload.prompt });
+      }
+    }
   }
 };
 
-const detectFromExif = async (buffer: Buffer, sources: Set<string>) => {
+const detectFromExif = async (
+  buffer: Buffer,
+  sources: Set<string>,
+  onEvidence?: (evidence: ComfyMetadataEvidence) => void
+) => {
   let metadata;
   try {
     metadata = await sharp(buffer).metadata();
@@ -235,23 +275,78 @@ const detectFromExif = async (buffer: Buffer, sources: Set<string>) => {
       const parsed = extractExifLikePayload(value);
       if (!parsed) return;
       if (!looksLikeComfyWorkflow(parsed.json)) return;
-      sources.add(`exif:${parsed.key}`);
+      const source = `exif:${parsed.key}`;
+      sources.add(source);
+      if (onEvidence) {
+        onEvidence({
+          source,
+          key: parsed.key,
+          json: parsed.json,
+        });
+      }
     });
   } catch {
     // ignore invalid EXIF payloads
   }
 };
 
-export const detectComfyMetadata = async (
+const resolveWorkflowJson = (evidence: ComfyMetadataEvidence[]): { workflowJson?: unknown; workflowSourceKey?: string } => {
+  if (!evidence.length) return {};
+
+  const preferredOrder = ['workflow', 'comfyui_workflow', 'comfy_workflow', 'parameters', 'prompt'];
+  const sortedEvidence = [...evidence].sort((left, right) => {
+    const leftPriority = preferredOrder.indexOf(left.key);
+    const rightPriority = preferredOrder.indexOf(right.key);
+    const safeLeft = leftPriority === -1 ? Number.MAX_SAFE_INTEGER : leftPriority;
+    const safeRight = rightPriority === -1 ? Number.MAX_SAFE_INTEGER : rightPriority;
+    return safeLeft - safeRight;
+  });
+
+  const pickWorkflowPayload = (value: unknown): unknown | undefined => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      if (looksLikeComfyWorkflow(value)) return value;
+      return undefined;
+    }
+
+    const record = value as Record<string, unknown>;
+    if ('workflow' in record && looksLikeComfyWorkflow(record.workflow)) {
+      return record.workflow;
+    }
+    if ('prompt' in record && looksLikeComfyWorkflow(record.prompt)) {
+      return record.prompt;
+    }
+    if (looksLikeComfyWorkflow(record)) {
+      return record;
+    }
+    return undefined;
+  };
+
+  for (const entry of sortedEvidence) {
+    const payload = pickWorkflowPayload(entry.json);
+    if (!payload) continue;
+    return {
+      workflowJson: payload,
+      workflowSourceKey: entry.key,
+    };
+  }
+
+  return {};
+};
+
+export const extractComfyWorkflowMetadata = async (
   buffer: Buffer,
   options: DetectComfyMetadataOptions = {}
-): Promise<ComfyMetadataDetection> => {
+): Promise<ComfyWorkflowExtraction> => {
   const sources = new Set<string>();
+  const evidence: ComfyMetadataEvidence[] = [];
+  const pushEvidence = (entry: ComfyMetadataEvidence) => {
+    evidence.push(entry);
+  };
   const mimeType = options.mimeType?.toLowerCase();
 
   const isSvg = mimeType?.includes('svg') || buffer.subarray(0, 256).toString('utf8').includes('<svg');
   if (isSvg) {
-    detectFromSvgMetadata(buffer, sources);
+    detectFromSvgMetadata(buffer, sources, pushEvidence);
   }
 
   const isPng = mimeType?.includes('png') || (
@@ -259,15 +354,30 @@ export const detectComfyMetadata = async (
     buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
   );
   if (isPng) {
-    detectFromPngChunks(buffer, sources);
+    detectFromPngChunks(buffer, sources, pushEvidence);
   }
 
-  await detectFromExif(buffer, sources);
+  await detectFromExif(buffer, sources, pushEvidence);
 
   const sourceList = Array.from(sources);
+  const workflowSelection = resolveWorkflowJson(evidence);
   return {
     detected: sourceList.length > 0,
     source: sourceList[0],
     sources: sourceList,
+    workflowJson: workflowSelection.workflowJson,
+    workflowSourceKey: workflowSelection.workflowSourceKey,
+  };
+};
+
+export const detectComfyMetadata = async (
+  buffer: Buffer,
+  options: DetectComfyMetadataOptions = {}
+): Promise<ComfyMetadataDetection> => {
+  const extraction = await extractComfyWorkflowMetadata(buffer, options);
+  return {
+    detected: extraction.detected,
+    source: extraction.source,
+    sources: extraction.sources,
   };
 };
