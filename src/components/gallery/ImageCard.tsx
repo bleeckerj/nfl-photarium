@@ -38,7 +38,7 @@ interface ImageCardProps {
   onGenerateAlt: (imageId: string) => void;
   onCopyUrl: (imageId: string) => void;
   onCopyNamespace: (namespace: string) => void;
-  onBeforeNavigate?: () => void;
+  onBeforeNavigate?: (imageId: string) => void;
   galleryReturnHrefSuffix?: string;
   // Hover preview
   onMouseEnter: (imageId: string, event: React.MouseEvent) => void;
@@ -110,7 +110,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
             onToggleSelection(image.id);
             return;
           }
-          onBeforeNavigate?.();
+          onBeforeNavigate?.(image.id);
         }}
         onMouseEnter={(e) => onMouseEnter(image.id, e)}
         onMouseMove={(e) => onMouseMove(image.id, e)}

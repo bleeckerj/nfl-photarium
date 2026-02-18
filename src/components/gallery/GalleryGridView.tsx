@@ -15,7 +15,7 @@ interface GalleryGridViewProps {
   gridSize: GridSize;
   filters: GalleryViewFilters;
   onToggleSelection: (imageId: string) => void;
-  onBeforeNavigate: () => void;
+  onBeforeNavigate: (imageId: string) => void;
   onCopyNamespace: (namespace: string) => void;
   onToggleCopyMenu: (imageId: string) => void;
   onStartEdit: (image: CloudflareImage) => void;

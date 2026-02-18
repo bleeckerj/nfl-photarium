@@ -18,7 +18,7 @@ interface GalleryListViewProps {
   onGenerateAlt: (imageId: string) => void;
   onCopyUrl: (imageId: string) => void;
   onCopyNamespace: (namespace: string) => void;
-  onBeforeNavigate: () => void;
+  onBeforeNavigate: (imageId: string) => void;
   onDragStart: (event: React.DragEvent, image: CloudflareImage) => void;
   onMouseEnter: (imageId: string, event: React.MouseEvent) => void;
   onMouseMove: (imageId: string, event: React.MouseEvent) => void;

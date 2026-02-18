@@ -5,7 +5,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { getMultipleImageUrls, getCloudflareImageUrl, getCloudflareDownloadUrl, IMAGE_VARIANTS } from '@/utils/imageUtils';
 import { useToast } from '@/components/Toast';
-import { Sparkles, RotateCcw, RotateCw, ChevronUp, ChevronDown, GripVertical, ExternalLink, Cpu } from 'lucide-react';
+import { Sparkles, RotateCcw, RotateCw, ChevronUp, ChevronDown, GripVertical, ExternalLink, Cpu, ChevronLeft, ChevronRight } from 'lucide-react';
 import FolderManagerButton from '@/components/FolderManagerButton';
 import MonoSelect from '@/components/MonoSelect';
 import EmbeddingStatusIcon from '@/components/EmbeddingStatusIcon';
@@ -43,7 +43,7 @@ import { useAltDescriptionGeneration } from '@/hooks/useAltDescriptionGeneration
 import { useDeleteImageFamily } from '@/hooks/useDeleteImageFamily';
 import { useShareLinks } from '@/hooks/useShareLinks';
 
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 
 const handleImageDragStart = (e: React.DragEvent, image: CloudflareImage) => {
   e.stopPropagation();
@@ -94,7 +94,15 @@ interface CloudflareImage {
 }
 
 const DEFAULT_LIST_VARIANT = 'full';
+const GALLERY_RETURN_STATE_KEY = 'galleryReturnStateV1';
+const GALLERY_RETURN_TTL_MS = 10 * 60 * 1000;
 const VARIANT_DIMENSIONS = new Map(IMAGE_VARIANTS.map(variant => [variant.name, variant.width]));
+
+type GalleryReturnState = {
+  namespace?: string;
+  savedAt?: number;
+  resultIds?: string[];
+};
 
 type BulkUpdateFailure = {
   id: string;
@@ -162,33 +170,36 @@ const toCloudflareTextMirror = (value?: string) => {
 export default function ImageDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const rawId = params?.id;
   const id = Array.isArray(rawId) ? rawId[0] : rawId;
+  const galleryPageParam = searchParams.get('gpage');
+  const galleryNamespaceParam = searchParams.get('gns') ?? '';
+  const hasGalleryNamespaceParam = searchParams.has('gns');
+  const galleryNavSuffix = useMemo(() => {
+    const qs = new URLSearchParams();
+    if (galleryPageParam) {
+      qs.set('gpage', galleryPageParam);
+    }
+    if (hasGalleryNamespaceParam) {
+      qs.set('gns', galleryNamespaceParam);
+    }
+    const serialized = qs.toString();
+    return serialized ? `?${serialized}` : '';
+  }, [galleryNamespaceParam, galleryPageParam, hasGalleryNamespaceParam]);
+
   const [image, setImage] = useState<CloudflareImage | null>(null);
   const [loading, setLoading] = useState(true);
   const toast = useToast();
+  const [galleryResultIds, setGalleryResultIds] = useState<string[]>([]);
 
   const handleBackToGallery = useCallback(() => {
-    if (typeof window === 'undefined') {
-      router.push('/');
+    if (galleryPageParam) {
+      router.push(`/?gpage=${encodeURIComponent(galleryPageParam)}&gns=${encodeURIComponent(galleryNamespaceParam)}`, { scroll: false });
       return;
     }
-
-    // Always go directly to the gallery. Use gpage/gns if present to restore position.
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const gpage = params.get('gpage');
-      const gns = params.get('gns') ?? '';
-      if (gpage) {
-        router.push(`/?gpage=${encodeURIComponent(gpage)}&gns=${encodeURIComponent(gns)}`, { scroll: false });
-        return;
-      }
-    } catch {
-      // ignore
-    }
-
     router.push('/');
-  }, [router]);
+  }, [galleryNamespaceParam, galleryPageParam, router]);
 
   const [allImages, setAllImages] = useState<CloudflareImage[]>([]);
   const [reassignParentId, setReassignParentId] = useState('');
@@ -329,6 +340,30 @@ export default function ImageDetailPage() {
       setNamespace(stored || envDefault);
     }
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = window.sessionStorage.getItem(GALLERY_RETURN_STATE_KEY);
+      if (!raw) {
+        setGalleryResultIds([]);
+        return;
+      }
+      const parsed = JSON.parse(raw) as GalleryReturnState;
+      const savedAt = typeof parsed?.savedAt === 'number' ? parsed.savedAt : 0;
+      const freshEnough = !savedAt || Date.now() - savedAt < GALLERY_RETURN_TTL_MS;
+      const savedNamespace = typeof parsed?.namespace === 'string' ? parsed.namespace : '';
+      if (!freshEnough || savedNamespace !== galleryNamespaceParam || !Array.isArray(parsed?.resultIds)) {
+        setGalleryResultIds([]);
+        return;
+      }
+      setGalleryResultIds(
+        parsed.resultIds.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+      );
+    } catch {
+      setGalleryResultIds([]);
+    }
+  }, [galleryNamespaceParam, id]);
 
   useEffect(() => {
     return subscribeEmbeddingPending(setEmbeddingPendingMap);
@@ -769,6 +804,19 @@ export default function ImageDetailPage() {
   const metadataPrunedDroppedFields = metadataDiagnostics.prunedDropped;
 
   const pendingEmbedding = id ? embeddingPendingMap[id as string] : undefined;
+  const galleryResultIndex = useMemo(() => {
+    if (!id) return -1;
+    return galleryResultIds.indexOf(id);
+  }, [galleryResultIds, id]);
+  const prevGalleryImageId = galleryResultIndex > 0 ? galleryResultIds[galleryResultIndex - 1] : null;
+  const nextGalleryImageId =
+    galleryResultIndex >= 0 && galleryResultIndex < galleryResultIds.length - 1
+      ? galleryResultIds[galleryResultIndex + 1]
+      : null;
+  const handleNavigateGalleryResult = useCallback((targetId: string | null) => {
+    if (!targetId) return;
+    router.push(`/images/${targetId}${galleryNavSuffix}`, { scroll: false });
+  }, [galleryNavSuffix, router]);
 
   const originalUrlByteLength = useMemo(() => {
     try {
@@ -1751,10 +1799,37 @@ export default function ImageDetailPage() {
     <div id="image-detail-page" className="p-6 relative">
       <div id="image-detail-container" className="max-w-5xl mx-auto bg-white rounded-lg shadow-md overflow-hidden">
         <div className="p-6">
-          <div id="detail-navigation" className="flex items-center justify-between mb-4">
+          <div id="detail-navigation" className="flex items-center justify-between gap-3 mb-4">
             <button type="button" onClick={handleBackToGallery} className="text-xs text-blue-600 underline">
               ← Back to gallery
             </button>
+            {galleryResultIds.length > 0 && (
+              <div className="flex items-center gap-2">
+                {galleryResultIndex >= 0 && (
+                  <span className="text-[11px] font-mono text-gray-500">
+                    {galleryResultIndex + 1} / {galleryResultIds.length}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => handleNavigateGalleryResult(prevGalleryImageId)}
+                  disabled={!prevGalleryImageId}
+                  className="inline-flex items-center gap-1 px-2 py-1 text-xs font-mono border rounded-md border-gray-200 text-gray-600 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                  Prev
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleNavigateGalleryResult(nextGalleryImageId)}
+                  disabled={!nextGalleryImageId}
+                  className="inline-flex items-center gap-1 px-2 py-1 text-xs font-mono border rounded-md border-gray-200 text-gray-600 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Next
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
           </div>
           <div id="image-hero-section" className="w-full mb-4">
             <div className="relative w-full aspect-[3/2] bg-gray-100 rounded overflow-hidden group">

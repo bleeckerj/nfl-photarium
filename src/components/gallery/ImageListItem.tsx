@@ -36,7 +36,7 @@ interface ImageListItemProps {
   onGenerateAlt: (imageId: string) => void;
   onCopyUrl: (imageId: string) => void;
   onCopyNamespace: (namespace: string) => void;
-  onBeforeNavigate?: () => void;
+  onBeforeNavigate?: (imageId: string) => void;
   onDragStart?: (event: React.DragEvent, image: CloudflareImage) => void;
   // Hover preview
   onMouseEnter: (imageId: string, event: React.MouseEvent) => void;
@@ -110,7 +110,7 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
             onToggleSelection(image.id);
             return;
           }
-          onBeforeNavigate?.();
+          onBeforeNavigate?.(image.id);
         }}
         prefetch={false}
       >

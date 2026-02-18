@@ -72,7 +72,25 @@ export interface ImageGalleryRef {
 const DEFAULT_PAGE_SIZE = 30;
 const PAGE_SIZE_OPTIONS = [12, 24, 30, 48, 60, 90, 120];
 const GALLERY_RETURN_STATE_KEY = 'galleryReturnStateV1';
+const GALLERY_RETURN_TTL_MS = 10 * 60 * 1000;
 const VARIANT_DIMENSIONS = new Map(IMAGE_VARIANTS.map(variant => [variant.name, variant.width]));
+
+type GalleryReturnState = {
+  currentPage?: number;
+  scrollY?: number;
+  namespace?: string;
+  savedAt?: number;
+  selectedImageId?: string;
+  resultIds?: string[];
+};
+
+type GalleryWarmCacheState = {
+  namespace: string;
+  images: CloudflareImage[];
+  savedAt: number;
+};
+
+let galleryWarmCache: GalleryWarmCacheState | null = null;
 
 type BulkState = {
   bulkSelectionMode: boolean;
@@ -231,7 +249,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             const savedNamespace = typeof returnParsed?.namespace === 'string' ? returnParsed.namespace : '';
             const activeNamespace = namespace ?? '';
             const savedAt = typeof returnParsed?.savedAt === 'number' ? returnParsed.savedAt : 0;
-            const freshEnough = !savedAt || Date.now() - savedAt < 10 * 60 * 1000;
+            const freshEnough = !savedAt || Date.now() - savedAt < GALLERY_RETURN_TTL_MS;
             if (freshEnough && savedNamespace === activeNamespace && typeof returnParsed?.currentPage === 'number' && returnParsed.currentPage > 0) {
               normalizedCurrentPage = Math.floor(returnParsed.currentPage);
             }
@@ -252,7 +270,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             const savedNamespace = typeof returnParsed?.namespace === 'string' ? returnParsed.namespace : '';
             const activeNamespace = namespace ?? '';
             const savedAt = typeof returnParsed?.savedAt === 'number' ? returnParsed.savedAt : 0;
-            const freshEnough = !savedAt || Date.now() - savedAt < 10 * 60 * 1000;
+            const freshEnough = !savedAt || Date.now() - savedAt < GALLERY_RETURN_TTL_MS;
             if (
               freshEnough &&
               savedNamespace === activeNamespace &&
@@ -330,17 +348,37 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     try {
       const rawReturn = window.sessionStorage.getItem(GALLERY_RETURN_STATE_KEY);
       if (!rawReturn) return false;
-      const parsed = JSON.parse(rawReturn) as { currentPage?: number };
-      return typeof parsed?.currentPage === 'number' && parsed.currentPage > 0;
+      const parsed = JSON.parse(rawReturn) as GalleryReturnState;
+      const savedAt = typeof parsed?.savedAt === 'number' ? parsed.savedAt : 0;
+      const freshEnough = !savedAt || Date.now() - savedAt < GALLERY_RETURN_TTL_MS;
+      return freshEnough && typeof parsed?.currentPage === 'number' && parsed.currentPage > 0;
     } catch {
       return false;
     }
   })();
 
-  const returningFromDetailRef = useRef(initialReturningFromDetail);
+  const initialWarmImages = (() => {
+    if (!initialReturningFromDetail) {
+      return [] as CloudflareImage[];
+    }
+    const activeNamespace = namespace ?? '';
+    if (!galleryWarmCache) {
+      return [] as CloudflareImage[];
+    }
+    if (galleryWarmCache.namespace !== activeNamespace) {
+      return [] as CloudflareImage[];
+    }
+    if (Date.now() - galleryWarmCache.savedAt > GALLERY_RETURN_TTL_MS) {
+      return [] as CloudflareImage[];
+    }
+    return galleryWarmCache.images;
+  })();
 
-  const [images, setImages] = useState<CloudflareImage[]>([]);
-  const [loading, setLoading] = useState(true);
+  const returningFromDetailRef = useRef(initialReturningFromDetail);
+  const initialSilentFetchRef = useRef(initialWarmImages.length > 0);
+
+  const [images, setImages] = useState<CloudflareImage[]>(initialWarmImages);
+  const [loading, setLoading] = useState(initialWarmImages.length === 0);
   const [selectedVariant, setSelectedVariant] = useState<string>(storedPreferencesRef.current.variant);
   const [openCopyMenu, setOpenCopyMenu] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>((storedPreferencesRef.current.viewMode ?? 'grid') as 'grid' | 'list');
@@ -660,6 +698,11 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           return true;
         });
         setImages(uniqueImages);
+        galleryWarmCache = {
+          namespace: namespace ?? '',
+          images: uniqueImages,
+          savedAt: Date.now(),
+        };
       }
     } catch (error) {
       if ((error as Error).name === 'AbortError') return;
@@ -709,7 +752,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
-    fetchImages();
+    const shouldSilentFetch = initialSilentFetchRef.current;
+    initialSilentFetchRef.current = false;
+    fetchImages({ silent: shouldSilentFetch });
   }, [namespace, fetchImages]);
 
   // Fetch color metadata from Redis for displayed images
@@ -1055,6 +1100,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     hideTagByName,
     unhideTagByName,
     clearHiddenTags,
+    filteredImages,
     filteredWithVariants,
     sortedImages,
     duplicateGroups,
@@ -1117,22 +1163,25 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     [uniqueFolders, hiddenFolders]
   );
 
-  const saveGalleryReturnState = useCallback(() => {
+  const saveGalleryReturnState = useCallback((imageId: string) => {
     if (typeof window === 'undefined') return;
     try {
+      const resultIds = filteredImages.map((img) => img.id);
       window.sessionStorage.setItem(
         GALLERY_RETURN_STATE_KEY,
         JSON.stringify({
           currentPage,
           scrollY: window.scrollY,
           namespace: namespace ?? '',
-          savedAt: Date.now()
+          savedAt: Date.now(),
+          selectedImageId: imageId,
+          resultIds,
         })
       );
     } catch {
       // ignore
     }
-  }, [currentPage, namespace]);
+  }, [currentPage, filteredImages, namespace]);
 
   const galleryReturnHrefSuffix = useMemo(() => {
     const page = currentPage;
