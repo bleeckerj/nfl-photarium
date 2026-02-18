@@ -34,7 +34,13 @@ export async function indexComfyWorkflowIntentForImage(imageId: string): Promise
     return { imageId, status: 'missing-intent-text' };
   }
 
-  const embedding = await generateClipTextEmbedding(extras.workflowIntentText);
+  const embedding = await generateClipTextEmbedding(extras.workflowIntentText, {
+    source: 'server',
+    component: 'workflowIndexer',
+    trigger: 'index',
+    route: 'server/comfy/workflowIndexer',
+    query: extras.workflowIntentText,
+  });
   if (!embedding) {
     return { imageId, status: 'embedding-failed' };
   }

@@ -25,8 +25,10 @@ const loadPuppeteer = async () => {
 };
 
 const DEFAULT_MAX_SCROLLS = 10;
+const AUTO_SCROLL_SAFETY_CAP = 200;
 const DEFAULT_SCROLL_DELAY_MS = 1500;
 const DEFAULT_TIMEOUT_MS = 30000;
+const NO_NEW_IMAGE_STOP_THRESHOLD = 3;
 
 const isValidUrl = (value: string) => {
   try {
@@ -168,9 +170,11 @@ const shouldIncludeImage = (img: ImageInfo): boolean => {
 export async function POST(request: NextRequest) {
   const body = await request.json();
   const pageUrl = typeof body?.url === 'string' ? body.url.trim() : '';
-  const maxScrolls = Number.isFinite(body?.maxScrolls) 
+  const requestedMaxScrolls = Number.isFinite(body?.maxScrolls)
     ? Math.max(1, Math.min(50, Number(body.maxScrolls))) 
     : Number(process.env.IMPORT_SCROLL_MAX_SCROLLS) || DEFAULT_MAX_SCROLLS;
+  const autoScrollUntilStable = Boolean(body?.autoScrollUntilStable);
+  const maxScrolls = autoScrollUntilStable ? AUTO_SCROLL_SAFETY_CAP : requestedMaxScrolls;
   const maxPages = Number.isFinite(body?.maxPages)
     ? Math.max(1, Math.min(20, Number(body.maxPages)))
     : 1; // Default to single page unless specified
@@ -238,21 +242,65 @@ export async function POST(request: NextRequest) {
         let currentPageNum = 1;
         let currentUrl = pageUrl;
         const visitedPages = new Set<string>();
+        let stoppedByScrollCap = false;
 
         // Helper to trigger all lazy-loaded images by scrolling through the page
         const triggerLazyLoad = async () => {
           await page.evaluate(async () => {
-            // Scroll to bottom in chunks to trigger lazy loaders
-            const scrollHeight = document.body.scrollHeight;
+            const pickScrollTarget = (): { kind: 'window' | 'element'; element: HTMLElement | null } => {
+              const root = (document.scrollingElement as HTMLElement | null) || document.documentElement;
+              const windowDelta = Math.max(0, root.scrollHeight - window.innerHeight);
+
+              let bestElement: HTMLElement | null = null;
+              let bestDelta = 0;
+              const candidates = Array.from(document.querySelectorAll<HTMLElement>('main, [role="main"], section, article, div'));
+              for (const el of candidates) {
+                if (!el || el === root || el === document.body) continue;
+                const style = window.getComputedStyle(el);
+                const overflowY = style.overflowY;
+                if (overflowY !== 'auto' && overflowY !== 'scroll' && overflowY !== 'overlay') continue;
+                const delta = el.scrollHeight - el.clientHeight;
+                if (delta < 300 || el.clientHeight < 220) continue;
+                if (delta > bestDelta) {
+                  bestDelta = delta;
+                  bestElement = el;
+                }
+              }
+
+              if (bestElement && bestDelta > windowDelta + 200) {
+                return { kind: 'element', element: bestElement };
+              }
+              return { kind: 'window', element: null };
+            };
+
+            const target = pickScrollTarget();
+            if (target.kind === 'element' && target.element) {
+              const el = target.element;
+              const maxTop = Math.max(0, el.scrollHeight - el.clientHeight);
+              const step = Math.max(120, el.clientHeight * 0.8);
+              for (let y = 0; y <= maxTop; y += step) {
+                el.scrollTop = Math.min(maxTop, y);
+                el.dispatchEvent(new Event('scroll', { bubbles: true }));
+                await new Promise(r => setTimeout(r, 120));
+              }
+              el.scrollTop = 0;
+              el.dispatchEvent(new Event('scroll', { bubbles: true }));
+              await new Promise(r => setTimeout(r, 220));
+              return;
+            }
+
+            // Fallback: scroll the main document/window
+            const scrollHeight = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
             const viewHeight = window.innerHeight;
-            
-            for (let y = 0; y < scrollHeight; y += viewHeight * 0.8) {
+            const step = Math.max(120, viewHeight * 0.8);
+            for (let y = 0; y < scrollHeight; y += step) {
               window.scrollTo(0, y);
+              window.dispatchEvent(new Event('scroll'));
               await new Promise(r => setTimeout(r, 100));
             }
-            
-            // Scroll back to top
+
             window.scrollTo(0, 0);
+            window.dispatchEvent(new Event('scroll'));
             await new Promise(r => setTimeout(r, 200));
           });
           
@@ -284,7 +332,7 @@ export async function POST(request: NextRequest) {
 
             for (const img of imgs) {
               results.push({
-                src: img.src || '',
+                src: img.currentSrc || img.src || '',
                 srcset: img.srcset || '',
                 dataSrcset: img.dataset.srcset || img.getAttribute('data-srcset') || '',
                 dataSrc: img.dataset.src || img.dataset.lazySrc || img.dataset.original || img.getAttribute('data-lazy') || '',
@@ -420,17 +468,53 @@ export async function POST(request: NextRequest) {
           let pageScrollCount = 0;
           let noNewImagesCount = 0;
           
-          while (pageScrollCount < maxScrolls && noNewImagesCount < 3) {
-            await page.evaluate(() => {
-              window.scrollBy(0, window.innerHeight);
+          while (pageScrollCount < maxScrolls && noNewImagesCount < NO_NEW_IMAGE_STOP_THRESHOLD) {
+            const scrollStep = await page.evaluate(() => {
+              const root = (document.scrollingElement as HTMLElement | null) || document.documentElement;
+              const windowDelta = Math.max(0, root.scrollHeight - window.innerHeight);
+
+              let bestElement: HTMLElement | null = null;
+              let bestDelta = 0;
+              const candidates = Array.from(document.querySelectorAll<HTMLElement>('main, [role="main"], section, article, div'));
+              for (const el of candidates) {
+                if (!el || el === root || el === document.body) continue;
+                const style = window.getComputedStyle(el);
+                const overflowY = style.overflowY;
+                if (overflowY !== 'auto' && overflowY !== 'scroll' && overflowY !== 'overlay') continue;
+                const delta = el.scrollHeight - el.clientHeight;
+                if (delta < 300 || el.clientHeight < 220) continue;
+                if (delta > bestDelta) {
+                  bestDelta = delta;
+                  bestElement = el;
+                }
+              }
+
+              if (bestElement && bestDelta > windowDelta + 200) {
+                const step = Math.max(120, bestElement.clientHeight * 0.85);
+                const before = bestElement.scrollTop;
+                const maxTop = Math.max(0, bestElement.scrollHeight - bestElement.clientHeight);
+                bestElement.scrollTop = Math.min(maxTop, before + step);
+                bestElement.dispatchEvent(new Event('scroll', { bubbles: true }));
+                const after = bestElement.scrollTop;
+                return { target: 'container', moved: after > before + 1, atEnd: maxTop - after < 2 };
+              }
+
+              const before = window.scrollY;
+              window.scrollBy(0, Math.max(120, window.innerHeight * 0.9));
+              window.dispatchEvent(new Event('scroll'));
+              const rootAfter = (document.scrollingElement as HTMLElement | null) || document.documentElement;
+              const maxY = Math.max(0, rootAfter.scrollHeight - window.innerHeight);
+              const after = window.scrollY;
+              return { target: 'window', moved: after > before + 1, atEnd: maxY - after < 2 };
             });
             pageScrollCount++;
             totalScrollCount++;
+            const scrollTargetLabel = scrollStep.target === 'container' ? 'container' : 'page';
 
             send('status', { 
               message: maxPages > 1 
-                ? `Page ${currentPageNum}: Scrolling... (${pageScrollCount}/${maxScrolls})` 
-                : `Scrolling... (${pageScrollCount}/${maxScrolls})`, 
+                ? `Page ${currentPageNum}: Scrolling ${scrollTargetLabel}... (${pageScrollCount}/${autoScrollUntilStable ? 'auto' : maxScrolls})` 
+                : `Scrolling ${scrollTargetLabel}... (${pageScrollCount}/${autoScrollUntilStable ? 'auto' : maxScrolls})`, 
               scrollCount: totalScrollCount, 
               imageCount: totalImagesSent,
               pageNum: currentPageNum
@@ -463,6 +547,10 @@ export async function POST(request: NextRequest) {
             }
           }
 
+          if (pageScrollCount >= maxScrolls && noNewImagesCount < NO_NEW_IMAGE_STOP_THRESHOLD) {
+            stoppedByScrollCap = true;
+          }
+
           // Check for next page (only if maxPages > 1)
           if (maxPages > 1 && currentPageNum < maxPages) {
             const nextUrl = await findNextPageUrl();
@@ -485,11 +573,16 @@ export async function POST(request: NextRequest) {
         }
 
         const pageInfo = maxPages > 1 ? ` across ${currentPageNum} page${currentPageNum !== 1 ? 's' : ''}` : '';
+        const stopReason = stoppedByScrollCap
+          ? (autoScrollUntilStable
+              ? `Reached auto-scroll safety cap (${maxScrolls} scrolls)`
+              : `Reached max scrolls (${maxScrolls})`)
+          : `Stopped after ${NO_NEW_IMAGE_STOP_THRESHOLD} rounds with no new images`;
         send('done', { 
           scrollCount: totalScrollCount,
           pageCount: currentPageNum,
           imageCount: totalImagesSent,
-          message: `Completed${pageInfo} with ${totalScrollCount} scrolls`
+          message: `Completed${pageInfo} with ${totalScrollCount} scrolls (${stopReason})`
         });
 
       } catch (error) {

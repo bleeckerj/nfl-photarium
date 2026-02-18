@@ -11,6 +11,7 @@
  */
 
 import { promises as fs } from 'fs';
+import os from 'node:os';
 import path from 'path';
 
 export interface CacheData<T> {
@@ -303,17 +304,26 @@ export function getCacheStorage(): ICacheStorage {
     return storageInstance;
   }
 
-  const storageType = process.env.CACHE_STORAGE_TYPE ?? 'file';
-  const cacheDir = process.env.CACHE_STORAGE_DIR;
+  const explicitStorageType = process.env.CACHE_STORAGE_TYPE;
+  const hasRedisUrl = Boolean(process.env.REDIS_URL);
+  const storageType = explicitStorageType ?? (hasRedisUrl ? 'redis' : 'file');
+  let cacheDir = process.env.CACHE_STORAGE_DIR;
 
   switch (storageType) {
     case 'redis':
+      if (!explicitStorageType && hasRedisUrl) {
+        console.log('[Cache] Auto-selecting Redis storage (REDIS_URL detected)');
+      }
       console.log('[Cache] Using Redis storage');
       storageInstance = new RedisCacheStorage();
       return storageInstance;
     
     case 'file':
     default:
+      if (!cacheDir && process.env.NODE_ENV === 'development') {
+        cacheDir = path.join(os.tmpdir(), 'photarium-cache');
+        console.log(`[Cache] Using dev temp cache dir: ${cacheDir}`);
+      }
       console.log('[Cache] Using file-based storage');
       storageInstance = new FileCacheStorage(cacheDir);
       return storageInstance;

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import AdmZip from 'adm-zip';
 import { toDuplicateSummary } from '@/server/duplicateDetector';
 import { upsertRegistryNamespace } from '@/server/namespaceRegistry';
+import { validateParentForNewChild } from '@/server/parentValidation';
 import { SUPPORTED_IMAGE_TYPES, uploadImageBuffer } from '@/server/uploadService';
 import type { UploadFailure, UploadSuccess } from '@/server/uploadService';
 
@@ -102,6 +103,14 @@ export async function POST(request: NextRequest) {
     const effectiveNamespace = cleanNamespace || defaultNamespace;
     const parentIdValue = typeof parentIdRaw === 'string' ? parentIdRaw.trim() : '';
     const cleanParentId = parentIdValue && parentIdValue !== 'undefined' ? parentIdValue : undefined;
+
+    const parentValidation = await validateParentForNewChild(cleanParentId);
+    if (!parentValidation.ok) {
+      return NextResponse.json(
+        { error: parentValidation.error },
+        { status: parentValidation.status }
+      );
+    }
 
     const keynoteSource = isKeynoteSourcePath(cleanSourcePath);
     const forcedTags = keynoteSource

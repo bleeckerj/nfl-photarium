@@ -2,6 +2,12 @@ export type CloudflareMetadata = {
   folder?: string;
   tags?: string[];
   description?: string;
+  size?: number | string;
+  bytes?: number | string;
+  fileSize?: number | string;
+  type?: string;
+  contentType?: string;
+  mimeType?: string;
   originalUrl?: string;
   originalUrlNormalized?: string;
   sourceUrl?: string;

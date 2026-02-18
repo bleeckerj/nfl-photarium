@@ -8,9 +8,11 @@
 
 import React from 'react';
 import { ImageCard } from './ImageCard';
-import type { CloudflareImage, GalleryViewFilters } from './types';
+import { getGridClassName } from './gridSizing';
+import type { CloudflareImage, GalleryViewFilters, GridSize } from './types';
 
 interface GalleryGridViewProps {
+  gridSize: GridSize;
   filters: GalleryViewFilters;
   onToggleSelection: (imageId: string) => void;
   onBeforeNavigate: () => void;
@@ -25,6 +27,7 @@ interface GalleryGridViewProps {
 }
 
 export const GalleryGridView: React.FC<GalleryGridViewProps> = ({
+  gridSize,
   filters,
   onToggleSelection,
   onBeforeNavigate,
@@ -52,7 +55,7 @@ export const GalleryGridView: React.FC<GalleryGridViewProps> = ({
   } = filters;
 
   return (
-    <div id="gallery-results-grid" className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+    <div id="gallery-results-grid" className={getGridClassName(gridSize)}>
       {images.map((image) => (
         <ImageCard
           key={image.id}

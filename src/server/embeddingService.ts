@@ -2,6 +2,54 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
+const formatTimestamp = () => new Date().toLocaleString('en-US', { hour12: false });
+const logEmbeddingInfo = (...args: unknown[]) => console.info(`[${formatTimestamp()}]`, ...args);
+const logEmbeddingWarn = (...args: unknown[]) => console.warn(`[${formatTimestamp()}]`, ...args);
+const logEmbeddingError = (...args: unknown[]) => console.error(`[${formatTimestamp()}]`, ...args);
+
+export type EmbeddingLogContext = {
+  requestId?: string;
+  source?: string;
+  route?: string;
+  component?: string;
+  trigger?: string;
+  ip?: string;
+  userAgent?: string;
+  referer?: string;
+  origin?: string;
+  query?: string;
+};
+
+const MAX_CONTEXT_VALUE = 160;
+
+const normalizeContextValue = (value?: string) => {
+  if (!value) return undefined;
+  const compact = value.replace(/\s+/g, ' ').trim();
+  if (!compact) return undefined;
+  if (compact.length <= MAX_CONTEXT_VALUE) return compact;
+  return `${compact.slice(0, MAX_CONTEXT_VALUE)}…`;
+};
+
+const formatEmbeddingContext = (context?: EmbeddingLogContext) => {
+  if (!context) return '';
+  const entries: Array<[string, string | undefined]> = [
+    ['req', normalizeContextValue(context.requestId)],
+    ['source', normalizeContextValue(context.source)],
+    ['route', normalizeContextValue(context.route)],
+    ['component', normalizeContextValue(context.component)],
+    ['trigger', normalizeContextValue(context.trigger)],
+    ['ip', normalizeContextValue(context.ip)],
+    ['ua', normalizeContextValue(context.userAgent)],
+    ['referer', normalizeContextValue(context.referer)],
+    ['origin', normalizeContextValue(context.origin)],
+    ['query', normalizeContextValue(context.query)],
+  ];
+  const segments = entries
+    .filter(([, value]) => value)
+    .map(([key, value]) => `${key}=${value}`);
+  return segments.length ? ` ctx={${segments.join(' ')}}` : '';
+};
+
 /**
  * Embedding Service
  * 
@@ -95,7 +143,7 @@ const logProviderOnce = () => {
     [PROVIDER_LOG_KEY]?: boolean;
   };
   if (!globalScope[PROVIDER_LOG_KEY]) {
-    console.info(`[Embedding] Provider: ${resolveEmbeddingProvider()}`);
+    logEmbeddingInfo(`[Embedding] Provider: ${resolveEmbeddingProvider()}`);
     globalScope[PROVIDER_LOG_KEY] = true;
   }
 };
@@ -107,8 +155,8 @@ const logPythonOnce = (pythonExecutable: string, repoRoot: string) => {
     [PYTHON_LOG_KEY]?: boolean;
   };
   if (!globalScope[PYTHON_LOG_KEY]) {
-    console.info(`[Embedding] Local python resolved: ${pythonExecutable}`);
-    console.info(`[Embedding] Repo root: ${repoRoot}`);
+    logEmbeddingInfo(`[Embedding] Local python resolved: ${pythonExecutable}`);
+    logEmbeddingInfo(`[Embedding] Repo root: ${repoRoot}`);
     globalScope[PYTHON_LOG_KEY] = true;
   }
 };
@@ -119,25 +167,28 @@ const logPythonOnce = (pythonExecutable: string, repoRoot: string) => {
  * @param imageUrl - URL of the image to embed (must be publicly accessible)
  * @returns 512-dimensional embedding vector, or null if generation failed
  */
-export async function generateClipEmbedding(imageUrl: string): Promise<number[] | null> {
+export async function generateClipEmbedding(
+  imageUrl: string,
+  context?: EmbeddingLogContext
+): Promise<number[] | null> {
   const provider = resolveEmbeddingProvider();
-  console.info(`[Embedding] Provider (${provider}) - image request`);
+  logEmbeddingInfo(`[Embedding] Provider (${provider}) - image request${formatEmbeddingContext(context)}`);
 
   if (provider === 'local') {
     try {
       const imageResponse = await fetch(imageUrl);
       if (!imageResponse.ok) {
-        console.error(`[Embedding] Failed to fetch image: ${imageResponse.status}`);
+        logEmbeddingError(`[Embedding] Failed to fetch image: ${imageResponse.status}`);
         return null;
       }
       const imageBuffer = await imageResponse.arrayBuffer();
       const localEmbedding = await generateClipEmbeddingLocalFromBytes(imageBuffer);
       if (localEmbedding) {
-        console.log('[Embedding] Successfully generated CLIP embedding via local model');
+        logEmbeddingInfo('[Embedding] Successfully generated CLIP embedding via local model');
       }
       return localEmbedding;
     } catch (error) {
-      console.error('[Embedding] Local embedding error:', error);
+      logEmbeddingError('[Embedding] Local embedding error:', error);
       return null;
     }
   }
@@ -145,7 +196,7 @@ export async function generateClipEmbedding(imageUrl: string): Promise<number[] 
   const apiToken = process.env.HUGGINGFACE_API_TOKEN;
 
   if (!apiToken) {
-    console.error('[Embedding] Missing HUGGINGFACE_API_TOKEN - get one from https://huggingface.co/settings/tokens');
+    logEmbeddingError('[Embedding] Missing HUGGINGFACE_API_TOKEN - get one from https://huggingface.co/settings/tokens');
     return null;
   }
 
@@ -153,7 +204,7 @@ export async function generateClipEmbedding(imageUrl: string): Promise<number[] 
     // Fetch the image bytes
     const imageResponse = await fetch(imageUrl);
     if (!imageResponse.ok) {
-      console.error(`[Embedding] Failed to fetch image: ${imageResponse.status}`);
+      logEmbeddingError(`[Embedding] Failed to fetch image: ${imageResponse.status}`);
       return null;
     }
 
@@ -174,7 +225,7 @@ export async function generateClipEmbedding(imageUrl: string): Promise<number[] 
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`[Embedding] HuggingFace API error: ${response.status} - ${errorText}`);
+      logEmbeddingError(`[Embedding] HuggingFace API error: ${response.status} - ${errorText}`);
       return null;
     }
 
@@ -182,24 +233,24 @@ export async function generateClipEmbedding(imageUrl: string): Promise<number[] 
 
     // Check for errors
     if (result && typeof result === 'object' && 'error' in result) {
-      console.error('[Embedding] HuggingFace API error:', result.error);
+      logEmbeddingError('[Embedding] HuggingFace API error:', result.error);
       return null;
     }
 
     // HuggingFace returns embedding as flat array
     if (!Array.isArray(result)) {
-      console.error('[Embedding] Invalid response format from HuggingFace API');
+      logEmbeddingError('[Embedding] Invalid response format from HuggingFace API');
       return null;
     }
 
     if (result.length !== CLIP_EMBEDDING_DIM) {
-      console.warn(`[Embedding] Unexpected dimension: ${result.length}, expected ${CLIP_EMBEDDING_DIM}`);
+      logEmbeddingWarn(`[Embedding] Unexpected dimension: ${result.length}, expected ${CLIP_EMBEDDING_DIM}`);
     }
 
-    console.log('[Embedding] Successfully generated CLIP embedding via HuggingFace');
+    logEmbeddingInfo('[Embedding] Successfully generated CLIP embedding via HuggingFace');
     return result;
   } catch (error) {
-    console.error('[Embedding] Error generating CLIP embedding:', error);
+    logEmbeddingError('[Embedding] Error generating CLIP embedding:', error);
     return null;
   }
 }
@@ -211,10 +262,11 @@ export async function generateClipEmbedding(imageUrl: string): Promise<number[] 
  * @returns 512-dimensional embedding vector, or null if generation failed
  */
 export async function generateClipEmbeddingFromBytes(
-  imageBytes: Buffer | ArrayBuffer
+  imageBytes: Buffer | ArrayBuffer,
+  context?: EmbeddingLogContext
 ): Promise<number[] | null> {
   const provider = resolveEmbeddingProvider();
-  console.info(`[Embedding] Provider (${provider}) - image bytes request`);
+  logEmbeddingInfo(`[Embedding] Provider (${provider}) - image bytes request${formatEmbeddingContext(context)}`);
   if (provider === 'local') {
     return generateClipEmbeddingLocalFromBytes(imageBytes);
   }
@@ -222,7 +274,7 @@ export async function generateClipEmbeddingFromBytes(
   const apiToken = process.env.HUGGINGFACE_API_TOKEN;
 
   if (!apiToken) {
-    console.error('[Embedding] Missing HUGGINGFACE_API_TOKEN');
+    logEmbeddingError('[Embedding] Missing HUGGINGFACE_API_TOKEN');
     return null;
   }
 
@@ -248,25 +300,25 @@ export async function generateClipEmbeddingFromBytes(
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`[Embedding] HuggingFace API error: ${response.status} - ${errorText}`);
+      logEmbeddingError(`[Embedding] HuggingFace API error: ${response.status} - ${errorText}`);
       return null;
     }
 
     const result = await response.json() as number[] | { error?: string };
 
     if (result && typeof result === 'object' && 'error' in result) {
-      console.error('[Embedding] HuggingFace API error:', result.error);
+      logEmbeddingError('[Embedding] HuggingFace API error:', result.error);
       return null;
     }
 
     if (!Array.isArray(result)) {
-      console.error('[Embedding] Invalid response format from HuggingFace API');
+      logEmbeddingError('[Embedding] Invalid response format from HuggingFace API');
       return null;
     }
 
     return result;
   } catch (error) {
-    console.error('[Embedding] Error generating CLIP embedding from bytes:', error);
+    logEmbeddingError('[Embedding] Error generating CLIP embedding from bytes:', error);
     return null;
   }
 }
@@ -278,9 +330,12 @@ export async function generateClipEmbeddingFromBytes(
  * @param text - Text query to embed
  * @returns 512-dimensional embedding vector, or null if generation failed
  */
-export async function generateClipTextEmbedding(text: string): Promise<number[] | null> {
+export async function generateClipTextEmbedding(
+  text: string,
+  context?: EmbeddingLogContext
+): Promise<number[] | null> {
   const provider = resolveEmbeddingProvider();
-  console.info(`[Embedding] Provider (${provider}) - text request`);
+  logEmbeddingInfo(`[Embedding] Provider (${provider}) - text request${formatEmbeddingContext(context)}`);
   if (provider === 'local') {
     return generateClipTextEmbeddingLocal(text);
   }
@@ -288,7 +343,7 @@ export async function generateClipTextEmbedding(text: string): Promise<number[] 
   const apiToken = process.env.HUGGINGFACE_API_TOKEN;
 
   if (!apiToken) {
-    console.error('[Embedding] Missing HUGGINGFACE_API_TOKEN');
+    logEmbeddingError('[Embedding] Missing HUGGINGFACE_API_TOKEN');
     return null;
   }
 
@@ -307,7 +362,7 @@ export async function generateClipTextEmbedding(text: string): Promise<number[] 
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`[Embedding] HuggingFace API error: ${response.status} - ${errorText}`);
+      logEmbeddingError(`[Embedding] HuggingFace API error: ${response.status} - ${errorText}`);
       return null;
     }
 
@@ -322,11 +377,11 @@ export async function generateClipTextEmbedding(text: string): Promise<number[] 
         embedding = result;
       }
     } else {
-      console.error('[Embedding] Invalid response format from HuggingFace API');
+      logEmbeddingError('[Embedding] Invalid response format from HuggingFace API');
       return null;
     }
 
-    console.log('[Embedding] Successfully generated text embedding via HuggingFace');
+    logEmbeddingInfo('[Embedding] Successfully generated text embedding via HuggingFace');
     return embedding;
   } catch (error) {
     console.error('[Embedding] Error generating text embedding:', error);

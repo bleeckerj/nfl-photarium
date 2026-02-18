@@ -7,6 +7,7 @@ interface CloudflareImageApiResponse {
   filename?: string;
   uploaded: string;
   variants: string[];
+  size?: number;
   meta?: unknown;
 }
 
@@ -15,6 +16,8 @@ export interface CachedCloudflareImage {
   filename: string;
   uploaded: string;
   variants: string[];
+  size?: number;
+  contentType?: string;
   folder?: string;
   tags: string[];
   description?: string;
@@ -56,6 +59,7 @@ interface CacheState {
   inflight: Promise<CachedCloudflareImage[]> | null;
   initialized: boolean;
   backgroundRefreshInProgress: boolean;
+  backgroundRefreshLastRun: number;
 }
 
 const GLOBAL_CACHE_KEY = Symbol.for('cloudflare.image.cache');
@@ -69,7 +73,8 @@ const defaultState: CacheState = {
   lastFetched: 0,
   inflight: null,
   initialized: false,
-  backgroundRefreshInProgress: false
+  backgroundRefreshInProgress: false,
+  backgroundRefreshLastRun: 0
 };
 
 const cacheState: CacheState = globalObject[GLOBAL_CACHE_KEY] ?? defaultState;
@@ -79,6 +84,14 @@ if (!globalObject[GLOBAL_CACHE_KEY]) {
 
 const CACHE_TTL_MS = Number(process.env.CLOUDFLARE_CACHE_TTL_MS ?? 5 * 60 * 1000);
 const PERSISTENT_CACHE_TTL_MS = Number(process.env.CLOUDFLARE_PERSISTENT_CACHE_TTL_MS ?? 24 * 60 * 60 * 1000); // 24 hours default
+const DEV_BACKGROUND_REFRESH_MIN_MS = Number(
+  process.env.CLOUDFLARE_DEV_BACKGROUND_REFRESH_MIN_MS ?? 60 * 60 * 1000
+);
+const devDisableEnv = process.env.CLOUDFLARE_DEV_BACKGROUND_REFRESH_DISABLED;
+const DEV_BACKGROUND_REFRESH_DISABLED =
+  process.env.NODE_ENV === 'development'
+    ? devDisableEnv !== 'false' && devDisableEnv !== '0'
+    : devDisableEnv === 'true' || devDisableEnv === '1';
 const PAGE_SIZE = Math.min(
   100,
   Math.max(10, Number(process.env.CLOUDFLARE_CACHE_PAGE_SIZE ?? 100))
@@ -87,9 +100,29 @@ const MAX_PAGES = (() => {
   const value = Number(process.env.CLOUDFLARE_CACHE_MAX_PAGES);
   return Number.isFinite(value) && value > 0 ? value : undefined;
 })();
+const SIZE_BACKFILL_ENABLED = process.env.CLOUDFLARE_SIZE_BACKFILL_DISABLED !== 'true';
+const SIZE_BACKFILL_MAX_PER_RUN = Math.max(
+  1,
+  Number(process.env.CLOUDFLARE_SIZE_BACKFILL_MAX_PER_RUN ?? 40)
+);
+const SIZE_BACKFILL_CONCURRENCY = Math.max(
+  1,
+  Math.min(10, Number(process.env.CLOUDFLARE_SIZE_BACKFILL_CONCURRENCY ?? 4))
+);
+const SIZE_BACKFILL_MIN_INTERVAL_MS = Math.max(
+  5_000,
+  Number(process.env.CLOUDFLARE_SIZE_BACKFILL_MIN_INTERVAL_MS ?? 30_000)
+);
+const SIZE_BACKFILL_RETRY_MS = Math.max(
+  30_000,
+  Number(process.env.CLOUDFLARE_SIZE_BACKFILL_RETRY_MS ?? 5 * 60 * 1000)
+);
 
 const PERSISTENT_CACHE_KEY = 'cloudflare-images';
 const METADATA_OVERRIDE_KEY = 'cloudflare-metadata-overrides';
+let sizeBackfillInProgress = false;
+let sizeBackfillLastRun = 0;
+const sizeBackfillAttempts = new Map<string, number>();
 
 // Get persistent storage instance
 let storage: ICacheStorage | null = null;
@@ -152,6 +185,8 @@ const buildMetadataOverride = (image: CachedCloudflareImage): CloudflareMetadata
   assign('variationParentId', image.parentId);
   assign('linkedAssetId', image.linkedAssetId);
   assign('variationSort', image.variationSort);
+  assign('size', image.size);
+  assign('type', image.contentType);
   return override;
 };
 
@@ -241,12 +276,39 @@ const transformImage = (image: CloudflareImageApiResponse): CachedCloudflareImag
   })();
   const parentId = cleanString(mergedMeta.variationParentId);
   const linkedAssetId = cleanString(mergedMeta.linkedAssetId);
+  const parsedSize = (() => {
+    const candidates = [mergedMeta.size, mergedMeta.bytes, mergedMeta.fileSize, image.size];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'number' && Number.isFinite(candidate) && candidate >= 0) {
+        return candidate;
+      }
+      if (typeof candidate === 'string') {
+        const parsed = Number(candidate);
+        if (Number.isFinite(parsed) && parsed >= 0) {
+          return parsed;
+        }
+      }
+    }
+    return undefined;
+  })();
+  const contentType = (() => {
+    const candidates = [mergedMeta.type, mergedMeta.contentType, mergedMeta.mimeType];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string') {
+        const trimmed = candidate.trim();
+        if (trimmed) return trimmed;
+      }
+    }
+    return undefined;
+  })();
 
   return {
     id: image.id,
     filename: image.filename || parsedMeta.filename || 'Unknown',
     uploaded: image.uploaded,
     variants: image.variants,
+    size: parsedSize,
+    contentType,
     folder: cleanFolder,
     tags: cleanTags,
     description: cleanDescription,
@@ -327,6 +389,135 @@ const fetchAllImages = async (): Promise<CachedCloudflareImage[]> => {
   return collected.map(transformImage);
 };
 
+const parseSizeHeaderValue = (value: string | null): number | undefined => {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+};
+
+const parseContentRangeTotal = (value: string | null): number | undefined => {
+  if (!value) return undefined;
+  const match = value.match(/\/(\d+)$/);
+  if (!match) return undefined;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+};
+
+const pickVariantUrl = (variants: string[]): string | undefined => {
+  if (!Array.isArray(variants) || variants.length === 0) return undefined;
+  return variants.find((url) => url.includes('/public')) || variants[0];
+};
+
+const fetchVariantContentSize = async (url: string): Promise<number | undefined> => {
+  try {
+    const head = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+    const fromLength = parseSizeHeaderValue(head.headers.get('content-length'));
+    if (fromLength !== undefined) {
+      return fromLength;
+    }
+  } catch {
+    // Fall through to range request.
+  }
+
+  try {
+    const ranged = await fetch(url, {
+      method: 'GET',
+      headers: { Range: 'bytes=0-0' },
+      cache: 'no-store',
+    });
+    return (
+      parseContentRangeTotal(ranged.headers.get('content-range'))
+      ?? parseSizeHeaderValue(ranged.headers.get('content-length'))
+    );
+  } catch {
+    return undefined;
+  }
+};
+
+const getMissingSizeCandidates = () => {
+  const now = Date.now();
+  const candidates: Array<{ id: string; url: string }> = [];
+  for (const image of cacheState.images) {
+    if (typeof image.size === 'number' && Number.isFinite(image.size) && image.size >= 0) {
+      continue;
+    }
+    const lastAttemptAt = sizeBackfillAttempts.get(image.id) ?? 0;
+    if (now - lastAttemptAt < SIZE_BACKFILL_RETRY_MS) {
+      continue;
+    }
+    const variantUrl = pickVariantUrl(image.variants);
+    if (!variantUrl) continue;
+    candidates.push({ id: image.id, url: variantUrl });
+    if (candidates.length >= SIZE_BACKFILL_MAX_PER_RUN) {
+      break;
+    }
+  }
+  return candidates;
+};
+
+const runSizeBackfillQueue = async (): Promise<void> => {
+  if (!SIZE_BACKFILL_ENABLED || sizeBackfillInProgress) {
+    return;
+  }
+  const now = Date.now();
+  if (now - sizeBackfillLastRun < SIZE_BACKFILL_MIN_INTERVAL_MS) {
+    return;
+  }
+
+  const candidates = getMissingSizeCandidates();
+  if (candidates.length === 0) {
+    return;
+  }
+
+  sizeBackfillInProgress = true;
+  sizeBackfillLastRun = now;
+  candidates.forEach((candidate) => sizeBackfillAttempts.set(candidate.id, now));
+
+  let cursor = 0;
+  const workerCount = Math.min(SIZE_BACKFILL_CONCURRENCY, candidates.length);
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= candidates.length) {
+        break;
+      }
+
+      const candidate = candidates[index];
+      const discoveredSize = await fetchVariantContentSize(candidate.url);
+      if (discoveredSize === undefined) {
+        continue;
+      }
+
+      const existing = cacheState.map.get(candidate.id);
+      if (!existing) {
+        continue;
+      }
+      if (typeof existing.size === 'number' && Number.isFinite(existing.size) && existing.size >= 0) {
+        continue;
+      }
+      upsertCachedImage({
+        ...existing,
+        size: discoveredSize,
+      });
+      sizeBackfillAttempts.delete(candidate.id);
+    }
+  });
+
+  try {
+    await Promise.all(workers);
+  } finally {
+    sizeBackfillInProgress = false;
+  }
+};
+
+const triggerSizeBackfill = (): void => {
+  if (!SIZE_BACKFILL_ENABLED) return;
+  void runSizeBackfillQueue().catch((error) => {
+    console.warn('[Cache] Size backfill queue failed:', error);
+  });
+};
+
 /**
  * Load images from persistent storage (file/Redis)
  * Returns null if cache doesn't exist or is too old
@@ -403,6 +594,20 @@ const triggerBackgroundRefresh = (): void => {
   if (cacheState.backgroundRefreshInProgress) {
     return;
   }
+
+  if (process.env.NODE_ENV === 'development') {
+    if (DEV_BACKGROUND_REFRESH_DISABLED) {
+      console.log('[Cache] Skipping background refresh in dev (disabled)');
+      return;
+    }
+    const now = Date.now();
+    const sinceLast = now - cacheState.backgroundRefreshLastRun;
+    if (sinceLast < DEV_BACKGROUND_REFRESH_MIN_MS) {
+      console.log('[Cache] Skipping background refresh in dev (throttled)');
+      return;
+    }
+    cacheState.backgroundRefreshLastRun = now;
+  }
   
   cacheState.backgroundRefreshInProgress = true;
   console.log('[Cache] Starting background refresh from Cloudflare API');
@@ -410,6 +615,7 @@ const triggerBackgroundRefresh = (): void => {
   fetchAndUpdateCaches()
     .then((images) => {
       console.log(`[Cache] Background refresh complete: ${images.length} images`);
+      triggerSizeBackfill();
     })
     .catch((error) => {
       console.warn('[Cache] Background refresh failed:', error);
@@ -435,12 +641,15 @@ export const getCachedImages = async (forceRefresh = false): Promise<CachedCloud
   await loadMetadataOverrides();
   // 1. Check in-memory cache first
   if (shouldUseMemoryCache(forceRefresh)) {
+    triggerSizeBackfill();
     return cacheState.images;
   }
 
   // 2. If there's already a fetch in progress, wait for it
   if (cacheState.inflight) {
-    return cacheState.inflight;
+    const images = await cacheState.inflight;
+    triggerSizeBackfill();
+    return images;
   }
 
   // 3. For force refresh, go straight to Cloudflare API
@@ -459,7 +668,9 @@ export const getCachedImages = async (forceRefresh = false): Promise<CachedCloud
       });
 
     cacheState.inflight = inflight;
-    return inflight;
+    const images = await inflight;
+    triggerSizeBackfill();
+    return images;
   }
 
   // 4. Try to load from persistent cache
@@ -475,7 +686,7 @@ export const getCachedImages = async (forceRefresh = false): Promise<CachedCloud
       // Persistent cache is older than memory TTL, trigger background refresh
       triggerBackgroundRefresh();
     }
-    
+    triggerSizeBackfill();
     return cacheState.images;
   }
 
@@ -492,7 +703,9 @@ export const getCachedImages = async (forceRefresh = false): Promise<CachedCloud
     });
 
   cacheState.inflight = inflight;
-  return inflight;
+  const images = await inflight;
+  triggerSizeBackfill();
+  return images;
 };
 
 /**
@@ -558,25 +771,46 @@ export const refreshCloudflareImageCache = async () => {
 };
 
 export const upsertCachedImage = (image: CachedCloudflareImage) => {
-  cacheState.map.set(image.id, image);
+  const existing = cacheState.map.get(image.id);
+  const mergedImage: CachedCloudflareImage = existing
+    ? {
+        ...existing,
+        ...image,
+        // Preserve known size/type when metadata-only updates omit these fields.
+        size: image.size ?? existing.size,
+        contentType: image.contentType ?? existing.contentType,
+        aspectRatio: image.aspectRatio ?? existing.aspectRatio,
+        dimensions: image.dimensions ?? existing.dimensions,
+        hasClipEmbedding: image.hasClipEmbedding ?? existing.hasClipEmbedding,
+        hasColorEmbedding: image.hasColorEmbedding ?? existing.hasColorEmbedding,
+        dominantColors: image.dominantColors ?? existing.dominantColors,
+        averageColor: image.averageColor ?? existing.averageColor,
+      }
+    : image;
+
+  cacheState.map.set(mergedImage.id, mergedImage);
   const index = cacheState.images.findIndex(item => item.id === image.id);
   if (index >= 0) {
-    cacheState.images[index] = image;
+    cacheState.images[index] = mergedImage;
   } else {
-    cacheState.images.unshift(image);
+    cacheState.images.unshift(mergedImage);
   }
   cacheState.lastFetched = Date.now();
 
   void loadMetadataOverrides().then(() => {
-    const override = buildMetadataOverride(image);
+    const override = buildMetadataOverride(mergedImage);
     if (Object.keys(override).length) {
-      metadataOverrides.set(image.id, override);
+      metadataOverrides.set(mergedImage.id, override);
       saveMetadataOverrides().catch(() => {});
     }
   });
   
   // Update persistent cache in background
   saveToPersistentCache(cacheState.images, cacheState.lastFetched).catch(() => {});
+
+  if (mergedImage.size === undefined) {
+    triggerSizeBackfill();
+  }
 };
 
 export const removeCachedImage = (id: string) => {

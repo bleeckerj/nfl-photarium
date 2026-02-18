@@ -30,8 +30,14 @@ export function HaikuDisplay({ imageId, hasClipEmbedding }: HaikuDisplayProps) {
     setError(null);
     
     try {
+      const trigger = haiku ? 'regenerate' : 'generate';
       const response = await fetch(`/api/images/${imageId}/haiku`, {
         method: 'POST',
+        headers: {
+          'x-photarium-component': 'HaikuDisplay',
+          'x-photarium-trigger': trigger,
+          'x-photarium-source': 'ui',
+        },
       });
       
       const data = await response.json();

@@ -12,6 +12,7 @@
 # Options:
 #   --dir=<path>       Backup directory (default: ./backups/redis)
 #   --keep=<n>         Number of backups to keep (default: 10)
+#   --retention-days=<n> Remove backups older than n days (default: 30)
 #   --container=<name> Container name (default: photarium-redis)
 #   --quiet            Suppress output except errors
 #   --dry-run          Show what would be done without doing it
@@ -35,6 +36,7 @@ set -e
 # Default configuration
 BACKUP_DIR="./backups/redis"
 KEEP_COUNT=10
+RETENTION_DAYS=30
 CONTAINER="photarium-redis"
 QUIET=false
 DRY_RUN=false
@@ -47,6 +49,9 @@ for arg in "$@"; do
       ;;
     --keep=*)
       KEEP_COUNT="${arg#*=}"
+      ;;
+    --retention-days=*)
+      RETENTION_DAYS="${arg#*=}"
       ;;
     --container=*)
       CONTAINER="${arg#*=}"
@@ -75,6 +80,15 @@ error() {
   echo "ERROR: $@" >&2
 }
 
+get_mtime_epoch() {
+  local file="$1"
+  if stat -f "%m" "$file" >/dev/null 2>&1; then
+    stat -f "%m" "$file"
+  else
+    stat -c "%Y" "$file"
+  fi
+}
+
 # Timestamp for backup file (include timezone offset, e.g. 20260206-091937-0800)
 TIMESTAMP=$(date +%Y%m%d-%H%M%S%z)
 BACKUP_FILE="redis-backup-${TIMESTAMP}.rdb"
@@ -88,6 +102,7 @@ log "Backup dir:  $BACKUP_DIR"
 log "Backup file: $BACKUP_FILE"
 log "Bundle file: $BACKUP_BUNDLE_FILE"
 log "Keep count:  $KEEP_COUNT"
+log "Retention:   ${RETENTION_DAYS} days"
 log "───────────────────────────────────────────────────────"
 
 wait_for_redis_field_zero() {
@@ -194,22 +209,41 @@ else
 fi
 
 log ""
-log "Step 3: Rotating old backups (keeping last $KEEP_COUNT)..."
+log "Step 3: Rotating old backups (older than ${RETENTION_DAYS} days, then keeping last $KEEP_COUNT)..."
 if [ "$DRY_RUN" = false ]; then
-  # Count existing backups
+  NOW_EPOCH=$(date +%s)
+  RETENTION_SECONDS=$((RETENTION_DAYS * 86400))
+  AGED_REMOVED=0
+
+  for file in "${BACKUP_DIR}"/redis-backup-*.rdb; do
+    [ -e "$file" ] || continue
+    mtime_epoch=$(get_mtime_epoch "$file")
+    age_seconds=$((NOW_EPOCH - mtime_epoch))
+    if [ "$age_seconds" -gt "$RETENTION_SECONDS" ]; then
+      base=$(basename "$file")
+      ts="${base#redis-backup-}"
+      ts="${ts%.rdb}"
+      log "         Removing (age>${RETENTION_DAYS}d): $base"
+      rm "$file"
+      if [ -f "${BACKUP_DIR}/redis-backup-${ts}.tgz" ]; then
+        log "         Removing: redis-backup-${ts}.tgz"
+        rm "${BACKUP_DIR}/redis-backup-${ts}.tgz"
+      fi
+      AGED_REMOVED=$((AGED_REMOVED + 1))
+    fi
+  done
+
   BACKUP_COUNT=$(ls -1 "${BACKUP_DIR}"/redis-backup-*.rdb 2>/dev/null | wc -l | tr -d ' ')
-  
+
   if [ "$BACKUP_COUNT" -gt "$KEEP_COUNT" ]; then
-    # Calculate how many to delete
     DELETE_COUNT=$((BACKUP_COUNT - KEEP_COUNT))
-    log "         Found $BACKUP_COUNT backups, removing $DELETE_COUNT oldest..."
-    
-    # Delete oldest backups
+    log "         Found $BACKUP_COUNT backups after age-rotation, removing $DELETE_COUNT oldest by count..."
+
     ls -1t "${BACKUP_DIR}"/redis-backup-*.rdb | tail -n "$DELETE_COUNT" | while read -r file; do
       base=$(basename "$file")
       ts="${base#redis-backup-}"
       ts="${ts%.rdb}"
-      log "         Removing: $base"
+      log "         Removing (count): $base"
       rm "$file"
       if [ -f "${BACKUP_DIR}/redis-backup-${ts}.tgz" ]; then
         log "         Removing: redis-backup-${ts}.tgz"
@@ -217,10 +251,14 @@ if [ "$DRY_RUN" = false ]; then
       fi
     done
   else
-    log "         $BACKUP_COUNT backups found, no rotation needed"
+    if [ "$AGED_REMOVED" -gt 0 ]; then
+      log "         Removed $AGED_REMOVED backup(s) by age; $BACKUP_COUNT backups remain"
+    else
+      log "         $BACKUP_COUNT backups found, no rotation needed"
+    fi
   fi
 else
-  log "         [DRY RUN] Would check and rotate backups"
+  log "         [DRY RUN] Would remove backups older than ${RETENTION_DAYS} days, then enforce keep-count=${KEEP_COUNT}"
 fi
 
 log ""

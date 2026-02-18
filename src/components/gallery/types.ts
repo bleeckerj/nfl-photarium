@@ -13,6 +13,7 @@ export interface CloudflareImage {
   displayName?: string;
   uploaded: string;
   variants: string[];
+  size?: number;
   folder?: string;
   tags?: string[];
   description?: string;
@@ -48,6 +49,7 @@ export interface ImageGalleryRef {
 }
 
 export type ViewMode = 'grid' | 'list';
+export type GridSize = 'small' | 'medium' | 'large' | 'xlarge';
 export type BulkFolderMode = 'existing' | 'new';
 export type BulkTagsMode = 'replace' | 'append';
 export type BulkDisplayNameMode = 'custom' | 'auto' | 'clear';
@@ -55,8 +57,8 @@ export type EmbeddingFilter = 'none' | 'missing-clip' | 'missing-color' | 'missi
 export type AspectRatioClass = 'horizontal' | 'vertical' | 'square';
 
 export interface DateFilter {
-  year: number;
-  month: number;
+  startDate: string; // YYYY-MM-DD
+  endDate: string; // YYYY-MM-DD
 }
 
 export interface BrokenAudit {
@@ -82,10 +84,12 @@ export interface GalleryPreferences {
   onlyCanonical: boolean;
   respectAspectRatio: boolean;
   onlyWithVariants: boolean;
+  showComfyOnly: boolean;
   selectedFolder: string;
   selectedTag: string;
   searchTerm: string;
   viewMode: ViewMode;
+  gridSize: GridSize;
   filtersCollapsed: boolean;
   bulkFolderInput: string;
   bulkFolderMode: BulkFolderMode;

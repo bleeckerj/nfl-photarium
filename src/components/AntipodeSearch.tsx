@@ -151,7 +151,14 @@ export function AntipodeSearch({ imageId, className = '', onImageClick, copyVari
       const nsQuery = nsParam ? `&namespace=${encodeURIComponent(nsParam)}` : '';
 
       const response = await fetch(
-        `/api/images/${imageId}/antipode?domain=${domain}&method=${method}&limit=8${nsQuery}`
+        `/api/images/${imageId}/antipode?domain=${domain}&method=${method}&limit=8${nsQuery}`,
+        {
+          headers: {
+            'x-photarium-component': 'AntipodeSearch',
+            'x-photarium-trigger': `search-${domain}-${method}`,
+            'x-photarium-source': 'ui',
+          },
+        }
       );
       const data = await response.json();
 

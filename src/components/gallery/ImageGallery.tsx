@@ -18,7 +18,7 @@
 import React, { forwardRef, useImperativeHandle, useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Settings, Cpu, AlertTriangle } from 'lucide-react';
 import MonoSelect from '@/components/MonoSelect';
-import DateNavigator, { DateFilter } from '@/components/DateNavigator';
+import DateNavigator from '@/components/DateNavigator';
 import GalleryCommandBar from '@/components/GalleryCommandBar';
 import HoverPreview from '@/components/HoverPreview';
 import { useToast } from '@/components/Toast';
@@ -55,6 +55,7 @@ import {
   getUniqueFolders,
   getUniqueTags,
 } from './utils';
+import { toDateKey } from './dateFilter';
 import {
   VARIANT_OPTIONS,
   PAGE_SIZE_OPTIONS,
@@ -156,6 +157,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       setRespectAspectRatio,
       onlyWithVariants,
       setOnlyWithVariants,
+      showComfyOnly,
+      setShowComfyOnly,
       showDuplicatesOnly,
       setShowDuplicatesOnly,
       showBrokenOnly,
@@ -284,6 +287,25 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     
     const duplicateGroupCount = duplicateGroups.length;
     const duplicateImageCount = duplicateGroups.reduce((acc, g) => acc + g.items.length, 0);
+    const showLastUploaded = useCallback(() => {
+      if (!sortedImages.length) {
+        return null;
+      }
+      const newestDate = new Date(sortedImages[0].uploaded);
+      if (Number.isNaN(newestDate.getTime())) {
+        return null;
+      }
+      const newestDateKey = toDateKey(newestDate);
+      const count = sortedImages.reduce((acc, image) => {
+        const uploadedDate = new Date(image.uploaded);
+        if (Number.isNaN(uploadedDate.getTime())) {
+          return acc;
+        }
+        return toDateKey(uploadedDate) === newestDateKey ? acc + 1 : acc;
+      }, 0);
+      setDateFilter({ startDate: newestDateKey, endDate: newestDateKey });
+      return { dateKey: newestDateKey, count };
+    }, [setDateFilter, sortedImages]);
     
     // ========================================================================
     // Imperative Handle
@@ -303,6 +325,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         onlyCanonical,
         respectAspectRatio,
         onlyWithVariants,
+        showComfyOnly,
         selectedFolder,
         selectedTag,
         searchTerm,
@@ -318,6 +341,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       });
     }, [
       selectedVariant, onlyCanonical, respectAspectRatio, onlyWithVariants,
+      showComfyOnly,
       selectedFolder, selectedTag, searchTerm, viewMode, filtersCollapsed,
       showDuplicatesOnly, showBrokenOnly, pageSize, dateFilter, currentPage,
     ]);
@@ -658,6 +682,15 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             <label className="flex items-center gap-1">
               <input
                 type="checkbox"
+                checked={showComfyOnly}
+                onChange={(e) => setShowComfyOnly(e.target.checked)}
+                className="h-3 w-3"
+              />
+              comfy
+            </label>
+            <label className="flex items-center gap-1">
+              <input
+                type="checkbox"
                 checked={respectAspectRatio}
                 onChange={(e) => setRespectAspectRatio(e.target.checked)}
                 className="h-3 w-3"
@@ -744,11 +777,14 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
               onClearTagFilter={() => setSelectedTag('')}
               showParentsOnly={onlyWithVariants}
               onSetParentsOnly={setOnlyWithVariants}
+              showComfyOnly={showComfyOnly}
+              onSetComfyOnly={setShowComfyOnly}
               currentPage={pageIndex}
               totalPages={totalPages}
               onGoToPage={goToPageNumber}
               embeddingFilter={embeddingFilter}
               onSetEmbeddingFilter={setEmbeddingFilter}
+              onShowLastUploaded={showLastUploaded}
             />
           </div>
         </div>

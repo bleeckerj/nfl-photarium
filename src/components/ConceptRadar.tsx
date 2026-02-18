@@ -10,7 +10,7 @@
 
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { Search, X, Clipboard, Check } from 'lucide-react';
 import Image from 'next/image';
 import { getCloudflareImageUrl } from '@/utils/imageUtils';
@@ -60,6 +60,9 @@ export function ConceptRadar({ imageId, className = '', size = 360, onImageClick
   const [concepts, setConcepts] = useState<ConceptScore[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadState, setLoadState] = useState<'idle' | 'loading' | 'loaded' | 'error'>('idle');
+  const hasLoadedRef = useRef(false);
+  const inFlightRef = useRef(false);
   const [clickTarget, setClickTarget] = useState<{ x: number; y: number; scores: number[] } | null>(null);
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -89,15 +92,24 @@ export function ConceptRadar({ imageId, className = '', size = 360, onImageClick
     }
   }, [searchResults, copyVariant, onCopySuccess]);
 
-  const fetchConcepts = useCallback(async () => {
+  const fetchConcepts = useCallback(async (trigger: 'manual-load' | 'retry' = 'manual-load') => {
     if (!imageId) return;
-    
+    if (hasLoadedRef.current) return;
+    if (inFlightRef.current) return;
+
+    inFlightRef.current = true;
     setLoading(true);
+    setLoadState('loading');
     setError(null);
     
     try {
       const response = await fetch(`/api/images/${imageId}/concepts`, {
         method: 'POST',
+        headers: {
+          'x-photarium-component': 'ConceptRadar',
+          'x-photarium-trigger': trigger,
+          'x-photarium-source': 'ui',
+        },
       });
       const data = await response.json();
       
@@ -106,16 +118,16 @@ export function ConceptRadar({ imageId, className = '', size = 360, onImageClick
       }
       
       setConcepts(data.concepts);
+      hasLoadedRef.current = true;
+      setLoadState('loaded');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
+      setLoadState('error');
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
     }
   }, [imageId]);
-
-  useEffect(() => {
-    fetchConcepts();
-  }, [fetchConcepts]);
 
   if (loading) {
     return (
@@ -130,7 +142,7 @@ export function ConceptRadar({ imageId, className = '', size = 360, onImageClick
       <div className={`flex flex-col items-center justify-center text-center ${className}`} style={{ width: size, height: size }}>
         <p className="text-red-400 text-sm mb-2">{error}</p>
         <button
-          onClick={fetchConcepts}
+          onClick={() => fetchConcepts('retry')}
           className="text-xs text-blue-400 hover:text-blue-300 underline"
         >
           Retry
@@ -141,8 +153,20 @@ export function ConceptRadar({ imageId, className = '', size = 360, onImageClick
 
   if (!concepts || concepts.length === 0) {
     return (
-      <div className={`flex items-center justify-center text-gray-500 text-sm ${className}`} style={{ width: size, height: size }}>
-        No concept data
+      <div className={`flex flex-col items-center justify-center text-gray-500 text-sm ${className}`} style={{ width: size, height: size }}>
+        {loadState === 'idle' ? (
+          <>
+            <p className="text-gray-400 text-xs mb-2">Concept radar is off by default</p>
+            <button
+              onClick={() => fetchConcepts('manual-load')}
+              className="px-3 py-1 text-xs font-3270 uppercase rounded bg-gray-800 text-gray-200 hover:bg-gray-700"
+            >
+              Load Concept Radar
+            </button>
+          </>
+        ) : (
+          'No concept data'
+        )}
       </div>
     );
   }
@@ -255,12 +279,21 @@ export function ConceptRadar({ imageId, className = '', size = 360, onImageClick
 
       const response = await fetch('/api/images/search', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-photarium-component': 'ConceptRadar',
+          'x-photarium-trigger': 'radar-click',
+          'x-photarium-source': 'ui',
+        },
         body: JSON.stringify({ 
           query: textQuery,
           type: 'text',
           limit: 8,
           namespace: nsParam,
+          diagnostics: {
+            component: 'ConceptRadar',
+            trigger: 'radar-click',
+          },
         }),
       });
       

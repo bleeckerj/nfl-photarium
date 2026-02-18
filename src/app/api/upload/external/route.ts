@@ -2,16 +2,22 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createHash } from 'crypto';
 import sharp from 'sharp';
 import { transformApiImageToCached, upsertCachedImage } from '@/server/cloudflareImageCache';
-import { findDuplicatesByContentHash, findDuplicatesByOriginalUrl, toDuplicateSummary } from '@/server/duplicateDetector';
+import { toDuplicateSummary } from '@/server/duplicateDetector';
+import {
+  evaluateUploadDeduplicationPolicy,
+  logContentHashDuplicate,
+  logOriginalUrlReuseWarning,
+} from '@/server/uploadDuplicatePolicy';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { enforceCloudflareMetadataLimit } from '@/utils/cloudflareMetadata';
 import { extractSnagx } from '@/utils/snagx';
 import { extractExifSummary } from '@/utils/exif';
 import { upsertRegistryNamespace } from '@/server/namespaceRegistry';
-import { sanitizeFilename } from '@/server/uploadService';
+import { MAX_IMAGE_BYTES, prepareImageForUpload, sanitizeFilename } from '@/server/uploadService';
 import { queueAutoEmbeddingsForImage } from '@/server/autoEmbeddings';
 import { extractComfyWorkflowMetadata } from '@/utils/comfyMetadata';
 import { ingestComfyWorkflowForImage } from '@/server/comfy/workflowIngestion';
+import { validateParentForNewChild } from '@/server/parentValidation';
 import type { ComfyWorkflowExtraction } from '@/utils/comfyMetadata';
 
 const corsHeaders = {
@@ -128,15 +134,6 @@ export async function POST(request: NextRequest) {
       ));
     }
 
-    const maxSize = 10 * 1024 * 1024;
-    if (!isSnagx && file.size > maxSize) {
-      logExternalIssue('Rejected oversized upload', { filename: file.name, bytes: file.size, limit: maxSize });
-      return withCors(NextResponse.json(
-        { error: 'File size must be less than 10MB' },
-        { status: 400 }
-      ));
-    }
-
     const computeContentHash = (payload: Buffer) =>
       createHash('sha256').update(payload).digest('hex');
 
@@ -174,23 +171,14 @@ export async function POST(request: NextRequest) {
     const parentIdValue = typeof parentIdRaw === 'string' ? parentIdRaw.trim() : '';
     const cleanParentId = parentIdValue && parentIdValue !== 'undefined' ? parentIdValue : undefined;
 
-    let duplicateMatches: Awaited<ReturnType<typeof findDuplicatesByOriginalUrl>> = [];
-    if (normalizedOriginalUrl) {
-      duplicateMatches = await findDuplicatesByOriginalUrl(normalizedOriginalUrl, effectiveNamespace);
-      if (duplicateMatches.length) {
-        console.warn('[upload/external] Duplicate original URL detected', {
-          originalUrl: cleanOriginalUrl,
-          duplicateIds: duplicateMatches.map(match => match.id),
-          folders: duplicateMatches.map(match => match.folder || null)
-        });
-        return withCors(NextResponse.json(
-          {
-            error: `Duplicate original URL "${cleanOriginalUrl}" detected`,
-            duplicates: duplicateMatches.map(toDuplicateSummary)
-          },
-          { status: 409 }
-        ));
-      }
+    const parentValidation = await validateParentForNewChild(cleanParentId);
+    if (!parentValidation.ok) {
+      return withCors(
+        NextResponse.json(
+          { error: parentValidation.error },
+          { status: parentValidation.status }
+        )
+      );
     }
 
     const bytes = await file.arrayBuffer();
@@ -216,37 +204,71 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (workingBuffer.byteLength > maxSize) {
-      logExternalIssue('Rejected oversized extracted image', { filename: workingName, bytes: workingBuffer.byteLength, limit: maxSize });
-      return withCors(NextResponse.json(
-        { error: 'File size must be less than 10MB' },
-        { status: 400 }
-      ));
-    }
-
-    const contentHash = computeContentHash(workingBuffer);
-    const exifSummary = await extractExifSummary(workingBuffer);
+    const sourceBufferForMetadata = workingBuffer;
+    const exifSummary = await extractExifSummary(sourceBufferForMetadata);
     const comfyExtraction = applyWorkflowOverride(
-      await extractComfyWorkflowMetadata(workingBuffer, { mimeType: workingType }),
+      await extractComfyWorkflowMetadata(sourceBufferForMetadata, { mimeType: workingType }),
       workflowJsonField.workflowJson
     );
 
-    if (!normalizedOriginalUrl) {
-      duplicateMatches = await findDuplicatesByContentHash(contentHash, effectiveNamespace);
-      if (duplicateMatches.length) {
-        console.warn('[upload/external] Duplicate content hash detected', {
-          contentHash,
-          duplicateIds: duplicateMatches.map(match => match.id),
-          folders: duplicateMatches.map(match => match.folder || null)
-        });
-        return withCors(NextResponse.json(
-          {
-            error: 'Duplicate image content detected',
-            duplicates: duplicateMatches.map(toDuplicateSummary)
-          },
-          { status: 409 }
-        ));
-      }
+    const prepared = await prepareImageForUpload({
+      buffer: workingBuffer,
+      fileType: workingType,
+      fileName: workingName,
+      maxBytes: MAX_IMAGE_BYTES,
+    });
+    if (!prepared.ok) {
+      logExternalIssue('Unable to prepare oversized image for upload', {
+        filename: workingName,
+        bytes: workingBuffer.byteLength,
+        limit: MAX_IMAGE_BYTES,
+        error: prepared.error,
+      });
+      return withCors(NextResponse.json(
+        { error: prepared.error },
+        { status: 400 }
+      ));
+    }
+    if (prepared.data.transformed) {
+      logExternalIssue('Auto-optimized oversized upload', {
+        filename: workingName,
+        beforeBytes: prepared.data.bytesBefore,
+        afterBytes: prepared.data.bytesAfter,
+        note: prepared.data.note,
+        targetType: prepared.data.fileType,
+      });
+    }
+    workingBuffer = prepared.data.buffer;
+    workingType = prepared.data.fileType;
+    workingName = prepared.data.fileName;
+
+    const contentHash = computeContentHash(workingBuffer);
+    const deduplication = await evaluateUploadDeduplicationPolicy({
+      contentHash,
+      normalizedOriginalUrl,
+      namespace: effectiveNamespace,
+    });
+    if (deduplication.originalUrlWarning) {
+      logOriginalUrlReuseWarning({
+        logScope: 'upload/external',
+        originalUrl: cleanOriginalUrl,
+        warning: deduplication.originalUrlWarning,
+      });
+    }
+
+    if (deduplication.contentHashDuplicates.length) {
+      logContentHashDuplicate({
+        logScope: 'upload/external',
+        contentHash,
+        duplicates: deduplication.contentHashDuplicates,
+      });
+      return withCors(NextResponse.json(
+        {
+          error: 'Duplicate image content detected',
+          duplicates: deduplication.contentHashDuplicates.map(toDuplicateSummary)
+        },
+        { status: 409 }
+      ));
     }
 
     const uploadFormData = new FormData();
@@ -377,6 +399,7 @@ export async function POST(request: NextRequest) {
       filename: primaryFilename,
       uploaded: primaryUploaded,
       variants: primaryVariants,
+      size: imageData.size,
       meta: baseMeta
     });
     upsertCachedImage(cachedPrimary);
@@ -405,10 +428,10 @@ export async function POST(request: NextRequest) {
       : await queueAutoEmbeddingsForImage(cachedPrimary);
 
     let webpVariantId: string | undefined;
-    if (file.type === 'image/svg+xml') {
+    if (workingType === 'image/svg+xml') {
       try {
         const webpBuffer = await sharp(workingBuffer).webp({ quality: 85 }).toBuffer();
-        const webpName = file.name.replace(/\.svg$/i, '') + '.webp';
+        const webpName = workingName.replace(/\.svg$/i, '') + '.webp';
         const webpFormData = new FormData();
         // Convert Buffer to Uint8Array for Blob compatibility
         const webpArray = new Uint8Array(webpBuffer);
@@ -447,6 +470,7 @@ export async function POST(request: NextRequest) {
               filename: webpResult.filename,
               uploaded: webpResult.uploaded,
               variants: webpResult.variants,
+              size: webpResult.size,
               meta: webpResult.meta ?? limitedWebpMetadata
             });
             upsertCachedImage(cachedWebp);
@@ -488,6 +512,7 @@ export async function POST(request: NextRequest) {
               filename: primaryFilename,
               uploaded: primaryUploaded,
               variants: primaryVariants,
+              size: imageData.size,
               meta: updatedMetadata
             })
           );

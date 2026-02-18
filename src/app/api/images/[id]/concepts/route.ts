@@ -13,7 +13,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getImageVectors, isVectorSearchAvailable } from '@/server/vectorSearch';
-import { generateClipTextEmbedding } from '@/server/embeddingService';
+import { generateClipTextEmbedding, type EmbeddingLogContext } from '@/server/embeddingService';
 
 // Concept pairs - each pair represents opposite poles of a semantic dimension
 // Format: [negative_pole, positive_pole]
@@ -33,12 +33,66 @@ const CONCEPT_PAIRS: [string, string][] = [
 // Cache for text embeddings (they don't change)
 const textEmbeddingCache = new Map<string, number[]>();
 
-async function getTextEmbedding(text: string): Promise<number[] | null> {
+type ConceptCacheEntry = {
+  at: number;
+  concepts: ConceptScore[];
+};
+
+const parsedConceptTtl = parseInt(process.env.CONCEPTS_CACHE_TTL_MS || '600000', 10);
+const CONCEPT_CACHE_TTL_MS =
+  Number.isFinite(parsedConceptTtl) && parsedConceptTtl >= 0
+    ? parsedConceptTtl
+    : 600000;
+
+const getConceptCache = () => {
+  const globalScope = globalThis as typeof globalThis & {
+    __photariumConceptCache?: Map<string, ConceptCacheEntry>;
+  };
+  if (!globalScope.__photariumConceptCache) {
+    globalScope.__photariumConceptCache = new Map<string, ConceptCacheEntry>();
+  }
+  return globalScope.__photariumConceptCache;
+};
+
+const getConceptInFlight = () => {
+  const globalScope = globalThis as typeof globalThis & {
+    __photariumConceptInFlight?: Map<string, Promise<ConceptScore[]>>;
+  };
+  if (!globalScope.__photariumConceptInFlight) {
+    globalScope.__photariumConceptInFlight = new Map<string, Promise<ConceptScore[]>>();
+  }
+  return globalScope.__photariumConceptInFlight;
+};
+
+const getCachedConcepts = (imageId: string): ConceptCacheEntry | null => {
+  if (CONCEPT_CACHE_TTL_MS <= 0) return null;
+  const cache = getConceptCache();
+  const entry = cache.get(imageId);
+  if (!entry) return null;
+  if (Date.now() - entry.at > CONCEPT_CACHE_TTL_MS) {
+    cache.delete(imageId);
+    return null;
+  }
+  return entry;
+};
+
+const setCachedConcepts = (imageId: string, concepts: ConceptScore[]) => {
+  if (CONCEPT_CACHE_TTL_MS <= 0) return;
+  getConceptCache().set(imageId, { at: Date.now(), concepts });
+};
+
+async function getTextEmbedding(
+  text: string,
+  contextBase?: EmbeddingLogContext
+): Promise<number[] | null> {
   if (textEmbeddingCache.has(text)) {
     return textEmbeddingCache.get(text)!;
   }
   
-  const embedding = await generateClipTextEmbedding(text);
+  const embedding = await generateClipTextEmbedding(text, {
+    ...contextBase,
+    query: text,
+  });
   if (embedding) {
     textEmbeddingCache.set(text, embedding);
   }
@@ -82,8 +136,30 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   const { id } = await params;
+  const requestId = request.headers.get('x-request-id') || crypto.randomUUID();
+  const userAgent = request.headers.get('user-agent') ?? undefined;
+  const referer = request.headers.get('referer') ?? undefined;
+  const origin = request.headers.get('origin') ?? undefined;
+  const forwardFor = request.headers.get('x-forwarded-for') ?? undefined;
+  const realIp = request.headers.get('x-real-ip') ?? undefined;
+  const ip = (forwardFor?.split(',')[0] || realIp || '').trim() || undefined;
+  const component = request.headers.get('x-photarium-component') ?? 'ConceptRadar';
+  const trigger = request.headers.get('x-photarium-trigger') ?? 'unknown';
+  const source = request.headers.get('x-photarium-source') ?? 'api';
 
   try {
+    console.log('[Concepts API] Received request:', {
+      requestId,
+      imageId: id,
+      component,
+      trigger,
+      source,
+      ip,
+      userAgent,
+      referer,
+      origin,
+    });
+
     // Check if vector search is available
     const available = await isVectorSearchAvailable();
     if (!available) {
@@ -102,46 +178,96 @@ export async function POST(
       );
     }
 
+    const cached = getCachedConcepts(id);
+    if (cached) {
+      const cacheAgeMs = Date.now() - cached.at;
+      console.log('[Concepts API] Cache hit', { requestId, imageId: id, cacheAgeMs });
+      return NextResponse.json({
+        imageId: id,
+        concepts: cached.concepts,
+        cached: true,
+        cacheAgeMs,
+      });
+    }
+
+    const inFlight = getConceptInFlight();
+    const existing = inFlight.get(id);
+    if (existing) {
+      console.log('[Concepts API] Awaiting in-flight computation', { requestId, imageId: id });
+      const concepts = await existing;
+      return NextResponse.json({
+        imageId: id,
+        concepts,
+        cached: true,
+        inFlight: true,
+      });
+    }
+
     const imageEmbedding = vectors.clipEmbedding;
     const conceptScores: ConceptScore[] = [];
 
     // Calculate scores for each concept pair
-    for (const [negative, positive] of CONCEPT_PAIRS) {
-      // Get text embeddings for both poles
-      const [negativeEmb, positiveEmb] = await Promise.all([
-        getTextEmbedding(`a ${negative} image`),
-        getTextEmbedding(`a ${positive} image`),
-      ]);
+    const contextBase: EmbeddingLogContext = {
+      requestId,
+      source,
+      route: 'POST /api/images/[id]/concepts',
+      component,
+      trigger,
+      ip,
+      userAgent,
+      referer,
+      origin,
+    };
 
-      if (!negativeEmb || !positiveEmb) {
-        console.warn(`[Concepts] Failed to get embeddings for ${negative}/${positive}`);
-        continue;
+    const computePromise = (async () => {
+      for (const [negative, positive] of CONCEPT_PAIRS) {
+        // Get text embeddings for both poles
+        const [negativeEmb, positiveEmb] = await Promise.all([
+          getTextEmbedding(`a ${negative} image`, contextBase),
+          getTextEmbedding(`a ${positive} image`, contextBase),
+        ]);
+
+        if (!negativeEmb || !positiveEmb) {
+          console.warn(`[Concepts] Failed to get embeddings for ${negative}/${positive}`);
+          continue;
+        }
+
+        // Calculate similarity to each pole
+        const negativeRaw = cosineSimilarity(imageEmbedding, negativeEmb);
+        const positiveRaw = cosineSimilarity(imageEmbedding, positiveEmb);
+
+        // Convert to -1 to 1 scale
+        // If both similarities are equal, score is 0
+        // If more similar to positive, score is positive
+        const total = negativeRaw + positiveRaw;
+        const score = total === 0 ? 0 : (positiveRaw - negativeRaw) / Math.max(Math.abs(positiveRaw), Math.abs(negativeRaw));
+
+        conceptScores.push({
+          dimension: `${negative}-${positive}`,
+          negative,
+          positive,
+          score: Math.max(-1, Math.min(1, score)), // Clamp to [-1, 1]
+          negativeRaw,
+          positiveRaw,
+        });
       }
 
-      // Calculate similarity to each pole
-      const negativeRaw = cosineSimilarity(imageEmbedding, negativeEmb);
-      const positiveRaw = cosineSimilarity(imageEmbedding, positiveEmb);
+      return conceptScores;
+    })();
 
-      // Convert to -1 to 1 scale
-      // If both similarities are equal, score is 0
-      // If more similar to positive, score is positive
-      const total = negativeRaw + positiveRaw;
-      const score = total === 0 ? 0 : (positiveRaw - negativeRaw) / Math.max(Math.abs(positiveRaw), Math.abs(negativeRaw));
+    inFlight.set(id, computePromise);
 
-      conceptScores.push({
-        dimension: `${negative}-${positive}`,
-        negative,
-        positive,
-        score: Math.max(-1, Math.min(1, score)), // Clamp to [-1, 1]
-        negativeRaw,
-        positiveRaw,
+    try {
+      const computed = await computePromise;
+      setCachedConcepts(id, computed);
+      return NextResponse.json({
+        imageId: id,
+        concepts: computed,
+        cached: false,
       });
+    } finally {
+      inFlight.delete(id);
     }
-
-    return NextResponse.json({
-      imageId: id,
-      concepts: conceptScores,
-    });
   } catch (error) {
     console.error('[API] Error calculating concept scores:', error);
     return NextResponse.json(

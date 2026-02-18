@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Agent } from 'undici';
 import { toDuplicateSummary } from '@/server/duplicateDetector';
-import { MAX_IMAGE_BYTES, SUPPORTED_IMAGE_TYPES, uploadImageBuffer } from '@/server/uploadService';
+import { SUPPORTED_IMAGE_TYPES, uploadImageBuffer } from '@/server/uploadService';
+import { validateParentForNewChild } from '@/server/parentValidation';
 import type { UploadFailure, UploadSuccess } from '@/server/uploadService';
 
 // Use a browser-like User-Agent to avoid sites (e.g. Google Drive) redirecting to login pages
@@ -182,6 +183,17 @@ export async function POST(request: NextRequest) {
       const parentIdValue = typeof item.parentId === 'string' ? item.parentId.trim() : '';
       const cleanParentId = parentIdValue && parentIdValue !== 'undefined' ? parentIdValue : undefined;
 
+      const parentValidation = await validateParentForNewChild(cleanParentId);
+      if (!parentValidation.ok) {
+        failures.push({
+          clientId: item.clientId,
+          filename: item.url || 'unknown',
+          error: parentValidation.error,
+          reason: 'upload'
+        });
+        continue;
+      }
+
       if (!item.url || !isValidUrl(item.url)) {
         failures.push({
           clientId: item.clientId,
@@ -233,15 +245,6 @@ export async function POST(request: NextRequest) {
 
         const arrayBuffer = await response.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
-        if (buffer.byteLength > MAX_IMAGE_BYTES) {
-          failures.push({
-            clientId: item.clientId,
-            filename: item.url,
-            error: 'Remote image exceeds 10MB limit',
-            reason: 'too-large'
-          });
-          continue;
-        }
         if (buffer.byteLength < MIN_IMAGE_BYTES) {
           failures.push({
             clientId: item.clientId,

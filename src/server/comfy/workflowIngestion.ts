@@ -72,7 +72,13 @@ export async function ingestComfyWorkflowForImage(
     return { persisted: true, indexed: false, reason: 'embedding-skipped-test' };
   }
 
-  const embedding = await generateClipTextEmbedding(persisted.workflowIntentText);
+  const embedding = await generateClipTextEmbedding(persisted.workflowIntentText, {
+    source: 'server',
+    component: 'workflowIngestion',
+    trigger: 'ingest',
+    route: 'server/comfy/workflowIngestion',
+    query: persisted.workflowIntentText,
+  });
   if (!embedding) {
     return { persisted: true, indexed: false, reason: 'embedding-unavailable' };
   }

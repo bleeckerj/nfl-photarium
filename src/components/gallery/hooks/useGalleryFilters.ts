@@ -11,6 +11,7 @@ import { filterImagesForGallery } from '@/utils/galleryFilter';
 import { loadHiddenFolders, loadHiddenTags, persistHiddenFolders, persistHiddenTags } from '../storage';
 import { computeDuplicateGroups, buildChildrenMap, formatDateRangeLabel } from '../utils';
 import { DEFAULT_PAGE_SIZE } from '../constants';
+import { getDateKeyRangeMs } from '../dateFilter';
 import type { CloudflareImage, DateFilter, EmbeddingFilter, DuplicateGroup, AspectRatioClass } from '../types';
 
 interface UseGalleryFiltersOptions {
@@ -24,6 +25,7 @@ interface UseGalleryFiltersOptions {
     onlyWithVariants: boolean;
     showDuplicatesOnly: boolean;
     showBrokenOnly: boolean;
+    showComfyOnly?: boolean;
     aspectRatioFilters?: AspectRatioClass[];
     dateFilter: DateFilter | null;
     pageSize?: number;
@@ -52,6 +54,8 @@ interface UseGalleryFiltersReturn {
   setShowDuplicatesOnly: (value: boolean) => void;
   showBrokenOnly: boolean;
   setShowBrokenOnly: (value: boolean) => void;
+  showComfyOnly: boolean;
+  setShowComfyOnly: (value: boolean) => void;
   embeddingFilter: EmbeddingFilter;
   setEmbeddingFilter: (filter: EmbeddingFilter) => void;
   aspectRatioFilters: AspectRatioClass[];
@@ -118,6 +122,7 @@ export function useGalleryFilters({
   const [onlyWithVariants, setOnlyWithVariants] = useState(initialPreferences.onlyWithVariants);
   const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(initialPreferences.showDuplicatesOnly);
   const [showBrokenOnly, setShowBrokenOnly] = useState(initialPreferences.showBrokenOnly);
+  const [showComfyOnly, setShowComfyOnly] = useState(Boolean(initialPreferences.showComfyOnly));
   const [embeddingFilter, setEmbeddingFilter] = useState<EmbeddingFilter>('none');
   const [aspectRatioFilters, setAspectRatioFilters] = useState<AspectRatioClass[]>(
     initialPreferences.aspectRatioFilters ?? []
@@ -260,16 +265,24 @@ export function useGalleryFilters({
     return duplicatesSortedByFilename.filter(image => brokenImageIds.has(image.id));
   }, [duplicatesSortedByFilename, showBrokenOnly, brokenImageIds]);
 
+  const comfyFilteredImages = useMemo(() => {
+    if (!showComfyOnly) return brokenFilteredImages;
+    return brokenFilteredImages.filter((image) => {
+      const generatedBy = typeof image.generatedBy === 'string' ? image.generatedBy.toLowerCase() : '';
+      return generatedBy === 'comfyui' || image.comfyMetadataDetected === true || Boolean(image.comfyMetadataSource);
+    });
+  }, [brokenFilteredImages, showComfyOnly]);
+
   const embeddingFilteredImages = useMemo(() => {
-    if (embeddingFilter === 'none') return brokenFilteredImages;
-    return brokenFilteredImages.filter(image => {
+    if (embeddingFilter === 'none') return comfyFilteredImages;
+    return comfyFilteredImages.filter(image => {
       // Type assertion: our images have embedding fields, galleryFilter's GalleryImage doesn't
       const img = image as CloudflareImage;
       if (embeddingFilter === 'missing-clip') return !img.hasClipEmbedding;
       if (embeddingFilter === 'missing-color') return !img.hasColorEmbedding;
       return !img.hasClipEmbedding || !img.hasColorEmbedding;
     });
-  }, [brokenFilteredImages, embeddingFilter]);
+  }, [comfyFilteredImages, embeddingFilter]);
 
   const aspectRatioFilteredImages = useMemo(() => {
     if (!aspectRatioFilters.length) return embeddingFilteredImages;
@@ -306,9 +319,14 @@ export function useGalleryFilters({
   // Date filtered
   const filteredImages = useMemo(() => {
     if (!dateFilter) return sortedImages;
+    const range = getDateKeyRangeMs(dateFilter);
+    if (!range) return sortedImages;
     return sortedImages.filter(image => {
-      const d = new Date(image.uploaded);
-      return d.getFullYear() === dateFilter.year && d.getMonth() === dateFilter.month;
+      const uploadedMs = new Date(image.uploaded).getTime();
+      if (Number.isNaN(uploadedMs)) {
+        return false;
+      }
+      return uploadedMs >= range.startMs && uploadedMs <= range.endMs;
     });
   }, [sortedImages, dateFilter]);
 
@@ -322,6 +340,7 @@ export function useGalleryFilters({
     onlyWithVariants ||
     showDuplicatesOnly ||
     showBrokenOnly ||
+    showComfyOnly ||
     embeddingFilter !== 'none' ||
     aspectRatioFilters.length > 0 ||
     hiddenFolders.length > 0 ||
@@ -339,6 +358,7 @@ export function useGalleryFilters({
     setOnlyWithVariants(false);
     setShowDuplicatesOnly(false);
     setShowBrokenOnly(false);
+    setShowComfyOnly(false);
     setEmbeddingFilter('none');
     setAspectRatioFilters([]);
     setHiddenFolders([]);
@@ -421,6 +441,7 @@ export function useGalleryFilters({
     onlyWithVariants,
     showDuplicatesOnly,
     showBrokenOnly,
+    showComfyOnly,
     embeddingFilter,
     pageSize,
     dateFilter,
@@ -452,6 +473,8 @@ export function useGalleryFilters({
     setShowDuplicatesOnly,
     showBrokenOnly,
     setShowBrokenOnly,
+    showComfyOnly,
+    setShowComfyOnly,
     embeddingFilter,
     setEmbeddingFilter,
     aspectRatioFilters,

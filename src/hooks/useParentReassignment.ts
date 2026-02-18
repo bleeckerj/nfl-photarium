@@ -42,24 +42,27 @@ export function useParentReassignment({
     return set;
   }, [allImages]);
 
-  const adoptableImages = useMemo(() => {
+  const parentCandidates = useMemo(() => {
     return allImages.filter((img) => {
       if (img.parentId) return false;
-      if (parentWithChildren.has(img.id)) return false;
       if (excludeId && img.id === excludeId) return false;
       return true;
     });
-  }, [allImages, excludeId, parentWithChildren]);
+  }, [allImages, excludeId]);
+
+  const adoptableImages = useMemo(() => {
+    return parentCandidates.filter((img) => !parentWithChildren.has(img.id));
+  }, [parentCandidates, parentWithChildren]);
 
   const reassignParentOptions = useMemo(
     () => [
       { value: '', label: 'No parent (make canonical)' },
-      ...adoptableImages.map((candidate) => ({
+      ...parentCandidates.map((candidate) => ({
         value: candidate.id,
         label: candidate.filename || candidate.id,
       })),
     ],
-    [adoptableImages]
+    [parentCandidates]
   );
 
   return {

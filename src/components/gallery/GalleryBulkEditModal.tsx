@@ -35,6 +35,10 @@ interface GalleryBulkEditModalProps {
   onBulkDisplayNameModeChange: (value: 'custom' | 'auto' | 'clear') => void;
   bulkDisplayNameInput: string;
   onBulkDisplayNameInputChange: (value: string) => void;
+  bulkApplyDescription: boolean;
+  onBulkApplyDescriptionChange: (value: boolean) => void;
+  bulkDescriptionAppendInput: string;
+  onBulkDescriptionAppendInputChange: (value: string) => void;
   bulkApplyNamespace: boolean;
   onBulkApplyNamespaceChange: (value: boolean) => void;
   bulkNamespaceInput: string;
@@ -77,6 +81,10 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
   onBulkDisplayNameModeChange,
   bulkDisplayNameInput,
   onBulkDisplayNameInputChange,
+  bulkApplyDescription,
+  onBulkApplyDescriptionChange,
+  bulkDescriptionAppendInput,
+  onBulkDescriptionAppendInputChange,
   bulkApplyNamespace,
   onBulkApplyNamespaceChange,
   bulkNamespaceInput,
@@ -105,6 +113,31 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
             ×
           </button>
+        </div>
+        <div className="space-y-3">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={bulkApplyDescription}
+              onChange={(e) => onBulkApplyDescriptionChange(e.target.checked)}
+              className="h-3 w-3"
+            />
+            Append to description
+          </label>
+          {bulkApplyDescription && (
+            <div className="space-y-2">
+              <textarea
+                value={bulkDescriptionAppendInput}
+                onChange={(e) => onBulkDescriptionAppendInputChange(e.target.value)}
+                className="w-full border border-gray-300 rounded px-3 py-2"
+                placeholder="Text to append to each selected image description"
+                rows={3}
+              />
+              <p className="text-[0.6rem] text-gray-500">
+                Appends text to existing descriptions with a blank line separator.
+              </p>
+            </div>
+          )}
         </div>
         <div className="space-y-3">
           <label className="flex items-center gap-2">

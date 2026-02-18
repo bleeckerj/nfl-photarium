@@ -30,6 +30,7 @@ export { ImageListItem } from './ImageListItem';
 export { GalleryToolbar } from './GalleryToolbar';
 export { GalleryFilters } from './GalleryFilters';
 export { GalleryEmptyState } from './GalleryEmptyState';
+export { GridSizeToggle } from './GridSizeToggle';
 
 // Modals
 export * from './modals';

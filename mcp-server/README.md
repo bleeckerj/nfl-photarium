@@ -77,12 +77,34 @@ npm install
 npm run build
 ```
 
+## Run the MCP Server
+
+Stdio (default):
+
+```bash
+npm run dev
+```
+
+HTTP proxy enabled:
+
+```bash
+PHOTARIUM_HTTP_ENABLED=true npm run dev
+```
+
 ## Configuration
 
 Set the base URL of your Photarium instance:
 
 ```bash
 export PHOTARIUM_BASE_URL=http://localhost:3000
+```
+
+Optional HTTP proxy settings (disabled by default):
+
+```bash
+export PHOTARIUM_HTTP_ENABLED=true
+export PHOTARIUM_HTTP_HOST=127.0.0.1
+export PHOTARIUM_HTTP_PORT=8787
 ```
 
 ## Usage with Claude Desktop

@@ -35,6 +35,7 @@ export const fetchCloudflareImage = async (
     filename: string;
     uploaded: string;
     variants: string[];
+    size?: number;
     meta?: CloudflareMetadata | string;
   };
 };

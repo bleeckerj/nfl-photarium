@@ -68,6 +68,10 @@ interface GalleryModalsProps {
   onBulkDisplayNameModeChange: (value: 'custom' | 'auto' | 'clear') => void;
   bulkDisplayNameInput: string;
   onBulkDisplayNameInputChange: (value: string) => void;
+  bulkApplyDescription: boolean;
+  onBulkApplyDescriptionChange: (value: boolean) => void;
+  bulkDescriptionAppendInput: string;
+  onBulkDescriptionAppendInputChange: (value: string) => void;
   bulkApplyNamespace: boolean;
   onBulkApplyNamespaceChange: (value: boolean) => void;
   bulkNamespaceInput: string;
@@ -136,6 +140,10 @@ export const GalleryModals: React.FC<GalleryModalsProps> = ({
   onBulkDisplayNameModeChange,
   bulkDisplayNameInput,
   onBulkDisplayNameInputChange,
+  bulkApplyDescription,
+  onBulkApplyDescriptionChange,
+  bulkDescriptionAppendInput,
+  onBulkDescriptionAppendInputChange,
   bulkApplyNamespace,
   onBulkApplyNamespaceChange,
   bulkNamespaceInput,
@@ -224,6 +232,10 @@ export const GalleryModals: React.FC<GalleryModalsProps> = ({
           onBulkDisplayNameModeChange={onBulkDisplayNameModeChange}
           bulkDisplayNameInput={bulkDisplayNameInput}
           onBulkDisplayNameInputChange={onBulkDisplayNameInputChange}
+          bulkApplyDescription={bulkApplyDescription}
+          onBulkApplyDescriptionChange={onBulkApplyDescriptionChange}
+          bulkDescriptionAppendInput={bulkDescriptionAppendInput}
+          onBulkDescriptionAppendInputChange={onBulkDescriptionAppendInputChange}
           bulkApplyNamespace={bulkApplyNamespace}
           onBulkApplyNamespaceChange={onBulkApplyNamespaceChange}
           bulkNamespaceInput={bulkNamespaceInput}

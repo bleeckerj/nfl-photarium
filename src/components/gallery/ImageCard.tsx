@@ -12,6 +12,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { Trash2, Copy, ExternalLink, Sparkles, Layers, AlertTriangle } from 'lucide-react';
 import { getCloudflareImageUrl, getCloudflareDownloadUrl } from '@/utils/imageUtils';
+import { formatBytes } from '@/utils/formatBytes';
 import { EmbeddingStatusDot } from '@/components/EmbeddingStatusIcon';
 import { SearchExclusionIcon } from './icons';
 import { AspectRatioDisplay } from './AspectRatioDisplay';
@@ -85,6 +86,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
   const isComfyOutput = image.generatedBy === 'comfyui' || image.comfyMetadataDetected === true;
   const imageUrl = getCloudflareImageUrl(image.id, selectedVariant === 'public' ? 'original' : selectedVariant);
   const displayUrl = svgImage ? getCloudflareImageUrl(image.id, 'original') : imageUrl;
+  const fileSizeLabel = formatBytes(image.size);
 
   return (
     <div
@@ -201,6 +203,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
           </div>
           <div className="text-gray-500 text-[0.6rem] mt-1 space-y-0.5">
             <p>{new Date(image.uploaded).toLocaleDateString()}</p>
+            <p>📦 {fileSizeLabel}</p>
             <p>📁 {image.folder ? image.folder : '[none]'}</p>
             <p className="flex items-center gap-1">
               <span>🧭 {image.namespace ? image.namespace : '[none]'}</span>
@@ -282,13 +285,28 @@ export const ImageCard: React.FC<ImageCardProps> = ({
       </div>
 
       {/* Action bar */}
-      <div className="flex flex-wrap justify-center gap-1.5 py-1.5 bg-white border-b border-gray-200 z-30 mt-auto">
+      <div className="grid grid-cols-5 gap-1 p-1.5 bg-white border-b border-gray-200 z-30 mt-auto">
+        <button
+          onClick={async (e) => {
+            e.stopPropagation();
+            try {
+              await navigator.clipboard.writeText(image.id);
+            } catch (error) {
+              console.error('Failed to copy image ID', error);
+            }
+          }}
+          className="h-8 w-full inline-flex items-center justify-center rounded-md bg-black text-white text-[0.55rem] font-semibold tracking-wide shadow-sm transition-colors hover:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-black/40"
+          title="Copy image ID"
+          aria-label="Copy image ID"
+        >
+          ID
+        </button>
         <button
           onClick={(e) => {
             e.stopPropagation();
             onCopyUrl(image.id);
           }}
-          className="inline-flex items-center justify-center bg-black text-white rounded-full px-2.5 py-1 text-[0.7rem] shadow-sm min-h-[32px] min-w-[32px] cursor-pointer transition-transform transform hover:scale-105 active:scale-95 hover:shadow-lg focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-black/40"
+          className="h-8 w-full inline-flex items-center justify-center rounded-md bg-black text-white shadow-sm transition-colors hover:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-black/40"
           title="Copy URL"
           aria-label="Copy URL"
         >
@@ -296,7 +314,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
         </button>
         <button
           onClick={() => window.open(`/images/${image.id}`, '_blank')}
-          className="inline-flex items-center justify-center bg-black text-white rounded-full px-2.5 py-1 text-[0.7rem] shadow-sm min-h-[32px] min-w-[32px] cursor-pointer transition-transform transform hover:scale-105 active:scale-95 hover:shadow-lg focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-black/40"
+          className="h-8 w-full inline-flex items-center justify-center rounded-md bg-black text-white shadow-sm transition-colors hover:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-black/40"
           title="Open in new tab"
           aria-label="Open in new tab"
         >
@@ -304,7 +322,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
         </button>
         <button
           onClick={() => onStartEdit(image)}
-          className="inline-flex items-center justify-center bg-black text-white rounded-full px-2.5 py-1 text-[0.7rem] shadow-sm min-h-[32px] min-w-[32px] cursor-pointer transition-transform transform hover:scale-105 active:scale-95 hover:shadow-lg focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-black/40"
+          className="h-8 w-full inline-flex items-center justify-center rounded-md bg-black text-white shadow-sm transition-colors hover:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-black/40"
           title="Edit folder/tags"
           aria-label="Edit folder/tags"
         >
@@ -319,7 +337,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
         </button>
         <button
           onClick={() => onDelete(image.id)}
-          className="inline-flex items-center justify-center bg-black text-white rounded-full px-2.5 py-1 text-[0.7rem] shadow-sm min-h-[32px] min-w-[32px] cursor-pointer transition-transform transform hover:scale-105 active:scale-95 hover:shadow-lg focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-black/40"
+          className="h-8 w-full inline-flex items-center justify-center rounded-md border border-red-300 bg-white text-red-600 shadow-sm transition-colors hover:bg-red-50 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-red-300"
           title="Delete image"
           aria-label="Delete image"
         >

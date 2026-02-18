@@ -302,6 +302,31 @@ const formatBytesMB = (bytes?: number) => {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 };
 
+const parseTagInput = (value?: string): string[] => {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+};
+
+const mergeTagInputs = (baseTags?: string, extraTags?: string): string => {
+  const merged = new Map<string, string>();
+  parseTagInput(baseTags).forEach((tag) => merged.set(tag.toLowerCase(), tag));
+  parseTagInput(extraTags).forEach((tag) => merged.set(tag.toLowerCase(), tag));
+  return Array.from(merged.values()).join(', ');
+};
+
+const resolveTagInput = (globalTags: string, itemTags?: string): string => {
+  if (itemTags === undefined) {
+    return globalTags;
+  }
+  if (!itemTags.trim()) {
+    return '';
+  }
+  return mergeTagInputs(globalTags, itemTags);
+};
+
 const renderBitmapToBlob = (bitmap: ImageBitmap, width: number, height: number, type: string, quality: number) =>
   new Promise<Blob | null>((resolve) => {
     const canvas = document.createElement('canvas');
@@ -457,7 +482,9 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
   const [pageImportError, setPageImportError] = useState<string | null>(null);
   const [pageImportAllowInsecure, setPageImportAllowInsecure] = useState(false);
   const [pageImportScrollMode, setPageImportScrollMode] = useState(false);
+  const [pageImportAutoScroll, setPageImportAutoScroll] = useState(true);
   const [pageImportMaxScrolls, setPageImportMaxScrolls] = useState('10');
+  const [pageImportScrollDelayMs, setPageImportScrollDelayMs] = useState('1500');
   const [pageImportMaxPages, setPageImportMaxPages] = useState('1');
   const [pageImportProgress, setPageImportProgress] = useState<{
     message: string;
@@ -465,6 +492,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     imageCount: number;
     pageNum?: number;
   } | null>(null);
+  const previewFallbackAttemptedRef = useRef<Set<string>>(new Set());
   const [reducingQueueItems, setReducingQueueItems] = useState<Record<string, boolean>>({});
   const [previewFailures, setPreviewFailures] = useState<Record<string, boolean>>({});
   const [animateFps, setAnimateFps] = useState<string>('');
@@ -510,6 +538,66 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     setQueuedFiles((prev) =>
       prev.map((item) => (item.id === id ? { ...item, ...updates } : item))
     );
+  }, []);
+
+  const handlePreviewLoadError = useCallback(async (item: QueuedFile) => {
+    // Local files or items without a remote URL can't be recovered via import proxy.
+    if (item.file || !item.remoteUrl) {
+      setPreviewFailures((prev) => ({ ...prev, [item.id]: true }));
+      return;
+    }
+
+    // Avoid repeated network attempts for the same queue item.
+    if (previewFallbackAttemptedRef.current.has(item.id)) {
+      setPreviewFailures((prev) => ({ ...prev, [item.id]: true }));
+      return;
+    }
+    previewFallbackAttemptedRef.current.add(item.id);
+
+    try {
+      const response = await fetch('/api/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: item.remoteUrl })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data?.error || 'Preview proxy fetch failed');
+      }
+      if (!data?.data || !data?.type || !data?.name) {
+        throw new Error('Invalid preview proxy response');
+      }
+
+      const previewFile = base64ToFile(String(data.data), String(data.name), String(data.type));
+      const previewBlobUrl = URL.createObjectURL(previewFile);
+
+      setQueuedFiles((prev) =>
+        prev.map((queued) => {
+          if (queued.id !== item.id) return queued;
+          if (queued.previewUrl && queued.previewUrl.startsWith('blob:')) {
+            URL.revokeObjectURL(queued.previewUrl);
+          }
+          return {
+            ...queued,
+            previewUrl: previewBlobUrl,
+            sizeBytes: queued.sizeBytes ?? previewFile.size,
+            contentType: queued.contentType ?? previewFile.type,
+          };
+        })
+      );
+      setPreviewFailures((prev) => {
+        const next = { ...prev };
+        delete next[item.id];
+        return next;
+      });
+    } catch (error) {
+      console.warn('[uploader] Preview fallback failed', {
+        id: item.id,
+        remoteUrl: item.remoteUrl,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      setPreviewFailures((prev) => ({ ...prev, [item.id]: true }));
+    }
   }, []);
 
   const reduceQueuedFileSize = useCallback(async (id: string) => {
@@ -905,7 +993,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         const sourceUrlToSend =
           entry.sourceUrl !== undefined ? entry.sourceUrl : sourceUrl.trim() || '';
         const folderToSend = entry.folder !== undefined ? entry.folder : folderToUse;
-        const tagsToSend = entry.tags !== undefined ? entry.tags : tags;
+        const tagsToSend = resolveTagInput(tags, entry.tags);
         const descriptionToSend = entry.description !== undefined ? entry.description : description;
 
         return {
@@ -959,7 +1047,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
           queuedSourceUrl !== undefined ? queuedSourceUrl : sourceUrl.trim() || '';
         const sourcePathToSend = queuedSourcePath && queuedSourcePath.trim() ? queuedSourcePath.trim() : '';
         const folderToSend = queuedFolder !== undefined ? queuedFolder : folderToUse;
-        const tagsToSend = queuedTags !== undefined ? queuedTags : tags;
+        const tagsToSend = resolveTagInput(tags, queuedTags);
         const descriptionToSend =
           queuedDescription !== undefined ? queuedDescription : description;
         const groupId = queuedGroupId || '';
@@ -1192,7 +1280,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         const sourceUrlToSend =
           entry.sourceUrl !== undefined ? entry.sourceUrl : sourceUrl.trim() || '';
         const folderToSend = entry.folder !== undefined ? entry.folder : folderToUse;
-        const tagsToSend = entry.tags !== undefined ? entry.tags : tags;
+        const tagsToSend = resolveTagInput(tags, entry.tags);
         const descriptionToSend = entry.description !== undefined ? entry.description : description;
 
         return {
@@ -1224,7 +1312,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         const sourceUrlToSend =
           entry.sourceUrl !== undefined ? entry.sourceUrl : sourceUrl.trim() || '';
         const folderToSend = entry.folder !== undefined ? entry.folder : folderToUse;
-        const tagsToSend = entry.tags !== undefined ? entry.tags : tags;
+        const tagsToSend = resolveTagInput(tags, entry.tags);
         const descriptionToSend =
           entry.description !== undefined ? entry.description : description;
 
@@ -1417,7 +1505,6 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
               id: createQueueId(),
               file: entry.file,
               filename: entry.filename,
-              tags: 'zip',
               sourcePath,
               previewUrl: isImageFile(entry.file) ? URL.createObjectURL(entry.file) : undefined,
               selected: true
@@ -1447,7 +1534,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       setQueuedFiles((prev) => [...prev, ...queued]);
     }
     if (firstKeynoteName) {
-      setTags('keynote');
+      setTags((prev) => mergeTagInputs(prev, 'keynote'));
       setDescription(firstKeynoteName);
     }
   }, [createQueueId, setTags, setDescription]);
@@ -1649,16 +1736,20 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       
       // For scroll mode, use streaming SSE endpoint for progressive loading
       if (pageImportScrollMode) {
-        const maxScrolls = Number(pageImportMaxScrolls) || 10;
         const maxPages = Number(pageImportMaxPages) || 1;
+        const maxScrolls = Number(pageImportMaxScrolls) || 10;
+        const scrollDelayMs = Number(pageImportScrollDelayMs) || 1500;
+        const autoScrollUntilStable = pageImportAutoScroll;
         
         const response = await fetch('/api/import/page/scroll/stream', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             url: pageImportUrl.trim(),
-            maxScrolls,
-            maxPages
+            maxPages,
+            scrollDelayMs,
+            autoScrollUntilStable,
+            ...(autoScrollUntilStable ? {} : { maxScrolls })
           })
         });
 
@@ -1765,7 +1856,27 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       const data = isJson ? await response.json() : await response.text();
       if (!response.ok) {
         if (isJson && typeof data === 'object' && data && 'error' in data) {
-          throw new Error((data as { error?: string }).error || 'Failed to inspect page');
+          const payload = data as {
+            error?: string;
+            details?: {
+              upstreamStatus?: number;
+              upstreamStatusText?: string;
+              finalUrl?: string;
+              code?: string;
+            };
+          };
+          const baseError = payload.error || 'Failed to inspect page';
+          const detailParts: string[] = [];
+          if (typeof payload.details?.upstreamStatus === 'number') {
+            detailParts.push(`Upstream: ${payload.details.upstreamStatus}${payload.details.upstreamStatusText ? ` ${payload.details.upstreamStatusText}` : ''}`);
+          }
+          if (payload.details?.code) {
+            detailParts.push(`Code: ${payload.details.code}`);
+          }
+          if (payload.details?.finalUrl) {
+            detailParts.push(`Final URL: ${payload.details.finalUrl}`);
+          }
+          throw new Error(detailParts.length ? `${baseError} (${detailParts.join(' | ')})` : baseError);
         }
         throw new Error('Failed to inspect page');
       }
@@ -1828,7 +1939,16 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       const formData = new FormData();
       const folderToUse = resolveFolder();
       const itemsPayload: Array<{ kind: 'file'; fileIndex: number } | { kind: 'url'; url: string }> = [];
+      const hydratedFrames: Array<{ id: string; file: File; previewUrl: string }> = [];
+      const hydrationErrors: string[] = [];
       let fileIndex = 0;
+      const getHost = (value: string) => {
+        try {
+          return new URL(value).host;
+        } catch {
+          return value;
+        }
+      };
 
       for (const item of selectedItems) {
         if (item.file) {
@@ -1836,12 +1956,52 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
           itemsPayload.push({ kind: 'file', fileIndex });
           fileIndex += 1;
         } else if (item.remoteUrl) {
-          itemsPayload.push({ kind: 'url', url: item.remoteUrl });
+          let hydratedFile: File | null = null;
+          try {
+            const importResponse = await fetch('/api/import', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: item.remoteUrl })
+            });
+            const importData = await importResponse.json();
+            if (importResponse.ok && importData?.data && importData?.type) {
+              const importName =
+                (typeof importData.name === 'string' && importData.name.trim())
+                  ? importData.name.trim()
+                  : item.filename || 'remote-frame';
+              hydratedFile = base64ToFile(String(importData.data), importName, String(importData.type));
+            } else {
+              const detail = typeof importData?.error === 'string'
+                ? importData.error
+                : `HTTP ${importResponse.status}`;
+              hydrationErrors.push(`${getHost(item.remoteUrl)}: ${detail}`);
+            }
+          } catch (error) {
+            const detail = error instanceof Error ? error.message : 'Network error';
+            hydrationErrors.push(`${getHost(item.remoteUrl)}: ${detail}`);
+          }
+
+          if (hydratedFile) {
+            formData.append('files', hydratedFile, hydratedFile.name);
+            itemsPayload.push({ kind: 'file', fileIndex });
+            fileIndex += 1;
+            hydratedFrames.push({
+              id: item.id,
+              file: hydratedFile,
+              previewUrl: URL.createObjectURL(hydratedFile),
+            });
+          } else {
+            // Fallback to server-side URL fetch in /api/animate.
+            itemsPayload.push({ kind: 'url', url: item.remoteUrl });
+          }
         }
       }
 
       if (itemsPayload.length < 2) {
-        setAnimateError('Select at least two valid images to animate');
+        const hydrationContext = hydrationErrors.length
+          ? ` Failed frame prep: ${hydrationErrors.slice(0, 3).join(' | ')}`
+          : '';
+        setAnimateError(`Select at least two valid images to animate.${hydrationContext}`);
         return;
       }
 
@@ -1879,7 +2039,45 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       });
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to create animation');
+        const details = Array.isArray(data?.details)
+          ? data.details.filter((entry: unknown): entry is string => typeof entry === 'string' && entry.trim()).slice(0, 4)
+          : [];
+        const frameCounts =
+          typeof data?.validFrames === 'number' && typeof data?.totalRequested === 'number'
+            ? ` (usable ${data.validFrames}/${data.totalRequested} frames)`
+            : '';
+        const detailText = details.length ? ` Details: ${details.join(' | ')}` : '';
+        throw new Error(`${data.error || 'Failed to create animation'}${frameCounts}${detailText}`);
+      }
+
+      if (hydratedFrames.length > 0) {
+        const hydratedById = new Map(hydratedFrames.map((entry) => [entry.id, entry]));
+        setQueuedFiles((prev) =>
+          prev.map((queued) => {
+            const hydrated = hydratedById.get(queued.id);
+            if (!hydrated) {
+              return queued;
+            }
+            if (queued.previewUrl && queued.previewUrl.startsWith('blob:')) {
+              URL.revokeObjectURL(queued.previewUrl);
+            }
+            return {
+              ...queued,
+              file: hydrated.file,
+              previewUrl: hydrated.previewUrl,
+              sizeBytes: queued.sizeBytes ?? hydrated.file.size,
+              contentType: queued.contentType ?? hydrated.file.type,
+              processingNote: 'Frame cached locally for animation',
+            };
+          })
+        );
+        setPreviewFailures((prev) => {
+          const next = { ...prev };
+          hydratedFrames.forEach((entry) => {
+            delete next[entry.id];
+          });
+          return next;
+        });
       }
 
       setUploadedImages((prev) => [
@@ -2231,14 +2429,39 @@ A long list of filenames is not user friendly and essentially useless for select
           {pageImportScrollMode && (
             <>
               <label className="flex items-center gap-2 text-[11px] text-gray-600">
-                Max scrolls
+                <input
+                  type="checkbox"
+                  checked={pageImportAutoScroll}
+                  onChange={(e) => setPageImportAutoScroll(e.target.checked)}
+                  className="h-3 w-3"
+                  disabled={pageImportLoading}
+                />
+                Auto-scroll until no new images
+              </label>
+              {!pageImportAutoScroll && (
+                <label className="flex items-center gap-2 text-[11px] text-gray-600">
+                  Max scrolls
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    value={pageImportMaxScrolls}
+                    onChange={(e) => setPageImportMaxScrolls(e.target.value)}
+                    className="w-16 border border-gray-300 rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    disabled={pageImportLoading}
+                  />
+                </label>
+              )}
+              <label className="flex items-center gap-2 text-[11px] text-gray-600">
+                Scroll delay (ms)
                 <input
                   type="number"
-                  min="1"
-                  max="50"
-                  value={pageImportMaxScrolls}
-                  onChange={(e) => setPageImportMaxScrolls(e.target.value)}
-                  className="w-16 border border-gray-300 rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
+                  min="500"
+                  max="5000"
+                  step="100"
+                  value={pageImportScrollDelayMs}
+                  onChange={(e) => setPageImportScrollDelayMs(e.target.value)}
+                  className="w-20 border border-gray-300 rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
                   disabled={pageImportLoading}
                 />
               </label>
@@ -2270,7 +2493,7 @@ A long list of filenames is not user friendly and essentially useless for select
         {pageImportError && <p className="text-xs text-red-600 mt-1">{pageImportError}</p>}
         <p className="text-[11px] text-gray-500 mt-1">
           {pageImportScrollMode 
-            ? 'Uses a headless browser to scroll and follow pagination links. Set "Max pages" > 1 for paginated sites. Requires puppeteer.'
+            ? 'Uses a headless browser to trigger lazy/infinite loading and follow pagination links. Auto-scroll stops when no new images are found (with a safety cap). Requires puppeteer.'
             : 'Scans the page HTML for image URLs. Fast but may miss JavaScript-loaded content.'}
         </p>
       </div>
@@ -2382,7 +2605,7 @@ A long list of filenames is not user friendly and essentially useless for select
                   ? newFolder.trim().toLowerCase().replace(/\s+/g, "-")
                   : "";
               const effectiveFolder = hasCustomFolder ? item.folder || "" : previewFolder;
-              const effectiveTags = hasCustomTags ? item.tags || "" : tags;
+              const effectiveTags = resolveTagInput(tags, hasCustomTags ? item.tags : undefined);
               const effectiveDescription = hasCustomDescription ? item.description || "" : description;
               const effectiveOriginalUrl = hasCustomOriginalUrl ? item.originalUrl || "" : originalUrl;
               const effectiveSourceUrl = hasCustomSourceUrl ? item.sourceUrl || "" : sourceUrl;
@@ -2404,12 +2627,12 @@ A long list of filenames is not user friendly and essentially useless for select
                       src={previewUrl}
                       alt={item.filename}
                       className="h-28 w-28 rounded border border-blue-200 object-cover bg-white"
-                      onError={() => setPreviewFailures((prev) => ({ ...prev, [item.id]: true }))}
+                      onError={() => { void handlePreviewLoadError(item); }}
                       referrerPolicy="no-referrer"
                     />
                   ) : (
                     <div className="h-28 w-28 rounded border border-blue-200 bg-white flex items-center justify-center text-[10px] text-gray-400">
-                      {item.file ? "Local file" : "No preview"}
+                      {item.file ? "Local file" : "No preview (source blocked?)"}
                     </div>
                   )}
                   <div className="flex-1 min-w-0">

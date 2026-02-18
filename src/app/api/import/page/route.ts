@@ -12,6 +12,8 @@ const insecureAgent = new Agent({
   }
 });
 
+type FetchInitWithDispatcher = RequestInit & { dispatcher?: Agent };
+
 const isCertError = (error: unknown) => {
   const code = typeof error === 'object' && error && 'code' in error
     ? String((error as { code?: string }).code)
@@ -21,17 +23,18 @@ const isCertError = (error: unknown) => {
 
 const fetchWithCertFallback = async (url: string, allowInsecure: boolean, init?: RequestInit) => {
   const baseHeaders = { 'User-Agent': BROWSER_USER_AGENT, ...(init?.headers || {}) };
-  const firstInit = allowInsecure
-    ? { ...(init as any), headers: baseHeaders, dispatcher: insecureAgent }
+  const firstInit: FetchInitWithDispatcher = allowInsecure
+    ? { ...init, headers: baseHeaders, dispatcher: insecureAgent }
     : { ...init, headers: baseHeaders };
   try {
-    return await fetch(url, firstInit);
+    return await fetch(url, firstInit as RequestInit);
   } catch (error) {
     if (!allowInsecure) throw error;
     if (isCertError(error)) {
       // Retry once with insecure agent if the first attempt didn't already use it
-      if (!firstInit || !(firstInit as any).dispatcher) {
-        return await fetch(url, { ...(init as any), dispatcher: insecureAgent } as any);
+      if (!firstInit.dispatcher) {
+        const retryInit: FetchInitWithDispatcher = { ...init, headers: baseHeaders, dispatcher: insecureAgent };
+        return await fetch(url, retryInit as RequestInit);
       }
     }
     throw error;
@@ -45,6 +48,42 @@ const isValidUrl = (value: string) => {
   } catch {
     return false;
   }
+};
+
+const getHostFromUrl = (value: string) => {
+  try {
+    return new URL(value).host;
+  } catch {
+    return value;
+  }
+};
+
+const toErrorCode = (error: unknown) =>
+  typeof error === 'object' && error && 'code' in error
+    ? String((error as { code?: string }).code || '')
+    : '';
+
+const buildFetchPageFailureMessage = (sourceUrl: string, response: Response) => {
+  const host = getHostFromUrl(sourceUrl);
+  const status = response.status;
+  const statusText = response.statusText || 'Unknown';
+  const redirectedToLogin = (() => {
+    try {
+      const finalPath = new URL(response.url || sourceUrl).pathname.toLowerCase();
+      return /(login|signin|auth|account)/.test(finalPath);
+    } catch {
+      return false;
+    }
+  })();
+
+  let hint = 'The site may block automated requests or require login.';
+  if (status === 401 || status === 403 || redirectedToLogin) {
+    hint = 'The site appears to require authentication or is blocking automated requests.';
+  } else if (status >= 500) {
+    hint = 'The source site returned a server error.';
+  }
+
+  return `Failed to fetch page from ${host} (HTTP ${status} ${statusText}). ${hint}`;
 };
 
 const isPrivateHost = (hostname: string) => {
@@ -201,9 +240,62 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Private or localhost URLs are not allowed' }, { status: 400 });
     }
 
-    const response = await fetchWithCertFallback(pageUrl, allowInsecure);
+    let response: Response;
+    try {
+      response = await fetchWithCertFallback(pageUrl, allowInsecure);
+    } catch (error) {
+      const code = toErrorCode(error);
+      const certRelated = isCertError(error);
+      const certHint = certRelated
+        ? (allowInsecureEnv
+            ? 'Try enabling "Allow insecure TLS" in the importer.'
+            : 'Set IMPORT_ALLOW_INSECURE_TLS=true on the server, then enable "Allow insecure TLS" in the importer.')
+        : '';
+      const message = error instanceof Error ? error.message : 'Network error';
+      return NextResponse.json(
+        {
+          error: `Failed to fetch page from ${getHostFromUrl(pageUrl)} (${message}). ${certHint}`.trim(),
+          details: {
+            code: code || undefined,
+            certRelated,
+          },
+        },
+        { status: 400 }
+      );
+    }
+
     if (!response.ok) {
-      return NextResponse.json({ error: 'Failed to fetch page' }, { status: 400 });
+      // Retry once without browser-like headers in case the origin rejects them.
+      try {
+        const fallbackResponse = await fetch(pageUrl);
+        if (fallbackResponse.ok) {
+          response = fallbackResponse;
+        } else {
+          return NextResponse.json(
+            {
+              error: buildFetchPageFailureMessage(pageUrl, fallbackResponse),
+              details: {
+                upstreamStatus: fallbackResponse.status,
+                upstreamStatusText: fallbackResponse.statusText,
+                finalUrl: fallbackResponse.url,
+              },
+            },
+            { status: 400 }
+          );
+        }
+      } catch {
+        return NextResponse.json(
+          {
+            error: buildFetchPageFailureMessage(pageUrl, response),
+            details: {
+              upstreamStatus: response.status,
+              upstreamStatusText: response.statusText,
+              finalUrl: response.url,
+            },
+          },
+          { status: 400 }
+        );
+      }
     }
 
     const contentType = response.headers.get('content-type') ?? '';

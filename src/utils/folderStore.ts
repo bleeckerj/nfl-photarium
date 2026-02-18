@@ -1,7 +1,14 @@
 import { promises as fs } from 'fs';
+import os from 'node:os';
 import path from 'path';
 
-const STORE_PATH = path.join(process.cwd(), 'src', 'data', 'folders.json');
+const RUNTIME_DATA_DIR =
+  process.env.PHOTARIUM_RUNTIME_DATA_DIR ??
+  (process.env.NODE_ENV === 'development'
+    ? path.join(os.tmpdir(), 'photarium-data')
+    : path.join(process.cwd(), 'data'));
+// Keep runtime writes outside the repo in dev to avoid HMR reloads.
+const STORE_PATH = path.join(RUNTIME_DATA_DIR, 'folders.json');
 
 type FolderStoreData = {
   folders: string[];

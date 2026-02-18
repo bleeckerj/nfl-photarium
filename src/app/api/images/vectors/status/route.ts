@@ -13,7 +13,12 @@ import {
   ensureVectorIndex,
 } from '@/server/vectorSearch';
 
+const formatTimestamp = () =>
+  new Date().toLocaleString('en-US', { hour12: false });
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
+  const startedAt = Date.now();
+  console.info(`[${formatTimestamp()}] [API] GET /api/images/vectors/status`);
   try {
     const available = await isVectorSearchAvailable();
     
@@ -39,7 +44,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const withClip = images.filter(img => img.hasClipEmbedding).length;
     const withColor = images.filter(img => img.hasColorEmbedding).length;
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       available: true,
       indexName: 'idx:images',
       stats: {
@@ -52,17 +57,25 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       },
       needsEmbedding: totalImages - withClip,
     });
+    return response;
   } catch (error) {
     console.error('[API] Error getting vector status:', error);
     return NextResponse.json(
       { error: 'Failed to get vector status', details: String(error) },
       { status: 500 }
     );
+  } finally {
+    const elapsedMs = Date.now() - startedAt;
+    console.info(
+      `[${formatTimestamp()}] [API] GET /api/images/vectors/status completed in ${elapsedMs}ms`
+    );
   }
 }
 
 // POST to trigger index creation
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const startedAt = Date.now();
+  console.info(`[${formatTimestamp()}] [API] POST /api/images/vectors/status`);
   try {
     const available = await isVectorSearchAvailable();
     
@@ -74,15 +87,21 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     await ensureVectorIndex();
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       message: 'Vector index created/verified',
     });
+    return response;
   } catch (error) {
     console.error('[API] Error creating vector index:', error);
     return NextResponse.json(
       { error: 'Failed to create vector index', details: String(error) },
       { status: 500 }
+    );
+  } finally {
+    const elapsedMs = Date.now() - startedAt;
+    console.info(
+      `[${formatTimestamp()}] [API] POST /api/images/vectors/status completed in ${elapsedMs}ms`
     );
   }
 }

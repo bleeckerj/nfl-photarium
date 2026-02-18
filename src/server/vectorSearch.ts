@@ -14,6 +14,7 @@
  */
 
 import { CLIP_EMBEDDING_DIM } from './embeddingService';
+import type { EmbeddingLogContext } from './embeddingService';
 import { COLOR_HISTOGRAM_DIM } from './colorExtraction';
 
 // Redis client type
@@ -447,13 +448,14 @@ export async function searchByColor(
  */
 export async function searchByText(
   textQuery: string,
-  limit = 10
+  limit = 10,
+  context?: EmbeddingLogContext
 ): Promise<VectorSearchResult[]> {
-  console.log('[VectorSearch] searchByText called with limit:', limit);
+  console.log('[VectorSearch] searchByText called', { limit, context });
   // Import embedding service dynamically to avoid circular dependency
   const { generateClipTextEmbedding } = await import('./embeddingService');
   
-  const embedding = await generateClipTextEmbedding(textQuery);
+  const embedding = await generateClipTextEmbedding(textQuery, context);
   if (!embedding) {
     console.error('[VectorSearch] Failed to generate text embedding');
     return [];

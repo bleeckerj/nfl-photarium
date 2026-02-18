@@ -7,7 +7,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import type { CloudflareImage, DateFilter } from '../types';
+import type { CloudflareImage } from '../types';
 import { DEFAULT_PAGE_SIZE } from '../constants';
 import { formatDateRangeLabel } from '../utils';
 

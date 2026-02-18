@@ -7,6 +7,7 @@ export function CloudflareMetadataHeader(props: {
   metadataPrunedByteSize: number;
   metadataLargestFields: LargestField[];
   metadataPrunedDroppedFields: string[];
+  extrasBackedFields?: string[];
   isMetadataDirty: boolean;
   pendingAutoSave: boolean;
   saving: boolean;
@@ -18,6 +19,7 @@ export function CloudflareMetadataHeader(props: {
     metadataPrunedByteSize,
     metadataLargestFields,
     metadataPrunedDroppedFields,
+    extrasBackedFields = [],
     isMetadataDirty,
     pendingAutoSave,
     saving,
@@ -44,6 +46,12 @@ export function CloudflareMetadataHeader(props: {
         <span className="text-[10px] text-amber-700">
           Would drop to fit: {metadataPrunedDroppedFields.slice(0, 5).join(', ')}
           {metadataPrunedDroppedFields.length > 5 ? '…' : ''}
+        </span>
+      )}
+
+      {extrasBackedFields.length > 0 && (
+        <span className="text-[10px] text-blue-700">
+          Extras-backed (not counted here): {extrasBackedFields.join(', ')}
         </span>
       )}
 

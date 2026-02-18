@@ -169,8 +169,19 @@ export function useGalleryActions({
   const saveEdit = useCallback(async (imageId: string) => {
     try {
       const finalFolder = editFolderSelect === '__create__'
-        ? (newEditFolder.trim() || undefined)
-        : (editFolderSelect === '' ? undefined : editFolderSelect);
+        ? newEditFolder.trim()
+        : editFolderSelect;
+      const target = images.find(img => img.id === imageId);
+      const folderChanged = (target?.folder ?? '') !== (finalFolder ?? '');
+      const tagsPayload = editTags.trim()
+        ? editTags.split(',').map(t => t.trim()).filter(Boolean)
+        : [];
+      const payload: Record<string, unknown> = { tags: tagsPayload };
+      if (folderChanged) {
+        payload.folder = finalFolder;
+        payload.applyToFamily = true;
+        payload.applyToFamilyFields = ['folder'];
+      }
 
       const response = await fetch(`/api/images/${imageId}/update`, {
         method: 'PATCH',
@@ -178,21 +189,31 @@ export function useGalleryActions({
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          folder: finalFolder,
-          tags: editTags.trim() ? editTags.split(',').map(t => t.trim()) : [],
+          ...payload,
         }),
       });
 
       if (response.ok) {
-        setImages(prev => prev.map(img =>
-          img.id === imageId
-            ? {
-                ...img,
-                folder: finalFolder,
-                tags: editTags.trim() ? editTags.split(',').map(t => t.trim()) : [],
-              }
-            : img
-        ));
+        const familyRoot = target?.parentId || imageId;
+        const familyIds = new Set<string>();
+        images.forEach(img => {
+          if (img.id === familyRoot || img.parentId === familyRoot) {
+            familyIds.add(img.id);
+          }
+        });
+        familyIds.add(familyRoot);
+
+        setImages(prev => prev.map(img => {
+          const inFamily = folderChanged && familyIds.has(img.id);
+          const isTarget = img.id === imageId;
+          if (!inFamily && !isTarget) return img;
+
+          return {
+            ...img,
+            folder: inFamily ? (finalFolder || undefined) : img.folder,
+            tags: isTarget ? tagsPayload : img.tags,
+          };
+        }));
         cancelEdit();
       } else {
         alert('Failed to update image metadata');
@@ -201,7 +222,7 @@ export function useGalleryActions({
       console.error('Failed to update image:', error);
       alert('Failed to update image metadata');
     }
-  }, [editFolderSelect, editTags, newEditFolder, setImages, cancelEdit]);
+  }, [editFolderSelect, editTags, newEditFolder, setImages, cancelEdit, images]);
 
   // Bulk update
   const applyBulkUpdates = useCallback(async (options: BulkUpdateOptions) => {
@@ -229,23 +250,72 @@ export function useGalleryActions({
 
     setBulkUpdating(true);
     try {
-      await Promise.all(
-        Array.from(selectedImageIds).map(id => {
-          const payload: Record<string, unknown> = {};
-          
-          if (options.applyFolder) {
-            if (options.folderMode === 'existing') {
-              payload.folder = options.folderInput || undefined;
-            } else if (options.folderMode === 'new') {
-              payload.folder = options.folderInput.trim() || undefined;
-            }
+      const familyFields: string[] = [];
+      if (options.applyFolder) familyFields.push('folder');
+      if (options.applyNamespace) familyFields.push('namespace');
+      const hasFamilyUpdates = familyFields.length > 0;
+      const hasPerImageChanges = hasTagChanges || hasDisplayNameChanges;
+      const imageById = new Map(images.map(img => [img.id, img]));
+
+      const familyTargets = new Map<string, string>();
+      const familyMemberIds = new Set<string>();
+
+      if (hasFamilyUpdates) {
+        selectedImageIds.forEach(id => {
+          const img = imageById.get(id);
+          const rootId = img?.parentId || id;
+          if (!familyTargets.has(rootId)) {
+            familyTargets.set(rootId, id);
           }
-          
+        });
+
+        images.forEach(img => {
+          const rootId = img.parentId || img.id;
+          if (familyTargets.has(rootId)) {
+            familyMemberIds.add(img.id);
+          }
+        });
+      }
+
+      const requests: Promise<Response>[] = [];
+      const folderValue = options.applyFolder
+        ? (options.folderMode === 'existing' ? options.folderInput : options.folderInput.trim())
+        : undefined;
+      const namespaceValue = options.applyNamespace ? options.namespaceInput.trim() : undefined;
+
+      if (hasFamilyUpdates) {
+        const familyPayload: Record<string, unknown> = {
+          applyToFamily: true,
+          applyToFamilyFields: familyFields,
+        };
+
+        if (options.applyFolder) {
+          familyPayload.folder = folderValue ?? '';
+        }
+        if (options.applyNamespace) {
+          familyPayload.namespace = namespaceValue ?? '';
+        }
+
+        for (const id of familyTargets.values()) {
+          requests.push(
+            fetch(`/api/images/${id}/update`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(familyPayload),
+            })
+          );
+        }
+      }
+
+      if (hasPerImageChanges) {
+        Array.from(selectedImageIds).forEach(id => {
+          const payload: Record<string, unknown> = {};
+
           if (options.applyTags) {
             if (options.tagsMode === 'replace') {
               payload.tags = options.tagsInput;
             } else if (parsedBulkTags.length > 0) {
-              const target = images.find(img => img.id === id);
+              const target = imageById.get(id);
               const existingTags = Array.isArray(target?.tags) ? target.tags : [];
               const merged = new Map<string, string>();
               existingTags.forEach(tag => merged.set(tag.toLowerCase(), tag));
@@ -253,45 +323,45 @@ export function useGalleryActions({
               payload.tags = Array.from(merged.values());
             }
           }
-          
+
           if (options.applyDisplayName) {
             if (options.displayNameMode === 'clear') {
               payload.displayName = '';
             } else if (options.displayNameMode === 'custom') {
               payload.displayName = options.displayNameInput.trim();
             } else if (options.displayNameMode === 'auto') {
-              const target = images.find(img => img.id === id);
+              const target = imageById.get(id);
               const baseName = target?.filename || '';
               payload.displayName = truncateMiddle(baseName, 64);
             }
           }
-          
-          if (options.applyNamespace) {
-            payload.namespace = options.namespaceInput.trim() || '';
-          }
-          
-          return fetch(`/api/images/${id}/update`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
-        })
-      );
+
+          requests.push(
+            fetch(`/api/images/${id}/update`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            })
+          );
+        });
+      }
+
+      await Promise.all(requests);
 
       // Update local state
       setImages(prev =>
         prev.map(img => {
-          if (!selectedImageIds.has(img.id)) return img;
+          const inFamily = hasFamilyUpdates && familyMemberIds.has(img.id);
+          const isSelected = selectedImageIds.has(img.id);
+          if (!inFamily && !isSelected) return img;
 
           let updatedFolder: string | undefined = img.folder;
-          if (options.applyFolder) {
-            updatedFolder = options.folderMode === 'existing'
-              ? (options.folderInput || undefined)
-              : (options.folderInput.trim() || undefined);
+          if (options.applyFolder && inFamily) {
+            updatedFolder = folderValue || undefined;
           }
 
           let updatedTags = img.tags;
-          if (options.applyTags) {
+          if (options.applyTags && isSelected) {
             if (options.tagsMode === 'replace') {
               updatedTags = parsedBulkTags;
             } else if (parsedBulkTags.length > 0) {
@@ -303,7 +373,7 @@ export function useGalleryActions({
           }
 
           let updatedDisplayName = img.displayName;
-          if (options.applyDisplayName) {
+          if (options.applyDisplayName && isSelected) {
             if (options.displayNameMode === 'clear') {
               updatedDisplayName = '';
             } else if (options.displayNameMode === 'custom') {
@@ -313,8 +383,8 @@ export function useGalleryActions({
             }
           }
 
-          const updatedNamespace = options.applyNamespace
-            ? (options.namespaceInput.trim() || undefined)
+          const updatedNamespace = options.applyNamespace && inFamily
+            ? (namespaceValue || undefined)
             : img.namespace;
 
           return {

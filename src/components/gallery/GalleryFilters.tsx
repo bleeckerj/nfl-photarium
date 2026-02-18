@@ -49,6 +49,8 @@ interface GalleryFiltersProps {
   onRespectAspectRatioChange: (value: boolean) => void;
   showBrokenOnly: boolean;
   onShowBrokenOnlyChange: (value: boolean) => void;
+  showComfyOnly: boolean;
+  onShowComfyOnlyChange: (value: boolean) => void;
   
   // Clear all
   onClearFilters: () => void;
@@ -84,6 +86,8 @@ export const GalleryFilters: React.FC<GalleryFiltersProps> = ({
   onRespectAspectRatioChange,
   showBrokenOnly,
   onShowBrokenOnlyChange,
+  showComfyOnly,
+  onShowComfyOnlyChange,
   onClearFilters,
   hasActiveFilters,
 }) => {
@@ -373,6 +377,17 @@ export const GalleryFilters: React.FC<GalleryFiltersProps> = ({
           />
           <span className="text-[0.65em] font-mono text-gray-700">
             Broken Only
+          </span>
+        </label>
+        <label className="flex items-center gap-1.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showComfyOnly}
+            onChange={(e) => onShowComfyOnlyChange(e.target.checked)}
+            className="rounded"
+          />
+          <span className="text-[0.65em] font-mono text-gray-700">
+            Comfy Only
           </span>
         </label>
       </div>

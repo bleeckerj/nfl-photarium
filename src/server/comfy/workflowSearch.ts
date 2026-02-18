@@ -124,7 +124,13 @@ export async function searchComfyWorkflowsByIntent(
   const offset = Math.max(0, params.offset ?? 0);
   const includeWorkflowJson = params.includeWorkflowJson !== false;
 
-  const queryEmbedding = await generateClipTextEmbedding(query);
+  const queryEmbedding = await generateClipTextEmbedding(query, {
+    source: 'server',
+    component: 'workflowSearch',
+    trigger: 'search',
+    route: 'server/comfy/workflowSearch',
+    query,
+  });
   if (!queryEmbedding) {
     throw new Error('Failed to generate query embedding for workflow search');
   }

@@ -231,6 +231,7 @@ export async function POST(
           filename: image.filename,
           uploaded: image.uploaded,
           variants: image.variants,
+          size: image.size,
           meta: metadataPayload
         })
       );

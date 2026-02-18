@@ -1,8 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cleanString, parseCloudflareMetadata, pickCloudflareMetadata } from '@/utils/cloudflareMetadata';
+import {
+  cleanString,
+  enforceCloudflareMetadataLimit,
+  parseCloudflareMetadata,
+  pickCloudflareMetadata,
+} from '@/utils/cloudflareMetadata';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
-import { transformApiImageToCached, upsertCachedImage } from '@/server/cloudflareImageCache';
+import { getCachedImages, transformApiImageToCached, upsertCachedImage } from '@/server/cloudflareImageCache';
+import { listImageFamilyIds } from '@/server/imageFamily';
 import { upsertRegistryNamespace } from '@/server/namespaceRegistry';
+import { validateParentAssignmentForExistingImage } from '@/server/parentValidation';
+import { patchImageExtrasRecord } from '@/server/imageExtras';
+
+const MAX_CLOUDFLARE_TEXT_MIRROR_CHARS = 160;
+
+const toCloudflareTextMirror = (value?: string) => {
+  if (!value) return '';
+  const compact = value.trim();
+  if (!compact) return '';
+  return compact.length <= MAX_CLOUDFLARE_TEXT_MIRROR_CHARS
+    ? compact
+    : `${compact.slice(0, MAX_CLOUDFLARE_TEXT_MIRROR_CHARS)}…`;
+};
 
 export async function PATCH(
   request: NextRequest,
@@ -22,7 +41,21 @@ export async function PATCH(
 
     const { id: imageId } = await params;
     const body = await request.json();
-    const { folder, tags, description, originalUrl, sourceUrl, parentId, displayName, altTag, variationSort, clearExif, namespace } = body;
+    const {
+      folder,
+      tags,
+      description,
+      originalUrl,
+      sourceUrl,
+      parentId,
+      displayName,
+      altTag,
+      variationSort,
+      clearExif,
+      namespace,
+      applyToFamily,
+      applyToFamilyFields,
+    } = body;
     
     if (!imageId) {
       return NextResponse.json(
@@ -79,141 +112,289 @@ export async function PATCH(
       return [];
     })();
 
-    const fetchedImageResponse = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${imageId}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${apiToken}`,
-        },
-      }
-    );
-
-    const fetchedImageResult = await fetchedImageResponse.json();
-
-    if (!fetchedImageResponse.ok) {
-      console.error('Cloudflare API error (fetch existing image):', fetchedImageResult);
-      return NextResponse.json(
-        { error: fetchedImageResult.errors?.[0]?.message || 'Failed to fetch existing image metadata' },
-        { status: fetchedImageResponse.status }
-      );
+    const applyToFamilyRequested = applyToFamily === true;
+    const allowedFamilyFields = new Set(['folder', 'namespace']);
+    const familyFieldSet = new Set<string>();
+    if (Array.isArray(applyToFamilyFields)) {
+      applyToFamilyFields.forEach((field: unknown) => {
+        if (typeof field === 'string' && allowedFamilyFields.has(field)) {
+          familyFieldSet.add(field);
+        }
+      });
     }
-
-    const existingMeta = parseCloudflareMetadata(fetchedImageResult.result?.meta);
+    if (applyToFamilyRequested && familyFieldSet.size === 0) {
+      if (folderProvided) familyFieldSet.add('folder');
+      if (namespaceProvided) familyFieldSet.add('namespace');
+    }
+    const shouldApplyToFamily = applyToFamilyRequested && familyFieldSet.size > 0;
     const parentProvided = Object.prototype.hasOwnProperty.call(body, 'parentId');
     const cleanParentId = typeof parentId === 'string' ? parentId.trim() : '';
 
-    const metadata = {
-      ...existingMeta,
-      updatedAt: new Date().toISOString(),
-    } as Record<string, unknown>;
-
-    if (folderProvided) {
-      // Explicitly allow clearing the folder.
-      metadata.folder = cleanFolder ?? '';
-    }
-
-    if (tagsProvided) {
-      metadata.tags = cleanTags;
-    }
-
-    if (descriptionProvided) {
-      metadata.description = cleanDescription ?? '';
-    }
-
-    if (originalUrlProvided) {
-      metadata.originalUrl = cleanOriginalUrl ?? '';
-      metadata.originalUrlNormalized = normalizeOriginalUrl(cleanOriginalUrl) ?? '';
-    }
-
-    if (sourceUrlProvided) {
-      metadata.sourceUrl = cleanSourceUrl ?? '';
-      metadata.sourceUrlNormalized = normalizeOriginalUrl(cleanSourceUrl) ?? '';
-    }
-
-    if (displayNameProvided) {
-      metadata.displayName = cleanDisplayName ?? '';
-    }
-
     if (parentProvided) {
-      // Explicitly allow clearing the parent.
-      metadata.variationParentId = cleanParentId;
-    }
-
-    if (altTagProvided) {
-      metadata.altTag = cleanAltTag ?? '';
-    }
-
-    if (variationSortProvided && cleanVariationSort !== undefined) {
-      metadata.variationSort = cleanVariationSort;
-    }
-
-    // Clear EXIF data if explicitly requested
-    if (clearExifProvided && clearExif === true) {
-      delete metadata.exif;
-    }
-
-    // Update namespace if provided and register it
-    if (namespaceProvided) {
-      metadata.namespace = cleanNamespace ?? '';
-      if (cleanNamespace) {
-        await upsertRegistryNamespace(cleanNamespace);
+      const parentValidation = await validateParentAssignmentForExistingImage(imageId, cleanParentId);
+      if (!parentValidation.ok) {
+        return NextResponse.json(
+          { error: parentValidation.error },
+          { status: parentValidation.status }
+        );
       }
     }
 
-    // IMPORTANT: Cloudflare PATCH semantics do not clear keys that are omitted.
-    // Use includeEmpty so that user-cleared values ('' / []) are sent explicitly.
-    const metadataPayload = pickCloudflareMetadata(metadata, { includeEmpty: true });
+    if (namespaceProvided && cleanNamespace) {
+      await upsertRegistryNamespace(cleanNamespace);
+    }
 
-    // Update image metadata in Cloudflare using JSON body
-    const response = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${imageId}`,
-      {
-        method: 'PATCH',
-        headers: {
-          'Authorization': `Bearer ${apiToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ metadata: metadataPayload }),
-      }
-    );
+    type UpdateFlags = {
+      folder: boolean;
+      tags: boolean;
+      description: boolean;
+      originalUrl: boolean;
+      sourceUrl: boolean;
+      displayName: boolean;
+      parentId: boolean;
+      altTag: boolean;
+      variationSort: boolean;
+      clearExif: boolean;
+      namespace: boolean;
+    };
 
-    const result = await response.json();
+    const targetFlags: UpdateFlags = {
+      folder: folderProvided,
+      tags: tagsProvided,
+      description: descriptionProvided,
+      originalUrl: originalUrlProvided,
+      sourceUrl: sourceUrlProvided,
+      displayName: displayNameProvided,
+      parentId: parentProvided,
+      altTag: altTagProvided,
+      variationSort: variationSortProvided && cleanVariationSort !== undefined,
+      clearExif: clearExifProvided && clearExif === true,
+      namespace: namespaceProvided,
+    };
 
-    if (!response.ok) {
-      console.error('Cloudflare API error:', result);
-      return NextResponse.json(
-        { error: result.errors?.[0]?.message || 'Failed to update image metadata' },
-        { status: response.status }
+    const familyFlags: UpdateFlags = {
+      folder: folderProvided && familyFieldSet.has('folder'),
+      tags: false,
+      description: false,
+      originalUrl: false,
+      sourceUrl: false,
+      displayName: false,
+      parentId: false,
+      altTag: false,
+      variationSort: false,
+      clearExif: false,
+      namespace: namespaceProvided && familyFieldSet.has('namespace'),
+    };
+
+    const updateImage = async (targetId: string, flags: UpdateFlags) => {
+      const fetchedImageResponse = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${targetId}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${apiToken}`,
+          },
+        }
       );
+
+      const fetchedImageResult = await fetchedImageResponse.json();
+
+      if (!fetchedImageResponse.ok) {
+        console.error('Cloudflare API error (fetch existing image):', fetchedImageResult);
+        throw new Error(
+          fetchedImageResult.errors?.[0]?.message || 'Failed to fetch existing image metadata'
+        );
+      }
+
+      const existingMeta = parseCloudflareMetadata(fetchedImageResult.result?.meta);
+      const metadata = {
+        ...existingMeta,
+        updatedAt: new Date().toISOString(),
+      } as Record<string, unknown>;
+
+      if (flags.folder) {
+        // Explicitly allow clearing the folder.
+        metadata.folder = cleanFolder ?? '';
+      }
+
+      if (flags.tags) {
+        metadata.tags = cleanTags;
+      }
+
+      if (flags.description) {
+        metadata.description = cleanDescription ?? '';
+      }
+
+      if (flags.originalUrl) {
+        metadata.originalUrl = cleanOriginalUrl ?? '';
+        metadata.originalUrlNormalized = normalizeOriginalUrl(cleanOriginalUrl) ?? '';
+      }
+
+      if (flags.sourceUrl) {
+        metadata.sourceUrl = cleanSourceUrl ?? '';
+        metadata.sourceUrlNormalized = normalizeOriginalUrl(cleanSourceUrl) ?? '';
+      }
+
+      if (flags.displayName) {
+        metadata.displayName = cleanDisplayName ?? '';
+      }
+
+      if (flags.parentId) {
+        // Explicitly allow clearing the parent.
+        metadata.variationParentId = cleanParentId;
+      }
+
+      if (flags.altTag) {
+        metadata.altTag = cleanAltTag ?? '';
+      }
+
+      const extrasPatch: { description?: string; altText?: string } = {};
+      if (flags.description) {
+        extrasPatch.description = cleanDescription || undefined;
+      }
+      if (flags.altTag) {
+        extrasPatch.altText = cleanAltTag || undefined;
+      }
+      if (Object.keys(extrasPatch).length > 0) {
+        await patchImageExtrasRecord(targetId, extrasPatch);
+      }
+
+      // Keep Cloudflare metadata compact: description/alt text are durable in extras storage.
+      // We only mirror a small preview here for compatibility/fallback surfaces.
+      metadata.description = toCloudflareTextMirror(
+        flags.description
+          ? (cleanDescription ?? '')
+          : cleanString(typeof metadata.description === 'string' ? metadata.description : undefined) ?? ''
+      );
+      metadata.altTag = toCloudflareTextMirror(
+        flags.altTag
+          ? (cleanAltTag ?? '')
+          : cleanString(typeof metadata.altTag === 'string' ? metadata.altTag : undefined) ?? ''
+      );
+
+      if (flags.variationSort && cleanVariationSort !== undefined) {
+        metadata.variationSort = cleanVariationSort;
+      }
+
+      // Clear EXIF data if explicitly requested
+      if (flags.clearExif) {
+        delete metadata.exif;
+      }
+
+      if (flags.namespace) {
+        metadata.namespace = cleanNamespace ?? '';
+      }
+
+      // IMPORTANT: Cloudflare PATCH semantics do not clear keys that are omitted.
+      // Use includeEmpty so that user-cleared values ('' / []) are sent explicitly.
+      const metadataPayload = pickCloudflareMetadata(metadata, { includeEmpty: true });
+      const requiredKeys = new Set<string>();
+      if (flags.folder) requiredKeys.add('folder');
+      if (flags.tags) requiredKeys.add('tags');
+      if (flags.description) requiredKeys.add('description');
+      if (flags.originalUrl) {
+        requiredKeys.add('originalUrl');
+        requiredKeys.add('originalUrlNormalized');
+      }
+      if (flags.sourceUrl) {
+        requiredKeys.add('sourceUrl');
+        requiredKeys.add('sourceUrlNormalized');
+      }
+      if (flags.displayName) requiredKeys.add('displayName');
+      if (flags.parentId) requiredKeys.add('variationParentId');
+      if (flags.altTag) requiredKeys.add('altTag');
+      if (flags.variationSort) requiredKeys.add('variationSort');
+      if (flags.namespace) requiredKeys.add('namespace');
+
+      const metadataLimit = enforceCloudflareMetadataLimit(metadataPayload, 1024);
+      const droppedRequired = metadataLimit.dropped.filter((key) => requiredKeys.has(key));
+      if (droppedRequired.length > 0) {
+        throw new Error(
+          `Metadata exceeds Cloudflare 1024-byte limit. Could not apply fields: ${droppedRequired.join(', ')}`
+        );
+      }
+      const finalMetadataPayload = metadataLimit.metadata;
+
+      // Update image metadata in Cloudflare using JSON body
+      const response = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${targetId}`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Authorization': `Bearer ${apiToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ metadata: finalMetadataPayload }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        console.error('Cloudflare API error:', result);
+        throw new Error(result.errors?.[0]?.message || 'Failed to update image metadata');
+      }
+
+      const cachedImage = transformApiImageToCached({
+        id: fetchedImageResult.result.id,
+        filename: fetchedImageResult.result.filename,
+        uploaded: fetchedImageResult.result.uploaded,
+        variants: fetchedImageResult.result.variants,
+        size: fetchedImageResult.result.size,
+        meta: finalMetadataPayload
+      });
+
+      console.log(`[Update] Upserting cache for ${targetId} with tags:`, cachedImage.tags);
+      upsertCachedImage(cachedImage);
+
+      return {
+        metadataPayload: finalMetadataPayload,
+        filename: fetchedImageResult.result.filename as string | undefined,
+      };
+    };
+
+    const updatedIds: string[] = [];
+    let targetResult: { metadataPayload: Record<string, unknown>; filename?: string } | null = null;
+
+    if (shouldApplyToFamily) {
+      const cachedImages = await getCachedImages();
+      const { memberIds } = listImageFamilyIds(
+        cachedImages.map(img => ({ id: img.id, parentId: img.parentId })),
+        imageId
+      );
+
+      for (const memberId of memberIds) {
+        const result = await updateImage(memberId, memberId === imageId ? targetFlags : familyFlags);
+        updatedIds.push(memberId);
+        if (memberId === imageId) {
+          targetResult = result;
+        }
+      }
+    } else {
+      targetResult = await updateImage(imageId, targetFlags);
+      updatedIds.push(imageId);
     }
 
-    const finalParentId = cleanString(metadataPayload.variationParentId as string | undefined);
+    if (!targetResult) {
+      throw new Error('Failed to update image metadata');
+    }
 
+    const metadataPayload = targetResult.metadataPayload;
+    const finalParentId = cleanString(metadataPayload.variationParentId as string | undefined);
     const finalFolder = cleanString(metadataPayload.folder as string | undefined);
     const finalTags = Array.isArray(metadataPayload.tags) ? metadataPayload.tags : [];
     const finalDescription = cleanString(metadataPayload.description as string | undefined) ?? '';
     const finalOriginalUrl = cleanString(metadataPayload.originalUrl as string | undefined);
     const finalSourceUrl = cleanString(metadataPayload.sourceUrl as string | undefined);
     const finalDisplayName =
-      (metadataPayload.displayName as string | undefined) ?? fetchedImageResult.result.filename;
+      (metadataPayload.displayName as string | undefined) ?? targetResult.filename;
     const finalAltTag = cleanString(metadataPayload.altTag as string | undefined) ?? '';
     const finalVariationSort =
       typeof metadataPayload.variationSort === 'number' ? metadataPayload.variationSort : undefined;
     const finalNamespace = cleanString(metadataPayload.namespace as string | undefined);
 
-    const cachedImage = transformApiImageToCached({
-      id: fetchedImageResult.result.id,
-      filename: fetchedImageResult.result.filename,
-      uploaded: fetchedImageResult.result.uploaded,
-      variants: fetchedImageResult.result.variants,
-      meta: metadataPayload
-    });
-    
-    console.log(`[Update] Upserting cache for ${imageId} with tags:`, cachedImage.tags);
-    upsertCachedImage(cachedImage);
-
     return NextResponse.json({
       success: true,
+      updatedIds,
       folder: finalFolder,
       tags: finalTags,
       description: finalDescription,
@@ -228,6 +409,16 @@ export async function PATCH(
 
   } catch (error) {
     console.error('Update image error:', error);
+    const message = error instanceof Error ? error.message : 'Internal server error';
+    if (
+      message.includes('Cloudflare 1024-byte limit')
+      || message.toLowerCase().includes('metadata must not exceed 1024 bytes')
+    ) {
+      return NextResponse.json(
+        { error: message },
+        { status: 400 }
+      );
+    }
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

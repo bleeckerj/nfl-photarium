@@ -149,6 +149,7 @@ export async function POST(
         filename: newImage.filename,
         uploaded: newImage.uploaded,
         variants: newImage.variants,
+        size: newImage.size,
         meta: newImage.meta ?? rotatedMetadata
       })
     );

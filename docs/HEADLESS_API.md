@@ -275,13 +275,13 @@ Content-Type: multipart/form-data
 
 **Form Fields:** Same as internal upload, plus `.snagx` file support.
 
-**Duplicate Detection:** Returns 409 if `originalUrl` matches an existing image.
+**Duplicate Detection:** Returns 409 when `contentHash` (SHA-256 of uploaded image bytes) matches an existing image in the same namespace. `originalUrl` is stored as metadata and may log a warning if reused, but it does not block upload.
 
 **Error Response (400):**
 
 ```json
 {
-  "error": "Duplicate original URL detected",
+  "error": "Duplicate image content detected",
   "duplicates": [
     { "id": "xyz", "filename": "hero.png", "folder": "website-images" }
   ]
@@ -522,14 +522,24 @@ Content-Type: application/json
   "results": [
     {
       "imageId": "abc123",
+      "id": "abc123",
+      "canonicalImageId": "abc123",
+      "requestedImageId": "optional-original-hit-id-if-remapped",
+      "filename": "example.jpg",
+      "folder": "my-folder",
       "score": 0.89,
-      "image": { /* full image object */ }
+      "displayName": "Optional display name"
     }
   ],
+  "count": 1,
   "query": "sunset on beach",
   "type": "text"
 }
 ```
+
+`imageId`/`id`/`canonicalImageId` now always point to the canonical catalog image ID for each hit.
+If a backend/vector hit returns a non-canonical identifier (for example a display name), `requestedImageId`
+contains that original value and the result is remapped to canonical IDs when resolvable.
 
 ---
 

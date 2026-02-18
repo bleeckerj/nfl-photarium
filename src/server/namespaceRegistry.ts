@@ -1,8 +1,14 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
+const RUNTIME_DATA_DIR =
+  process.env.PHOTARIUM_RUNTIME_DATA_DIR ??
+  (process.env.NODE_ENV === 'development'
+    ? path.join(os.tmpdir(), 'photarium-data')
+    : path.join(process.cwd(), 'data'));
 // Local JSON registry used to populate namespace dropdown options in the UI.
-const REGISTRY_PATH = path.join(process.cwd(), 'data', 'namespace-registry.json');
+const REGISTRY_PATH = path.join(RUNTIME_DATA_DIR, 'namespace-registry.json');
 
 type NamespaceRegistryPayload = {
   namespaces: string[];

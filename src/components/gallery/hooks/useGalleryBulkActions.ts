@@ -23,6 +23,8 @@ interface UseGalleryBulkActionsOptions {
   bulkApplyDisplayName: boolean;
   bulkDisplayNameInput: string;
   bulkDisplayNameMode: 'custom' | 'auto' | 'clear';
+  bulkApplyDescription: boolean;
+  bulkDescriptionAppendInput: string;
   bulkApplyNamespace: boolean;
   bulkNamespaceInput: string;
   bulkFolderMode: 'existing' | 'new';
@@ -59,6 +61,8 @@ export const useGalleryBulkActions = ({
   bulkApplyDisplayName,
   bulkDisplayNameInput,
   bulkDisplayNameMode,
+  bulkApplyDescription,
+  bulkDescriptionAppendInput,
   bulkApplyNamespace,
   bulkNamespaceInput,
   bulkFolderMode,
@@ -86,8 +90,10 @@ export const useGalleryBulkActions = ({
       bulkApplyTags &&
       (bulkTagsMode === 'replace' || parsedBulkTags.length > 0);
     const hasDisplayNameChanges = bulkApplyDisplayName;
+    const descriptionAppendText = bulkDescriptionAppendInput.trim();
+    const hasDescriptionChanges = bulkApplyDescription && descriptionAppendText.length > 0;
     const hasNamespaceChanges = bulkApplyNamespace;
-    if (!bulkApplyFolder && !hasTagChanges && !hasDisplayNameChanges && !hasNamespaceChanges) {
+    if (!bulkApplyFolder && !hasTagChanges && !hasDisplayNameChanges && !hasDescriptionChanges && !hasNamespaceChanges) {
       toastPush('Choose at least one field to update');
       return;
     }
@@ -125,6 +131,13 @@ export const useGalleryBulkActions = ({
               const baseName = target?.filename || '';
               payload.displayName = truncateMiddle(baseName, 64);
             }
+          }
+          if (hasDescriptionChanges) {
+            const target = images.find(img => img.id === id);
+            const currentDescription = (target?.description || '').trim();
+            payload.description = currentDescription
+              ? `${currentDescription}\n\n${descriptionAppendText}`
+              : descriptionAppendText;
           }
           if (bulkApplyNamespace) {
             payload.namespace = bulkNamespaceInput.trim() || '';
@@ -168,6 +181,11 @@ export const useGalleryBulkActions = ({
               updatedDisplayName = truncateMiddle(img.filename || '', 64);
             }
           }
+          const updatedDescription = hasDescriptionChanges
+            ? ((img.description || '').trim()
+              ? `${(img.description || '').trim()}\n\n${descriptionAppendText}`
+              : descriptionAppendText)
+            : img.description;
           const updatedNamespace = bulkApplyNamespace ? (bulkNamespaceInput.trim() || undefined) : img.namespace;
 
           return {
@@ -175,6 +193,7 @@ export const useGalleryBulkActions = ({
             folder: bulkApplyFolder ? updatedFolder : img.folder,
             tags: updatedTags,
             displayName: updatedDisplayName,
+            description: updatedDescription,
             namespace: updatedNamespace
           };
         })
@@ -191,9 +210,11 @@ export const useGalleryBulkActions = ({
     }
   }, [
     bulkApplyDisplayName,
+    bulkApplyDescription,
     bulkApplyFolder,
     bulkApplyNamespace,
     bulkApplyTags,
+    bulkDescriptionAppendInput,
     bulkDisplayNameInput,
     bulkDisplayNameMode,
     bulkFolderInput,
@@ -287,17 +308,47 @@ export const useGalleryBulkActions = ({
     }
     setBulkDeleting(true);
     try {
-      await Promise.all(
-        Array.from(selectedImageIds).map(id =>
-          fetch(`/api/images/${id}/delete`, {
+      const ids = Array.from(selectedImageIds);
+      const settled = await Promise.allSettled(
+        ids.map(async (id) => {
+          const response = await fetch(`/api/images/${id}`, {
             method: 'DELETE'
-          })
-        )
+          });
+          if (!response.ok) {
+            let message = `HTTP ${response.status}`;
+            try {
+              const payload = await response.json();
+              if (typeof payload?.error === 'string' && payload.error.trim()) {
+                message = payload.error;
+              }
+            } catch {
+              // ignore JSON parse failure and keep HTTP status message
+            }
+            throw new Error(message);
+          }
+          return id;
+        })
       );
-      setImages(prev => prev.filter(img => !selectedImageIds.has(img.id)));
-      toastPush('Images deleted');
-      clearSelection();
-      setBulkSelectionMode(false);
+
+      const deletedIds = settled
+        .filter((result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled')
+        .map(result => result.value);
+      const failedCount = settled.length - deletedIds.length;
+
+      if (deletedIds.length > 0) {
+        const deletedSet = new Set(deletedIds);
+        setImages(prev => prev.filter(img => !deletedSet.has(img.id)));
+      }
+
+      if (failedCount === 0) {
+        toastPush(`Deleted ${deletedIds.length} image${deletedIds.length === 1 ? '' : 's'}`);
+        clearSelection();
+        setBulkSelectionMode(false);
+      } else if (deletedIds.length > 0) {
+        toastPush(`Deleted ${deletedIds.length}, failed ${failedCount}`);
+      } else {
+        toastPush('Bulk delete failed');
+      }
     } catch (error) {
       console.error('Bulk delete failed', error);
       toastPush('Bulk delete failed');

@@ -11,6 +11,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { Trash2, Copy, ExternalLink, Sparkles, Layers, AlertTriangle } from 'lucide-react';
 import { getCloudflareImageUrl, getCloudflareDownloadUrl } from '@/utils/imageUtils';
+import { formatBytes } from '@/utils/formatBytes';
 import { EmbeddingStatusDot } from '@/components/EmbeddingStatusIcon';
 import { AspectRatioDisplay } from './AspectRatioDisplay';
 import { isSvgImage } from './utils';
@@ -82,6 +83,7 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
   const svgImage = isSvgImage(image);
   const imageUrl = getCloudflareImageUrl(image.id, selectedVariant === 'public' ? 'original' : selectedVariant);
   const displayUrl = svgImage ? getCloudflareImageUrl(image.id, 'original') : imageUrl;
+  const fileSizeLabel = formatBytes(image.size);
   const handleDragStart = (event: React.DragEvent) => {
     if (onDragStart) {
       onDragStart(event, image);
@@ -164,6 +166,7 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
         <p className="text-[0.7em] font-mono text-gray-500">
           {new Date(image.uploaded).toLocaleDateString()}
         </p>
+        <p className="text-[0.7em] font-mono text-gray-500">📦 {fileSizeLabel}</p>
         <p className="text-[0.7em] font-mono text-gray-500">📁 {image.folder ? image.folder : '[none]'}</p>
         <p className="text-[0.7em] font-mono text-gray-500 flex items-center gap-1">
           <span>🧭 {image.namespace ? image.namespace : '[none]'}</span>

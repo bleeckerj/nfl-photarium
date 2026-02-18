@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { POST } from '@/app/api/upload/external/route';
+import * as duplicateDetector from '@/server/duplicateDetector';
 
 const TEST_URL = 'http://localhost/api/upload/external';
 const ORIGINAL_ENV = { ...process.env };
@@ -67,6 +68,8 @@ describe('POST /api/upload/external', () => {
         JSON.stringify({
           result: {
             id: 'abc123',
+            filename: 'photo.png',
+            uploaded: '2026-02-01T00:00:00.000Z',
             variants: [
               'https://imagedelivery.net/hash/abc123/public',
               'https://imagedelivery.net/hash/abc123/thumb',
@@ -113,6 +116,8 @@ describe('POST /api/upload/external', () => {
           JSON.stringify({
             result: {
               id: 'svg123',
+              filename: 'vector.svg',
+              uploaded: '2026-02-01T00:00:00.000Z',
               variants: ['https://example.com/svg123/public']
             }
           }),
@@ -124,6 +129,8 @@ describe('POST /api/upload/external', () => {
           JSON.stringify({
             result: {
               id: 'webp789',
+              filename: 'vector.webp',
+              uploaded: '2026-02-01T00:00:01.000Z',
               variants: ['https://example.com/webp789/public']
             }
           }),
@@ -176,6 +183,8 @@ describe('POST /api/upload/external', () => {
           JSON.stringify({
             result: {
               id: 'wf123',
+              filename: 'image.png',
+              uploaded: '2026-02-01T00:00:00.000Z',
               variants: ['https://imagedelivery.net/hash/wf123/public'],
               images: [],
             },
@@ -232,5 +241,81 @@ describe('POST /api/upload/external', () => {
     expect(response.status).toBe(400);
     expect(payload.error).toMatch(/Invalid comfyWorkflowJson/i);
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('allows upload when originalUrl already exists but content hash is unique', async () => {
+    process.env.CLOUDFLARE_ACCOUNT_ID = 'acct';
+    process.env.CLOUDFLARE_API_TOKEN = 'token';
+
+    vi.spyOn(duplicateDetector, 'findDuplicatesByOriginalUrl').mockResolvedValue([
+      {
+        id: 'existing-url-1',
+        filename: 'existing.png',
+        uploaded: '2026-01-01T00:00:00.000Z',
+        folder: 'existing-folder',
+        variants: ['https://imagedelivery.net/hash/existing/public'],
+      } as never,
+    ]);
+    vi.spyOn(duplicateDetector, 'findDuplicatesByContentHash').mockResolvedValue([]);
+
+    const mockFetch = vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+      Promise.resolve(new Response(
+        JSON.stringify({
+          result: {
+            id: 'url-ok-123',
+            filename: 'photo.png',
+            uploaded: '2026-02-01T00:00:00.000Z',
+            variants: ['https://imagedelivery.net/hash/url-ok-123/public'],
+            images: [],
+          },
+        }),
+        { status: 200 }
+      ))
+    );
+
+    const file = new File([`unique-content-${Date.now()}-${Math.random()}`], 'photo.png', { type: 'image/png' });
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('originalUrl', 'https://example.com/dynamic-endpoint');
+
+    const response = await POST(createRequest(formData));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.id).toBe('url-ok-123');
+    expect(mockFetch).toHaveBeenCalled();
+    expect(duplicateDetector.findDuplicatesByOriginalUrl).toHaveBeenCalled();
+    expect(duplicateDetector.findDuplicatesByContentHash).toHaveBeenCalled();
+  });
+
+  it('blocks upload when content hash already exists even if originalUrl differs', async () => {
+    process.env.CLOUDFLARE_ACCOUNT_ID = 'acct';
+    process.env.CLOUDFLARE_API_TOKEN = 'token';
+
+    vi.spyOn(duplicateDetector, 'findDuplicatesByOriginalUrl').mockResolvedValue([]);
+    vi.spyOn(duplicateDetector, 'findDuplicatesByContentHash').mockResolvedValue([
+      {
+        id: 'existing-hash-1',
+        filename: 'existing-hash.png',
+        uploaded: '2026-01-01T00:00:00.000Z',
+        folder: 'hash-folder',
+        variants: ['https://imagedelivery.net/hash/existing-hash/public'],
+      } as never,
+    ]);
+
+    const mockFetch = vi.spyOn(globalThis, 'fetch');
+    const file = new File([`duplicate-content-${Date.now()}-${Math.random()}`], 'photo.png', { type: 'image/png' });
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('originalUrl', 'https://example.com/another-endpoint');
+
+    const response = await POST(createRequest(formData));
+    const payload = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(payload.error).toBe('Duplicate image content detected');
+    expect(payload.duplicates?.[0]?.id).toBe('existing-hash-1');
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(duplicateDetector.findDuplicatesByContentHash).toHaveBeenCalled();
   });
 });

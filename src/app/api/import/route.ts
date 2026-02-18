@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractSnagx } from '@/utils/snagx';
-import { sanitizeFilename } from '@/server/uploadService';
+import { MAX_IMAGE_BYTES, prepareImageForUpload, sanitizeFilename } from '@/server/uploadService';
 import path from 'path';
-
-const MAX_SIZE = 10 * 1024 * 1024; // 10MB to match uploader
 
 const isValidUrl = (value: string) => {
   try {
@@ -86,6 +84,18 @@ const hasSnagxExtension = (value: string) => {
   }
 };
 
+const buildDownloadFailureMessage = (sourceUrl: string, response: Response) => {
+  let host = sourceUrl;
+  try {
+    host = new URL(sourceUrl).host;
+  } catch {
+    // Keep original sourceUrl fallback.
+  }
+  const status = response.status;
+  const statusText = response.statusText || 'Unknown';
+  return `Failed to download image from ${host} (HTTP ${status} ${statusText}). The source may block automated downloads or require login.`;
+};
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -94,14 +104,84 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'A valid image URL is required' }, { status: 400 });
     }
 
-    // Use a browser-like User-Agent to avoid sites (e.g. Google Drive) redirecting to login pages
-    const response = await fetch(sourceUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      },
-    });
+    const requestHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+    };
+
+    // Some hosts reject browser-like headers or bot-like patterns.
+    // Retry without custom headers if the primary request fails.
+    let response: Response;
+    try {
+      response = await fetch(sourceUrl, {
+        headers: requestHeaders,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Network error';
+      return NextResponse.json(
+        { error: `Failed to download image: ${message}` },
+        { status: 400 }
+      );
+    }
+
     if (!response.ok) {
-      return NextResponse.json({ error: 'Failed to download the image' }, { status: 400 });
+      try {
+        const fallbackResponse = await fetch(sourceUrl);
+        if (fallbackResponse.ok) {
+          response = fallbackResponse;
+        } else {
+          console.warn('[import] Remote download failed', {
+            sourceUrl,
+            status: fallbackResponse.status,
+            statusText: fallbackResponse.statusText,
+            finalUrl: fallbackResponse.url,
+          });
+          return NextResponse.json(
+            {
+              error: buildDownloadFailureMessage(sourceUrl, fallbackResponse),
+              details: {
+                upstreamStatus: fallbackResponse.status,
+                upstreamStatusText: fallbackResponse.statusText,
+                finalUrl: fallbackResponse.url,
+              },
+            },
+            { status: 400 }
+          );
+        }
+      } catch {
+        console.warn('[import] Remote download failed', {
+          sourceUrl,
+          status: response.status,
+          statusText: response.statusText,
+          finalUrl: response.url,
+        });
+        return NextResponse.json(
+          {
+            error: buildDownloadFailureMessage(sourceUrl, response),
+            details: {
+              upstreamStatus: response.status,
+              upstreamStatusText: response.statusText,
+              finalUrl: response.url,
+            },
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    if (!response.ok) {
+      return NextResponse.json(
+        {
+          error: buildDownloadFailureMessage(sourceUrl, response),
+          details: {
+            upstreamStatus: response.status,
+            upstreamStatusText: response.statusText,
+            finalUrl: response.url,
+          },
+        },
+        { status: 400 }
+      );
     }
 
     const rawContentType = response.headers.get('content-type') ?? '';
@@ -145,9 +225,18 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (finalBuffer.byteLength > MAX_SIZE) {
-      return NextResponse.json({ error: 'Remote image exceeds 10MB limit' }, { status: 400 });
+    const prepared = await prepareImageForUpload({
+      buffer: finalBuffer,
+      fileType: finalType,
+      fileName: filename,
+      maxBytes: MAX_IMAGE_BYTES,
+    });
+    if (!prepared.ok) {
+      return NextResponse.json({ error: prepared.error }, { status: 400 });
     }
+    finalBuffer = prepared.data.buffer;
+    finalType = prepared.data.fileType;
+    filename = prepared.data.fileName;
 
     const base64 = finalBuffer.toString('base64');
 

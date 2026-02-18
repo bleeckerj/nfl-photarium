@@ -6,7 +6,7 @@ import MonoSelect from './MonoSelect';
 import GalleryCommandBar from './GalleryCommandBar';
 import FolderManagerButton from './FolderManagerButton';
 import { GalleryFilters } from './gallery/GalleryFilters';
-import { type DateFilter } from './DateNavigator';
+import { type DateFilter, type GridSize } from './gallery/types';
 import { getMultipleImageUrls, IMAGE_VARIANTS } from '@/utils/imageUtils';
 import { setDragPayloadForImage } from '@/utils/imageDrag';
 import { copyToClipboard, formatCopyPayload } from '@/utils/clipboard';
@@ -24,7 +24,9 @@ import { useGalleryEmbedding } from './gallery/hooks/useGalleryEmbedding';
 import { GalleryListView } from './gallery/GalleryListView';
 import { GalleryGridView } from './gallery/GalleryGridView';
 import { GalleryModals } from './gallery/GalleryModals';
-import { AUDIT_LOG_LIMIT } from './gallery/constants';
+import { AUDIT_LOG_LIMIT, DEFAULT_GRID_SIZE } from './gallery/constants';
+import { normalizeGridSize } from './gallery/gridSizing';
+import { normalizeDateFilterValue, toDateKey } from './gallery/dateFilter';
 
 interface CloudflareImage {
   id: string;
@@ -84,6 +86,8 @@ type BulkState = {
   bulkApplyDisplayName: boolean;
   bulkDisplayNameMode: 'custom' | 'auto' | 'clear';
   bulkDisplayNameInput: string;
+  bulkApplyDescription: boolean;
+  bulkDescriptionAppendInput: string;
   bulkApplyNamespace: boolean;
   bulkNamespaceInput: string;
   bulkUpdating: boolean;
@@ -121,6 +125,8 @@ const bulkReducer = (state: BulkState, action: BulkAction): BulkState => {
         bulkApplyDisplayName: false,
         bulkDisplayNameMode: 'custom',
         bulkDisplayNameInput: '',
+        bulkApplyDescription: false,
+        bulkDescriptionAppendInput: '',
         bulkApplyNamespace: false,
         bulkNamespaceInput: '',
         bulkAnimateFps: '',
@@ -145,10 +151,12 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         onlyCanonical: false,
         respectAspectRatio: false,
         onlyWithVariants: false,
+        showComfyOnly: false,
         selectedFolder: 'all',
         selectedTag: '',
         searchTerm: '',
         viewMode: 'grid' as 'grid' | 'list',
+        gridSize: DEFAULT_GRID_SIZE as GridSize,
         filtersCollapsed: false,
         bulkFolderInput: '',
         bulkFolderMode: 'existing' as 'existing' | 'new',
@@ -169,10 +177,12 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           onlyCanonical?: boolean;
           respectAspectRatio?: boolean;
           onlyWithVariants?: boolean;
+          showComfyOnly?: boolean;
           selectedFolder?: string;
           selectedTag?: string;
           searchTerm?: string;
           viewMode?: 'grid' | 'list';
+          gridSize?: GridSize;
           filtersCollapsed?: boolean;
           bulkFolderInput?: string;
           bulkFolderMode?: 'existing' | 'new';
@@ -181,7 +191,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           aspectRatioFilters?: ('horizontal' | 'vertical' | 'square')[];
           showCli?: boolean;
           pageSize?: number;
-          dateFilter?: { year: number; month: number } | null;
+          dateFilter?: { startDate?: string; endDate?: string } | { year?: number; month?: number } | null;
           currentPage?: number;
         };
         const rawPageSize = typeof parsed.pageSize === 'number' ? parsed.pageSize : DEFAULT_PAGE_SIZE;
@@ -192,14 +202,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         const normalizedVariant = storedVariant === 'public' || storedVariant === 'original'
           ? 'full'
           : storedVariant;
-        const normalizedDateFilter = (() => {
-          if (!parsed.dateFilter || typeof parsed.dateFilter !== 'object') return null;
-          const year = (parsed.dateFilter as { year?: number }).year;
-          const month = (parsed.dateFilter as { month?: number }).month;
-          if (typeof year !== 'number' || typeof month !== 'number') return null;
-          if (month < 0 || month > 11) return null;
-          return { year, month };
-        })();
+        const normalizedDateFilter = normalizeDateFilterValue(parsed.dateFilter);
+        const normalizedGridSize = normalizeGridSize(parsed.gridSize, DEFAULT_GRID_SIZE);
         let normalizedCurrentPage = typeof parsed.currentPage === 'number' && parsed.currentPage > 0
           ? Math.floor(parsed.currentPage)
           : 1;
@@ -266,10 +270,12 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           onlyCanonical: Boolean(parsed.onlyCanonical),
           respectAspectRatio: Boolean(parsed.respectAspectRatio),
           onlyWithVariants: Boolean(parsed.onlyWithVariants),
+          showComfyOnly: Boolean(parsed.showComfyOnly),
           selectedFolder: parsed.selectedFolder ?? 'all',
           selectedTag: parsed.selectedTag ?? '',
           searchTerm: parsed.searchTerm ?? '',
           viewMode: (parsed.viewMode === 'list' ? 'list' : 'grid') as 'grid' | 'list',
+          gridSize: normalizedGridSize,
           filtersCollapsed: Boolean(parsed.filtersCollapsed),
           bulkFolderInput: typeof parsed.bulkFolderInput === 'string' ? parsed.bulkFolderInput : '',
           bulkFolderMode: (parsed.bulkFolderMode === 'new' ? 'new' : 'existing') as 'existing' | 'new',
@@ -292,10 +298,12 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       onlyCanonical: false,
       respectAspectRatio: false,
       onlyWithVariants: false,
+      showComfyOnly: false,
       selectedFolder: 'all',
       selectedTag: '',
       searchTerm: '',
       viewMode: 'grid',
+      gridSize: DEFAULT_GRID_SIZE as GridSize,
       filtersCollapsed: false,
       bulkFolderInput: '',
       bulkFolderMode: 'existing',
@@ -336,6 +344,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [selectedVariant, setSelectedVariant] = useState<string>(storedPreferencesRef.current.variant);
   const [openCopyMenu, setOpenCopyMenu] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>((storedPreferencesRef.current.viewMode ?? 'grid') as 'grid' | 'list');
+  const [gridSize, setGridSize] = useState<GridSize>(
+    normalizeGridSize(storedPreferencesRef.current.gridSize, DEFAULT_GRID_SIZE)
+  );
   const [filtersCollapsed, setFiltersCollapsed] = useState(storedPreferencesRef.current.filtersCollapsed ?? false);
   const [showCli, setShowCli] = useState(storedPreferencesRef.current.showCli ?? true);
   const [bulkState, dispatchBulk] = useReducer(
@@ -352,6 +363,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       bulkApplyDisplayName: false,
       bulkDisplayNameMode: 'custom',
       bulkDisplayNameInput: '',
+      bulkApplyDescription: false,
+      bulkDescriptionAppendInput: '',
       bulkApplyNamespace: false,
       bulkNamespaceInput: '',
       bulkUpdating: false,
@@ -377,6 +390,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     bulkApplyDisplayName,
     bulkDisplayNameMode,
     bulkDisplayNameInput,
+    bulkApplyDescription,
+    bulkDescriptionAppendInput,
     bulkApplyNamespace,
     bulkNamespaceInput,
     bulkUpdating,
@@ -405,6 +420,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const setBulkApplyDisplayName = useCallback((value: boolean) => setBulkField('bulkApplyDisplayName', value), [setBulkField]);
   const setBulkDisplayNameMode = useCallback((value: 'custom' | 'auto' | 'clear') => setBulkField('bulkDisplayNameMode', value), [setBulkField]);
   const setBulkDisplayNameInput = useCallback((value: string) => setBulkField('bulkDisplayNameInput', value), [setBulkField]);
+  const setBulkApplyDescription = useCallback((value: boolean) => setBulkField('bulkApplyDescription', value), [setBulkField]);
+  const setBulkDescriptionAppendInput = useCallback((value: string) => setBulkField('bulkDescriptionAppendInput', value), [setBulkField]);
   const setBulkApplyNamespace = useCallback((value: boolean) => setBulkField('bulkApplyNamespace', value), [setBulkField]);
   const setBulkNamespaceInput = useCallback((value: string) => setBulkField('bulkNamespaceInput', value), [setBulkField]);
   const setBulkUpdating = useCallback((value: boolean) => setBulkField('bulkUpdating', value), [setBulkField]);
@@ -1018,6 +1035,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     setRespectAspectRatio,
     onlyWithVariants,
     setOnlyWithVariants,
+    showComfyOnly,
+    setShowComfyOnly,
     showDuplicatesOnly,
     setShowDuplicatesOnly,
     showBrokenOnly,
@@ -1071,6 +1090,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       onlyCanonical: storedPreferencesRef.current.onlyCanonical,
       respectAspectRatio: storedPreferencesRef.current.respectAspectRatio,
       onlyWithVariants: storedPreferencesRef.current.onlyWithVariants,
+      showComfyOnly: storedPreferencesRef.current.showComfyOnly ?? false,
       showDuplicatesOnly: storedPreferencesRef.current.showDuplicatesOnly ?? false,
       showBrokenOnly: storedPreferencesRef.current.showBrokenOnly ?? false,
       aspectRatioFilters: storedPreferencesRef.current.aspectRatioFilters ?? [],
@@ -1128,10 +1148,12 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         respectAspectRatio,
         variant: selectedVariant,
         onlyWithVariants,
+        showComfyOnly,
         selectedFolder,
         selectedTag,
         searchTerm,
         viewMode,
+        gridSize,
         filtersCollapsed,
         bulkFolderInput,
         bulkFolderMode,
@@ -1151,10 +1173,12 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     respectAspectRatio,
     selectedVariant,
     onlyWithVariants,
+    showComfyOnly,
     selectedFolder,
     selectedTag,
     searchTerm,
     viewMode,
+    gridSize,
     filtersCollapsed,
     bulkFolderInput,
     bulkFolderMode,
@@ -1291,6 +1315,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     bulkApplyDisplayName,
     bulkDisplayNameInput,
     bulkDisplayNameMode,
+    bulkApplyDescription,
+    bulkDescriptionAppendInput,
     bulkApplyNamespace,
     bulkNamespaceInput,
     bulkFolderMode,
@@ -1337,6 +1363,25 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     );
     return tags.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
   }, [images]);
+
+  const showLastUploaded = useCallback(() => {
+    if (!sortedImages.length) {
+      return null;
+    }
+    const newestDate = new Date(sortedImages[0].uploaded);
+    if (Number.isNaN(newestDate.getTime())) {
+      return null;
+    }
+    const newestDateKey = toDateKey(newestDate);
+    const count = sortedImages.reduce((acc, image) => {
+      const uploaded = new Date(image.uploaded);
+      if (Number.isNaN(uploaded.getTime())) return acc;
+      return toDateKey(uploaded) === newestDateKey ? acc + 1 : acc;
+    }, 0);
+
+    setDateFilter({ startDate: newestDateKey, endDate: newestDateKey });
+    return { dateKey: newestDateKey, count };
+  }, [setDateFilter, sortedImages]);
 
   const variantOptions = useMemo(
     () => [
@@ -1491,6 +1536,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           pageSize={pageSize}
           pageSizeOptions={PAGE_SIZE_OPTIONS}
           defaultPageSize={DEFAULT_PAGE_SIZE}
+          gridSize={gridSize}
           refreshingCache={refreshingCache}
           viewMode={viewMode}
           selectedCount={selectedCount}
@@ -1500,6 +1546,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           onToggleFilters={() => setFiltersCollapsed(prev => !prev)}
           onClearFilters={clearFilters}
           onPageSizeChange={handlePageSizeChange}
+          onGridSizeChange={setGridSize}
           onRefreshCache={() => fetchImages({ forceRefresh: true })}
           onOpenNamespaceSettings={() => setNamespaceSettingsOpen(true)}
           onToggleViewMode={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
@@ -1614,6 +1661,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                 onShowDuplicatesOnlyChange={setShowDuplicatesOnly}
                 showVariationsOnly={onlyWithVariants}
                 onShowVariationsOnlyChange={setOnlyWithVariants}
+                showComfyOnly={showComfyOnly}
+                onShowComfyOnlyChange={setShowComfyOnly}
                 showOnlyMissingEmbeddings={embeddingFilter !== 'none'}
                 onShowOnlyMissingEmbeddingsChange={(value: boolean) =>
                   setEmbeddingFilter(value ? 'missing-any' : 'none')
@@ -1678,11 +1727,14 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
               onClearTagFilter={() => setSelectedTag('')}
               showParentsOnly={onlyWithVariants}
               onSetParentsOnly={setOnlyWithVariants}
+              showComfyOnly={showComfyOnly}
+              onSetComfyOnly={setShowComfyOnly}
               currentPage={pageIndex}
               totalPages={totalPages}
               onGoToPage={goToPageNumber}
               embeddingFilter={embeddingFilter}
               onSetEmbeddingFilter={setEmbeddingFilter}
+              onShowLastUploaded={showLastUploaded}
               onClose={() => setShowCli(false)}
             />
           )}
@@ -1845,6 +1897,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       ) : (
         viewMode === 'grid' ? (
           <GalleryGridView
+            gridSize={gridSize}
             filters={viewFilters}
             onToggleSelection={toggleSelection}
             onBeforeNavigate={saveGalleryReturnState}
@@ -2001,6 +2054,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         onBulkDisplayNameModeChange={setBulkDisplayNameMode}
         bulkDisplayNameInput={bulkDisplayNameInput}
         onBulkDisplayNameInputChange={setBulkDisplayNameInput}
+        bulkApplyDescription={bulkApplyDescription}
+        onBulkApplyDescriptionChange={setBulkApplyDescription}
+        bulkDescriptionAppendInput={bulkDescriptionAppendInput}
+        onBulkDescriptionAppendInputChange={setBulkDescriptionAppendInput}
         bulkApplyNamespace={bulkApplyNamespace}
         onBulkApplyNamespaceChange={setBulkApplyNamespace}
         bulkNamespaceInput={bulkNamespaceInput}

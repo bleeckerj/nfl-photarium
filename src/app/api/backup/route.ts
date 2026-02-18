@@ -18,6 +18,7 @@ const execAsync = promisify(exec);
 // Backup configuration
 const BACKUP_DIR = process.env.BACKUP_DIR || './backups/redis';
 const KEEP_COUNT = parseInt(process.env.BACKUP_KEEP_COUNT || '10', 10);
+const RETENTION_DAYS = parseInt(process.env.BACKUP_RETENTION_DAYS || '30', 10);
 const CONTAINER = process.env.REDIS_CONTAINER || 'photarium-redis';
 
 interface BackupInfo {
@@ -105,6 +106,7 @@ export async function GET() {
       count: Object.keys(grouped).length,
       backupDir: backupPath,
       keepCount: KEEP_COUNT,
+      retentionDays: RETENTION_DAYS,
     });
   } catch (error) {
     console.error('List backups error:', error);
@@ -120,12 +122,14 @@ export async function GET() {
  * 
  * Body options:
  *   - keepCount: number - Override the number of backups to keep
+ *   - retentionDays: number - Override age retention in days (default 30)
  *   - dryRun: boolean - If true, return what would be done without doing it
  */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
     const keepCount = body.keepCount ?? KEEP_COUNT;
+    const retentionDays = body.retentionDays ?? RETENTION_DAYS;
     const dryRun = body.dryRun ?? false;
 
     // Check if Docker is available
@@ -166,6 +170,7 @@ export async function POST(request: NextRequest) {
         },
         container: CONTAINER,
         keepCount,
+        retentionDays,
       });
     }
 
@@ -255,9 +260,38 @@ export async function POST(request: NextRequest) {
     steps.push(`Created ${bundleFile} (${formatBytes(bundleStats.size)})${!hasAof ? ' (RDB only, no AOF)' : ''}`);
 
     // Step 5: Rotate old backups
-    steps.push(`Rotating old backups (keeping ${keepCount})...`);
+    steps.push(`Rotating old backups (older than ${retentionDays} days, then keeping ${keepCount})...`);
     const files = await fs.readdir(backupPath);
-    const rdbFiles = files
+    let rdbFiles = files
+      .filter(f => f.match(/^redis-backup-\d{8}-\d{6}(?:[+-]\d{4})?\.*\.rdb$/))
+      .sort()
+      .reverse();
+
+    const nowMs = Date.now();
+    const retentionMs = Math.max(0, Number(retentionDays)) * 24 * 60 * 60 * 1000;
+    let agedRemovedCount = 0;
+
+    for (const file of rdbFiles) {
+      const rdbPathToCheck = path.join(backupPath, file);
+      const stats = await fs.stat(rdbPathToCheck);
+      if (nowMs - stats.mtimeMs <= retentionMs) {
+        continue;
+      }
+
+      const ts = file.match(/redis-backup-(\d{8}-\d{6}(?:[+-]\d{4})?)\.*\.rdb$/)?.[1];
+      await fs.unlink(rdbPathToCheck).catch(() => {});
+      steps.push(`Removed (age>${retentionDays}d) ${file}`);
+      agedRemovedCount++;
+      if (ts) {
+        const bundleName = `redis-backup-${ts}.tgz`;
+        const bundleAltName = `redis-backup-${ts}..tgz`;
+        await fs.unlink(path.join(backupPath, bundleName)).catch(() => {});
+        await fs.unlink(path.join(backupPath, bundleAltName)).catch(() => {});
+      }
+    }
+
+    const filesAfterAgeRotation = await fs.readdir(backupPath);
+    rdbFiles = filesAfterAgeRotation
       .filter(f => f.match(/^redis-backup-\d{8}-\d{6}(?:[+-]\d{4})?\.*\.rdb$/))
       .sort()
       .reverse();
@@ -267,17 +301,20 @@ export async function POST(request: NextRequest) {
       for (const file of toDelete) {
         const ts = file.match(/redis-backup-(\d{8}-\d{6}(?:[+-]\d{4})?)\.*\.rdb$/)?.[1];
         await fs.unlink(path.join(backupPath, file)).catch(() => {});
-        steps.push(`Removed ${file}`);
+        steps.push(`Removed (count) ${file}`);
         if (ts) {
           const bundleName = `redis-backup-${ts}.tgz`;
           const bundleAltName = `redis-backup-${ts}..tgz`;
           await fs.unlink(path.join(backupPath, bundleName)).catch(() => {});
           await fs.unlink(path.join(backupPath, bundleAltName)).catch(() => {});
-          steps.push(`Removed ${bundleName}`);
         }
       }
     } else {
-      steps.push(`${rdbFiles.length} backups found, no rotation needed`);
+      if (agedRemovedCount > 0) {
+        steps.push(`Removed ${agedRemovedCount} backup(s) by age; ${rdbFiles.length} backups remain`);
+      } else {
+        steps.push(`${rdbFiles.length} backups found, no rotation needed`);
+      }
     }
 
     return NextResponse.json({
@@ -298,6 +335,7 @@ export async function POST(request: NextRequest) {
         },
       },
       timestamp,
+      retentionDays,
       steps,
     });
   } catch (error) {

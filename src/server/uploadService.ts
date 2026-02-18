@@ -1,8 +1,12 @@
 import { createHash } from 'crypto';
 import sharp from 'sharp';
 import { transformApiImageToCached, upsertCachedImage } from '@/server/cloudflareImageCache';
-import { findDuplicatesByContentHash, findDuplicatesByOriginalUrl } from '@/server/duplicateDetector';
 import type { toDuplicateSummary } from '@/server/duplicateDetector';
+import {
+  evaluateUploadDeduplicationPolicy,
+  logContentHashDuplicate,
+  logOriginalUrlReuseWarning,
+} from '@/server/uploadDuplicatePolicy';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { enforceCloudflareMetadataLimit } from '@/utils/cloudflareMetadata';
 import { extractExifSummary } from '@/utils/exif';
@@ -87,29 +91,152 @@ const persistAspectMetadataFromBuffer = async (imageId: string, buffer: Buffer) 
   }
 };
 
-const shrinkIfNeeded = async (input: Buffer, type: string): Promise<Buffer> => {
-  if (input.byteLength <= MAX_IMAGE_BYTES) {
-    return input;
-  }
-  const transformer = sharp(input).rotate();
-  const metadata = await transformer.metadata();
-  const width = metadata.width || 4096;
-  const height = metadata.height || 4096;
-  const maxDimension = Math.max(width, height);
-  const targetDimension = Math.min(maxDimension, 4000);
-  const scale = targetDimension / maxDimension;
-  const resized = transformer.resize(Math.round(width * scale), Math.round(height * scale), { fit: 'inside' });
-  const format = type.includes('png') ? 'png' : 'jpeg';
-  const encoded = await resized.toFormat(format, { quality: 85 }).toBuffer();
-  if (encoded.byteLength <= MAX_IMAGE_BYTES) {
-    return encoded;
-  }
-  return resized.toFormat(format, { quality: 70 }).toBuffer();
+const IMAGE_EXTENSION_BY_TYPE: Record<string, string> = {
+  'image/webp': '.webp',
+  'image/jpeg': '.jpg',
+  'image/jpg': '.jpg',
+  'image/png': '.png',
+  'image/gif': '.gif',
+  'image/svg+xml': '.svg',
 };
+
+const withExtensionForType = (fileName: string, fileType: string) => {
+  const ext = IMAGE_EXTENSION_BY_TYPE[fileType];
+  if (!ext) return fileName;
+  if (fileName.toLowerCase().endsWith(ext)) return fileName;
+  if (/\.[a-z0-9]+$/i.test(fileName)) {
+    return fileName.replace(/\.[^.]+$/, ext);
+  }
+  return `${fileName}${ext}`;
+};
+
+export type PreparedUploadPayload = {
+  buffer: Buffer;
+  fileType: string;
+  fileName: string;
+  transformed: boolean;
+  bytesBefore: number;
+  bytesAfter: number;
+  note?: string;
+};
+
+export async function prepareImageForUpload({
+  buffer,
+  fileType,
+  fileName,
+  maxBytes = MAX_IMAGE_BYTES,
+}: {
+  buffer: Buffer;
+  fileType: string;
+  fileName: string;
+  maxBytes?: number;
+}): Promise<{ ok: true; data: PreparedUploadPayload } | { ok: false; error: string }> {
+  const bytesBefore = buffer.byteLength;
+  if (bytesBefore <= maxBytes) {
+    return {
+      ok: true,
+      data: {
+        buffer,
+        fileType,
+        fileName,
+        transformed: false,
+        bytesBefore,
+        bytesAfter: bytesBefore,
+      },
+    };
+  }
+
+  if (!fileType.startsWith('image/')) {
+    return { ok: false, error: 'File must be an image' };
+  }
+
+  const metadata = await sharp(buffer).metadata();
+  const sourceWidth = metadata.width ?? 0;
+  const sourceHeight = metadata.height ?? 0;
+  const canResize = Boolean(sourceWidth && sourceHeight);
+
+  const hasAlpha = metadata.hasAlpha === true;
+  const qualitySteps = [92, 88, 84, 80, 76, 72, 68, 64, 60];
+  const scaleSteps = canResize
+    ? [1, 0.96, 0.92, 0.88, 0.84, 0.8, 0.75, 0.7, 0.65, 0.6, 0.55, 0.5, 0.45, 0.4, 0.35, 0.3]
+    : [1];
+  const minDimension = 320;
+  const formatOrder = hasAlpha ? ['image/webp', 'image/jpeg'] : ['image/webp', 'image/jpeg'];
+
+  let smallestCandidate: { buffer: Buffer; type: string; quality: number; width: number; height: number } | null = null;
+
+  for (const scale of scaleSteps) {
+    const width = canResize ? Math.max(minDimension, Math.round(sourceWidth * scale)) : 0;
+    const height = canResize ? Math.max(minDimension, Math.round(sourceHeight * scale)) : 0;
+    const needsResize = canResize && (width !== sourceWidth || height !== sourceHeight);
+
+    for (const quality of qualitySteps) {
+      const passing: Array<{ buffer: Buffer; type: string }> = [];
+      for (const nextType of formatOrder) {
+        let pipeline = sharp(buffer).rotate();
+        if (canResize && needsResize) {
+          pipeline = pipeline.resize(width, height, {
+            fit: 'inside',
+            withoutEnlargement: true,
+          });
+        }
+        const encoded =
+          nextType === 'image/webp'
+            ? await pipeline.webp({ quality, effort: 4 }).toBuffer()
+            : await pipeline
+                .flatten({ background: '#ffffff' })
+                .jpeg({ quality, mozjpeg: true, chromaSubsampling: '4:4:4' })
+                .toBuffer();
+
+        if (!smallestCandidate || encoded.byteLength < smallestCandidate.buffer.byteLength) {
+          smallestCandidate = { buffer: encoded, type: nextType, quality, width, height };
+        }
+
+        if (encoded.byteLength <= maxBytes) {
+          passing.push({ buffer: encoded, type: nextType });
+        }
+      }
+
+      if (passing.length > 0) {
+        const chosen = passing.sort((a, b) => b.buffer.byteLength - a.buffer.byteLength)[0];
+        const note = canResize && needsResize
+          ? `Converted to ${chosen.type === 'image/webp' ? 'WebP' : 'JPEG'} and resized to ${width}x${height} (q${quality})`
+          : `Converted to ${chosen.type === 'image/webp' ? 'WebP' : 'JPEG'} (q${quality})`;
+        return {
+          ok: true,
+          data: {
+            buffer: chosen.buffer,
+            fileType: chosen.type,
+            fileName: withExtensionForType(fileName, chosen.type),
+            transformed: true,
+            bytesBefore,
+            bytesAfter: chosen.buffer.byteLength,
+            note,
+          },
+        };
+      }
+    }
+  }
+
+  if (smallestCandidate) {
+    return {
+      ok: false,
+      error: `Unable to reduce image below 10MB (smallest attempt: ${(smallestCandidate.buffer.byteLength / 1024 / 1024).toFixed(2)}MB).`,
+    };
+  }
+
+  return { ok: false, error: 'Unable to convert image for upload' };
+}
 
 export type UploadOutcome =
   | { ok: true; data: UploadSuccess }
-  | { ok: false; error: string; status: number; reason?: UploadFailure['reason']; duplicates?: Awaited<ReturnType<typeof findDuplicatesByOriginalUrl>> };
+  | {
+      ok: false;
+      error: string;
+      status: number;
+      reason?: UploadFailure['reason'];
+      duplicates?: Awaited<ReturnType<typeof evaluateUploadDeduplicationPolicy>>['contentHashDuplicates'];
+    };
 
 export async function uploadImageBuffer({
   buffer,
@@ -144,17 +271,10 @@ export async function uploadImageBuffer({
     return { ok: false, error: 'File must be an image', status: 400, reason: 'invalid-type' };
   }
 
-  if (!isSnagx && fileSize > MAX_IMAGE_BYTES) {
-    logIssue('Rejected oversized upload', { filename: fileName, bytes: fileSize, limit: MAX_IMAGE_BYTES });
-    return { ok: false, error: 'File size must be less than 10MB', status: 400, reason: 'too-large' };
-  }
-
   // Sanitize filename: truncate, clean, and handle Google Photos blobs
   let normalizedName = sanitizeFilename(fileName);
   const normalizedOriginalUrl = normalizeOriginalUrl(originalUrl);
   const normalizedSourceUrl = normalizeOriginalUrl(sourceUrl);
-  let duplicateMatches: Awaited<ReturnType<typeof findDuplicatesByContentHash>> = [];
-  let originalUrlDuplicates: Awaited<ReturnType<typeof findDuplicatesByOriginalUrl>> = [];
 
   let workingBuffer = buffer;
   let workingOriginalBuffer = originalBuffer;
@@ -181,40 +301,65 @@ export async function uploadImageBuffer({
     return { ok: false, error: 'File must be an image', status: 400, reason: 'invalid-type' };
   }
 
-  if (workingFileSize > MAX_IMAGE_BYTES) {
-    logIssue('Rejected oversized extracted image', { filename: normalizedName, bytes: workingFileSize, limit: MAX_IMAGE_BYTES });
-    return { ok: false, error: 'File size must be less than 10MB', status: 400, reason: 'too-large' };
+  const prepared = await prepareImageForUpload({
+    buffer: workingBuffer,
+    fileType: workingFileType,
+    fileName: normalizedName,
+    maxBytes: MAX_IMAGE_BYTES,
+  });
+  if (!prepared.ok) {
+    logIssue('Unable to prepare oversized image for upload', {
+      filename: normalizedName,
+      bytes: workingFileSize,
+      limit: MAX_IMAGE_BYTES,
+      error: prepared.error,
+    });
+    return { ok: false, error: prepared.error, status: 400, reason: 'too-large' };
+  }
+  workingBuffer = prepared.data.buffer;
+  workingFileType = prepared.data.fileType;
+  normalizedName = prepared.data.fileName;
+  workingFileSize = prepared.data.bytesAfter;
+  if (prepared.data.transformed) {
+    logIssue('Auto-optimized oversized upload', {
+      filename: normalizedName,
+      beforeBytes: prepared.data.bytesBefore,
+      afterBytes: prepared.data.bytesAfter,
+      note: prepared.data.note,
+      targetType: workingFileType,
+    });
   }
 
-  if (normalizedOriginalUrl) {
-    originalUrlDuplicates = await findDuplicatesByOriginalUrl(normalizedOriginalUrl, namespace);
-    if (originalUrlDuplicates.length) {
-      console.warn('[upload] Original URL already exists (not treated as duplicate)', {
-        originalUrl,
-        duplicateIds: originalUrlDuplicates.map(match => match.id),
-        folders: originalUrlDuplicates.map(match => match.folder || null)
-      });
-    }
-  }
-
-  const finalBuffer = await shrinkIfNeeded(workingBuffer, workingFileType);
+  const finalBuffer = workingBuffer;
   const contentHash = createHash('sha256').update(finalBuffer).digest('hex');
+  const deduplication = await evaluateUploadDeduplicationPolicy({
+    contentHash,
+    normalizedOriginalUrl,
+    namespace,
+  });
+  if (deduplication.originalUrlWarning) {
+    logOriginalUrlReuseWarning({
+      logScope: 'upload',
+      originalUrl,
+      warning: deduplication.originalUrlWarning,
+    });
+  }
+
   const exifSummary = await extractExifSummary(workingOriginalBuffer);
   const comfyExtraction = await extractComfyWorkflowMetadata(workingOriginalBuffer, { mimeType: workingFileType });
 
-  duplicateMatches = await findDuplicatesByContentHash(contentHash, namespace);
-  if (duplicateMatches.length) {
-    console.warn('[upload] Duplicate content hash detected', {
+  if (deduplication.contentHashDuplicates.length) {
+    logContentHashDuplicate({
+      logScope: 'upload',
       contentHash,
-      duplicateIds: duplicateMatches.map(match => match.id),
-      folders: duplicateMatches.map(match => match.folder || null)
+      duplicates: deduplication.contentHashDuplicates,
     });
     return {
       ok: false,
       error: 'Duplicate image content detected',
       status: 409,
       reason: 'duplicate',
-      duplicates: duplicateMatches
+      duplicates: deduplication.contentHashDuplicates
     };
   }
 
@@ -314,6 +459,7 @@ export async function uploadImageBuffer({
     filename: imageData.filename,
     uploaded: imageData.uploaded,
     variants: imageData.variants,
+    size: imageData.size,
     meta: baseMeta
   });
   upsertCachedImage(primaryCached);
@@ -340,7 +486,7 @@ export async function uploadImageBuffer({
   const autoEmbeddings = await queueAutoEmbeddingsForImage(primaryCached);
 
   let webpVariantId: string | undefined;
-  if (fileType === 'image/svg+xml') {
+  if (workingFileType === 'image/svg+xml') {
     try {
       const webpBuffer = await sharp(finalBuffer).webp({ quality: 85 }).toBuffer();
       const webpName = normalizedName.replace(/\.svg$/i, '') + '.webp';
@@ -380,6 +526,7 @@ export async function uploadImageBuffer({
             filename: webpResult.filename,
             uploaded: webpResult.uploaded,
             variants: webpResult.variants,
+            size: webpResult.size,
             meta: webpResult.meta && typeof webpResult.meta === 'object'
               ? { ...webpMetadataPayload, ...(webpResult.meta as Record<string, unknown>) }
               : webpMetadataPayload
@@ -425,6 +572,7 @@ export async function uploadImageBuffer({
           filename: imageData.filename,
           uploaded: imageData.uploaded,
           variants: imageData.variants,
+          size: imageData.size,
           meta: updatedMetadata
         });
         upsertCachedImage(updatedPrimary);

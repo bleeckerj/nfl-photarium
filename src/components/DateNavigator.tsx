@@ -1,165 +1,315 @@
 'use client';
 
-import { useMemo } from 'react';
-import { Calendar } from 'lucide-react';
-import MonoSelect from './MonoSelect';
-
-/**
- * DateNavigator - Month filter for gallery images
- * 
- * This component provides:
- * 1. Month dropdown - filter to show only images from a specific month
- * 2. "All uploads" option to clear the filter
- * 
- * Architecture:
- * - Emits a date filter (year/month) via onFilterChange callback
- * - Parent component is responsible for actually filtering the images
- * - null filter means "show all"
- * 
- * HTML Structure IDs:
- * - #date-navigator-container - outer wrapper
- * - #date-navigator-month-section - month dropdown area
- */
-
-export interface DateFilter {
-  year: number;
-  month: number; // 0-11
-}
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
+import type { DateFilter } from '@/components/gallery/types';
+import { formatDateFilterLabel, normalizeDateRange, parseDateKey, toDateKey } from '@/components/gallery/dateFilter';
 
 interface DateNavigatorProps {
-  /** Array of ALL images (unfiltered) with 'uploaded' date strings */
   allImages: Array<{ uploaded: string }>;
-  /** Current date filter (null means no filter / show all) */
   currentFilter: DateFilter | null;
-  /** Callback when user changes the date filter */
   onFilterChange: (filter: DateFilter | null) => void;
 }
 
-interface MonthGroup {
-  /** Display label, e.g. "January 2026" */
-  label: string;
-  /** Sort key for ordering, e.g. "2026-01" */
-  key: string;
-  /** Number of images in this month */
-  count: number;
-  /** The month's year */
-  year: number;
-  /** The month (0-11) */
-  month: number;
-}
-
 const MONTH_NAMES = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December'
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
 ];
 
-/**
- * Groups images by month and counts them.
- */
-const computeMonthGroups = (
-  images: Array<{ uploaded: string }>
-): MonthGroup[] => {
-  if (!images.length) return [];
+const WEEKDAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 
-  const monthMap = new Map<string, { 
-    count: number; 
-    year: number; 
-    month: number 
-  }>();
-
-  images.forEach((image) => {
-    const date = new Date(image.uploaded);
-    const year = date.getFullYear();
-    const month = date.getMonth();
-    const key = `${year}-${String(month + 1).padStart(2, '0')}`;
-
-    const existing = monthMap.get(key);
-    if (existing) {
-      existing.count++;
-    } else {
-      monthMap.set(key, { count: 1, year, month });
-    }
-  });
-
-  const groups: MonthGroup[] = [];
-
-  monthMap.forEach((data, key) => {
-    groups.push({
-      key,
-      label: `${MONTH_NAMES[data.month]} ${data.year}`,
-      count: data.count,
-      year: data.year,
-      month: data.month
-    });
-  });
-
-  // Sort by date descending (newest first)
-  groups.sort((a, b) => b.key.localeCompare(a.key));
-
-  return groups;
+const isDateKeyInRange = (key: string, start: string, end: string): boolean => {
+  const left = start <= end ? start : end;
+  const right = start <= end ? end : start;
+  return key >= left && key <= right;
 };
 
-/**
- * Converts a DateFilter to a key string for the dropdown
- */
-const filterToKey = (filter: DateFilter | null): string => {
-  if (!filter) return '__all__';
-  return `${filter.year}-${String(filter.month + 1).padStart(2, '0')}`;
+const buildCalendarGrid = (year: number, month: number): Date[] => {
+  const firstOfMonth = new Date(year, month, 1);
+  const firstWeekday = firstOfMonth.getDay();
+  const firstCellDate = new Date(year, month, 1 - firstWeekday);
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(firstCellDate);
+    date.setDate(firstCellDate.getDate() + index);
+    return date;
+  });
+};
+
+const collectYearOptions = (
+  allImages: Array<{ uploaded: string }>,
+  fallbackYear: number
+): number[] => {
+  const years = new Set<number>();
+  allImages.forEach((image) => {
+    const date = new Date(image.uploaded);
+    if (!Number.isNaN(date.getTime())) {
+      years.add(date.getFullYear());
+    }
+  });
+  years.add(fallbackYear);
+  years.add(fallbackYear - 1);
+  years.add(fallbackYear + 1);
+  return Array.from(years).sort((a, b) => a - b);
 };
 
 export default function DateNavigator({
   allImages,
   currentFilter,
-  onFilterChange
+  onFilterChange,
 }: DateNavigatorProps) {
-  // Month groups from all images (not filtered)
-  const monthGroups = useMemo(
-    () => computeMonthGroups(allImages),
-    [allImages]
+  const normalizedCurrent = useMemo(
+    () => (currentFilter ? normalizeDateRange(currentFilter) : null),
+    [currentFilter]
   );
 
-  // Build options for MonoSelect - include "All uploads" at top
-  const monthOptions = useMemo(
-    () => [
-      { value: '__all__', label: `All uploads (${allImages.length})` },
-      ...monthGroups.map((group) => ({
-        value: group.key,
-        label: `${group.label} (${group.count})`
-      }))
-    ],
-    [monthGroups, allImages.length]
+  const latestUploadDate = useMemo(() => {
+    let latest: Date | null = null;
+    allImages.forEach((image) => {
+      const candidate = new Date(image.uploaded);
+      if (Number.isNaN(candidate.getTime())) return;
+      if (!latest || candidate.getTime() > latest.getTime()) {
+        latest = candidate;
+      }
+    });
+    return latest ?? new Date();
+  }, [allImages]);
+
+  const [isOpen, setIsOpen] = useState(false);
+  const [viewYear, setViewYear] = useState(latestUploadDate.getFullYear());
+  const [viewMonth, setViewMonth] = useState(latestUploadDate.getMonth());
+  const [draftStartDate, setDraftStartDate] = useState<string | null>(null);
+  const [draftEndDate, setDraftEndDate] = useState<string | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  const imageCountByDate = useMemo(() => {
+    const map = new Map<string, number>();
+    allImages.forEach((image) => {
+      const uploaded = new Date(image.uploaded);
+      if (Number.isNaN(uploaded.getTime())) return;
+      const key = toDateKey(uploaded);
+      map.set(key, (map.get(key) || 0) + 1);
+    });
+    return map;
+  }, [allImages]);
+
+  const yearOptions = useMemo(
+    () => collectYearOptions(allImages, viewYear),
+    [allImages, viewYear]
   );
 
-  if (monthGroups.length === 0) {
-    return null;
-  }
+  useEffect(() => {
+    if (!isOpen) return;
 
-  const handleMonthChange = (selectedKey: string) => {
-    if (selectedKey === '__all__') {
+    const nextStart = normalizedCurrent?.startDate ?? null;
+    const nextEnd = normalizedCurrent?.endDate ?? null;
+    setDraftStartDate(nextStart);
+    setDraftEndDate(nextEnd);
+
+    const anchor = nextStart ? parseDateKey(nextStart) : latestUploadDate;
+    if (anchor) {
+      setViewYear(anchor.getFullYear());
+      setViewMonth(anchor.getMonth());
+    }
+  }, [isOpen, latestUploadDate, normalizedCurrent]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (rootRef.current && !rootRef.current.contains(target)) {
+        setIsOpen(false);
+      }
+    };
+    window.addEventListener('mousedown', handlePointerDown);
+    return () => window.removeEventListener('mousedown', handlePointerDown);
+  }, [isOpen]);
+
+  const dayCells = useMemo(() => buildCalendarGrid(viewYear, viewMonth), [viewYear, viewMonth]);
+
+  const monthLabel = `${MONTH_NAMES[viewMonth]} ${viewYear}`;
+
+  const selectedRange = useMemo(() => {
+    if (!draftStartDate) return null;
+    const endDate = draftEndDate || draftStartDate;
+    return normalizeDateRange({ startDate: draftStartDate, endDate });
+  }, [draftEndDate, draftStartDate]);
+
+  const applyDraftRange = () => {
+    if (!selectedRange) {
       onFilterChange(null);
+      setIsOpen(false);
       return;
     }
-    const selectedGroup = monthGroups.find((g) => g.key === selectedKey);
-    if (selectedGroup) {
-      onFilterChange({ year: selectedGroup.year, month: selectedGroup.month });
+    onFilterChange(selectedRange);
+    setIsOpen(false);
+  };
+
+  const clearRange = () => {
+    setDraftStartDate(null);
+    setDraftEndDate(null);
+    onFilterChange(null);
+    setIsOpen(false);
+  };
+
+  const handleDaySelect = (dateKey: string) => {
+    if (!draftStartDate || (draftStartDate && draftEndDate)) {
+      setDraftStartDate(dateKey);
+      setDraftEndDate(null);
+      return;
+    }
+    if (draftStartDate && !draftEndDate) {
+      setDraftEndDate(dateKey);
     }
   };
 
+  const moveMonth = (delta: number) => {
+    const next = new Date(viewYear, viewMonth + delta, 1);
+    setViewYear(next.getFullYear());
+    setViewMonth(next.getMonth());
+  };
+
   return (
-    <div id="date-navigator-container" className="flex items-center gap-3 flex-wrap">
-      <div id="date-navigator-month-section" className="flex items-center gap-2">
-        <Calendar className="h-4 w-4 text-gray-400" aria-hidden="true" />
-        <span className="text-[0.65em] font-mono text-gray-500 uppercase tracking-wide">Uploaded</span>
-        <MonoSelect
-          id="date-navigator-month-select"
-          value={filterToKey(currentFilter)}
-          options={monthOptions}
-          onChange={handleMonthChange}
-          placeholder="Select month…"
-          size="sm"
-          className="min-w-[160px]"
-        />
-      </div>
+    <div id="date-navigator-container" className="relative" ref={rootRef}>
+      <button
+        type="button"
+        onClick={() => setIsOpen((prev) => !prev)}
+        className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-2 py-1 text-[0.65rem] font-mono text-gray-700 hover:bg-gray-50"
+        title="Filter by upload date or date range"
+      >
+        <Calendar className="h-3.5 w-3.5 text-gray-500" />
+        <span className="max-w-[180px] truncate">{formatDateFilterLabel(normalizedCurrent)}</span>
+      </button>
+
+      {isOpen && (
+        <div className="absolute right-0 top-full z-[4000] mt-2 w-[276px] rounded-lg border border-gray-200 bg-white p-3 shadow-xl">
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => moveMonth(-1)}
+              className="rounded border border-gray-200 p-1 text-gray-600 hover:bg-gray-50"
+              aria-label="Previous month"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </button>
+            <div className="text-[0.68rem] font-mono font-medium text-gray-800">{monthLabel}</div>
+            <button
+              type="button"
+              onClick={() => moveMonth(1)}
+              className="rounded border border-gray-200 p-1 text-gray-600 hover:bg-gray-50"
+              aria-label="Next month"
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          <div className="mt-2 flex items-center gap-2">
+            <select
+              value={String(viewMonth)}
+              onChange={(event) => setViewMonth(Number(event.target.value))}
+              className="w-1/2 rounded border border-gray-300 bg-white px-2 py-1 text-[0.65rem] font-mono"
+            >
+              {MONTH_NAMES.map((monthName, index) => (
+                <option key={monthName} value={index}>
+                  {monthName}
+                </option>
+              ))}
+            </select>
+            <select
+              value={String(viewYear)}
+              onChange={(event) => setViewYear(Number(event.target.value))}
+              className="w-1/2 rounded border border-gray-300 bg-white px-2 py-1 text-[0.65rem] font-mono"
+            >
+              {yearOptions.map((year) => (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="mt-2 grid grid-cols-7 gap-1 text-center text-[0.6rem] font-mono text-gray-500">
+            {WEEKDAY_LABELS.map((label) => (
+              <div key={label}>{label}</div>
+            ))}
+          </div>
+
+          <div className="mt-1 grid grid-cols-7 gap-1">
+            {dayCells.map((day) => {
+              const dayKey = toDateKey(day);
+              const inCurrentMonth = day.getMonth() === viewMonth;
+              const isSelectedStart = Boolean(draftStartDate && dayKey === draftStartDate);
+              const isSelectedEnd = Boolean((draftEndDate || draftStartDate) && dayKey === (draftEndDate || draftStartDate));
+              const inRange = Boolean(
+                draftStartDate &&
+                  (draftEndDate || draftStartDate) &&
+                  isDateKeyInRange(dayKey, draftStartDate, draftEndDate || draftStartDate)
+              );
+              const uploadCount = imageCountByDate.get(dayKey) || 0;
+
+              return (
+                <button
+                  key={dayKey}
+                  type="button"
+                  onClick={() => handleDaySelect(dayKey)}
+                  className={[
+                    'relative h-8 rounded text-[0.62rem] font-mono transition',
+                    inCurrentMonth ? 'text-gray-800' : 'text-gray-400',
+                    inRange ? 'bg-blue-100' : 'hover:bg-gray-100',
+                    isSelectedStart || isSelectedEnd ? 'bg-blue-600 text-white hover:bg-blue-600' : '',
+                  ].join(' ')}
+                  title={uploadCount > 0 ? `${uploadCount} upload${uploadCount === 1 ? '' : 's'}` : dayKey}
+                >
+                  {day.getDate()}
+                  {uploadCount > 0 && (
+                    <span
+                      className={[
+                        'absolute bottom-1 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full',
+                        isSelectedStart || isSelectedEnd ? 'bg-white' : 'bg-blue-500',
+                      ].join(' ')}
+                    />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-2 rounded border border-gray-200 bg-gray-50 px-2 py-1 text-[0.62rem] font-mono text-gray-600">
+            {!draftStartDate
+              ? 'Select a date. Select another date to make a range.'
+              : draftEndDate
+                ? `Range: ${formatDateFilterLabel({ startDate: draftStartDate, endDate: draftEndDate })}`
+                : `Single day: ${formatDateFilterLabel({ startDate: draftStartDate, endDate: draftStartDate })}`}
+          </div>
+
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={clearRange}
+              className="px-2 py-1 text-[0.62rem] font-mono text-red-700 hover:text-red-800"
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              onClick={applyDraftRange}
+              disabled={!draftStartDate}
+              className="rounded border border-blue-600 bg-blue-600 px-2 py-1 text-[0.62rem] font-mono text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Apply
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

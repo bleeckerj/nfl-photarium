@@ -19,7 +19,7 @@ export function RedisInfoModal({ isOpen, onClose }: RedisInfoModalProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] px-4 animate-in fade-in duration-200">
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] px-4 animate-in fade-in duration-200">
       <div 
         className="bg-white rounded-lg shadow-2xl max-w-2xl w-full flex flex-col max-h-[90vh] overflow-hidden animate-in zoom-in-95 duration-200"
         role="dialog"

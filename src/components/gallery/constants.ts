@@ -5,10 +5,18 @@
  */
 
 import { IMAGE_VARIANTS } from '@/utils/imageUtils';
+import type { GridSize } from './types';
 
 // Pagination
 export const DEFAULT_PAGE_SIZE = 30;
 export const PAGE_SIZE_OPTIONS = [12, 24, 30, 48, 60, 90, 120];
+export const DEFAULT_GRID_SIZE: GridSize = 'medium';
+export const GRID_SIZE_OPTIONS: Array<{ value: GridSize; label: string }> = [
+  { value: 'small', label: 'Small' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'large', label: 'Large' },
+  { value: 'xlarge', label: 'X-Large' },
+];
 
 // Local storage keys
 export const STORAGE_KEYS = {
@@ -49,10 +57,12 @@ export const DEFAULT_PREFERENCES = {
   onlyCanonical: false,
   respectAspectRatio: false,
   onlyWithVariants: false,
+  showComfyOnly: false,
   selectedFolder: 'all',
   selectedTag: '',
   searchTerm: '',
   viewMode: 'grid' as const,
+  gridSize: DEFAULT_GRID_SIZE,
   filtersCollapsed: false,
   bulkFolderInput: '',
   bulkFolderMode: 'existing' as const,

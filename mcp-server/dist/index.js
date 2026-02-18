@@ -39,16 +39,24 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, } from '@modelcontextprotocol/sdk/types.js';
 import { promises as fs } from 'node:fs';
+import { createServer } from 'node:http';
 import path from 'node:path';
+import { inflateSync } from 'node:zlib';
 // Configuration
 const BASE_URL = process.env.PHOTARIUM_BASE_URL || 'http://localhost:3000';
 // API Client
 async function apiRequest(endpoint, options = {}) {
     const url = `${BASE_URL}${endpoint}`;
+    const baseHeaders = {
+        'Content-Type': 'application/json',
+        'x-photarium-source': 'mcp',
+        'x-photarium-component': 'photarium-mcp-server',
+        'x-photarium-trigger': 'mcp',
+    };
     const response = await fetch(url, {
         ...options,
         headers: {
-            'Content-Type': 'application/json',
+            ...baseHeaders,
             ...options.headers,
         },
     });
@@ -60,7 +68,18 @@ async function apiRequest(endpoint, options = {}) {
 }
 async function apiRequestRaw(endpoint, options = {}) {
     const url = `${BASE_URL}${endpoint}`;
-    const response = await fetch(url, options);
+    const baseHeaders = {
+        'x-photarium-source': 'mcp',
+        'x-photarium-component': 'photarium-mcp-server',
+        'x-photarium-trigger': 'mcp',
+    };
+    const response = await fetch(url, {
+        ...options,
+        headers: {
+            ...baseHeaders,
+            ...options.headers,
+        },
+    });
     if (!response.ok) {
         const error = await response.text();
         throw new Error(`API error (${response.status}): ${error}`);
@@ -180,14 +199,203 @@ async function listImages(options) {
         total: images.length,
     };
 }
+function _toRecord(value) {
+    if (!value)
+        return {};
+    if (typeof value === 'string') {
+        try {
+            const parsed = JSON.parse(value);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                return parsed;
+            }
+        }
+        catch {
+            return {};
+        }
+    }
+    if (typeof value === 'object' && !Array.isArray(value)) {
+        return value;
+    }
+    return {};
+}
+function _pickString(...values) {
+    for (const value of values) {
+        if (typeof value === 'string') {
+            const trimmed = value.trim();
+            if (trimmed)
+                return trimmed;
+        }
+    }
+    return undefined;
+}
+function _pickNumber(...values) {
+    for (const value of values) {
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            return value;
+        }
+        if (typeof value === 'string') {
+            const parsed = Number(value);
+            if (Number.isFinite(parsed))
+                return parsed;
+        }
+    }
+    return undefined;
+}
+function _normalizeDimensions(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+        return undefined;
+    const obj = value;
+    const width = _pickNumber(obj.width, obj.w);
+    const height = _pickNumber(obj.height, obj.h);
+    if (width && height) {
+        return { width, height };
+    }
+    return undefined;
+}
+function _deriveAspectRatio(dimensions) {
+    if (!dimensions)
+        return undefined;
+    const { width, height } = dimensions;
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+        return undefined;
+    }
+    const gcd = (a, b) => (b === 0 ? a : gcd(b, a % b));
+    const g = gcd(Math.round(width), Math.round(height));
+    if (!g)
+        return undefined;
+    return `${Math.round(width / g)}:${Math.round(height / g)}`;
+}
+function _formatFileSize(bytes) {
+    if (bytes === undefined || !Number.isFinite(bytes) || bytes < 0)
+        return undefined;
+    if (bytes < 1024)
+        return `${bytes} B`;
+    const units = ['KB', 'MB', 'GB', 'TB'];
+    let value = bytes / 1024;
+    let unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+        value /= 1024;
+        unitIndex += 1;
+    }
+    const rounded = value >= 10 ? value.toFixed(1) : value.toFixed(2);
+    return `${rounded} ${units[unitIndex]}`;
+}
 async function getImage(imageId) {
     try {
         const data = await apiRequest(`/api/images/${imageId}`);
-        return formatImageResult(data.image);
+        const rawImage = data.image;
+        const normalized = formatImageResult(rawImage);
+        const metadata = _toRecord(rawImage.meta);
+        const dimensions = normalized.dimensions
+            || _normalizeDimensions(rawImage.dimensions)
+            || _normalizeDimensions(metadata.dimensions)
+            || (() => {
+                const width = _pickNumber(rawImage.width, metadata.width);
+                const height = _pickNumber(rawImage.height, metadata.height);
+                return width && height ? { width, height } : undefined;
+            })();
+        const aspectRatio = _pickString(normalized.aspectRatio, rawImage.aspectRatio, metadata.aspectRatio) || _deriveAspectRatio(dimensions);
+        const fileSizeBytes = _pickNumber(rawImage.size, rawImage.fileSize, rawImage.bytes, metadata.size, metadata.fileSize, metadata.bytes);
+        const contentType = _pickString(rawImage.type, rawImage.contentType, rawImage.mimeType, metadata.type, metadata.contentType, metadata.mimeType);
+        return {
+            ...normalized,
+            uploadedAt: _pickString(rawImage.uploaded, rawImage.uploadedAt, rawImage.createdAt, rawImage.updatedAt, metadata.uploadedAt, metadata.updatedAt) || null,
+            folder: normalized.folder || _pickString(metadata.folder) || null,
+            tags: normalized.tags || (Array.isArray(metadata.tags) ? metadata.tags : []),
+            displayName: _pickString(rawImage.displayName, metadata.displayName) || null,
+            linkedAssetId: _pickString(rawImage.linkedAssetId, metadata.linkedAssetId) || null,
+            variationSort: _pickNumber(rawImage.variationSort, metadata.variationSort) ?? null,
+            generatedBy: _pickString(rawImage.generatedBy, metadata.generatedBy) || null,
+            contentHash: _pickString(rawImage.contentHash, metadata.contentHash) || null,
+            fileSizeBytes: fileSizeBytes ?? null,
+            fileSize: _formatFileSize(fileSizeBytes) || null,
+            contentType: contentType || null,
+            dimensions: dimensions || null,
+            aspectRatio: aspectRatio || null,
+            metadata,
+            raw: rawImage,
+        };
     }
     catch {
         return null;
     }
+}
+async function getImageMetadata(imageId) {
+    let rawImage;
+    try {
+        const data = await apiRequest(`/api/images/${imageId}`);
+        rawImage = data.image;
+    }
+    catch {
+        return null;
+    }
+    const normalized = formatImageResult(rawImage);
+    const isVariant = Boolean(normalized.parentId);
+    const familyRootId = isVariant ? normalized.parentId : normalized.id;
+    let familyVariantCount = null;
+    try {
+        const { images } = await listImages({ limit: 0 });
+        familyVariantCount = images.filter((img) => (img.parentId || null) === familyRootId).length;
+    }
+    catch {
+        familyVariantCount = null;
+    }
+    let extrasRecord = null;
+    try {
+        const extras = await getExtras(imageId);
+        extrasRecord = extras.record;
+    }
+    catch {
+        extrasRecord = null;
+    }
+    let promptText = null;
+    try {
+        const promptResult = await getPromptRecord(imageId);
+        const record = (promptResult.record || {});
+        const candidate = record.prompt;
+        promptText = typeof candidate === 'string' ? candidate : null;
+    }
+    catch {
+        promptText = null;
+    }
+    const tags = normalized.tags || [];
+    const variants = normalized.variants;
+    const variantUrls = Array.isArray(variants)
+        ? variants
+        : variants && typeof variants === 'object'
+            ? Object.values(variants)
+            : [];
+    return {
+        id: normalized.id,
+        filename: normalized.filename,
+        url: normalized.url,
+        uploadedAt: rawImage.createdAt
+            || rawImage.uploaded
+            || rawImage.uploadedAt
+            || rawImage.updatedAt
+            || null,
+        folder: normalized.folder || null,
+        namespace: normalized.namespace || null,
+        tags,
+        description: normalized.description || null,
+        altDescription: extrasRecord?.altText || normalized.altTag || null,
+        prompt: promptText,
+        isVariant,
+        parentId: normalized.parentId || null,
+        familyRootId,
+        variantCount: familyVariantCount,
+        variantUrls,
+        dimensions: normalized.dimensions || null,
+        aspectRatio: normalized.aspectRatio || null,
+        dominantColors: normalized.dominantColors || null,
+        averageColor: normalized.averageColor || null,
+        hasClipEmbedding: normalized.hasClipEmbedding ?? null,
+        hasColorEmbedding: normalized.hasColorEmbedding ?? null,
+        originalUrl: normalized.originalUrl || null,
+        sourceUrl: normalized.sourceUrl || null,
+        extras: extrasRecord,
+        raw: rawImage,
+    };
 }
 async function uploadFromUrl(url, options = {}) {
     try {
@@ -432,6 +640,340 @@ async function downloadImageById(imageId, variant) {
         base64,
     };
 }
+async function downloadOriginalImageById(imageId) {
+    try {
+        const result = await downloadImageById(imageId, 'original');
+        return {
+            ...result,
+            variantUsed: 'original',
+            fallbackUsed: false,
+        };
+    }
+    catch (error) {
+        const fallback = await downloadImageById(imageId);
+        return {
+            ...fallback,
+            variantUsed: 'default',
+            fallbackUsed: true,
+            fallbackReason: error instanceof Error ? error.message : String(error),
+        };
+    }
+}
+function _tryParseJson(value) {
+    try {
+        return JSON.parse(value);
+    }
+    catch {
+        return null;
+    }
+}
+function _extractFromMetadataMap(metadata, sourceLabel) {
+    const workflowKeys = ['workflow', 'comfy_workflow', 'comfyui_workflow'];
+    const promptKeys = ['prompt', 'comfy_prompt', 'parameters'];
+    let workflow = null;
+    for (const key of workflowKeys) {
+        if (metadata[key]) {
+            workflow = _tryParseJson(metadata[key]);
+            if (workflow !== null)
+                break;
+        }
+    }
+    let prompt = null;
+    for (const key of promptKeys) {
+        if (metadata[key]) {
+            prompt = _tryParseJson(metadata[key]);
+            if (prompt !== null)
+                break;
+        }
+    }
+    if (!workflow || !prompt) {
+        for (const value of Object.values(metadata)) {
+            const parsed = _tryParseJson(value.trim());
+            if (!parsed || typeof parsed !== 'object')
+                continue;
+            const obj = parsed;
+            if (!workflow && obj.workflow !== undefined)
+                workflow = obj.workflow;
+            if (!prompt && obj.prompt !== undefined)
+                prompt = obj.prompt;
+            if (workflow && prompt)
+                break;
+        }
+    }
+    if (!workflow && !prompt) {
+        return {
+            found: false,
+            workflow: null,
+            prompt: null,
+            rawMetadata: metadata,
+            message: `No Comfy workflow/prompt JSON metadata found in ${sourceLabel}.`,
+        };
+    }
+    return {
+        found: true,
+        workflow,
+        prompt,
+        rawMetadata: metadata,
+    };
+}
+function _extractExifText(exifBuffer) {
+    const out = {};
+    if (exifBuffer.length < 14)
+        return out;
+    let tiffStart = 0;
+    if (exifBuffer.subarray(0, 6).toString('ascii') === 'Exif\x00\x00') {
+        tiffStart = 6;
+    }
+    if (tiffStart + 8 > exifBuffer.length)
+        return out;
+    const endian = exifBuffer.toString('ascii', tiffStart, tiffStart + 2);
+    const le = endian === 'II';
+    if (!le && endian !== 'MM')
+        return out;
+    const u16 = (off) => (le ? exifBuffer.readUInt16LE(off) : exifBuffer.readUInt16BE(off));
+    const u32 = (off) => (le ? exifBuffer.readUInt32LE(off) : exifBuffer.readUInt32BE(off));
+    const firstIfdRel = u32(tiffStart + 4);
+    const typeSizes = { 1: 1, 2: 1, 3: 2, 4: 4, 7: 1 };
+    const readIfd = (ifdRel, prefix = 'ifd') => {
+        const ifdOff = tiffStart + ifdRel;
+        if (ifdOff + 2 > exifBuffer.length)
+            return;
+        const count = u16(ifdOff);
+        for (let i = 0; i < count; i += 1) {
+            const entryOff = ifdOff + 2 + i * 12;
+            if (entryOff + 12 > exifBuffer.length)
+                break;
+            const tag = u16(entryOff);
+            const type = u16(entryOff + 2);
+            const valueCount = u32(entryOff + 4);
+            const valueOrOffset = u32(entryOff + 8);
+            const unit = typeSizes[type] || 1;
+            const byteLen = valueCount * unit;
+            let raw;
+            if (byteLen <= 4) {
+                raw = exifBuffer.subarray(entryOff + 8, entryOff + 8 + byteLen);
+            }
+            else {
+                const dataOff = tiffStart + valueOrOffset;
+                if (dataOff + byteLen > exifBuffer.length)
+                    continue;
+                raw = exifBuffer.subarray(dataOff, dataOff + byteLen);
+            }
+            let decoded = null;
+            if (type === 2) {
+                decoded = raw.toString('utf8').replace(/\x00+$/g, '').trim();
+            }
+            else if (type === 7 || type === 1) {
+                if (tag === 0x9286 && raw.length > 8) {
+                    const payload = raw.subarray(8);
+                    decoded = payload.toString('utf8').replace(/\x00+$/g, '').trim();
+                }
+                else {
+                    decoded = raw.toString('utf8').replace(/\x00+$/g, '').trim();
+                }
+            }
+            if (decoded) {
+                out[`${prefix}_tag_${tag.toString(16)}`] = decoded;
+                if (tag === 0x010e)
+                    out.image_description = decoded;
+                if (tag === 0x9286)
+                    out.user_comment = decoded;
+            }
+            if (tag === 0x8769 && valueOrOffset > 0) {
+                readIfd(valueOrOffset, `${prefix}_exif`);
+            }
+        }
+    };
+    if (firstIfdRel > 0)
+        readIfd(firstIfdRel);
+    return out;
+}
+function extractComfyMetadataFromJpeg(buffer) {
+    const metadata = {};
+    if (buffer.length < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8) {
+        return {
+            found: false,
+            workflow: null,
+            prompt: null,
+            rawMetadata: metadata,
+            message: 'Not a JPEG file.',
+        };
+    }
+    let offset = 2;
+    let commentIndex = 0;
+    while (offset + 4 <= buffer.length) {
+        if (buffer[offset] !== 0xff) {
+            offset += 1;
+            continue;
+        }
+        while (offset < buffer.length && buffer[offset] === 0xff)
+            offset += 1;
+        if (offset >= buffer.length)
+            break;
+        const marker = buffer[offset];
+        offset += 1;
+        if (marker === 0xd9 || marker === 0xda)
+            break;
+        if (offset + 2 > buffer.length)
+            break;
+        const len = buffer.readUInt16BE(offset);
+        if (len < 2 || offset + len > buffer.length)
+            break;
+        const data = buffer.subarray(offset + 2, offset + len);
+        if (marker === 0xe1) {
+            if (data.subarray(0, 6).toString('ascii') === 'Exif\x00\x00') {
+                Object.assign(metadata, _extractExifText(data));
+            }
+            else if (data.subarray(0, 29).toString('ascii').startsWith('http://ns.adobe.com/xap/1.0/')) {
+                const xmp = data.subarray(29).toString('utf8').replace(/\x00+$/g, '').trim();
+                if (xmp)
+                    metadata.xmp = xmp;
+            }
+        }
+        else if (marker === 0xfe) {
+            const txt = data.toString('utf8').replace(/\x00+$/g, '').trim();
+            if (txt)
+                metadata[`comment_${commentIndex++}`] = txt;
+        }
+        offset += len;
+    }
+    return _extractFromMetadataMap(metadata, 'JPEG metadata segments');
+}
+function extractComfyMetadataFromWebp(buffer) {
+    const metadata = {};
+    if (buffer.length < 12
+        || buffer.subarray(0, 4).toString('ascii') !== 'RIFF'
+        || buffer.subarray(8, 12).toString('ascii') !== 'WEBP') {
+        return {
+            found: false,
+            workflow: null,
+            prompt: null,
+            rawMetadata: metadata,
+            message: 'Not a WebP file.',
+        };
+    }
+    let offset = 12;
+    while (offset + 8 <= buffer.length) {
+        const chunkType = buffer.subarray(offset, offset + 4).toString('ascii');
+        const chunkSize = buffer.readUInt32LE(offset + 4);
+        const dataOff = offset + 8;
+        const dataEnd = dataOff + chunkSize;
+        if (dataEnd > buffer.length)
+            break;
+        const data = buffer.subarray(dataOff, dataEnd);
+        if (chunkType === 'EXIF') {
+            Object.assign(metadata, _extractExifText(data));
+        }
+        else if (chunkType === 'XMP ') {
+            const xmp = data.toString('utf8').replace(/\x00+$/g, '').trim();
+            if (xmp)
+                metadata.xmp = xmp;
+        }
+        offset = dataEnd + (chunkSize % 2);
+    }
+    return _extractFromMetadataMap(metadata, 'WebP EXIF/XMP chunks');
+}
+function extractComfyMetadataFromPng(buffer) {
+    const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+    if (buffer.length < 8 || !buffer.subarray(0, 8).equals(pngSignature)) {
+        return {
+            found: false,
+            workflow: null,
+            prompt: null,
+            rawMetadata: {},
+            message: 'Not a PNG file; Comfy workflow extraction currently supports PNG embedded metadata.',
+        };
+    }
+    const metadata = {};
+    let offset = 8;
+    while (offset + 8 <= buffer.length) {
+        const length = buffer.readUInt32BE(offset);
+        offset += 4;
+        const chunkType = buffer.toString('ascii', offset, offset + 4);
+        offset += 4;
+        if (offset + length + 4 > buffer.length) {
+            break;
+        }
+        const chunkData = buffer.subarray(offset, offset + length);
+        offset += length;
+        offset += 4; // crc
+        if (chunkType === 'tEXt') {
+            const sep = chunkData.indexOf(0);
+            if (sep > 0) {
+                const key = chunkData.subarray(0, sep).toString('utf8');
+                const value = chunkData.subarray(sep + 1).toString('utf8');
+                metadata[key] = value;
+            }
+        }
+        else if (chunkType === 'zTXt') {
+            const sep = chunkData.indexOf(0);
+            if (sep > 0 && sep + 2 <= chunkData.length) {
+                const key = chunkData.subarray(0, sep).toString('utf8');
+                const compressed = chunkData.subarray(sep + 2);
+                try {
+                    metadata[key] = inflateSync(compressed).toString('utf8');
+                }
+                catch {
+                    // ignore malformed chunk
+                }
+            }
+        }
+        else if (chunkType === 'iTXt') {
+            const sep0 = chunkData.indexOf(0);
+            if (sep0 > 0 && sep0 + 3 <= chunkData.length) {
+                const key = chunkData.subarray(0, sep0).toString('utf8');
+                const compressionFlag = chunkData[sep0 + 1];
+                const afterFlag = sep0 + 3;
+                const sep1 = chunkData.indexOf(0, afterFlag); // language
+                if (sep1 >= 0) {
+                    const sep2 = chunkData.indexOf(0, sep1 + 1); // translated keyword
+                    if (sep2 >= 0) {
+                        const textBytes = chunkData.subarray(sep2 + 1);
+                        try {
+                            metadata[key] = (compressionFlag === 1 ? inflateSync(textBytes) : textBytes).toString('utf8');
+                        }
+                        catch {
+                            // ignore malformed chunk
+                        }
+                    }
+                }
+            }
+        }
+        if (chunkType === 'IEND') {
+            break;
+        }
+    }
+    return _extractFromMetadataMap(metadata, 'PNG text chunks');
+}
+function extractComfyMetadata(buffer, contentType, filename) {
+    const lowerType = (contentType || '').toLowerCase();
+    const lowerName = (filename || '').toLowerCase();
+    const isPng = buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    const isJpeg = buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xd8;
+    const isWebp = buffer.length >= 12
+        && buffer.subarray(0, 4).toString('ascii') === 'RIFF'
+        && buffer.subarray(8, 12).toString('ascii') === 'WEBP';
+    if (isPng || lowerType.includes('png') || lowerName.endsWith('.png')) {
+        const result = extractComfyMetadataFromPng(buffer);
+        return { ...result, format: 'png' };
+    }
+    if (isJpeg || lowerType.includes('jpeg') || lowerType.includes('jpg') || lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')) {
+        const result = extractComfyMetadataFromJpeg(buffer);
+        return { ...result, format: 'jpeg' };
+    }
+    if (isWebp || lowerType.includes('webp') || lowerName.endsWith('.webp')) {
+        const result = extractComfyMetadataFromWebp(buffer);
+        return { ...result, format: 'webp' };
+    }
+    return {
+        found: false,
+        workflow: null,
+        prompt: null,
+        rawMetadata: {},
+        format: 'unknown',
+        message: 'Unsupported artifact format for embedded workflow extraction. Supported: PNG, JPEG, WebP.',
+    };
+}
 async function resolveSavePath(savePath, fallbackFilename) {
     const resolved = path.isAbsolute(savePath) ? savePath : path.resolve(process.cwd(), savePath);
     const endsWithSeparator = savePath.endsWith(path.sep) || savePath.endsWith('/');
@@ -588,6 +1130,10 @@ async function listBackups() {
 }
 // Helpers
 function formatImageResult(img) {
+    const canonicalId = String(img.id
+        || img.imageId
+        || img.canonicalImageId
+        || '').trim();
     // Handle both array and object variants
     let publicUrl = '';
     if (Array.isArray(img.variants)) {
@@ -597,7 +1143,10 @@ function formatImageResult(img) {
         publicUrl = img.variants.public || Object.values(img.variants)[0] || '';
     }
     return {
-        id: img.id,
+        id: canonicalId,
+        imageId: canonicalId || undefined,
+        canonicalImageId: canonicalId || undefined,
+        requestedImageId: img.requestedImageId,
         filename: img.filename,
         url: publicUrl || img.url,
         variants: img.variants,
@@ -643,6 +1192,14 @@ function buildShareUrl(imageId, variant) {
 }
 // Tool definitions
 const TOOLS = [
+    {
+        name: 'list_tools',
+        description: 'Return tool definitions for this MCP server.',
+        inputSchema: {
+            type: 'object',
+            properties: {},
+        },
+    },
     // ===== Discovery & Search =====
     {
         name: 'photarium_search',
@@ -849,13 +1406,27 @@ const TOOLS = [
     },
     {
         name: 'photarium_get',
-        description: 'Get detailed information about a specific image by its ID, including metadata, dimensions, and variant URLs.',
+        description: 'Get detailed information about a specific image by its ID, including full metadata, folder/tags, aspect ratio/dimensions, file size/type, and variant URLs.',
         inputSchema: {
             type: 'object',
             properties: {
                 imageId: {
                     type: 'string',
                     description: 'The ID of the image to retrieve',
+                },
+            },
+            required: ['imageId'],
+        },
+    },
+    {
+        name: 'photarium_image_metadata',
+        description: 'Get normalized metadata for a specific image by ID, including folder, tags, uploaded date, variant/family info, description, alt description, prompt, and dimensions.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                imageId: {
+                    type: 'string',
+                    description: 'The ID of the image to inspect',
                 },
             },
             required: ['imageId'],
@@ -882,6 +1453,46 @@ const TOOLS = [
                 includeBase64: {
                     type: 'boolean',
                     description: 'If false and savePath is provided, omit base64 from the response (default: true).',
+                },
+            },
+            required: ['imageId'],
+        },
+    },
+    {
+        name: 'photarium_download_original',
+        description: 'Download the original uploaded artifact bytes for an image ID (preferred when you need embedded metadata like Comfy workflow data).',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                imageId: {
+                    type: 'string',
+                    description: 'The ID of the image to download',
+                },
+                savePath: {
+                    type: 'string',
+                    description: 'Optional path to save the file locally (relative or absolute). If directory-like, the original filename is used.',
+                },
+                includeBase64: {
+                    type: 'boolean',
+                    description: 'If false and savePath is provided, omit base64 from the response (default: true).',
+                },
+            },
+            required: ['imageId'],
+        },
+    },
+    {
+        name: 'photarium_extract_workflow',
+        description: 'Download the original image artifact and extract embedded Comfy workflow/prompt metadata (currently PNG text-chunk extraction).',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                imageId: {
+                    type: 'string',
+                    description: 'The ID of the image to inspect for embedded workflow metadata',
+                },
+                includeRawMetadata: {
+                    type: 'boolean',
+                    description: 'If true, include all extracted PNG text metadata in the response (default: false).',
                 },
             },
             required: ['imageId'],
@@ -1367,6 +1978,53 @@ const TOOLS = [
         },
     },
     {
+        name: 'photarium_upload_from_path',
+        description: 'Upload a file directly from a file path using multipart form data. No base64 encoding needed. Fast and efficient for local files.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                filePath: {
+                    type: 'string',
+                    description: 'Absolute file path to the image file (e.g., /Users/username/Desktop/image.png)',
+                },
+                filename: {
+                    type: 'string',
+                    description: 'Optional filename override. If not provided, uses the filename from the path.',
+                },
+                folder: {
+                    type: 'string',
+                    description: 'Folder to organize the image in',
+                },
+                tags: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Tags to apply',
+                },
+                description: {
+                    type: 'string',
+                    description: 'Description to store with the image',
+                },
+                originalUrl: {
+                    type: 'string',
+                    description: 'Original URL for duplicate detection',
+                },
+                sourceUrl: {
+                    type: 'string',
+                    description: 'Source page URL for provenance',
+                },
+                namespace: {
+                    type: 'string',
+                    description: 'Namespace to store the image in',
+                },
+                parentId: {
+                    type: 'string',
+                    description: 'Optional parent image ID to set variant relationship',
+                },
+            },
+            required: ['filePath'],
+        },
+    },
+    {
         name: 'photarium_animate',
         description: 'Create an animated WebP from a sequence of frames (URLs or base64). Uploads the result to Cloudflare Images.',
         inputSchema: {
@@ -1697,11 +2355,19 @@ const server = new Server({
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: TOOLS,
 }));
-// Handle tool calls
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params;
+async function handleToolCall(name, args = {}) {
     try {
         switch (name) {
+            case 'list_tools': {
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify({ tools: TOOLS }, null, 2),
+                        },
+                    ],
+                };
+            }
             // ===== Discovery & Search =====
             case 'photarium_search': {
                 const { query, limit, namespace } = args;
@@ -1811,6 +2477,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                     ],
                 };
             }
+            case 'photarium_image_metadata': {
+                const { imageId } = args;
+                const result = await getImageMetadata(imageId);
+                if (!result) {
+                    return {
+                        content: [{ type: 'text', text: 'Image not found' }],
+                        isError: true,
+                    };
+                }
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(result, null, 2),
+                        },
+                    ],
+                };
+            }
             case 'photarium_download_image': {
                 const { imageId, variant, savePath, includeBase64 } = args;
                 const result = await downloadImageById(imageId, variant);
@@ -1822,6 +2506,57 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 const response = includeBase64 === false && savePath
                     ? { ...result, base64: undefined, savedPath }
                     : { ...result, savedPath };
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(response, null, 2),
+                        },
+                    ],
+                };
+            }
+            case 'photarium_download_original': {
+                const { imageId, savePath, includeBase64 } = args;
+                const result = await downloadOriginalImageById(imageId);
+                let savedPath;
+                if (savePath) {
+                    const fallbackFilename = result.filename || `${imageId}_original.bin`;
+                    savedPath = await saveBase64ToFile(result.base64, savePath, fallbackFilename);
+                }
+                const response = includeBase64 === false && savePath
+                    ? { ...result, base64: undefined, savedPath }
+                    : { ...result, savedPath };
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify(response, null, 2),
+                        },
+                    ],
+                };
+            }
+            case 'photarium_extract_workflow': {
+                const { imageId, includeRawMetadata } = args;
+                const download = await downloadOriginalImageById(imageId);
+                const decoded = Buffer.from(download.base64, 'base64');
+                const extracted = extractComfyMetadata(decoded, download.contentType, download.filename);
+                const response = {
+                    imageId,
+                    format: extracted.format,
+                    contentType: download.contentType || null,
+                    size: download.size || decoded.length,
+                    filename: download.filename || null,
+                    variantUsed: download.variantUsed,
+                    fallbackUsed: download.fallbackUsed,
+                    fallbackReason: download.fallbackReason || null,
+                    extracted: extracted.found,
+                    workflow: extracted.workflow,
+                    prompt: extracted.prompt,
+                    message: extracted.message || null,
+                };
+                if (includeRawMetadata) {
+                    response.rawMetadata = extracted.rawMetadata;
+                }
                 return {
                     content: [
                         {
@@ -2082,6 +2817,64 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                         },
                     ],
                 };
+            }
+            case 'photarium_upload_from_path': {
+                const { filePath, filename, folder, tags, description, originalUrl, sourceUrl, namespace, parentId } = args;
+                try {
+                    const { readFileSync } = await import('node:fs');
+                    const fileBuffer = readFileSync(filePath);
+                    const finalFilename = filename || filePath.split('/').pop() || 'upload.bin';
+                    // Determine MIME type from extension
+                    const ext = finalFilename.split('.').pop()?.toLowerCase() || '';
+                    const mimeMap = {
+                        png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+                        gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
+                        bmp: 'image/bmp', tiff: 'image/tiff', tif: 'image/tiff',
+                        avif: 'image/avif',
+                    };
+                    const mimeType = mimeMap[ext] || 'application/octet-stream';
+                    const form = new FormData();
+                    form.append('file', new Blob([fileBuffer], { type: mimeType }), finalFilename);
+                    if (folder)
+                        form.append('folder', folder);
+                    if (description)
+                        form.append('description', description);
+                    if (originalUrl)
+                        form.append('originalUrl', originalUrl);
+                    if (sourceUrl)
+                        form.append('sourceUrl', sourceUrl);
+                    if (namespace)
+                        form.append('namespace', namespace);
+                    if (parentId)
+                        form.append('parentId', parentId);
+                    if (tags && tags.length > 0) {
+                        tags.forEach((tag) => form.append('tags', tag));
+                    }
+                    const response = await fetch(`${BASE_URL}/api/upload`, {
+                        method: 'POST',
+                        body: form,
+                    });
+                    const result = await response.json();
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: JSON.stringify(result, null, 2),
+                            },
+                        ],
+                    };
+                }
+                catch (err) {
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: `Error uploading from path: ${err instanceof Error ? err.message : String(err)}`,
+                            },
+                        ],
+                        isError: true,
+                    };
+                }
             }
             case 'photarium_animate': {
                 const { frames, fps, loop, folder, tags, description, originalUrl, sourceUrl, namespace, parentId, filename } = args;
@@ -2374,11 +3167,134 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             isError: true,
         };
     }
+}
+// Handle tool calls
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const { name, arguments: args } = request.params;
+    return handleToolCall(name, (args || {}));
 });
+const HTTP_HOST = process.env.PHOTARIUM_HTTP_HOST || '127.0.0.1';
+const HTTP_PORT = process.env.PHOTARIUM_HTTP_PORT ? Number(process.env.PHOTARIUM_HTTP_PORT) : undefined;
+const HTTP_ENABLED = new Set(['1', 'true', 'yes', 'on']).has((process.env.PHOTARIUM_HTTP_ENABLED || '').toLowerCase());
+function getTokenFromHeaders(headers) {
+    const rawAuth = headers.authorization || headers.Authorization;
+    const auth = Array.isArray(rawAuth) ? rawAuth[0] : rawAuth;
+    if (auth && auth.toLowerCase().startsWith('bearer ')) {
+        const token = auth.slice('bearer '.length).trim();
+        return token || undefined;
+    }
+    const rawToken = headers['x-mcp-token'] || headers['X-MCP-Token'];
+    const token = Array.isArray(rawToken) ? rawToken[0] : rawToken;
+    return token || undefined;
+}
+function maybeInjectToken(args, headers) {
+    if (args.token !== undefined) {
+        return args;
+    }
+    const token = getTokenFromHeaders(headers);
+    if (!token) {
+        return args;
+    }
+    return { ...args, token };
+}
+async function readJsonBody(req) {
+    return new Promise((resolve, reject) => {
+        let data = '';
+        req.on('data', (chunk) => {
+            data += chunk.toString('utf8');
+        });
+        req.on('end', () => {
+            if (!data.trim()) {
+                resolve({});
+                return;
+            }
+            try {
+                const parsed = JSON.parse(data);
+                if (parsed && typeof parsed === 'object') {
+                    resolve(parsed);
+                    return;
+                }
+                reject(new Error('Request body must be a JSON object'));
+            }
+            catch (error) {
+                reject(error);
+            }
+        });
+        req.on('error', reject);
+    });
+}
+function sendJson(res, status, payload) {
+    res.statusCode = status;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify(payload));
+}
+async function startHttpServer() {
+    const port = HTTP_PORT ?? 8787;
+    const server = createServer(async (req, res) => {
+        try {
+            const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+            const path = url.pathname.replace(/\/+$/, '') || '/';
+            if (req.method === 'GET' && path === '/health') {
+                sendJson(res, 200, { status: 'ok' });
+                return;
+            }
+            if (req.method === 'GET' && path === '/tools') {
+                sendJson(res, 200, { tools: TOOLS });
+                return;
+            }
+            if (path.startsWith('/tools/') && req.method === 'GET') {
+                const name = decodeURIComponent(path.slice('/tools/'.length));
+                const tool = TOOLS.find((entry) => entry.name === name);
+                if (!tool) {
+                    sendJson(res, 404, { ok: false, error: `Unknown tool: ${name}` });
+                    return;
+                }
+                sendJson(res, 200, { tool });
+                return;
+            }
+            if (req.method === 'POST' && path === '/tools/call') {
+                const payload = await readJsonBody(req);
+                const name = payload.name;
+                if (!name) {
+                    sendJson(res, 400, { ok: false, error: 'Missing tool name' });
+                    return;
+                }
+                const rawArgs = payload.arguments;
+                const args = maybeInjectToken(rawArgs || {}, req.headers);
+                const result = await handleToolCall(name, args);
+                sendJson(res, 200, { ok: !result.isError, result });
+                return;
+            }
+            if (req.method === 'POST' && path.startsWith('/tools/')) {
+                const name = decodeURIComponent(path.slice('/tools/'.length));
+                const payload = await readJsonBody(req);
+                const args = payload.arguments
+                    || payload.args
+                    || payload;
+                const result = await handleToolCall(name, maybeInjectToken(args || {}, req.headers));
+                sendJson(res, 200, { ok: !result.isError, result });
+                return;
+            }
+            sendJson(res, 404, { ok: false, error: 'Not found' });
+        }
+        catch (error) {
+            sendJson(res, 400, {
+                ok: false,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    });
+    server.listen(port, HTTP_HOST, () => {
+        console.error(`Photarium MCP HTTP proxy listening on http://${HTTP_HOST}:${port}`);
+    });
+}
 // Start server
 async function main() {
     const transport = new StdioServerTransport();
     await server.connect(transport);
     console.error('Photarium MCP server running on stdio');
+    if (HTTP_ENABLED || HTTP_PORT !== undefined) {
+        await startHttpServer();
+    }
 }
 main().catch(console.error);

@@ -120,7 +120,7 @@ export function TextSearch({ className = '', onImageClick, initialQuery = '', na
     setHoverPreview(null);
   }, []);
 
-  const search = useCallback(async (searchQuery?: string) => {
+  const search = useCallback(async (searchQuery?: string, trigger: string = 'manual') => {
     const q = searchQuery ?? query;
     if (!q.trim()) return;
 
@@ -132,12 +132,21 @@ export function TextSearch({ className = '', onImageClick, initialQuery = '', na
     try {
       const response = await fetch('/api/images/search', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-photarium-component': 'TextSearch',
+          'x-photarium-trigger': trigger,
+          'x-photarium-source': 'ui',
+        },
         body: JSON.stringify({
           type: searchType,
           query: q.trim(),
           limit: SEARCH_LIMIT,
           namespace: effectiveNamespaceFilter,
+          diagnostics: {
+            component: 'TextSearch',
+            trigger,
+          },
         }),
       });
 
@@ -159,7 +168,7 @@ export function TextSearch({ className = '', onImageClick, initialQuery = '', na
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      search();
+      search(undefined, 'enter');
     }
   }, [search]);
 
@@ -278,7 +287,7 @@ export function TextSearch({ className = '', onImageClick, initialQuery = '', na
 
       {/* Search button */}
       <button
-        onClick={() => search()}
+        onClick={() => search(undefined, 'button')}
         disabled={loading || !query.trim()}
         className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-lg py-2 text-[12px] font-medium transition-colors flex items-center justify-center gap-2"
       >
@@ -306,7 +315,7 @@ export function TextSearch({ className = '', onImageClick, initialQuery = '', na
                 onClick={() => {
                   setQuery(preset.query);
                   setShowPresets(false);
-                  search(preset.query);
+                  search(preset.query, 'preset');
                 }}
                 className="px-2 py-1 bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200 rounded text-[10px] transition-colors"
               >
@@ -330,7 +339,7 @@ export function TextSearch({ className = '', onImageClick, initialQuery = '', na
                 key={historyQuery}
                 onClick={() => {
                   setQuery(historyQuery);
-                  search(historyQuery);
+                  search(historyQuery, 'history');
                 }}
                 className="px-2 py-1 bg-gray-800/50 hover:bg-gray-700 text-gray-500 hover:text-gray-300 rounded text-[10px] transition-colors truncate max-w-[120px]"
                 title={historyQuery}

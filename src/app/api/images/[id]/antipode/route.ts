@@ -47,12 +47,39 @@ export async function GET(
 ): Promise<NextResponse> {
   const { id } = await params;
   const { searchParams } = new URL(request.url);
+
+  const requestId = request.headers.get('x-request-id') || crypto.randomUUID();
+  const userAgent = request.headers.get('user-agent') ?? undefined;
+  const referer = request.headers.get('referer') ?? undefined;
+  const origin = request.headers.get('origin') ?? undefined;
+  const forwardFor = request.headers.get('x-forwarded-for') ?? undefined;
+  const realIp = request.headers.get('x-real-ip') ?? undefined;
+  const ip = (forwardFor?.split(',')[0] || realIp || '').trim() || undefined;
+  const component = request.headers.get('x-photarium-component') ?? 'AntipodeSearch';
+  const trigger = request.headers.get('x-photarium-trigger') ?? 'unknown';
+  const source = request.headers.get('x-photarium-source') ?? 'api';
   
   const domain = searchParams.get('domain') ?? 'clip';
   const method = searchParams.get('method') ?? (domain === 'clip' ? 'stranger' : 'complementary');
   const limit = Math.min(20, Math.max(1, parseInt(searchParams.get('limit') ?? '8')));
   const namespace = normalizeNamespace(searchParams.get('namespace'));
   const internalLimit = namespace === null ? limit : Math.min(250, limit * 10);
+
+  console.log('[Antipode API] Received request:', {
+    requestId,
+    imageId: id,
+    domain,
+    method,
+    limit,
+    namespace,
+    component,
+    trigger,
+    source,
+    ip,
+    userAgent,
+    referer,
+    origin,
+  });
 
   try {
     const available = await isVectorSearchAvailable();
@@ -109,7 +136,18 @@ export async function GET(
           description = 'Conceptual inversion: searching for opposite qualities';
           // Build inverted concept query - generic conceptual opposite
           const invertedQuery = 'artificial, chaotic, vast, futuristic, hard, bright, dynamic, playful, complex, cold';
-          results = await searchByText(invertedQuery, internalLimit + 1);
+          results = await searchByText(invertedQuery, internalLimit + 1, {
+            requestId,
+            source,
+            route: 'GET /api/images/[id]/antipode',
+            component,
+            trigger,
+            ip,
+            userAgent,
+            referer,
+            origin,
+            query: invertedQuery,
+          });
           results = results.filter(r => r.imageId !== id).slice(0, limit);
           break;
 

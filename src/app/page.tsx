@@ -23,15 +23,19 @@ export default function Home() {
   });
   const [isVectorReady, setIsVectorReady] = useState(false);
   const [showRedisInfo, setShowRedisInfo] = useState(false);
+  const statusCheckDisabled =
+    process.env.NEXT_PUBLIC_REDIS_STATUS_CHECK_DISABLED === 'true' ||
+    process.env.NEXT_PUBLIC_REDIS_STATUS_CHECK_DISABLED === '1';
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    if (statusCheckDisabled) return;
     // Check availability of vector search
     fetch('/api/images/vectors/status')
       .then(res => res.json())
       .then(data => setIsVectorReady(data.available ?? false))
       .catch(() => setIsVectorReady(false));
-  }, []);
+  }, [statusCheckDisabled]);
 
   const handleNamespaceChange = (value: string) => {
     if (typeof window !== 'undefined') {

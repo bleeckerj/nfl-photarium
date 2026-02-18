@@ -9,11 +9,19 @@ type VectorStatusResponse =
   | { available: false; error?: string; help?: string };
 
 export function RedisStatusBanner() {
+  const envDisabled = process.env.NEXT_PUBLIC_REDIS_STATUS_POLL_DISABLED;
+  const defaultDisabled = process.env.NODE_ENV === 'development';
+  const isDisabled =
+    envDisabled === 'true' ||
+    envDisabled === '1' ||
+    (envDisabled === undefined && defaultDisabled);
+  const pollMs = Number(process.env.NEXT_PUBLIC_REDIS_STATUS_POLL_MS ?? 30_000);
   const [available, setAvailable] = useState<boolean | null>(null);
   const [help, setHelp] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
+    if (isDisabled) return;
     let cancelled = false;
 
     const run = async () => {
@@ -34,13 +42,18 @@ export function RedisStatusBanner() {
     };
 
     run();
-    const interval = window.setInterval(run, 30_000);
+    if (!Number.isFinite(pollMs) || pollMs <= 0) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    const interval = window.setInterval(run, pollMs);
 
     return () => {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, []);
+  }, [isDisabled, pollMs]);
 
   const show = useMemo(() => available === false, [available]);
   if (!show) return null;

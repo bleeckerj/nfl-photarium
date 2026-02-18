@@ -27,7 +27,7 @@ export function useParentAssignment({
 
   const patchParentAssignment = useCallback(async (targetId: string, parentIdValue: string) => {
     const payload = await patchParentAssignmentService(targetId, parentIdValue);
-    await refreshImageList();
+    void refreshImageList();
     return payload;
   }, [refreshImageList]);
 

@@ -1,6 +1,8 @@
 import { Cpu, Settings } from 'lucide-react';
-import DateNavigator, { type DateFilter } from '@/components/DateNavigator';
+import DateNavigator from '@/components/DateNavigator';
 import MonoSelect from '@/components/MonoSelect';
+import type { DateFilter, GridSize } from './types';
+import { GridSizeToggle } from './GridSizeToggle';
 
 export type LegacyTopBarImage = { id: string; uploaded: string };
 
@@ -24,6 +26,7 @@ interface LegacyTopBarProps {
   pageSize: number;
   pageSizeOptions: number[];
   defaultPageSize: number;
+  gridSize: GridSize;
   refreshingCache: boolean;
   viewMode: 'grid' | 'list';
   selectedCount: number;
@@ -33,6 +36,7 @@ interface LegacyTopBarProps {
   onToggleFilters: () => void;
   onClearFilters: () => void;
   onPageSizeChange: (size: number) => void;
+  onGridSizeChange: (size: GridSize) => void;
   onRefreshCache: () => void;
   onOpenNamespaceSettings: () => void;
   onToggleViewMode: () => void;
@@ -69,6 +73,7 @@ export default function LegacyTopBar({
   pageSize,
   pageSizeOptions,
   defaultPageSize,
+  gridSize,
   refreshingCache,
   viewMode,
   selectedCount,
@@ -78,6 +83,7 @@ export default function LegacyTopBar({
   onToggleFilters,
   onClearFilters,
   onPageSizeChange,
+  onGridSizeChange,
   onRefreshCache,
   onOpenNamespaceSettings,
   onToggleViewMode,
@@ -109,8 +115,14 @@ export default function LegacyTopBar({
             </p>
           )}
         </div>
-        {showPagination && (
-          <div className="flex items-center gap-2 text-[0.7em] font-mono text-gray-600">
+        <div className="flex items-center gap-2 text-[0.7em] font-mono text-gray-600">
+          <DateNavigator
+            allImages={sortedImages}
+            currentFilter={dateFilter}
+            onFilterChange={onDateFilterChange}
+          />
+          {showPagination && (
+            <>
             <button
               onClick={onFirstPage}
               disabled={pageIndex === 1}
@@ -162,13 +174,9 @@ export default function LegacyTopBar({
             >
               Last
             </button>
-            <DateNavigator
-              allImages={sortedImages}
-              currentFilter={dateFilter}
-              onFilterChange={onDateFilterChange}
-            />
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </div>
 
       <div id="second-row-controls" className="flex flex-wrap items-center justify-between gap-2">
@@ -212,6 +220,7 @@ export default function LegacyTopBar({
               size="sm"
             />
           </div>
+          <GridSizeToggle value={gridSize} onChange={onGridSizeChange} />
           <button
             onClick={onRefreshCache}
             disabled={refreshingCache}

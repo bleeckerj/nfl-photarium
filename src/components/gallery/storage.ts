@@ -5,8 +5,16 @@
  * Extracts storage logic from the main component for better testability.
  */
 
-import { STORAGE_KEYS, DEFAULT_PREFERENCES, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from './constants';
-import type { GalleryPreferences, BrokenAudit, DateFilter } from './types';
+import {
+  STORAGE_KEYS,
+  DEFAULT_PREFERENCES,
+  PAGE_SIZE_OPTIONS,
+  DEFAULT_PAGE_SIZE,
+  DEFAULT_GRID_SIZE,
+} from './constants';
+import { normalizeGridSize } from './gridSizing';
+import { normalizeDateFilterValue } from './dateFilter';
+import type { GalleryPreferences, BrokenAudit } from './types';
 
 /**
  * Check if we're running in a browser environment
@@ -145,30 +153,25 @@ export const loadPreferences = (): GalleryPreferences => {
       ? 'full'
       : storedVariant;
     
-    // Normalize date filter
-    const normalizedDateFilter = (() => {
-      if (!parsed.dateFilter || typeof parsed.dateFilter !== 'object') return null;
-      const year = (parsed.dateFilter as { year?: number }).year;
-      const month = (parsed.dateFilter as { month?: number }).month;
-      if (typeof year !== 'number' || typeof month !== 'number') return null;
-      if (month < 0 || month > 11) return null;
-      return { year, month };
-    })();
+    const normalizedDateFilter = normalizeDateFilterValue(parsed.dateFilter);
     
     // Normalize current page
     const normalizedCurrentPage = typeof parsed.currentPage === 'number' && parsed.currentPage > 0
       ? Math.floor(parsed.currentPage)
       : 1;
+    const normalizedGridSize = normalizeGridSize(parsed.gridSize, DEFAULT_GRID_SIZE);
     
     return {
       variant: normalizedVariant,
       onlyCanonical: Boolean(parsed.onlyCanonical),
       respectAspectRatio: Boolean(parsed.respectAspectRatio),
       onlyWithVariants: Boolean(parsed.onlyWithVariants),
+      showComfyOnly: Boolean(parsed.showComfyOnly),
       selectedFolder: parsed.selectedFolder ?? 'all',
       selectedTag: parsed.selectedTag ?? '',
       searchTerm: parsed.searchTerm ?? '',
       viewMode: parsed.viewMode === 'list' ? 'list' : 'grid',
+      gridSize: normalizedGridSize,
       filtersCollapsed: Boolean(parsed.filtersCollapsed),
       bulkFolderInput: typeof parsed.bulkFolderInput === 'string' ? parsed.bulkFolderInput : '',
       bulkFolderMode: parsed.bulkFolderMode === 'new' ? 'new' : 'existing',

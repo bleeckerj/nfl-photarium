@@ -25,6 +25,9 @@ interface GalleryCommandBarProps {
   onGoToPage: (page: number) => void;
   embeddingFilter: 'none' | 'missing-clip' | 'missing-color' | 'missing-any';
   onSetEmbeddingFilter: (filter: 'none' | 'missing-clip' | 'missing-color' | 'missing-any') => void;
+  onShowLastUploaded?: () => { dateKey: string; count: number } | null;
+  showComfyOnly?: boolean;
+  onSetComfyOnly?: (value: boolean) => void;
   onClose?: () => void;
 }
 
@@ -47,6 +50,9 @@ const baseHelp = [
   '- show all: Show every image, including solos',
   '- show missing clip/color/embeddings: Filter to images without embeddings',
   '- clear embedding filter: Remove embedding filter',
+  '- last uploaded: Filter to the latest upload day',
+  '- show only comfy: Filter to images with detected ComfyUI workflow metadata',
+  '- clear comfy filter: Remove Comfy-only filter',
   '- page next/prev or page <n>: Navigate gallery pages',
   '- help: Show this command list'
 ].join(' ');
@@ -73,6 +79,9 @@ export default function GalleryCommandBar({
   onGoToPage,
   embeddingFilter,
   onSetEmbeddingFilter,
+  onShowLastUploaded,
+  showComfyOnly = false,
+  onSetComfyOnly,
   onClose
 }: GalleryCommandBarProps) {
   const [inputValue, setInputValue] = useState('');
@@ -291,6 +300,27 @@ export default function GalleryCommandBar({
       return;
     }
 
+    if (/^(show\s+)?last\s+uploaded$/i.test(trimmed)) {
+      if (!onShowLastUploaded) {
+        setStatusLine('Last uploaded filter is not available in this view.');
+        return;
+      }
+      const result = onShowLastUploaded();
+      if (!result) {
+        setStatusLine('No uploads available to filter.');
+        return;
+      }
+      const label = new Date(`${result.dateKey}T00:00:00`).toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      });
+      const suffix = result.count === 1 ? '' : 's';
+      setStatusLine(`Showing ${result.count} image${suffix} from ${label}.`);
+      toast.push(`Filtered to latest upload date (${label})`);
+      return;
+    }
+
     // Embedding filter commands
     if (/^show\s+(missing\s+)?clip$/i.test(trimmed) || /^(missing|no)\s+clip$/i.test(trimmed)) {
       onSetEmbeddingFilter('missing-clip');
@@ -319,6 +349,30 @@ export default function GalleryCommandBar({
         toast.push('Embedding filter cleared');
       }
       setStatusLine('Embedding filter cleared.');
+      return;
+    }
+
+    if (/^(show\s+only\s+comfy(ui)?|comfy(ui)?\s+only|only\s+comfy(ui)?|show\s+comfy(ui)?)$/i.test(trimmed)) {
+      if (!onSetComfyOnly) {
+        setStatusLine('Comfy filter is not available in this view.');
+        return;
+      }
+      onSetComfyOnly(true);
+      toast.push('Filtering: Comfy images only');
+      setStatusLine('Showing images with detected ComfyUI workflow metadata.');
+      return;
+    }
+
+    if (/^(clear|reset)\s+comfy(\s+filter)?$/i.test(trimmed)) {
+      if (!onSetComfyOnly) {
+        setStatusLine('Comfy filter is not available in this view.');
+        return;
+      }
+      if (showComfyOnly) {
+        onSetComfyOnly(false);
+        toast.push('Comfy filter cleared');
+      }
+      setStatusLine('Comfy filter cleared.');
       return;
     }
 

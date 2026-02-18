@@ -45,6 +45,7 @@ scripts/backup-redis.sh
 |--------|---------|-------------|
 | `--dir=<path>` | `./backups/redis` | Directory to store backups |
 | `--keep=<n>` | `10` | Number of backups to retain |
+| `--retention-days=<n>` | `30` | Remove backups older than n days |
 | `--container=<name>` | `photarium-redis` | Docker container name |
 | `--quiet` | off | Suppress output (for cron jobs) |
 | `--dry-run` | off | Show what would happen without doing it |
@@ -57,6 +58,9 @@ scripts/backup-redis.sh
 
 # Keep only last 5 backups
 ./scripts/backup-redis.sh --keep=5
+
+# Remove backups older than 30 days and keep at most 10
+./scripts/backup-redis.sh --retention-days=30 --keep=10
 
 # Backup to custom directory
 ./scripts/backup-redis.sh --dir=/Volumes/Backup/redis
@@ -79,6 +83,7 @@ Backup dir:  ./backups/redis
 Backup file: redis-backup-20260117-230436.rdb
 Bundle file: redis-backup-20260117-230436.tgz
 Keep count:  10
+Retention:   30 days
 ───────────────────────────────────────────────────────
 
 Step 1: Triggering Redis BGSAVE...
@@ -94,7 +99,7 @@ Step 2: Copying dump.rdb from container...
 Step 2b: Creating bundle with dump.rdb + AOF file(s)...
          Created: ./backups/redis/redis-backup-20260117-230436.tgz (5.1M)
 
-Step 3: Rotating old backups (keeping last 10)...
+Step 3: Rotating old backups (older than 30 days, then keeping last 10)...
          1 backups found, no rotation needed
 
 ───────────────────────────────────────────────────────

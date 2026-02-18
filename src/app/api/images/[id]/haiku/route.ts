@@ -10,7 +10,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getImageVectors, isVectorSearchAvailable } from '@/server/vectorSearch';
-import { generateClipTextEmbedding } from '@/server/embeddingService';
+import { generateClipTextEmbedding, type EmbeddingLogContext } from '@/server/embeddingService';
 
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
 
@@ -31,12 +31,18 @@ const CONCEPT_PAIRS: [string, string][] = [
 // Cache for text embeddings
 const textEmbeddingCache = new Map<string, number[]>();
 
-async function getTextEmbedding(text: string): Promise<number[] | null> {
+async function getTextEmbedding(
+  text: string,
+  contextBase?: EmbeddingLogContext
+): Promise<number[] | null> {
   if (textEmbeddingCache.has(text)) {
     return textEmbeddingCache.get(text)!;
   }
   
-  const embedding = await generateClipTextEmbedding(text);
+  const embedding = await generateClipTextEmbedding(text, {
+    ...contextBase,
+    query: text,
+  });
   if (embedding) {
     textEmbeddingCache.set(text, embedding);
   }
@@ -67,13 +73,16 @@ interface ConceptScore {
   score: number;
 }
 
-async function getConceptScores(imageEmbedding: number[]): Promise<ConceptScore[]> {
+async function getConceptScores(
+  imageEmbedding: number[],
+  contextBase?: EmbeddingLogContext
+): Promise<ConceptScore[]> {
   const scores: ConceptScore[] = [];
   
   for (const [negative, positive] of CONCEPT_PAIRS) {
     const [negativeEmb, positiveEmb] = await Promise.all([
-      getTextEmbedding(`a ${negative} image`),
-      getTextEmbedding(`a ${positive} image`),
+      getTextEmbedding(`a ${negative} image`, contextBase),
+      getTextEmbedding(`a ${positive} image`, contextBase),
     ]);
 
     if (!negativeEmb || !positiveEmb) continue;
@@ -135,8 +144,30 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   const { id } = await params;
+  const requestId = request.headers.get('x-request-id') || crypto.randomUUID();
+  const userAgent = request.headers.get('user-agent') ?? undefined;
+  const referer = request.headers.get('referer') ?? undefined;
+  const origin = request.headers.get('origin') ?? undefined;
+  const forwardFor = request.headers.get('x-forwarded-for') ?? undefined;
+  const realIp = request.headers.get('x-real-ip') ?? undefined;
+  const ip = (forwardFor?.split(',')[0] || realIp || '').trim() || undefined;
+  const component = request.headers.get('x-photarium-component') ?? 'HaikuDisplay';
+  const trigger = request.headers.get('x-photarium-trigger') ?? 'unknown';
+  const source = request.headers.get('x-photarium-source') ?? 'api';
 
   try {
+    console.log('[Haiku API] Received request:', {
+      requestId,
+      imageId: id,
+      component,
+      trigger,
+      source,
+      ip,
+      userAgent,
+      referer,
+      origin,
+    });
+
     const openAiKey = process.env.OPENAI_API_KEY;
     if (!openAiKey) {
       return NextResponse.json(
@@ -164,7 +195,19 @@ export async function POST(
     }
 
     // Calculate concept scores
-    const conceptScores = await getConceptScores(vectors.clipEmbedding);
+    const contextBase: EmbeddingLogContext = {
+      requestId,
+      source,
+      route: 'POST /api/images/[id]/haiku',
+      component,
+      trigger,
+      ip,
+      userAgent,
+      referer,
+      origin,
+    };
+
+    const conceptScores = await getConceptScores(vectors.clipEmbedding, contextBase);
     
     if (conceptScores.length === 0) {
       return NextResponse.json(

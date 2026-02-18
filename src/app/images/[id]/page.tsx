@@ -19,6 +19,7 @@ import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { useDropzone } from 'react-dropzone';
 import { downloadImageToFile, formatDownloadFileName } from '@/utils/downloadUtils';
 import { useImageAspectRatio } from '@/hooks/useImageAspectRatio';
+import { formatBytes } from '@/utils/formatBytes';
 
 import { AltTextEditor } from '@/components/image-detail/AltTextEditor';
 import { CloudflareMetadataHeader } from '@/components/image-detail/CloudflareMetadataHeader';
@@ -63,6 +64,8 @@ interface CloudflareImage {
   filename: string;
   displayName?: string;
   uploaded: string;
+  size?: number;
+  fileSizeBytes?: number | null;
   variants?: string[];
   folder?: string;
   tags?: string[];
@@ -75,6 +78,8 @@ interface CloudflareImage {
   contentHash?: string;
   altTag?: string;
   exif?: Record<string, string | number>;
+  aspectRatio?: string;
+  dimensions?: { width: number; height: number };
   generatedBy?: string;
   comfyMetadataDetected?: boolean;
   comfyMetadataSource?: string;
@@ -144,6 +149,16 @@ const formatEntriesAsYaml = (entries: { url: string; altText: string }[]) => {
   return lines.join('\n');
 };
 
+const MAX_CLOUDFLARE_TEXT_MIRROR_CHARS = 160;
+const toCloudflareTextMirror = (value?: string) => {
+  if (!value) return '';
+  const compact = value.trim();
+  if (!compact) return '';
+  return compact.length <= MAX_CLOUDFLARE_TEXT_MIRROR_CHARS
+    ? compact
+    : `${compact.slice(0, MAX_CLOUDFLARE_TEXT_MIRROR_CHARS)}…`;
+};
+
 export default function ImageDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -184,9 +199,12 @@ export default function ImageDetailPage() {
   const [adoptSearch, setAdoptSearch] = useState('');
   const [adoptFolderFilter, setAdoptFolderFilter] = useState('');
   const [variationPage, setVariationPage] = useState(1);
+  const [variationLayout, setVariationLayout] = useState<'list' | 'grid'>('list');
+  const [variationTrueAspect, setVariationTrueAspect] = useState(true);
   const [adoptPage, setAdoptPage] = useState(1);
   const [listVariant, setListVariant] = useState(DEFAULT_LIST_VARIANT);
-  const VARIATION_PAGE_SIZE = 25;
+  const LIST_VARIATION_PAGE_SIZE = 25;
+  const GRID_VARIATION_PAGE_SIZE = 36;
   const ADOPT_PAGE_SIZE = 12;
   const [hoverPreview, setHoverPreview] = useState<{
     url: string;
@@ -576,14 +594,18 @@ export default function ImageDetailPage() {
     return ordered;
   }, [variationCandidates, variationOrderOverride]);
 
+  const variationPageSize = variationLayout === 'grid'
+    ? GRID_VARIATION_PAGE_SIZE
+    : LIST_VARIATION_PAGE_SIZE;
+
   const pagedVariations = useMemo(() => {
-    const start = (variationPage - 1) * VARIATION_PAGE_SIZE;
-    return displayedVariations.slice(start, start + VARIATION_PAGE_SIZE);
-  }, [displayedVariations, variationPage]);
+    const start = (variationPage - 1) * variationPageSize;
+    return displayedVariations.slice(start, start + variationPageSize);
+  }, [displayedVariations, variationPage, variationPageSize]);
 
   const totalVariationPages = Math.max(
     1,
-    Math.ceil(displayedVariations.length / VARIATION_PAGE_SIZE)
+    Math.ceil(displayedVariations.length / variationPageSize)
   );
 
   const filteredAdoptableImages = useMemo(() => {
@@ -598,6 +620,9 @@ export default function ImageDetailPage() {
 
     const term = adoptSearch.toLowerCase();
     return base.filter((img) => {
+      if ((img.id || '').toLowerCase().includes(term)) {
+        return true;
+      }
       const haystack = [
         img.filename,
         img.folder,
@@ -698,7 +723,7 @@ export default function ImageDetailPage() {
     metadata.tags = finalTags
       .map((tag) => cleanString(tag))
       .filter((tag): tag is string => Boolean(tag));
-    metadata.description = cleanDescription ?? '';
+    metadata.description = toCloudflareTextMirror(cleanDescription ?? '');
     const cleanedOriginalUrl = cleanString(originalUrlInput);
     metadata.originalUrl = cleanedOriginalUrl ?? '';
     metadata.originalUrlNormalized = normalizeOriginalUrl(cleanedOriginalUrl) ?? '';
@@ -708,7 +733,7 @@ export default function ImageDetailPage() {
     const cleanedDisplayName = cleanString(displayNameInput);
     metadata.displayName = cleanedDisplayName ?? '';
     const cleanAltTag = cleanString(altTextInput) ?? '';
-    metadata.altTag = cleanAltTag;
+    metadata.altTag = toCloudflareTextMirror(cleanAltTag);
     const compact = pickCloudflareMetadata(metadata, { includeEmpty: true });
     try {
       const encoder = new TextEncoder();
@@ -933,6 +958,14 @@ export default function ImageDetailPage() {
     setVariationOrderOverride(null);
     setSelectedVariationIds(new Set());
   }, [image?.id]);
+
+  useEffect(() => {
+    setVariationPage(1);
+  }, [variationLayout]);
+
+  useEffect(() => {
+    setVariationPage((prev) => Math.min(prev, totalVariationPages));
+  }, [totalVariationPages]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -1414,6 +1447,7 @@ export default function ImageDetailPage() {
   }, [toast]);
 
   const [deletingSelectedVariations, setDeletingSelectedVariations] = useState(false);
+  const [detachingAllChildren, setDetachingAllChildren] = useState(false);
 
   const handleDeleteSelectedVariations = useCallback(async () => {
     const ids = Array.from(selectedVariationIds);
@@ -1459,6 +1493,66 @@ export default function ImageDetailPage() {
       setDeletingSelectedVariations(false);
     }
   }, [selectedVariationIds, toast]);
+
+  const handleDetachAllChildren = useCallback(async () => {
+    if (!image || image.parentId) {
+      return;
+    }
+
+    const childIds = variationChildren.map((child) => child.id);
+    if (childIds.length === 0) {
+      toast.push('No variations to detach');
+      return;
+    }
+
+    if (!confirm(`Detach ${childIds.length} variation(s)? They will become canonical images.`)) {
+      return;
+    }
+
+    setDetachingAllChildren(true);
+
+    try {
+      const response = await fetch(`/api/images/${image.id}/detach-children`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ concurrency: 4 })
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || 'Failed to detach variations');
+      }
+
+      const detachedIds = Array.isArray(payload?.detachedIds)
+        ? payload.detachedIds.filter((value: unknown): value is string => typeof value === 'string')
+        : [];
+      const failureCount = Array.isArray(payload?.failed) ? payload.failed.length : 0;
+      const successCount = detachedIds.length;
+
+      if (successCount > 0) {
+        setSelectedVariationIds((prev) => {
+          const next = new Set(prev);
+          detachedIds.forEach((childId) => next.delete(childId));
+          return next;
+        });
+      }
+
+      await refreshImageList();
+      setVariationPage(1);
+
+      if (failureCount > 0) {
+        toast.push(`Detached ${successCount}, failed ${failureCount}`);
+      } else if (successCount === 0) {
+        toast.push('No variations were detached');
+      } else {
+        toast.push(`Detached ${successCount} variation(s)`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to detach variations';
+      toast.push(message);
+    } finally {
+      setDetachingAllChildren(false);
+    }
+  }, [image, refreshImageList, toast, variationChildren]);
 
   const handleAdoptImage = useCallback(async () => {
     if (!adoptImageId || !id) {
@@ -1509,6 +1603,18 @@ export default function ImageDetailPage() {
   const handleThumbLeave = useCallback(() => {
     setHoverPreview(null);
   }, []);
+
+  const shouldCalculateDetailAspect =
+    Boolean(image?.id) && (!image?.dimensions || !image?.aspectRatio);
+  const {
+    aspectRatio: computedDetailAspect,
+    dimensions: computedDetailDimensions,
+    loading: detailAspectLoading,
+  } = useImageAspectRatio(image?.id ?? '', shouldCalculateDetailAspect);
+  const detailAspectRatio = image?.aspectRatio ?? computedDetailAspect;
+  const detailDimensions = image?.dimensions ?? computedDetailDimensions;
+  const detailFileSizeBytes = image?.size ?? image?.fileSizeBytes ?? null;
+  const detailFileSizeLabel = formatBytes(detailFileSizeBytes);
 
   const refreshPromptThis = useCallback(async () => {
     if (!image?.id) {
@@ -1956,12 +2062,37 @@ export default function ImageDetailPage() {
               metadataPrunedByteSize={metadataPrunedByteSize}
               metadataLargestFields={metadataLargestFields}
               metadataPrunedDroppedFields={metadataPrunedDroppedFields}
+              extrasBackedFields={['description', 'altText']}
               isMetadataDirty={isMetadataDirty}
               pendingAutoSave={pendingAutoSave}
               saving={saving}
               onDiscard={handleCancelMetadata}
               onSave={handleSaveMetadata}
             />
+            <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono text-gray-500">
+              <span className="text-gray-400">Dimensions</span>
+              {detailAspectLoading && !detailDimensions ? (
+                <span className="inline-block w-20 h-2 bg-gray-200 rounded animate-pulse" />
+              ) : detailDimensions ? (
+                <span className="text-gray-700">
+                  {detailDimensions.width}×{detailDimensions.height}px
+                </span>
+              ) : (
+                <span className="text-gray-400">--</span>
+              )}
+              <span className="text-gray-300">•</span>
+              <span className="text-gray-400">Aspect</span>
+              {detailAspectLoading && !detailAspectRatio ? (
+                <span className="inline-block w-10 h-2 bg-gray-200 rounded animate-pulse" />
+              ) : detailAspectRatio ? (
+                <span className="text-gray-700">{detailAspectRatio}</span>
+              ) : (
+                <span className="text-gray-400">--</span>
+              )}
+              <span className="text-gray-300">•</span>
+              <span className="text-gray-400">File size</span>
+              <span className="text-gray-700">{detailFileSizeLabel}</span>
+            </div>
 
             <DescriptionEditor
               descriptionInput={descriptionInput}
@@ -2176,6 +2307,10 @@ export default function ImageDetailPage() {
               <VariationsSection
                 isChildImage={isChildImage}
                 variationCount={variationCount}
+                variationLayout={variationLayout}
+                setVariationLayout={setVariationLayout}
+                variationTrueAspect={variationTrueAspect}
+                setVariationTrueAspect={setVariationTrueAspect}
                 listVariant={listVariant}
                 setListVariant={setListVariant}
                 listVariantOptions={listVariantOptions}
@@ -2209,9 +2344,12 @@ export default function ImageDetailPage() {
                 onHandleThumbLeave={handleThumbLeave}
                 onHandleImageDragStart={handleImageDragStart}
                 onHandleCopyUrl={handleCopyUrl}
+                onCopyVariationId={(variationId) => handleCopyText(variationId, 'Image ID copied')}
                 onOpenVariantSizes={(target) => setVariantModalState({ target })}
                 childDetachingId={childDetachingId}
+                detachingAllChildren={detachingAllChildren}
                 onDetachChild={handleDetachChild}
+                onDetachAllChildren={handleDetachAllChildren}
                 onDeleteChild={handleDeleteChild}
                 swappingParentId={swappingParentId}
                 onSwapParent={handleSwapParent}
@@ -2219,7 +2357,7 @@ export default function ImageDetailPage() {
                 variationPage={variationPage}
                 setVariationPage={setVariationPage}
                 totalVariationPages={totalVariationPages}
-                variationPageSize={VARIATION_PAGE_SIZE}
+                variationPageSize={variationPageSize}
               />
 
             {!image.parentId && (
