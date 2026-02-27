@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { extractSnagx } from '@/utils/snagx';
 import { MAX_IMAGE_BYTES, prepareImageForUpload, sanitizeFilename } from '@/server/uploadService';
+import { extractFilenameFromUrl } from '@/utils/filename';
 import path from 'path';
 
 const isValidUrl = (value: string) => {
@@ -40,22 +41,6 @@ const getMimeFromExtension = (value: string) => {
     // ignore
   }
   return undefined;
-};
-
-const getFilenameFromUrl = (url: string, mimeType?: string | null) => {
-  try {
-    const parsed = new URL(url);
-    const pathname = parsed.pathname;
-    const segments = pathname.split('/').filter(Boolean);
-    const lastSegment = segments[segments.length - 1];
-    if (lastSegment) {
-      return lastSegment;
-    }
-  } catch {
-    // ignore
-  }
-  const extension = mimeType?.split('/')[1] || 'jpg';
-  return `remote-image-${Date.now()}.${extension}`;
 };
 
 const buildSnagxDescription = (
@@ -202,7 +187,7 @@ export async function POST(request: NextRequest) {
     let finalBuffer: Buffer = buffer;
     let finalType = inferredContentType || 'image/png';
     // Sanitize filename: truncate, clean, and handle Google Photos blobs
-    let filename = sanitizeFilename(getFilenameFromUrl(sourceUrl, inferredContentType));
+    let filename = extractFilenameFromUrl(sourceUrl, inferredContentType);
     let captureDate: string | undefined;
     let snagxMetadata: Record<string, unknown> | undefined;
     let snagxDescription: string | undefined;

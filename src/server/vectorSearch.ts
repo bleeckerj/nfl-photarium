@@ -71,9 +71,60 @@ export interface ImageAspectMetadata {
   height?: number;
 }
 
+export interface ImageColorMetadata {
+  imageId: string;
+  dominantColors?: string[];
+  averageColor?: string;
+  hasClipEmbedding: boolean;
+  hasColorEmbedding: boolean;
+}
+
+export interface ImageAspectRatioMetadata {
+  imageId: string;
+  aspectRatio?: string;
+  aspectRatioClass?: string;
+  width?: number;
+  height?: number;
+}
+
 // Singleton client instance
 let redisClient: RedisClient | null = null;
 let connectionPromise: Promise<void> | null = null;
+let vectorAvailabilityCache: { value: boolean; checkedAt: number } | null = null;
+const VECTOR_AVAILABILITY_TTL_MS = Math.max(
+  1_000,
+  Number(process.env.VECTOR_AVAILABILITY_TTL_MS ?? 15_000)
+);
+const VECTOR_METADATA_CACHE_TTL_MS = Math.max(
+  1_000,
+  Number(process.env.VECTOR_METADATA_CACHE_TTL_MS ?? 60_000)
+);
+type MetadataCacheEntry<T> = { value: T | null; checkedAt: number };
+const colorMetadataCache = new Map<string, MetadataCacheEntry<ImageColorMetadata>>();
+const aspectMetadataCache = new Map<string, MetadataCacheEntry<ImageAspectRatioMetadata>>();
+
+function getFreshMetadataCacheValue<T>(
+  cache: Map<string, MetadataCacheEntry<T>>,
+  key: string,
+  now: number
+): T | null | undefined {
+  const entry = cache.get(key);
+  if (!entry) return undefined;
+  if (now - entry.checkedAt > VECTOR_METADATA_CACHE_TTL_MS) {
+    cache.delete(key);
+    return undefined;
+  }
+  return entry.value;
+}
+
+function setMetadataCacheValue<T>(
+  cache: Map<string, MetadataCacheEntry<T>>,
+  key: string,
+  value: T | null,
+  checkedAt: number
+): void {
+  cache.set(key, { value, checkedAt });
+}
 
 /**
  * Get or create Redis client connection
@@ -244,6 +295,9 @@ export async function storeImageVectors(data: ImageVectorData): Promise<void> {
   }
 
   await client.hset(key, fields);
+  // Invalidate metadata caches so subsequent reads fetch fresh Redis values.
+  colorMetadataCache.delete(data.imageId);
+  aspectMetadataCache.delete(data.imageId);
 }
 
 export async function storeImageAspectMetadata(data: ImageAspectMetadata): Promise<void> {
@@ -270,6 +324,7 @@ export async function storeImageAspectMetadata(data: ImageAspectMetadata): Promi
 
   if (Object.keys(fields).length > 0) {
     await client.hset(key, fields);
+    aspectMetadataCache.delete(data.imageId);
   }
 }
 
@@ -311,6 +366,8 @@ export async function getImageVectors(imageId: string): Promise<ImageVectorData 
 export async function deleteImageVectors(imageId: string): Promise<void> {
   const client = await getRedisClient();
   await client.del(`${KEY_PREFIX}${imageId}`);
+  colorMetadataCache.delete(imageId);
+  aspectMetadataCache.delete(imageId);
 }
 
 /**
@@ -597,38 +654,27 @@ export async function getIndexStats(): Promise<{
  * Check if vector search is available (Redis Stack with RediSearch)
  */
 export async function isVectorSearchAvailable(): Promise<boolean> {
+  const now = Date.now();
+  if (vectorAvailabilityCache && now - vectorAvailabilityCache.checkedAt < VECTOR_AVAILABILITY_TTL_MS) {
+    return vectorAvailabilityCache.value;
+  }
+
   try {
     const client = await getRedisClient();
     // Try to get module list - RediSearch should be present
     const modules = await client.call('MODULE', 'LIST') as unknown[][];
-    
-    return modules.some(mod => 
+
+    const available = modules.some(mod =>
       Array.isArray(mod) && mod.some(item => 
         typeof item === 'string' && item.toLowerCase().includes('search')
       )
     );
+    vectorAvailabilityCache = { value: available, checkedAt: now };
+    return available;
   } catch {
+    vectorAvailabilityCache = { value: false, checkedAt: now };
     return false;
   }
-}
-
-/**
- * Color metadata for an image (lightweight, no embeddings)
- */
-export interface ImageColorMetadata {
-  imageId: string;
-  dominantColors?: string[];
-  averageColor?: string;
-  hasClipEmbedding: boolean;
-  hasColorEmbedding: boolean;
-}
-
-export interface ImageAspectRatioMetadata {
-  imageId: string;
-  aspectRatio?: string;
-  aspectRatioClass?: string;
-  width?: number;
-  height?: number;
 }
 
 /**
@@ -636,8 +682,27 @@ export interface ImageAspectRatioMetadata {
  * Returns only color info (dominant colors, average color) and embedding status flags
  */
 export async function batchGetColorMetadata(imageIds: string[]): Promise<Map<string, ImageColorMetadata>> {
-  const client = await getRedisClient();
   const results = new Map<string, ImageColorMetadata>();
+  if (imageIds.length === 0) return results;
+  const now = Date.now();
+  const missingIds: string[] = [];
+
+  for (const imageId of imageIds) {
+    const cached = getFreshMetadataCacheValue(colorMetadataCache, imageId, now);
+    if (cached !== undefined) {
+      if (cached) {
+        results.set(imageId, cached);
+      }
+      continue;
+    }
+    missingIds.push(imageId);
+  }
+
+  if (missingIds.length === 0) {
+    return results;
+  }
+
+  const client = await getRedisClient();
 
   // Use Redis pipeline for efficient batch fetching
   const pipeline = (client as unknown as { pipeline: () => {
@@ -646,7 +711,7 @@ export async function batchGetColorMetadata(imageIds: string[]): Promise<Map<str
   } }).pipeline();
 
   // Queue up all the field requests
-  for (const imageId of imageIds) {
+  for (const imageId of missingIds) {
     const key = `${KEY_PREFIX}${imageId}`;
     pipeline.hget(key, 'dominant_colors');
     pipeline.hget(key, 'average_color');
@@ -658,8 +723,8 @@ export async function batchGetColorMetadata(imageIds: string[]): Promise<Map<str
   if (!responses) return results;
 
   // Process results (4 fields per image)
-  for (let i = 0; i < imageIds.length; i++) {
-    const imageId = imageIds[i];
+  for (let i = 0; i < missingIds.length; i++) {
+    const imageId = missingIds[i];
     const baseIdx = i * 4;
 
     const [, dominantColorsRaw] = responses[baseIdx] || [];
@@ -669,7 +734,7 @@ export async function batchGetColorMetadata(imageIds: string[]): Promise<Map<str
 
     // Only include if we have any data
     if (dominantColorsRaw || averageColorRaw || clipRaw || colorRaw) {
-      results.set(imageId, {
+      const metadata: ImageColorMetadata = {
         imageId,
         dominantColors: dominantColorsRaw && typeof dominantColorsRaw === 'string' 
           ? dominantColorsRaw.split(',')
@@ -679,7 +744,12 @@ export async function batchGetColorMetadata(imageIds: string[]): Promise<Map<str
           : undefined,
         hasClipEmbedding: !!clipRaw,
         hasColorEmbedding: !!colorRaw,
-      });
+      };
+      results.set(imageId, metadata);
+      setMetadataCacheValue(colorMetadataCache, imageId, metadata, now);
+    } else {
+      // Negative cache to suppress repeated misses for the TTL duration.
+      setMetadataCacheValue(colorMetadataCache, imageId, null, now);
     }
   }
 
@@ -687,15 +757,34 @@ export async function batchGetColorMetadata(imageIds: string[]): Promise<Map<str
 }
 
 export async function batchGetAspectMetadata(imageIds: string[]): Promise<Map<string, ImageAspectRatioMetadata>> {
-  const client = await getRedisClient();
   const results = new Map<string, ImageAspectRatioMetadata>();
+  if (imageIds.length === 0) return results;
+  const now = Date.now();
+  const missingIds: string[] = [];
+
+  for (const imageId of imageIds) {
+    const cached = getFreshMetadataCacheValue(aspectMetadataCache, imageId, now);
+    if (cached !== undefined) {
+      if (cached) {
+        results.set(imageId, cached);
+      }
+      continue;
+    }
+    missingIds.push(imageId);
+  }
+
+  if (missingIds.length === 0) {
+    return results;
+  }
+
+  const client = await getRedisClient();
 
   const pipeline = (client as unknown as { pipeline: () => {
     hget: (key: string, field: string) => unknown;
     exec: () => Promise<[Error | null, unknown][]>;
   } }).pipeline();
 
-  for (const imageId of imageIds) {
+  for (const imageId of missingIds) {
     const key = `${KEY_PREFIX}${imageId}`;
     pipeline.hget(key, ASPECT_RATIO_FIELD);
     pipeline.hget(key, ASPECT_RATIO_CLASS_FIELD);
@@ -706,8 +795,8 @@ export async function batchGetAspectMetadata(imageIds: string[]): Promise<Map<st
   const responses = await pipeline.exec();
   if (!responses) return results;
 
-  for (let i = 0; i < imageIds.length; i++) {
-    const imageId = imageIds[i];
+  for (let i = 0; i < missingIds.length; i++) {
+    const imageId = missingIds[i];
     const baseIdx = i * 4;
 
     const [, aspectRatioRaw] = responses[baseIdx] || [];
@@ -718,13 +807,17 @@ export async function batchGetAspectMetadata(imageIds: string[]): Promise<Map<st
     if (aspectRatioRaw || aspectRatioClassRaw || widthRaw || heightRaw) {
       const width = typeof widthRaw === 'string' ? Number(widthRaw) : undefined;
       const height = typeof heightRaw === 'string' ? Number(heightRaw) : undefined;
-      results.set(imageId, {
+      const metadata: ImageAspectRatioMetadata = {
         imageId,
         aspectRatio: typeof aspectRatioRaw === 'string' ? aspectRatioRaw : undefined,
         aspectRatioClass: typeof aspectRatioClassRaw === 'string' ? aspectRatioClassRaw : undefined,
-        width: Number.isFinite(width as number) ? (width as number) : undefined,
-        height: Number.isFinite(height as number) ? (height as number) : undefined,
-      });
+        width: typeof width === 'number' && Number.isFinite(width) ? width : undefined,
+        height: typeof height === 'number' && Number.isFinite(height) ? height : undefined,
+      };
+      results.set(imageId, metadata);
+      setMetadataCacheValue(aspectMetadataCache, imageId, metadata, now);
+    } else {
+      setMetadataCacheValue(aspectMetadataCache, imageId, null, now);
     }
   }
 
@@ -949,6 +1042,9 @@ export async function searchColorNegativeSpace(
  * Disconnect from Redis
  */
 export async function disconnect(): Promise<void> {
+  vectorAvailabilityCache = null;
+  colorMetadataCache.clear();
+  aspectMetadataCache.clear();
   if (redisClient) {
     await redisClient.quit();
     redisClient = null;

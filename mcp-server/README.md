@@ -37,6 +37,8 @@ MCP (Model Context Protocol) server that exposes the full Photarium API surface 
 
 - `photarium_upload_url`
 - `photarium_upload_image`
+- `photarium_fs_ingest` (recursive local image/video ingest from a directory tree)
+  - includes local checkpointing to skip unchanged files on reruns (avoids repeat AI/API work)
 
 
 ### AI Features
@@ -105,6 +107,13 @@ Optional HTTP proxy settings (disabled by default):
 export PHOTARIUM_HTTP_ENABLED=true
 export PHOTARIUM_HTTP_HOST=127.0.0.1
 export PHOTARIUM_HTTP_PORT=8787
+```
+
+HTTP proxy helper endpoints:
+
+```bash
+curl http://127.0.0.1:8787/help
+curl http://127.0.0.1:8787/help/photarium_fs_ingest
 ```
 
 ## Usage with Claude Desktop
@@ -187,6 +196,8 @@ Once connected, you can ask the AI:
 **Upload & Management:**
 - "Upload this image URL to the 'editorial' namespace"
 - "Upload this base64 image into the comfyui folder"
+- "Recursively ingest ~/Code/chester-downloads-discord-images into the midjourney namespace and use AI for display names and tags"
+- "Recursively ingest ~/Code/chester-downloads-discord-images into the midjourney namespace and throttle uploads to 500ms between requests"
 - "Delete image abc123"
 
 ## Integration with Editorial Workflow

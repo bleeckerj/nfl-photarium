@@ -82,6 +82,14 @@ if (!globalObject[GLOBAL_CACHE_KEY]) {
   globalObject[GLOBAL_CACHE_KEY] = cacheState;
 }
 
+const isTruthyEnv = (value?: string): boolean => {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+};
+
+const CLOUDFLARE_CACHE_DISABLED = isTruthyEnv(process.env.CLOUDFLARE_CACHE_DISABLED);
+
 const CACHE_TTL_MS = Number(process.env.CLOUDFLARE_CACHE_TTL_MS ?? 5 * 60 * 1000);
 const PERSISTENT_CACHE_TTL_MS = Number(process.env.CLOUDFLARE_PERSISTENT_CACHE_TTL_MS ?? 24 * 60 * 60 * 1000); // 24 hours default
 const DEV_BACKGROUND_REFRESH_MIN_MS = Number(
@@ -137,6 +145,7 @@ const metadataOverrides = new Map<string, CloudflareMetadata>();
 let metadataOverridesLoaded = false;
 
 const loadMetadataOverrides = async (): Promise<void> => {
+  if (CLOUDFLARE_CACHE_DISABLED) return;
   if (metadataOverridesLoaded) return;
   metadataOverridesLoaded = true;
   try {
@@ -153,6 +162,7 @@ const loadMetadataOverrides = async (): Promise<void> => {
 };
 
 const saveMetadataOverrides = async (): Promise<void> => {
+  if (CLOUDFLARE_CACHE_DISABLED) return;
   try {
     const payload = Object.fromEntries(metadataOverrides.entries());
     await getStorage().set(METADATA_OVERRIDE_KEY, payload);
@@ -523,6 +533,7 @@ const triggerSizeBackfill = (): void => {
  * Returns null if cache doesn't exist or is too old
  */
 const loadFromPersistentCache = async (): Promise<{ images: CachedCloudflareImage[]; timestamp: number } | null> => {
+  if (CLOUDFLARE_CACHE_DISABLED) return null;
   try {
     const cached = await getStorage().get<CachedCloudflareImage[]>(PERSISTENT_CACHE_KEY);
     if (!cached) {
@@ -547,6 +558,7 @@ const loadFromPersistentCache = async (): Promise<{ images: CachedCloudflareImag
  * Save images to persistent storage
  */
 const saveToPersistentCache = async (images: CachedCloudflareImage[], timestamp: number): Promise<void> => {
+  if (CLOUDFLARE_CACHE_DISABLED) return;
   try {
     await getStorage().set(PERSISTENT_CACHE_KEY, images, timestamp);
     console.log(`[Cache] Saved ${images.length} images to persistent cache`);
@@ -556,6 +568,7 @@ const saveToPersistentCache = async (images: CachedCloudflareImage[], timestamp:
 };
 
 const shouldUseMemoryCache = (forceRefresh?: boolean) => {
+  if (CLOUDFLARE_CACHE_DISABLED) return false;
   if (forceRefresh) return false;
   if (!cacheState.images.length) return false;
   return Date.now() - cacheState.lastFetched < CACHE_TTL_MS;
@@ -591,6 +604,9 @@ const fetchAndUpdateCaches = async (): Promise<CachedCloudflareImage[]> => {
  * Doesn't block the current request
  */
 const triggerBackgroundRefresh = (): void => {
+  if (CLOUDFLARE_CACHE_DISABLED) {
+    return;
+  }
   if (cacheState.backgroundRefreshInProgress) {
     return;
   }
@@ -638,7 +654,27 @@ const triggerBackgroundRefresh = (): void => {
  * - Triggers background refresh if persistent cache is stale
  */
 export const getCachedImages = async (forceRefresh = false): Promise<CachedCloudflareImage[]> => {
-  await loadMetadataOverrides();
+  if (!CLOUDFLARE_CACHE_DISABLED) {
+    await loadMetadataOverrides();
+  }
+
+  if (CLOUDFLARE_CACHE_DISABLED) {
+    // Cache-off mode:
+    // - normal reads return only this-process transient entries
+    // - explicit force refresh still allows one-off direct Cloudflare fetch
+    if (!forceRefresh) {
+      return cacheState.images;
+    }
+    if (cacheState.inflight) {
+      return cacheState.inflight;
+    }
+    const inflight = fetchAllImages().finally(() => {
+      cacheState.inflight = null;
+    });
+    cacheState.inflight = inflight;
+    return inflight;
+  }
+
   // 1. Check in-memory cache first
   if (shouldUseMemoryCache(forceRefresh)) {
     triggerSizeBackfill();
@@ -722,6 +758,28 @@ export const getCachedImagesSync = (): CachedCloudflareImage[] => {
 };
 
 export const getCachedImage = async (id: string) => {
+  if (CLOUDFLARE_CACHE_DISABLED) {
+    const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+    const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+    if (!accountId || !apiToken) {
+      return undefined;
+    }
+    try {
+      const response = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${id}`,
+        {
+          headers: { Authorization: `Bearer ${apiToken}` }
+        }
+      );
+      if (!response.ok) return undefined;
+      const data = await response.json();
+      return data.result ? transformApiImageToCached(data.result) : undefined;
+    } catch (err) {
+      console.warn('[Cache] Failed to fetch single image from Cloudflare:', err);
+      return undefined;
+    }
+  }
+
   // First check in-memory map
   if (cacheState.map.has(id)) {
     return cacheState.map.get(id);
@@ -771,6 +829,17 @@ export const refreshCloudflareImageCache = async () => {
 };
 
 export const upsertCachedImage = (image: CachedCloudflareImage) => {
+  if (CLOUDFLARE_CACHE_DISABLED) {
+    cacheState.map.set(image.id, image);
+    const index = cacheState.images.findIndex(item => item.id === image.id);
+    if (index >= 0) {
+      cacheState.images[index] = image;
+    } else {
+      cacheState.images.unshift(image);
+    }
+    cacheState.lastFetched = Date.now();
+    return;
+  }
   const existing = cacheState.map.get(image.id);
   const mergedImage: CachedCloudflareImage = existing
     ? {
@@ -814,6 +883,12 @@ export const upsertCachedImage = (image: CachedCloudflareImage) => {
 };
 
 export const removeCachedImage = (id: string) => {
+  if (CLOUDFLARE_CACHE_DISABLED) {
+    cacheState.map.delete(id);
+    cacheState.images = cacheState.images.filter(image => image.id !== id);
+    cacheState.lastFetched = Date.now();
+    return;
+  }
   cacheState.map.delete(id);
   cacheState.images = cacheState.images.filter(image => image.id !== id);
   cacheState.lastFetched = Date.now();
@@ -830,6 +905,7 @@ export const getCacheStats = () => ({
   lastFetched: cacheState.lastFetched,
   ttlMs: CACHE_TTL_MS,
   persistentTtlMs: PERSISTENT_CACHE_TTL_MS,
+  disabled: CLOUDFLARE_CACHE_DISABLED,
   initialized: cacheState.initialized,
   backgroundRefreshInProgress: cacheState.backgroundRefreshInProgress
 });

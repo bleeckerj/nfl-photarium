@@ -22,7 +22,7 @@ interface UseGalleryBulkActionsOptions {
   bulkTagsMode: 'replace' | 'append';
   bulkApplyDisplayName: boolean;
   bulkDisplayNameInput: string;
-  bulkDisplayNameMode: 'custom' | 'auto' | 'clear';
+  bulkDisplayNameMode: 'custom' | 'auto' | 'clear' | 'ai';
   bulkApplyDescription: boolean;
   bulkDescriptionAppendInput: string;
   bulkApplyNamespace: boolean;
@@ -99,8 +99,12 @@ export const useGalleryBulkActions = ({
     }
     setBulkUpdating(true);
     try {
+      const wantsAiDisplayName = bulkApplyDisplayName && bulkDisplayNameMode === 'ai';
+      const generatedDisplayNames = new Map<string, string>();
+      let aiSuccessCount = 0;
+      let aiFailureCount = 0;
       await Promise.all(
-        Array.from(selectedImageIds).map(id => {
+        Array.from(selectedImageIds).map(async id => {
           const payload: Record<string, unknown> = {};
           if (bulkApplyFolder) {
             if (bulkFolderMode === 'existing') {
@@ -130,6 +134,21 @@ export const useGalleryBulkActions = ({
               const target = images.find(img => img.id === id);
               const baseName = target?.filename || '';
               payload.displayName = truncateMiddle(baseName, 64);
+            } else if (bulkDisplayNameMode === 'ai') {
+              try {
+                const response = await fetch(`/api/images/${id}/display-name`, { method: 'POST' });
+                const data = await response.json();
+                if (response.ok && data?.displayName) {
+                  payload.displayName = data.displayName;
+                  generatedDisplayNames.set(id, data.displayName);
+                  aiSuccessCount += 1;
+                } else {
+                  aiFailureCount += 1;
+                }
+              } catch (error) {
+                console.error('Failed to generate display name', error);
+                aiFailureCount += 1;
+              }
             }
           }
           if (hasDescriptionChanges) {
@@ -141,6 +160,9 @@ export const useGalleryBulkActions = ({
           }
           if (bulkApplyNamespace) {
             payload.namespace = bulkNamespaceInput.trim() || '';
+          }
+          if (!Object.keys(payload).length) {
+            return null;
           }
           return fetch(`/api/images/${id}/update`, {
             method: 'PATCH',
@@ -179,6 +201,8 @@ export const useGalleryBulkActions = ({
               updatedDisplayName = bulkDisplayNameInput.trim();
             } else if (bulkDisplayNameMode === 'auto') {
               updatedDisplayName = truncateMiddle(img.filename || '', 64);
+            } else if (bulkDisplayNameMode === 'ai') {
+              updatedDisplayName = generatedDisplayNames.get(img.id) ?? updatedDisplayName;
             }
           }
           const updatedDescription = hasDescriptionChanges
@@ -198,6 +222,16 @@ export const useGalleryBulkActions = ({
           };
         })
       );
+      if (wantsAiDisplayName) {
+        const total = selectedImageIds.size;
+        if (aiSuccessCount === 0) {
+          toastPush('No display names generated');
+        } else if (aiSuccessCount < total || aiFailureCount > 0) {
+          toastPush(`Generated display names for ${aiSuccessCount}/${total} images`);
+        } else {
+          toastPush('Display names generated');
+        }
+      }
       toastPush('Images updated');
       clearSelection();
       setBulkSelectionMode(false);

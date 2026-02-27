@@ -48,6 +48,8 @@ export default function FolderManagerButton({
     return `namespace=${encodeURIComponent(namespace)}`;
   };
 
+  const isAllNamespacesView = namespace === '__all__';
+
   const loadFolders = async () => {
     try {
       setLoading(true);
@@ -77,9 +79,15 @@ export default function FolderManagerButton({
 
   const createFolder = async () => {
     if (!newFolderName.trim()) return;
+    if (isAllNamespacesView) {
+      toast.push('Choose a specific namespace before creating folders');
+      return;
+    }
     try {
       setLoading(true);
-      const resp = await fetch('/api/folders', {
+      const query = getNamespaceQuery();
+      const request = query ? `/api/folders?${query}` : '/api/folders';
+      const resp = await fetch(request, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newFolderName.trim() })
@@ -113,6 +121,10 @@ export default function FolderManagerButton({
       cancelRename();
       return;
     }
+    if (isAllNamespacesView) {
+      toast.push('Choose a specific namespace before renaming folders');
+      return;
+    }
     try {
       setLoading(true);
       const query = getNamespaceQuery();
@@ -136,6 +148,10 @@ export default function FolderManagerButton({
   };
 
   const deleteFolder = async (folder: string) => {
+    if (isAllNamespacesView) {
+      toast.push('Choose a specific namespace before deleting folders');
+      return;
+    }
     if (!confirm(`Delete folder "${folder}"? Images will be set to [none].`)) {
       return;
     }
@@ -186,6 +202,11 @@ export default function FolderManagerButton({
             <div className="p-4 space-y-3 max-h-[70vh] overflow-auto">
               <div className="space-y-2">
                 <label className="text-[11px] font-mono uppercase tracking-wide text-gray-500">Create folder</label>
+                {isAllNamespacesView && (
+                  <p className="text-[0.7em] font-mono text-amber-700">
+                    Select a specific namespace to create, rename, or delete folders.
+                  </p>
+                )}
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -196,7 +217,7 @@ export default function FolderManagerButton({
                   />
                   <button
                     onClick={createFolder}
-                    disabled={loading || !newFolderName.trim()}
+                    disabled={loading || !newFolderName.trim() || isAllNamespacesView}
                     className="px-3 py-1 text-[0.7em] font-mono bg-blue-600 text-white rounded-md disabled:opacity-50"
                   >
                     Add
@@ -223,6 +244,7 @@ export default function FolderManagerButton({
                             />
                             <button
                               onClick={() => submitRename(folder)}
+                              disabled={isAllNamespacesView}
                               className="px-2 py-1 text-[0.7em] font-mono bg-blue-600 text-white rounded-md"
                             >
                               Save
@@ -239,12 +261,14 @@ export default function FolderManagerButton({
                             <span className="flex-1 text-[0.7em] font-mono font-mono">{folder}</span>
                             <button
                               onClick={() => startRename(folder)}
+                              disabled={isAllNamespacesView}
                               className="px-2 py-1 text-[11px] border border-gray-300 rounded-md"
                             >
                               Rename
                             </button>
                             <button
                               onClick={() => deleteFolder(folder)}
+                              disabled={isAllNamespacesView}
                               className="px-2 py-1 text-[11px] border border-red-400 text-red-600 rounded-md"
                             >
                               Delete

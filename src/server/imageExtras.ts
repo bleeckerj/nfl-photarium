@@ -88,6 +88,20 @@ export async function setImageExtrasRecord(record: ImageExtrasRecord): Promise<v
   await storage.set(getImageExtrasKey(record.imageId), record);
 }
 
+export async function deleteImageExtrasRecord(imageId: string): Promise<void> {
+  const storage = getExtrasStorage();
+  await storage.delete(getImageExtrasKey(imageId));
+}
+
+export async function listImageExtrasImageIds(): Promise<string[]> {
+  const storage = getExtrasStorage();
+  const keys = await storage.listKeysByPrefix('image-extras:');
+  return keys
+    .filter((key) => key.startsWith('image-extras:'))
+    .map((key) => key.slice('image-extras:'.length))
+    .filter(Boolean);
+}
+
 export async function patchImageExtrasRecord(
   imageId: string,
   patch: Partial<Omit<ImageExtrasRecordV1, 'schemaVersion' | 'imageId' | 'createdAt' | 'updatedAt'>>

@@ -19,6 +19,9 @@
 ## Upload
 - `photarium_upload_url`
 - `photarium_upload_image`
+- `photarium_fs_ingest` (recursive local image/video ingest by directory tree)
+  - supports `throttleMs` to pace upload requests globally
+  - automatically caches successful uploads locally and skips unchanged files on reruns
 
 ## AI Features
 - `photarium_generate_alt`
@@ -34,3 +37,7 @@
 
 ## Download
 - `photarium_download_image`
+
+## HTTP Help
+- `GET /help` - list MCP HTTP proxy endpoints and discoverability hints
+- `GET /help/<tool-name>` - show schema + HTTP call pattern for a specific tool (example: `/help/photarium_fs_ingest`)

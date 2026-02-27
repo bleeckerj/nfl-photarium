@@ -33,12 +33,14 @@ export const uploadVariationFile = async (params: {
   file: File;
   folder?: string;
   tags?: string;
+  namespace?: string;
   parentId: string;
 }): Promise<{ ok: boolean; payload: UploadResponse }> => {
   const formData = new FormData();
   formData.append('file', params.file);
   if (params.folder) formData.append('folder', params.folder);
   if (params.tags) formData.append('tags', params.tags);
+  if (params.namespace) formData.append('namespace', params.namespace);
   formData.append('parentId', params.parentId);
 
   const response = await fetch('/api/upload', {
@@ -53,6 +55,7 @@ export const uploadVariationUrl = async (params: {
   url: string;
   folder?: string;
   tags?: string;
+  namespace?: string;
   parentId: string;
   originalUrl?: string;
 }): Promise<{ ok: boolean; payload: UploadResponse }> => {
@@ -66,6 +69,7 @@ export const uploadVariationUrl = async (params: {
           url: params.url,
           folder: params.folder || undefined,
           tags: params.tags || undefined,
+          namespace: params.namespace || undefined,
           originalUrl: params.originalUrl || params.url,
           parentId: params.parentId
         }

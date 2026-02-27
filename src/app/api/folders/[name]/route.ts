@@ -32,6 +32,12 @@ export async function PATCH(
   try {
     const { name } = await params;
     const namespace = resolveNamespaceFilter(request);
+    if (namespace === null) {
+      return NextResponse.json(
+        { error: 'Choose a specific namespace before renaming folders' },
+        { status: 400 }
+      );
+    }
     const body = await request.json();
     const newName = cleanString(typeof body?.newName === 'string' ? body.newName : undefined);
     if (!name) {
@@ -40,7 +46,7 @@ export async function PATCH(
     if (!newName) {
       return NextResponse.json({ error: 'New folder name is required' }, { status: 400 });
     }
-    await renameFolder(name, newName);
+    await renameFolder(name, newName, namespace);
     await updateAllImages(name, newName, namespace);
     return NextResponse.json({ success: true, name: newName });
   } catch (error) {
@@ -56,10 +62,16 @@ export async function DELETE(
   try {
     const { name } = await params;
     const namespace = resolveNamespaceFilter(request);
+    if (namespace === null) {
+      return NextResponse.json(
+        { error: 'Choose a specific namespace before deleting folders' },
+        { status: 400 }
+      );
+    }
     if (!name) {
       return NextResponse.json({ error: 'Folder name is required' }, { status: 400 });
     }
-    await removeFolder(name);
+    await removeFolder(name, namespace);
     await updateAllImages(name, undefined, namespace);
     return NextResponse.json({ success: true });
   } catch (error) {

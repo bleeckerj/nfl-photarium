@@ -31,8 +31,8 @@ interface GalleryBulkEditModalProps {
   onBulkTagsInputChange: (value: string) => void;
   bulkApplyDisplayName: boolean;
   onBulkApplyDisplayNameChange: (value: boolean) => void;
-  bulkDisplayNameMode: 'custom' | 'auto' | 'clear';
-  onBulkDisplayNameModeChange: (value: 'custom' | 'auto' | 'clear') => void;
+  bulkDisplayNameMode: 'custom' | 'auto' | 'clear' | 'ai';
+  onBulkDisplayNameModeChange: (value: 'custom' | 'auto' | 'clear' | 'ai') => void;
   bulkDisplayNameInput: string;
   onBulkDisplayNameInputChange: (value: string) => void;
   bulkApplyDescription: boolean;
@@ -272,6 +272,16 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
                   <input
                     type="radio"
                     name="bulk-display-name-mode"
+                    checked={bulkDisplayNameMode === 'ai'}
+                    onChange={() => onBulkDisplayNameModeChange('ai')}
+                    className="h-3 w-3"
+                  />
+                  AI (generate)
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="bulk-display-name-mode"
                     checked={bulkDisplayNameMode === 'clear'}
                     onChange={() => onBulkDisplayNameModeChange('clear')}
                     className="h-3 w-3"
@@ -289,7 +299,7 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
                 />
               )}
               <p className="text-[0.6rem] text-gray-500">
-                Auto mode uses the filename trimmed to 64 characters.
+                Auto mode uses the filename trimmed to 64 characters. AI mode generates a short name per image.
               </p>
             </div>
           )}

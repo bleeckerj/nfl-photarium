@@ -15,6 +15,7 @@ type UseVariationUploadParams = {
   imageId?: string;
   imageFolder?: string;
   imageTags?: string[];
+  imageNamespace?: string;
   refreshImageList: () => Promise<void>;
   toast: VariationUploadToast;
 };
@@ -42,7 +43,14 @@ const formatDuplicateMessage = (failure: UploadFailureItem, fallback?: string) =
   return `${fallback || failure.error || 'Duplicate detected.'} Existing: ${summary}${extra}`;
 };
 
-export function useVariationUpload({ imageId, imageFolder, imageTags, refreshImageList, toast }: UseVariationUploadParams) {
+export function useVariationUpload({
+  imageId,
+  imageFolder,
+  imageTags,
+  imageNamespace,
+  refreshImageList,
+  toast
+}: UseVariationUploadParams) {
   const [childUploadFiles, setChildUploadFiles] = useState<File[]>([]);
   const [childUploadTags, setChildUploadTags] = useState('');
   const [childUploadFolder, setChildUploadFolder] = useState('');
@@ -60,6 +68,11 @@ export function useVariationUpload({ imageId, imageFolder, imageTags, refreshIma
 
   const handleChildUpload = useCallback(async () => {
     if (!imageId || childUploadFiles.length === 0) return;
+    const resolvedNamespace = imageNamespace?.trim();
+    if (!resolvedNamespace) {
+      toast.push('Select a specific namespace before uploading variations.');
+      return;
+    }
     setChildUploadLoading(true);
     try {
       const defaultFolder = childUploadFolder.trim();
@@ -73,6 +86,7 @@ export function useVariationUpload({ imageId, imageFolder, imageTags, refreshIma
           file,
           folder: defaultFolder || undefined,
           tags: defaultTags || undefined,
+          namespace: resolvedNamespace,
           parentId: imageId
         });
 
@@ -121,10 +135,15 @@ export function useVariationUpload({ imageId, imageFolder, imageTags, refreshIma
     } finally {
       setChildUploadLoading(false);
     }
-  }, [childUploadFiles, childUploadFolder, childUploadTags, imageId, refreshImageList, toast]);
+  }, [childUploadFiles, childUploadFolder, childUploadTags, imageId, imageNamespace, refreshImageList, toast]);
 
   const handleChildUploadByUrl = useCallback(async () => {
     if (!imageId) return;
+    const resolvedNamespace = imageNamespace?.trim();
+    if (!resolvedNamespace) {
+      toast.push('Select a specific namespace before uploading variations.');
+      return;
+    }
     const trimmedUrl = childUploadUrl.trim();
     if (!trimmedUrl) return;
     setChildUploadUrlLoading(true);
@@ -136,6 +155,7 @@ export function useVariationUpload({ imageId, imageFolder, imageTags, refreshIma
         url: trimmedUrl,
         folder: defaultFolder || undefined,
         tags: defaultTags || undefined,
+        namespace: resolvedNamespace,
         originalUrl: trimmedUrl,
         parentId: imageId
       });
@@ -167,7 +187,7 @@ export function useVariationUpload({ imageId, imageFolder, imageTags, refreshIma
     } finally {
       setChildUploadUrlLoading(false);
     }
-  }, [childUploadFolder, childUploadTags, childUploadUrl, imageId, refreshImageList, toast]);
+  }, [childUploadFolder, childUploadTags, childUploadUrl, imageId, imageNamespace, refreshImageList, toast]);
 
   const handleImportFromUrl = useCallback(async () => {
     if (!childImportUrl.trim()) return;

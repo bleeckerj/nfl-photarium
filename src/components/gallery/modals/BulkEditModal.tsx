@@ -299,6 +299,16 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
                   <input
                     type="radio"
                     name="bulk-display-name-mode"
+                    checked={displayNameMode === 'ai'}
+                    onChange={() => setDisplayNameMode('ai')}
+                    className="h-3 w-3"
+                  />
+                  AI (generate)
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="bulk-display-name-mode"
                     checked={displayNameMode === 'clear'}
                     onChange={() => setDisplayNameMode('clear')}
                     className="h-3 w-3"
@@ -316,7 +326,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
                 />
               )}
               <p className="text-[0.85em] text-gray-500">
-                Auto mode uses the filename trimmed to 64 characters.
+                Auto mode uses the filename trimmed to 64 characters. AI mode generates a short name per image.
               </p>
             </div>
           )}

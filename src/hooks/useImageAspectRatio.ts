@@ -112,8 +112,12 @@ export function useImageAspectRatio(imageId: string, shouldCalculate: boolean = 
         }
       } catch (err) {
         if (!abortController.signal.aborted) {
-          console.warn(`Failed to calculate aspect ratio for image ${imageId}:`, err);
-          setError(err instanceof Error ? err.message : 'Unknown error');
+          const message = err instanceof Error ? err.message : 'Unknown error';
+          const isLoadFailure = message.startsWith('Failed to load image:');
+          if (!isLoadFailure) {
+            console.warn(`Failed to calculate aspect ratio for image ${imageId}:`, err);
+          }
+          setError(isLoadFailure ? null : message);
         }
       } finally {
         if (!abortController.signal.aborted) {

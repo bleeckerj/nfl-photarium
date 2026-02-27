@@ -72,6 +72,23 @@ const buildFrameFetchError = (sourceUrl: string, response: Response) => {
   return `Failed to fetch frame from ${host} (HTTP ${response.status} ${statusText})`;
 };
 
+const MAX_FFMPEG_STDERR_CHARS = 256 * 1024;
+
+const appendWithLimit = (
+  current: string,
+  chunk: string,
+  limit: number
+): { next: string; truncated: boolean } => {
+  if (current.length >= limit) {
+    return { next: current, truncated: true };
+  }
+  const remaining = limit - current.length;
+  if (chunk.length <= remaining) {
+    return { next: current + chunk, truncated: false };
+  }
+  return { next: current + chunk.slice(0, remaining), truncated: true };
+};
+
 export async function POST(request: NextRequest) {
   try {
     const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
@@ -126,6 +143,7 @@ export async function POST(request: NextRequest) {
         { status: parentValidation.status }
       );
     }
+    const resolvedParentId = parentValidation.canonicalParentId;
 
     const cleanTags = tagsRaw
       ? tagsRaw.split(',').map((tag) => tag.trim()).filter(Boolean)
@@ -258,10 +276,20 @@ export async function POST(request: NextRequest) {
     await new Promise<void>((resolve, reject) => {
       const ffmpeg = spawn('ffmpeg', ffmpegArgs);
       let stderr = '';
-      ffmpeg.stderr.on('data', (data) => { stderr += data.toString(); });
+      let stderrTruncated = false;
+      ffmpeg.stderr.on('data', (data) => {
+        const appended = appendWithLimit(stderr, data.toString(), MAX_FFMPEG_STDERR_CHARS);
+        stderr = appended.next;
+        if (appended.truncated) {
+          stderrTruncated = true;
+        }
+      });
       ffmpeg.on('close', (code) => {
         if (code === 0) resolve();
-        else reject(new Error(`ffmpeg exited with code ${code}: ${stderr}`));
+        else {
+          const suffix = stderrTruncated ? ' [stderr truncated]' : '';
+          reject(new Error(`ffmpeg exited with code ${code}: ${stderr}${suffix}`));
+        }
       });
       ffmpeg.on('error', reject);
     });
@@ -293,7 +321,7 @@ export async function POST(request: NextRequest) {
         originalUrl: originalUrl && originalUrl.trim() ? originalUrl.trim() : undefined,
         sourceUrl: sourceUrl && sourceUrl.trim() ? sourceUrl.trim() : undefined,
         namespace: namespace && namespace.trim() ? namespace.trim() : undefined,
-        parentId: cleanParentId
+        parentId: resolvedParentId
       }
     });
 

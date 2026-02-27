@@ -10,6 +10,12 @@ type DescriptionResponse = {
   error?: string;
 };
 
+type DisplayNameResponse = {
+  displayName?: string;
+  model?: string;
+  error?: string;
+};
+
 export const requestAltTag = async (imageId: string) => {
   const response = await fetch(`/api/images/${imageId}/alt`, { method: 'POST' });
   const payload = (await response.json()) as AltTagResponse;
@@ -23,5 +29,11 @@ export const requestDescription = async (imageId: string, existingDescription: s
     body: JSON.stringify({ existingDescription })
   });
   const payload = (await response.json()) as DescriptionResponse;
+  return { ok: response.ok, payload };
+};
+
+export const requestDisplayName = async (imageId: string) => {
+  const response = await fetch(`/api/images/${imageId}/display-name`, { method: 'POST' });
+  const payload = (await response.json()) as DisplayNameResponse;
   return { ok: response.ok, payload };
 };

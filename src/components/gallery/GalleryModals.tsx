@@ -64,8 +64,8 @@ interface GalleryModalsProps {
   onBulkTagsInputChange: (value: string) => void;
   bulkApplyDisplayName: boolean;
   onBulkApplyDisplayNameChange: (value: boolean) => void;
-  bulkDisplayNameMode: 'custom' | 'auto' | 'clear';
-  onBulkDisplayNameModeChange: (value: 'custom' | 'auto' | 'clear') => void;
+  bulkDisplayNameMode: 'custom' | 'auto' | 'clear' | 'ai';
+  onBulkDisplayNameModeChange: (value: 'custom' | 'auto' | 'clear' | 'ai') => void;
   bulkDisplayNameInput: string;
   onBulkDisplayNameInputChange: (value: string) => void;
   bulkApplyDescription: boolean;

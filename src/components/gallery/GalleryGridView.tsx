@@ -21,6 +21,7 @@ interface GalleryGridViewProps {
   onStartEdit: (image: CloudflareImage) => void;
   onDelete: (imageId: string) => void;
   onGenerateAlt: (imageId: string) => void;
+  onGenerateDisplayName: (imageId: string) => void;
   onMouseEnter: (imageId: string, event: React.MouseEvent) => void;
   onMouseMove: (imageId: string, event: React.MouseEvent) => void;
   onMouseLeave: () => void;
@@ -36,6 +37,7 @@ export const GalleryGridView: React.FC<GalleryGridViewProps> = ({
   onStartEdit,
   onDelete,
   onGenerateAlt,
+  onGenerateDisplayName,
   onMouseEnter,
   onMouseMove,
   onMouseLeave,
@@ -51,6 +53,7 @@ export const GalleryGridView: React.FC<GalleryGridViewProps> = ({
     colorMetadataMap,
     embeddingPendingMap,
     altLoadingMap,
+    displayNameLoadingMap,
     galleryReturnHrefSuffix,
   } = filters;
 
@@ -69,10 +72,12 @@ export const GalleryGridView: React.FC<GalleryGridViewProps> = ({
           colorMetadata={colorMetadataMap[image.id]}
           embeddingPending={embeddingPendingMap[image.id]}
           altLoading={Boolean(altLoadingMap[image.id])}
+          displayNameLoading={Boolean(displayNameLoadingMap[image.id])}
           onToggleSelection={onToggleSelection}
           onStartEdit={onStartEdit}
           onDelete={onDelete}
           onGenerateAlt={onGenerateAlt}
+          onGenerateDisplayName={onGenerateDisplayName}
           onCopyUrl={onToggleCopyMenu}
           onCopyNamespace={onCopyNamespace}
           onBeforeNavigate={onBeforeNavigate}

@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
         console.error('Failed to fetch Cloudflare images for folder list', err);
         return [];
       }),
-      listStoredFolders()
+      listStoredFolders(namespace)
     ]);
 
     const filteredImages = namespace === null
@@ -36,10 +36,9 @@ export async function GET(request: NextRequest) {
       )
     );
 
-    const includeStoredFolders = namespace === null;
     const allFolders = Array.from(
       new Set([
-        ...(includeStoredFolders ? storedFolders : []),
+        ...storedFolders,
         ...derivedFolders
       ])
     ).sort((a, b) => a.localeCompare(b));
@@ -53,12 +52,19 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const namespace = resolveNamespaceFilter(request);
+    if (namespace === null) {
+      return NextResponse.json(
+        { error: 'Choose a specific namespace before creating folders' },
+        { status: 400 }
+      );
+    }
     const body = await request.json();
     const name = typeof body?.name === 'string' ? body.name.trim() : '';
     if (!name) {
       return NextResponse.json({ error: 'Folder name is required' }, { status: 400 });
     }
-    await addFolder(name);
+    await addFolder(name, namespace);
     return NextResponse.json({ success: true, name });
   } catch (error) {
     console.error('Create folder error', error);

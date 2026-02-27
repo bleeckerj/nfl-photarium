@@ -5,6 +5,7 @@ import type { toDuplicateSummary } from '@/server/duplicateDetector';
 import {
   evaluateUploadDeduplicationPolicy,
   logContentHashDuplicate,
+  logCrossNamespaceContentHashWarning,
   logOriginalUrlReuseWarning,
 } from '@/server/uploadDuplicatePolicy';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
@@ -37,6 +38,7 @@ export type UploadContext = {
   apiToken: string;
   folder?: string;
   tags: string[];
+  displayName?: string;
   description?: string;
   originalUrl?: string;
   sourceUrl?: string;
@@ -258,6 +260,7 @@ export async function uploadImageBuffer({
     apiToken,
     folder,
     tags,
+    displayName,
     description,
     originalUrl,
     sourceUrl,
@@ -266,6 +269,25 @@ export async function uploadImageBuffer({
     parentId
   } = context;
   const isSnagx = fileName.toLowerCase().endsWith('.snagx');
+  const normalizedNamespace = typeof namespace === 'string' && namespace.trim()
+    ? namespace.trim()
+    : undefined;
+  const hasExplicitNamespace = Boolean(
+    normalizedNamespace &&
+    normalizedNamespace !== '__all__' &&
+    normalizedNamespace !== '__none__' &&
+    normalizedNamespace !== 'undefined'
+  );
+
+  if (!hasExplicitNamespace || !normalizedNamespace) {
+    return {
+      ok: false,
+      error: 'A specific namespace is required for uploads. Select a namespace instead of All.',
+      status: 400,
+      reason: 'upload',
+    };
+  }
+
   if (!isSnagx && !SUPPORTED_IMAGE_TYPES.has(fileType)) {
     logIssue('Rejected non-image upload', { filename: fileName, type: fileType });
     return { ok: false, error: 'File must be an image', status: 400, reason: 'invalid-type' };
@@ -335,13 +357,21 @@ export async function uploadImageBuffer({
   const deduplication = await evaluateUploadDeduplicationPolicy({
     contentHash,
     normalizedOriginalUrl,
-    namespace,
+    namespace: normalizedNamespace,
   });
   if (deduplication.originalUrlWarning) {
     logOriginalUrlReuseWarning({
       logScope: 'upload',
       originalUrl,
       warning: deduplication.originalUrlWarning,
+    });
+  }
+  if (deduplication.crossNamespaceContentHashMatches.length) {
+    logCrossNamespaceContentHashWarning({
+      logScope: 'upload',
+      contentHash,
+      targetNamespace: normalizedNamespace,
+      matches: deduplication.crossNamespaceContentHashMatches,
     });
   }
 
@@ -368,7 +398,7 @@ export async function uploadImageBuffer({
 
   const metadataPayload: Record<string, unknown> = {
     filename: normalizedName,
-    displayName: normalizedName,
+    displayName: (typeof displayName === 'string' && displayName.trim()) ? displayName.trim() : normalizedName,
     uploadedAt: new Date().toISOString(),
     size: workingFileSize,
     type: workingFileType,
@@ -380,7 +410,7 @@ export async function uploadImageBuffer({
     sourceUrl: sourceUrl,
     sourceUrlNormalized: normalizedSourceUrl,
     sourcePath: sourcePath,
-    namespace: namespace,
+    namespace: normalizedNamespace,
     contentHash,
     variationParentId: parentId,
     exif: exifSummary,
@@ -595,7 +625,7 @@ export async function uploadImageBuffer({
       description: description,
       originalUrl: originalUrl,
       sourceUrl: sourceUrl,
-      namespace: namespace,
+      namespace: normalizedNamespace,
       parentId: parentId,
       linkedAssetId: webpVariantId,
       webpVariantId,

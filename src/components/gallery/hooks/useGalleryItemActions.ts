@@ -5,6 +5,7 @@ interface UseGalleryItemActionsOptions {
   setImages: React.Dispatch<React.SetStateAction<CloudflareImage[]>>;
   toastPush: (message: string) => void;
   setAltLoadingMap: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  setDisplayNameLoadingMap: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   editFolderSelect: string;
   newEditFolder: string;
   editTags: string;
@@ -18,6 +19,7 @@ export const useGalleryItemActions = ({
   setImages,
   toastPush,
   setAltLoadingMap,
+  setDisplayNameLoadingMap,
   editFolderSelect,
   newEditFolder,
   editTags,
@@ -73,6 +75,55 @@ export const useGalleryItemActions = ({
     }
   }, [setAltLoadingMap, setImages, toastPush]);
 
+  const generateDisplayName = useCallback(async (imageId: string) => {
+    setDisplayNameLoadingMap(prev => ({ ...prev, [imageId]: true }));
+    try {
+      const response = await fetch(`/api/images/${imageId}/display-name`, {
+        method: 'POST',
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        const message = typeof data?.error === 'string' ? data.error : 'Failed to generate display name';
+        toastPush(message);
+        return;
+      }
+
+      if (!data?.displayName) {
+        toastPush('Display name response was empty');
+        return;
+      }
+
+      const saveResponse = await fetch(`/api/images/${imageId}/update`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: data.displayName }),
+      });
+      if (!saveResponse.ok) {
+        const savePayload = await saveResponse.json().catch(() => ({}));
+        const message = typeof savePayload?.error === 'string'
+          ? savePayload.error
+          : 'Failed to save display name';
+        toastPush(message);
+        return;
+      }
+
+      setImages(prev => prev.map(img => (
+        img.id === imageId ? { ...img, displayName: data.displayName } : img
+      )));
+      toastPush('Display name updated');
+    } catch (error) {
+      console.error('Failed to generate display name:', error);
+      toastPush('Failed to generate display name');
+    } finally {
+      setDisplayNameLoadingMap(prev => {
+        const next = { ...prev };
+        delete next[imageId];
+        return next;
+      });
+    }
+  }, [setDisplayNameLoadingMap, setImages, toastPush]);
+
   const startEdit = useCallback((image: CloudflareImage) => {
     setEditingImage(image.id);
     setEditFolderSelect(image.folder || '');
@@ -127,6 +178,7 @@ export const useGalleryItemActions = ({
   return {
     deleteImage,
     generateAltTag,
+    generateDisplayName,
     startEdit,
     cancelEdit,
     saveEdit,

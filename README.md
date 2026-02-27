@@ -249,6 +249,52 @@ DROP_OFF_TAGS=found
 
 ---
 
+## Recursive Local Library Ingest (Images + Video)
+
+Bulk-ingest a local directory tree (including nested subfolders) into a specific namespace. This is useful for imports like Discord/Midjourney download archives.
+
+- Recursively scans for images and videos
+- Uploads images and videos to the correct Photarium endpoints
+- Includes the subdirectory path in `description`
+- Optional AI-generated image `displayName` and 3-4 semantic tags
+- Automatically keeps a local checkpoint of successful uploads and skips unchanged files on future runs (avoids repeat AI/API work)
+
+Dry run first:
+
+```bash
+npm run fs:ingest -- \
+  --root ~/Code/chester-downloads-discord-images \
+  --namespace YOUR_NAMESPACE \
+  --ai-metadata \
+  --tag-count 4 \
+  --throttle-ms 500 \
+  --dry-run \
+  --verbose
+```
+
+Run for real:
+
+```bash
+npm run fs:ingest -- \
+  --root ~/Code/chester-downloads-discord-images \
+  --namespace YOUR_NAMESPACE \
+  --folder midjourney-discord \
+  --description-prefix "Midjourney Discord export" \
+  --include-path-tags \
+  --ai-metadata \
+  --tag-count 4 \
+  --throttle-ms 500
+```
+
+Notes:
+- AI metadata applies to images only (videos still get tags/description, not `displayName`)
+- Requires the local Photarium app running at `http://localhost:3000` unless overridden with `--api-base`
+- Use `--throttle-ms` to globally pace uploads (for example `500` = ~2 uploads/sec max)
+- AI metadata requires `OPENAI_API_KEY` configured in the Photarium app environment
+- Checkpoints are stored under `data/fs-ingest-checkpoints/` (keyed by source root + namespace). A file is considered unchanged when its path, size, and modified time match.
+
+---
+
 ## Architecture
 
 **Self-hosted** — Run on your own server, Vercel, Railway, or any Node.js host  
@@ -319,6 +365,209 @@ npm run lint
 - `npm run refresh:hash-cache` — Rebuild the duplicate detection cache
 - `npm run audit:broken` — Find broken image URLs
 - `npm run diag:duplicates` — Analyze duplicate uploads
+- `npm run ig:auth -- --username iffffound` — Open headed browser for one-time Instagram login
+- `npm run ig:ingest -- --username iffffound --max-pages 10` — Ingest Instagram media metadata with checkpoint resume
+- `npm run ig:url -- --url https://www.instagram.com/reel/<shortcode>/ --push-cloudflare` — Pull one Instagram post/reel and push media to Photarium
+
+### Instagram Ingest (`npm run ig:ingest`)
+
+`ig:ingest` crawls Instagram profile media via an authenticated browser session and writes each media item as one NDJSON record. It supports:
+
+- checkpointed pagination (resume from last `next_max_id`)
+- optional local image downloads
+- optional push into this app's API (`/api/upload/external` for images, `/api/import/page/upload-video` for videos)
+
+This workflow is implemented in `scripts/instagram-ingest.mjs`.
+
+#### Quick Start
+
+1. Authenticate once with a persistent browser profile:
+
+```bash
+npm run ig:auth -- --username iffffound
+```
+
+2. Run ingest:
+
+```bash
+npm run ig:ingest -- --username iffffound
+```
+
+3. Inspect output:
+
+- NDJSON: `data/instagram/<username>.ndjson`
+- checkpoint: `data/instagram/<username>.checkpoint.json`
+- auth metadata: `data/instagram/<username>.auth.json`
+
+#### Single URL (post/reel)
+
+Use this when you want one specific Instagram URL (including videos) pushed to Photarium:
+
+```bash
+npm run ig:url -- --url https://www.instagram.com/reel/<shortcode>/ --push-cloudflare --namespace cf-default
+```
+
+Notes:
+- Reuses your authenticated browser profile from `ig:auth`
+- Extracts media URLs from the page payload/meta and pushes images/videos through existing Photarium APIs
+- Appends a normalized NDJSON record to `data/instagram/<username>.ndjson`
+
+#### What The Script Does
+
+1. Launches Puppeteer with a persistent profile directory (`.cache/instagram-profile` by default).
+2. Verifies session by fetching profile data from Instagram web endpoints.
+3. Pages profile feed items (`/api/v1/feed/user/<userId>`) using `next_max_id`.
+4. Maps each item to a normalized record (caption, counts, `imageUrls`, `videoUrls`, permalink, timestamps, etc.).
+5. Appends one JSON line per item to the NDJSON file.
+6. Writes checkpoint progress after each page so restart is resume-safe.
+7. Optionally downloads image files and/or pushes media into your local API.
+
+#### Command Form
+
+```bash
+npm run ig:ingest -- --username <name> [options]
+```
+
+Use `--` so npm passes arguments to the script.
+
+#### Options
+
+| Option | Default | Purpose |
+|-------|---------|---------|
+| `--username <name>` | `iffffound` | Instagram username to ingest |
+| `--profile-dir <path>` | `.cache/instagram-profile` | Persistent Chromium profile directory |
+| `--count <n>` | `12` | Items requested per page |
+| `--max-pages <n>` | `0` | Stop after N pages (`0` = unbounded) |
+| `--delay-ms <n>` | `1200` | Delay between page fetches |
+| `--request-delay-ms <n>` | `800` | Delay between media push requests |
+| `--output <path>` | `data/instagram/<username>.ndjson` | NDJSON output file |
+| `--checkpoint <path>` | `data/instagram/<username>.checkpoint.json` | Resume checkpoint file |
+| `--download-dir <path>` | none | Download discovered images to disk |
+| `--push-cloudflare` | `false` | Push media into app APIs during ingest |
+| `--skip-video-push` | `false` | With `--push-cloudflare`, skip video uploads |
+| `--api-base <url>` | `http://localhost:3000` | Base URL for local app API |
+| `--no-resume` | resume on | Ignore checkpoint and start from newest items |
+| `--headful` | headless | Run ingest with visible browser window |
+| `-v`, `--verbose` | very verbose by default | Increase logging verbosity |
+| `--quiet` | off | Minimal logging |
+| `--no-color` | off | Disable ANSI colors |
+
+#### Output Schema (Per NDJSON Line)
+
+Each line includes fields like:
+
+- `source`, `fetchedAt`, `username`, `userId`
+- `mediaId`, `pk`, `shortcode`, `permalink`
+- `mediaType`, `productType`
+- `takenAtUnix`, `takenAtIso`
+- `likeCount`, `commentCount`, `caption`
+- `imageUrls[]`, `videoUrls[]`
+- `cloudflare[]` (only populated when push is enabled)
+
+#### Typical Usage Patterns
+
+Baseline ingest:
+
+```bash
+npm run ig:ingest -- --username iffffound
+```
+
+Quiet mode:
+
+```bash
+npm run ig:ingest -- --username iffffound --quiet
+```
+
+Fetch only a fixed amount for testing:
+
+```bash
+npm run ig:ingest -- --username iffffound --max-pages 3 --count 12
+```
+
+Download images while ingesting:
+
+```bash
+npm run ig:ingest -- --username iffffound --download-dir data/instagram/iffffound-images
+```
+
+Start fresh from newest items (ignore checkpoint):
+
+```bash
+npm run ig:ingest -- --username iffffound --no-resume
+```
+
+Use visible browser for debugging auth/session issues:
+
+```bash
+npm run ig:ingest -- --username iffffound --headful
+```
+
+#### Pushing To Cloudflare-Backed API During Ingest
+
+Enable push:
+
+```bash
+npm run ig:ingest -- --username iffffound --push-cloudflare
+```
+
+When enabled, images are sent to:
+
+- `POST /api/upload/external`
+- form fields include `folder=instagram`, `tags=instagram,<username>`, `sourceUrl`, `originalUrl`, and `description=<permalink>` when available
+
+Videos are sent to:
+
+- `POST /api/import/page/upload-video`
+- with the same folder/tag/source/original metadata pattern
+
+If video ingest should be deferred:
+
+```bash
+npm run ig:ingest -- --username iffffound --push-cloudflare --skip-video-push
+```
+
+Tune per-asset pacing to reduce throttling:
+
+```bash
+npm run ig:ingest -- --username iffffound --push-cloudflare --request-delay-ms 1500
+```
+
+#### Replay Deferred Videos
+
+The script can later replay videos from the NDJSON file:
+
+```bash
+npm run ig:videos -- --username iffffound
+```
+
+Equivalent direct command:
+
+```bash
+node scripts/instagram-ingest.mjs videos-from-ndjson --username iffffound
+```
+
+#### Checkpoint & Resume Behavior
+
+- Checkpoint is written after every fetched page.
+- Resume uses `nextMaxId` from checkpoint when present.
+- If checkpoint is missing, ingest starts from newest.
+- `--no-resume` forces a new pass from newest even if checkpoint exists.
+
+Checkpoint fields include `pagesFetched`, `recordsWritten`, `nextMaxId`, and `updatedAt`.
+
+#### Common Failure Modes
+
+- `Login required` / `require_login`: session expired or missing. Re-run:
+  `npm run ig:auth -- --username <name>`
+- Feed request status not `200`: account/session/network issue; retry with `--headful` for visibility.
+- Video push temporary failures (`520/502/503/504`, timeout): script retries internally with backoff.
+- Duplicate image push (`409`): treated as "already exists", counted separately (not a hard failure).
+
+#### Operational Notes
+
+- The script appends to NDJSON; if you want a clean file, remove or rotate output first.
+- Keep one username per output/checkpoint file to preserve clean resume semantics.
+- For long runs, prefer conservative delays (`--delay-ms`, `--request-delay-ms`) to reduce platform/API friction.
 
 ---
 

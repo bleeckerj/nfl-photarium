@@ -16,6 +16,7 @@ interface GalleryListViewProps {
   onStartEdit: (image: CloudflareImage) => void;
   onDelete: (imageId: string) => void;
   onGenerateAlt: (imageId: string) => void;
+  onGenerateDisplayName: (imageId: string) => void;
   onCopyUrl: (imageId: string) => void;
   onCopyNamespace: (namespace: string) => void;
   onBeforeNavigate: (imageId: string) => void;
@@ -31,6 +32,7 @@ export const GalleryListView: React.FC<GalleryListViewProps> = ({
   onStartEdit,
   onDelete,
   onGenerateAlt,
+  onGenerateDisplayName,
   onCopyUrl,
   onCopyNamespace,
   onBeforeNavigate,
@@ -49,6 +51,7 @@ export const GalleryListView: React.FC<GalleryListViewProps> = ({
     colorMetadataMap,
     embeddingPendingMap,
     altLoadingMap,
+    displayNameLoadingMap,
     galleryReturnHrefSuffix,
   } = filters;
 
@@ -69,10 +72,12 @@ export const GalleryListView: React.FC<GalleryListViewProps> = ({
             colorMetadata={colorMetadataMap[image.id] as ColorMetadata | undefined}
             embeddingPending={embeddingPendingMap[image.id]}
             altLoading={Boolean(altLoadingMap[image.id])}
+            displayNameLoading={Boolean(displayNameLoadingMap[image.id])}
             onToggleSelection={onToggleSelection}
             onStartEdit={onStartEdit}
             onDelete={onDelete}
             onGenerateAlt={onGenerateAlt}
+            onGenerateDisplayName={onGenerateDisplayName}
             onCopyUrl={onCopyUrl}
             onCopyNamespace={onCopyNamespace}
             onBeforeNavigate={onBeforeNavigate}

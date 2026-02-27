@@ -74,6 +74,23 @@ const DEFAULT_PROVIDER = 'huggingface';
 const PROVIDER_LOG_KEY = Symbol.for('photarium.embedding.provider.logged');
 const PYTHON_LOG_KEY = Symbol.for('photarium.embedding.python.logged');
 const PYTHON_RESOLVE_KEY = Symbol.for('photarium.embedding.python.resolved');
+const MAX_EMBED_CHILD_STDOUT_CHARS = 2 * 1024 * 1024;
+const MAX_EMBED_CHILD_STDERR_CHARS = 256 * 1024;
+
+const appendWithLimit = (
+  current: string,
+  chunk: string,
+  limit: number
+): { next: string; truncated: boolean } => {
+  if (current.length >= limit) {
+    return { next: current, truncated: true };
+  }
+  const remaining = limit - current.length;
+  if (chunk.length <= remaining) {
+    return { next: current + chunk, truncated: false };
+  }
+  return { next: current + chunk.slice(0, remaining), truncated: true };
+};
 
 const resolveEmbeddingProvider = () =>
   (process.env.EMBEDDING_PROVIDER || DEFAULT_PROVIDER).toLowerCase();
@@ -433,17 +450,28 @@ async function runLocalEmbeddingScript(payload: { mode: 'image' | 'text'; text?:
 
     let stdout = '';
     let stderr = '';
+    let stdoutTruncated = false;
+    let stderrTruncated = false;
 
     child.stdout.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString();
+      const appended = appendWithLimit(stdout, chunk.toString(), MAX_EMBED_CHILD_STDOUT_CHARS);
+      stdout = appended.next;
+      if (appended.truncated) {
+        stdoutTruncated = true;
+      }
     });
     child.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString();
+      const appended = appendWithLimit(stderr, chunk.toString(), MAX_EMBED_CHILD_STDERR_CHARS);
+      stderr = appended.next;
+      if (appended.truncated) {
+        stderrTruncated = true;
+      }
     });
 
     child.on('close', (code: number | null) => {
       if (code !== 0) {
         const trimmed = stderr.trim();
+        const suffix = stderrTruncated ? ' [stderr truncated]' : '';
         if (trimmed.includes("No module named 'sentence_transformers'")) {
           console.error(
             `[Embedding] Local embedding script failed: sentence_transformers not available for ${pythonExecutable}`
@@ -452,7 +480,12 @@ async function runLocalEmbeddingScript(payload: { mode: 'image' | 'text'; text?:
           resolve(null);
           return;
         }
-        console.error('[Embedding] Local embedding script failed:', trimmed || `exit code ${code}`);
+        console.error('[Embedding] Local embedding script failed:', `${trimmed || `exit code ${code}`}${suffix}`);
+        resolve(null);
+        return;
+      }
+      if (stdoutTruncated) {
+        console.error('[Embedding] Local embedding script output exceeded limit and was truncated');
         resolve(null);
         return;
       }

@@ -3,6 +3,7 @@ import AdmZip from 'adm-zip';
 import { toDuplicateSummary } from '@/server/duplicateDetector';
 import { upsertRegistryNamespace } from '@/server/namespaceRegistry';
 import { validateParentForNewChild } from '@/server/parentValidation';
+import { getPromptThisRecord, setPromptThisRecord, type PromptThisRecord } from '@/server/promptThis';
 import { SUPPORTED_IMAGE_TYPES, uploadImageBuffer } from '@/server/uploadService';
 import type { UploadFailure, UploadSuccess } from '@/server/uploadService';
 
@@ -53,6 +54,89 @@ const keynoteDescriptionFromPath = (value?: string) => {
   return stripExtension(normalizeFilename(value));
 };
 
+type PromptSaveSummary = {
+  requested: true;
+  promptLength: number;
+  attempted: number;
+  saved: number;
+  failed: number;
+  imageIds: string[];
+  errors?: Array<{ imageId: string; error: string }>;
+};
+
+const parseOptionalPromptField = (
+  value: FormDataEntryValue | null
+): { ok: true; prompt?: string } | { ok: false; error: string } => {
+  if (value === null) return { ok: true };
+  if (typeof value !== 'string') {
+    return { ok: false, error: 'Invalid prompt: expected a text field' };
+  }
+  const prompt = value.trim();
+  return prompt ? { ok: true, prompt } : { ok: true };
+};
+
+async function persistUploadPrompt(
+  imageIds: Array<string | undefined>,
+  prompt?: string
+): Promise<PromptSaveSummary | undefined> {
+  if (!prompt) return undefined;
+
+  const uniqueIds = Array.from(new Set(imageIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)));
+  if (!uniqueIds.length) {
+    return {
+      requested: true,
+      promptLength: prompt.length,
+      attempted: 0,
+      saved: 0,
+      failed: 0,
+      imageIds: [],
+    };
+  }
+
+  const errors: Array<{ imageId: string; error: string }> = [];
+  let saved = 0;
+
+  for (const imageId of uniqueIds) {
+    try {
+      const existing = await getPromptThisRecord(imageId);
+      const now = new Date().toISOString();
+      const record: PromptThisRecord = {
+        imageId,
+        prompt,
+        model: 'manual',
+        provider: 'manual',
+        createdAt: existing?.createdAt || now,
+        updatedAt: now,
+      };
+      await setPromptThisRecord(record);
+      saved += 1;
+    } catch (error) {
+      errors.push({
+        imageId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (errors.length) {
+    logIssue('Failed to persist prompt for one or more uploaded images', {
+      attempted: uniqueIds.length,
+      failed: errors.length,
+      imageIds: uniqueIds,
+    });
+  }
+
+  return {
+    requested: true,
+    promptLength: prompt.length,
+    attempted: uniqueIds.length,
+    saved,
+    failed: errors.length,
+    imageIds: uniqueIds,
+    errors: errors.length ? errors : undefined,
+  };
+}
+
 export async function POST(request: NextRequest) {
   try {
     // Check for required environment variables
@@ -81,16 +165,27 @@ export async function POST(request: NextRequest) {
     const folder = formData.get('folder') as string;
     const tags = formData.get('tags') as string;
     const description = formData.get('description') as string;
+    const promptField = parseOptionalPromptField(formData.get('prompt'));
+    const displayName = formData.get('displayName') as string;
     const originalUrl = formData.get('originalUrl') as string;
     const sourceUrl = formData.get('sourceUrl') as string;
     const sourcePath = formData.get('sourcePath') as string;
     const namespace = formData.get('namespace') as string;
     const parentIdRaw = formData.get('parentId');
+
+    if (!promptField.ok) {
+      return NextResponse.json(
+        { error: promptField.error },
+        { status: 400 }
+      );
+    }
+    const cleanPrompt = promptField.prompt;
     
     // Clean up values - handle empty strings and "undefined" strings
     const cleanFolder = folder && folder.trim() && folder !== 'undefined' ? folder.trim() : undefined;
     const cleanTags = tags && tags.trim() ? tags.trim().split(',').map(t => t.trim()).filter(t => t) : [];
     const cleanDescription = description && description.trim() && description !== 'undefined' ? description.trim() : undefined;
+    const cleanDisplayName = displayName && displayName.trim() && displayName !== 'undefined' ? displayName.trim() : undefined;
     const cleanOriginalUrl = originalUrl && originalUrl.trim() && originalUrl !== 'undefined' ? originalUrl.trim() : undefined;
     const cleanSourceUrl = sourceUrl && sourceUrl.trim() && sourceUrl !== 'undefined' ? sourceUrl.trim() : undefined;
     const cleanSourcePath = sourcePath && sourcePath.trim() && sourcePath !== 'undefined' ? sourcePath.trim() : undefined;
@@ -99,8 +194,13 @@ export async function POST(request: NextRequest) {
       rawNamespace && rawNamespace !== 'undefined' && rawNamespace !== '__all__' && rawNamespace !== '__none__'
         ? rawNamespace
         : undefined;
-    const defaultNamespace = process.env.IMAGE_NAMESPACE || process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || undefined;
-    const effectiveNamespace = cleanNamespace || defaultNamespace;
+    if (!cleanNamespace) {
+      return NextResponse.json(
+        { error: 'A specific namespace is required for uploads. Select a namespace instead of All.' },
+        { status: 400 }
+      );
+    }
+    const effectiveNamespace = cleanNamespace;
     const parentIdValue = typeof parentIdRaw === 'string' ? parentIdRaw.trim() : '';
     const cleanParentId = parentIdValue && parentIdValue !== 'undefined' ? parentIdValue : undefined;
 
@@ -111,6 +211,7 @@ export async function POST(request: NextRequest) {
         { status: parentValidation.status }
       );
     }
+    const resolvedParentId = parentValidation.canonicalParentId;
 
     const keynoteSource = isKeynoteSourcePath(cleanSourcePath);
     const forcedTags = keynoteSource
@@ -124,11 +225,12 @@ export async function POST(request: NextRequest) {
       folder: cleanFolder,
       tags: forcedTags,
       description: forcedDescription,
+      displayName: cleanDisplayName,
       originalUrl: cleanOriginalUrl,
       sourceUrl: cleanSourceUrl,
       sourcePath: cleanSourcePath,
       namespace: effectiveNamespace,
-      parentId: cleanParentId
+      parentId: resolvedParentId
     };
 
     if (isArchiveFile(file)) {
@@ -222,6 +324,11 @@ export async function POST(request: NextRequest) {
         await upsertRegistryNamespace(effectiveNamespace);
       }
 
+      const promptSave = await persistUploadPrompt(
+        results.flatMap((result) => [result.id, result.webpVariantId]),
+        cleanPrompt
+      );
+
       return NextResponse.json({
         results,
         failures,
@@ -229,7 +336,8 @@ export async function POST(request: NextRequest) {
         successCount: results.length,
         failureCount: failures.length,
         skippedCount: skipped.length,
-        isZip: true
+        isZip: true,
+        ...(promptSave ? { promptSave } : {})
       });
     }
 
@@ -262,7 +370,15 @@ export async function POST(request: NextRequest) {
 
     await upsertRegistryNamespace(effectiveNamespace);
 
-    return NextResponse.json(outcome.data);
+    const promptSave = await persistUploadPrompt(
+      [outcome.data.id, outcome.data.webpVariantId],
+      cleanPrompt
+    );
+
+    return NextResponse.json({
+      ...outcome.data,
+      ...(promptSave ? { promptSave } : {})
+    });
 
   } catch (error) {
     console.error('Upload error:', error);

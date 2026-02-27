@@ -33,6 +33,7 @@ The API does not include built-in authentication. If exposing externally, protec
   - [Upload](#upload)
     - [Upload Image (Internal)](#upload-image-internal)
     - [Upload Image (External API)](#upload-image-external-api)
+    - [Upload Video (Page Import)](#upload-video-page-import)
     - [Import from URL](#import-from-url)
   - [Paginated Uploads](#paginated-uploads)
   - [Folders](#folders)
@@ -349,6 +350,63 @@ const uploadResponse = await fetch("/api/upload/external", {
   method: "POST",
   body: formData
 });
+```
+
+---
+
+### Upload Video (Page Import)
+
+Upload short video assets for catalog ingestion via Cloudflare Stream.
+
+```
+POST /api/import/page/upload-video
+Content-Type: multipart/form-data
+```
+
+**Multipart Form Fields (file mode):**
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `file` | ✅ | Video file (`video/mp4`, `video/webm`, `video/quicktime`, `video/ogg`) |
+| `folder` | ❌ | Folder assignment |
+| `tags` | ❌ | Comma-separated tags |
+| `description` | ❌ | Description |
+| `namespace` | ❌ | Namespace override |
+| `originalUrl` | ❌ | Source/origin URL |
+| `sourceUrl` | ❌ | Source page/media URL |
+| `requireSignedUrls` | ❌ | `"true"` to request signed playback URLs in Stream |
+
+**Remote URL mode:**
+
+```
+POST /api/import/page/upload-video
+Content-Type: application/json
+```
+
+```json
+{
+  "url": "https://cdn.example.com/loop.mp4",
+  "filename": "loop.mp4",
+  "folder": "loops",
+  "tags": "hero,canva",
+  "namespace": "app-a"
+}
+```
+
+**Response:**
+
+```json
+{
+  "id": "catalog-video-id",
+  "assetType": "video",
+  "filename": "loop.mp4",
+  "uploaded": "2026-02-20T20:00:00.000Z",
+  "streamUid": "a1b2c3d4e5f6",
+  "playbackUrl": "https://videodelivery.net/a1b2c3d4e5f6/iframe",
+  "hlsUrl": "https://videodelivery.net/a1b2c3d4e5f6/manifest/video.m3u8",
+  "thumbnailUrl": "https://videodelivery.net/.../thumbnails/thumbnail.jpg",
+  "videoStatus": "pending"
+}
 ```
 
 ---

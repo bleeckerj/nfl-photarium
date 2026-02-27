@@ -31,11 +31,13 @@ interface ImageCardProps {
   colorMetadata?: ColorMetadata;
   embeddingPending?: EmbeddingPendingEntry;
   altLoading: boolean;
+  displayNameLoading: boolean;
   // Actions
   onToggleSelection: (imageId: string) => void;
   onStartEdit: (image: CloudflareImage) => void;
   onDelete: (imageId: string) => void;
   onGenerateAlt: (imageId: string) => void;
+  onGenerateDisplayName: (imageId: string) => void;
   onCopyUrl: (imageId: string) => void;
   onCopyNamespace: (namespace: string) => void;
   onBeforeNavigate?: (imageId: string) => void;
@@ -70,10 +72,12 @@ export const ImageCard: React.FC<ImageCardProps> = ({
   colorMetadata,
   embeddingPending,
   altLoading,
+  displayNameLoading,
   onToggleSelection,
   onStartEdit,
   onDelete,
   onGenerateAlt,
+  onGenerateDisplayName,
   onCopyUrl,
   onCopyNamespace,
   onBeforeNavigate,
@@ -82,11 +86,19 @@ export const ImageCard: React.FC<ImageCardProps> = ({
   onMouseMove,
   onMouseLeave,
 }) => {
+  const isVideoAsset = image.assetType === 'video';
   const svgImage = isSvgImage(image);
   const isComfyOutput = image.generatedBy === 'comfyui' || image.comfyMetadataDetected === true;
-  const imageUrl = getCloudflareImageUrl(image.id, selectedVariant === 'public' ? 'original' : selectedVariant);
-  const displayUrl = svgImage ? getCloudflareImageUrl(image.id, 'original') : imageUrl;
+  const imageUrl = isVideoAsset
+    ? image.videoThumbnailUrl || image.videoPreviewUrl || image.videoPlaybackUrl || image.videoHlsUrl || ''
+    : getCloudflareImageUrl(image.id, selectedVariant === 'public' ? 'original' : selectedVariant);
+  const displayUrl = isVideoAsset
+    ? imageUrl
+    : (svgImage ? getCloudflareImageUrl(image.id, 'original') : imageUrl);
   const fileSizeLabel = formatBytes(image.size);
+  const detailHref = isVideoAsset
+    ? `/videos/${image.id}${galleryReturnHrefSuffix ?? ''}`
+    : `/images/${image.id}${galleryReturnHrefSuffix ?? ''}`;
 
   return (
     <div
@@ -95,7 +107,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
       } ${bulkSelectionMode ? 'cursor-pointer' : ''}`}
     >
       <Link
-        href={`/images/${image.id}${galleryReturnHrefSuffix ?? ''}`}
+        href={detailHref}
         className={`relative block w-full ${respectAspectRatio ? '' : 'aspect-square'}`}
         style={
           respectAspectRatio && image.dimensions
@@ -110,14 +122,41 @@ export const ImageCard: React.FC<ImageCardProps> = ({
             onToggleSelection(image.id);
             return;
           }
+          if (isVideoAsset) {
+            onBeforeNavigate?.(image.id);
+            return;
+          }
           onBeforeNavigate?.(image.id);
         }}
-        onMouseEnter={(e) => onMouseEnter(image.id, e)}
-        onMouseMove={(e) => onMouseMove(image.id, e)}
-        onMouseLeave={onMouseLeave}
+        onMouseEnter={(e) => {
+          if (!isVideoAsset) onMouseEnter(image.id, e);
+        }}
+        onMouseMove={(e) => {
+          if (!isVideoAsset) onMouseMove(image.id, e);
+        }}
+        onMouseLeave={() => {
+          if (!isVideoAsset) onMouseLeave();
+        }}
         prefetch={false}
       >
-        {svgImage ? (
+        {isVideoAsset ? (
+          <>
+            {displayUrl ? (
+              <img
+                src={displayUrl}
+                alt={image.displayName || image.filename}
+                className={`absolute inset-0 w-full h-full ${respectAspectRatio ? 'object-contain bg-white' : 'object-cover'}`}
+              />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center bg-gray-200 text-[0.65rem] text-gray-600">
+                Video
+              </div>
+            )}
+            <div className="absolute bottom-2 left-2 rounded bg-black/70 px-2 py-1 text-[0.6rem] font-semibold text-white">
+              VIDEO
+            </div>
+          </>
+        ) : svgImage ? (
           <img
             draggable
             onDragStart={(e) => handleImageDragStart(e, image)}
@@ -203,6 +242,9 @@ export const ImageCard: React.FC<ImageCardProps> = ({
           </div>
           <div className="text-gray-500 text-[0.6rem] mt-1 space-y-0.5">
             <p>{new Date(image.uploaded).toLocaleDateString()}</p>
+            {isVideoAsset && (
+              <p>🎬 {image.videoStatus || 'pending'}</p>
+            )}
             <p>📦 {fileSizeLabel}</p>
             <p>📁 {image.folder ? image.folder : '[none]'}</p>
             <p className="flex items-center gap-1">
@@ -222,7 +264,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
                 </button>
               )}
             </p>
-            <AspectRatioDisplay imageId={image.id} />
+            <AspectRatioDisplay imageId={image.id} aspectRatio={image.aspectRatio} />
             {image.tags && image.tags.length > 0 ? (
               <p>
                 🏷️ {image.tags.slice(0, 2).join(', ')}
@@ -270,17 +312,36 @@ export const ImageCard: React.FC<ImageCardProps> = ({
           </div>
         </div>
         <div className="pt-2">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onGenerateAlt(image.id);
-            }}
-            disabled={altLoading}
-            className="w-full inline-flex items-center justify-center gap-2 bg-gray-900 text-white rounded-md px-3 py-1.5 text-[0.6rem] transition hover:bg-black disabled:opacity-50"
-          >
-            <Sparkles className="text-[0.8rem] h-3.5 w-3.5" />
-            {altLoading ? 'Generating ALT...' : image.altTag ? 'Refresh text' : 'Gen ALT text'}
-          </button>
+          {!isVideoAsset && (
+            <div className="inline-flex w-full rounded-md overflow-hidden border border-gray-900">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onGenerateAlt(image.id);
+                }}
+                disabled={altLoading}
+                className="flex-1 inline-flex items-center justify-center gap-2 bg-gray-900 text-white px-2 py-1.5 text-[0.6rem] transition hover:bg-black disabled:opacity-50"
+                title="Generate ALT text"
+                aria-label="Generate ALT text"
+              >
+                <Sparkles className="text-[0.8rem] h-3.5 w-3.5" />
+                {altLoading ? 'Generating ALT...' : image.altTag ? 'Refresh ALT' : 'Gen ALT text'}
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onGenerateDisplayName(image.id);
+                }}
+                disabled={displayNameLoading}
+                className="flex-1 inline-flex items-center justify-center gap-2 bg-gray-800 text-white px-2 py-1.5 text-[0.6rem] transition hover:bg-gray-900 disabled:opacity-50 border-l border-gray-700"
+                title="Generate display name"
+                aria-label="Generate display name"
+              >
+                <Sparkles className="text-[0.8rem] h-3.5 w-3.5" />
+                {displayNameLoading ? 'Generating…' : 'Gen DSP name'}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -313,10 +374,10 @@ export const ImageCard: React.FC<ImageCardProps> = ({
           <Copy className="h-[12px] w-[12px]" />
         </button>
         <button
-          onClick={() => window.open(`/images/${image.id}`, '_blank')}
+          onClick={() => window.open(isVideoAsset ? `/videos/${image.id}` : `/images/${image.id}`, '_blank')}
           className="h-8 w-full inline-flex items-center justify-center rounded-md bg-black text-white shadow-sm transition-colors hover:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-black/40"
-          title="Open in new tab"
-          aria-label="Open in new tab"
+          title={isVideoAsset ? "Open video detail" : "Open in new tab"}
+          aria-label={isVideoAsset ? "Open video detail" : "Open in new tab"}
         >
           <ExternalLink className="h-[12px] w-[12px]" />
         </button>
@@ -338,8 +399,8 @@ export const ImageCard: React.FC<ImageCardProps> = ({
         <button
           onClick={() => onDelete(image.id)}
           className="h-8 w-full inline-flex items-center justify-center rounded-md border border-red-300 bg-white text-red-600 shadow-sm transition-colors hover:bg-red-50 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-red-300"
-          title="Delete image"
-          aria-label="Delete image"
+          title={isVideoAsset ? "Delete video" : "Delete image"}
+          aria-label={isVideoAsset ? "Delete video" : "Delete image"}
         >
           <Trash2 className="h-[12px] w-[12px]" />
         </button>

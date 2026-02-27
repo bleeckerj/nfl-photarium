@@ -11,16 +11,9 @@ import { Database } from 'lucide-react';
 export default function Home() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const galleryRef = useRef<{ refreshImages: () => void }>(null);
-  // Initialize from localStorage (client-only) to avoid a second namespace update
-  // that would otherwise re-fetch images and trigger another /api/images/colors call.
-  const [namespace, setNamespace] = useState<string>(() => {
-    const envDefault = process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || '';
-    if (typeof window === 'undefined') return envDefault;
-    const stored = window.localStorage.getItem('imageNamespace');
-    if (stored === '__none__') return '';
-    if (stored === '__all__') return '__all__';
-    return stored || envDefault;
-  });
+  const envDefaultNamespace = process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || '';
+  // Keep the initial server/client render deterministic; hydrate from localStorage in an effect.
+  const [namespace, setNamespace] = useState<string>(envDefaultNamespace);
   const [isVectorReady, setIsVectorReady] = useState(false);
   const [showRedisInfo, setShowRedisInfo] = useState(false);
   const statusCheckDisabled =
@@ -36,6 +29,18 @@ export default function Home() {
       .then(data => setIsVectorReady(data.available ?? false))
       .catch(() => setIsVectorReady(false));
   }, [statusCheckDisabled]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const stored = window.localStorage.getItem('imageNamespace');
+    const nextNamespace =
+      stored === '__none__'
+        ? ''
+        : stored === '__all__'
+          ? '__all__'
+          : stored || envDefaultNamespace;
+    setNamespace((prev) => (prev === nextNamespace ? prev : nextNamespace));
+  }, [envDefaultNamespace]);
 
   const handleNamespaceChange = (value: string) => {
     if (typeof window !== 'undefined') {
@@ -76,7 +81,7 @@ export default function Home() {
                 </summary>
                 <div className="mt-2">
                   <TextSearch 
-                    onImageClick={(id) => router.push(`/images/${id}`)}
+                    onImageClick={(result) => router.push(result.assetType === 'video' ? `/videos/${result.imageId}` : `/images/${result.imageId}`)}
                     namespace={namespace}
                   />
                 </div>
@@ -109,7 +114,7 @@ export default function Home() {
             <p className="text-sm font-mono text-gray-900 mb-2">
               Cloudflare Image Upload
             </p>
-            <ImageUploader onImageUploaded={handleImageUploaded} namespace={namespace === '__all__' ? '' : namespace} />
+            <ImageUploader onImageUploaded={handleImageUploaded} namespace={namespace} />
           </section>
         </div>
       </div>

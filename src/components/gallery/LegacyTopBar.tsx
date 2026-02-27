@@ -1,4 +1,5 @@
 import { Cpu, Settings } from 'lucide-react';
+import type { ReactNode } from 'react';
 import DateNavigator from '@/components/DateNavigator';
 import MonoSelect from '@/components/MonoSelect';
 import type { DateFilter, GridSize } from './types';
@@ -51,6 +52,7 @@ interface LegacyTopBarProps {
   onNextPage: () => void;
   onJumpForwardTen: () => void;
   onLastPage: () => void;
+  backupControls?: ReactNode;
 }
 
 export default function LegacyTopBar({
@@ -98,6 +100,7 @@ export default function LegacyTopBar({
   onNextPage,
   onJumpForwardTen,
   onLastPage,
+  backupControls,
 }: LegacyTopBarProps) {
   return (
     <div className="flex flex-col gap-3 mb-4">
@@ -180,7 +183,7 @@ export default function LegacyTopBar({
       </div>
 
       <div id="second-row-controls" className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={onToggleBulkSelection}
             className="px-3 py-1 text-[0.7em] font-mono border border-gray-200 rounded-md hover:bg-gray-100 transition"
@@ -202,6 +205,7 @@ export default function LegacyTopBar({
           >
             Clear filters
           </button>
+          {backupControls}
         </div>
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1 bg-gray-100/50 rounded-md px-2 py-0.5">

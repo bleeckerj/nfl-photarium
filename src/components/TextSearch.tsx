@@ -24,11 +24,14 @@ interface SearchResult {
   score: number;
   filename?: string;
   folder?: string;
+  assetType?: 'image' | 'video';
+  videoThumbnailUrl?: string;
+  videoPlaybackUrl?: string;
 }
 
 interface TextSearchProps {
   className?: string;
-  onImageClick?: (imageId: string) => void;
+  onImageClick?: (result: SearchResult) => void;
   initialQuery?: string;
   // Current operating namespace from the gallery. Can be '', '__all__', or a namespace string.
   namespace?: string;
@@ -163,7 +166,7 @@ export function TextSearch({ className = '', onImageClick, initialQuery = '', na
     } finally {
       setLoading(false);
     }
-  }, [query, searchType, addToHistory]);
+  }, [query, searchType, addToHistory, effectiveNamespaceFilter]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -379,13 +382,15 @@ export function TextSearch({ className = '', onImageClick, initialQuery = '', na
                 key={result.imageId}
                 className="relative aspect-square rounded-lg overflow-hidden bg-gray-800 border-2 border-gray-700 cursor-pointer hover:border-purple-500 hover:scale-105 transition-all duration-150"
                 style={{ minWidth: '70px', minHeight: '70px' }}
-                onClick={() => onImageClick?.(result.imageId)}
+                onClick={() => onImageClick?.(result)}
                 onMouseEnter={(e) => handleMouseEnter(e, result)}
                 onMouseLeave={handleMouseLeave}
                 title={`${result.filename || result.imageId}\nScore: ${result.score.toFixed(3)} (${getScoreLabel(result.score)})`}
               >
                 <Image
-                  src={getCloudflareImageUrl(result.imageId, 'medium')}
+                  src={result.assetType === 'video' && result.videoThumbnailUrl
+                    ? result.videoThumbnailUrl
+                    : getCloudflareImageUrl(result.imageId, 'medium')}
                   alt={result.filename || 'Search result'}
                   fill
                   className="object-cover"
@@ -437,7 +442,13 @@ export function TextSearch({ className = '', onImageClick, initialQuery = '', na
           <div className="bg-gray-900 rounded-lg shadow-2xl border border-purple-700 overflow-hidden">
             <div className="relative w-48 h-48">
               <Image
-                src={getCloudflareImageUrl(hoverPreview.imageId, 'medium')}
+                src={(() => {
+                  const result = results.find((entry) => entry.imageId === hoverPreview.imageId);
+                  if (result?.assetType === 'video' && result.videoThumbnailUrl) {
+                    return result.videoThumbnailUrl;
+                  }
+                  return getCloudflareImageUrl(hoverPreview.imageId, 'medium');
+                })()}
                 alt={hoverPreview.filename || 'Preview'}
                 fill
                 className="object-cover"

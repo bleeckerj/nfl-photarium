@@ -45,11 +45,17 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { promises as fs } from 'node:fs';
 import { createServer } from 'node:http';
+import { execSync, spawn } from 'node:child_process';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
 
 // Configuration
 const BASE_URL = process.env.PHOTARIUM_BASE_URL || 'http://localhost:3000';
+const SERVICE_NAME = 'photarium-mcp-server';
+const SERVICE_VERSION = '0.3.0';
+const THIS_FILE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(THIS_FILE_DIR, '..', '..');
 
 // Types
 interface ImageResult {
@@ -166,6 +172,130 @@ function decodeBase64(value: string): { buffer: Buffer; mimeType?: string } {
   const { mimeType, data } = parseDataUrl(value);
   const buffer = Buffer.from(data, 'base64');
   return { buffer, mimeType };
+}
+
+async function runCommandCapture(
+  command: string,
+  args: string[],
+  options: { cwd?: string } = {}
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: process.env,
+    });
+
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString('utf8');
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString('utf8');
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      resolve({
+        exitCode: typeof code === 'number' ? code : 1,
+        stdout,
+        stderr,
+      });
+    });
+  });
+}
+
+async function runFilesystemIngest(options: {
+  rootPath: string;
+  namespace: string;
+  apiBase?: string;
+  folder?: string;
+  tags?: string[];
+  descriptionPrefix?: string;
+  includeFilename?: boolean;
+  includePathTags?: boolean;
+  aiMetadata?: boolean;
+  aiDisplayName?: boolean;
+  aiTags?: boolean;
+  tagCount?: number;
+  concurrency?: number;
+  throttleMs?: number;
+  limit?: number;
+  dryRun?: boolean;
+  verbose?: boolean;
+}): Promise<{
+  ok: boolean;
+  exitCode: number;
+  command: string[];
+  stdout: string;
+  stderr: string;
+}> {
+  const scriptPath = path.join(REPO_ROOT, 'scripts', 'fs-ingest.mjs');
+  const args = [scriptPath, '--root', options.rootPath, '--namespace', options.namespace];
+
+  if (options.apiBase) args.push('--api-base', options.apiBase);
+  if (options.folder) args.push('--folder', options.folder);
+  if (options.tags && options.tags.length > 0) args.push('--tags', options.tags.join(','));
+  if (options.descriptionPrefix) args.push('--description-prefix', options.descriptionPrefix);
+  if (options.includeFilename) args.push('--include-filename');
+  if (options.includePathTags) args.push('--include-path-tags');
+  if (options.aiMetadata) args.push('--ai-metadata');
+  if (options.aiDisplayName) args.push('--ai-display-name');
+  if (options.aiTags) args.push('--ai-tags');
+  if (typeof options.tagCount === 'number') args.push('--tag-count', String(options.tagCount));
+  if (typeof options.concurrency === 'number') args.push('--concurrency', String(options.concurrency));
+  if (typeof options.throttleMs === 'number') args.push('--throttle-ms', String(options.throttleMs));
+  if (typeof options.limit === 'number') args.push('--limit', String(options.limit));
+  if (options.dryRun) args.push('--dry-run');
+  if (options.verbose) args.push('--verbose');
+
+  const result = await runCommandCapture(process.execPath, args, { cwd: REPO_ROOT });
+  return {
+    ok: result.exitCode === 0,
+    exitCode: result.exitCode,
+    command: [process.execPath, ...args],
+    stdout: result.stdout,
+    stderr: result.stderr,
+  };
+}
+
+function buildHttpHelp(toolName?: string) {
+  const normalized = toolName ? decodeURIComponent(toolName) : undefined;
+  if (normalized) {
+    const tool = TOOLS.find((entry) => entry.name === normalized);
+    if (!tool) {
+      return { ok: false, error: `Unknown tool: ${normalized}` };
+    }
+    return {
+      ok: true,
+      tool,
+      usage: {
+        endpoint: `/tools/${tool.name}`,
+        method: 'POST',
+        body: { arguments: {} },
+      },
+    };
+  }
+
+  return {
+    ok: true,
+    service: SERVICE_NAME,
+    version: SERVICE_VERSION,
+    endpoints: {
+      health: 'GET /health',
+      version: 'GET /version',
+      tools: 'GET /tools',
+      toolInfo: 'GET /tools/:name',
+      help: 'GET /help',
+      toolHelp: 'GET /help/:name',
+      callTool: 'POST /tools/call',
+      callToolDirect: 'POST /tools/:name',
+    },
+    notes: [
+      'Use GET /help/<tool-name> for a specific tool schema and HTTP call pattern.',
+      'Example: /help/photarium_fs_ingest',
+    ],
+  };
 }
 
 // Tool implementations
@@ -563,9 +693,270 @@ async function getImageMetadata(imageId: string): Promise<Record<string, unknown
   };
 }
 
+const UPLOAD_FILENAME_QUERY_KEYS = [
+  'view_filename',
+  'filename',
+  'file',
+  'name',
+  'image',
+  'download',
+];
+
+const UPLOAD_MIME_EXTENSION_MAP: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/jpg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+  'image/gif': '.gif',
+  'image/svg+xml': '.svg',
+  'image/avif': '.avif',
+  'image/bmp': '.bmp',
+  'image/x-icon': '.ico',
+  'image/tiff': '.tiff',
+};
+
+function decodeUrlComponentSafe(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function extractFilenameFromSearchParams(params: URLSearchParams): string | undefined {
+  for (const key of UPLOAD_FILENAME_QUERY_KEYS) {
+    const raw = params.get(key);
+    if (raw && raw.trim()) {
+      return decodeUrlComponentSafe(raw.trim());
+    }
+  }
+  return undefined;
+}
+
+function extractFilenameFromQueryBlob(value: string): string | undefined {
+  const text = value.trim().replace(/^\?/, '');
+  if (!text || !text.includes('=')) return undefined;
+  const params = new URLSearchParams(text);
+  return extractFilenameFromSearchParams(params);
+}
+
+function cleanUploadFilename(value: string): string {
+  let name = value.split(/[\\/]/).pop() || value;
+  const fromBlob = extractFilenameFromQueryBlob(name);
+  if (fromBlob) {
+    name = fromBlob;
+  }
+  name = name.split('#')[0] || name;
+  name = name.split('?')[0] || name;
+
+  const dot = name.lastIndexOf('.');
+  const hasExt = dot > 0 && dot < name.length - 1;
+  const extension = hasExt ? name.slice(dot).replace(/[^a-zA-Z0-9.]/g, '').toLowerCase() : '';
+  const stem = hasExt ? name.slice(0, dot) : name;
+  const cleanStem = stem
+    .replace(/[^a-zA-Z0-9_-]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  const finalStem = cleanStem || 'UploadedImage';
+  return `${finalStem}${extension}`;
+}
+
+function camelizeUploadStem(value: string): string {
+  const tokens = value
+    .replace(/(?<=[a-z0-9])(?=[A-Z])/g, ' ')
+    .replace(/[^A-Za-z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!tokens.length) return 'UploadedImage';
+  const words = tokens.slice(0, 6).map((token) => {
+    const lower = token.toLowerCase();
+    return lower.charAt(0).toUpperCase() + lower.slice(1);
+  });
+  const merged = words.join('');
+  if (!merged) return 'UploadedImage';
+  return /^\d/.test(merged) ? `Image${merged}` : merged;
+}
+
+function extensionFromMimeType(value?: string | null): string | undefined {
+  if (!value) return undefined;
+  const normalized = value.split(';')[0]?.trim().toLowerCase();
+  if (!normalized) return undefined;
+  return UPLOAD_MIME_EXTENSION_MAP[normalized];
+}
+
+function extensionFromFilename(value: string): string | undefined {
+  const match = value.match(/\.[a-z0-9]{2,5}$/i);
+  return match ? match[0].toLowerCase() : undefined;
+}
+
+function withExtension(stem: string, extension?: string): string {
+  if (!extension) return stem;
+  if (stem.toLowerCase().endsWith(extension.toLowerCase())) return stem;
+  return `${stem}${extension}`;
+}
+
+function detectImageMimeFromBuffer(buffer: Buffer): string | undefined {
+  if (!buffer || buffer.length < 12) return undefined;
+
+  // PNG
+  if (
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47 &&
+    buffer[4] === 0x0d &&
+    buffer[5] === 0x0a &&
+    buffer[6] === 0x1a &&
+    buffer[7] === 0x0a
+  ) {
+    return 'image/png';
+  }
+
+  // JPEG
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return 'image/jpeg';
+  }
+
+  // GIF
+  if (
+    buffer[0] === 0x47 &&
+    buffer[1] === 0x49 &&
+    buffer[2] === 0x46 &&
+    buffer[3] === 0x38
+  ) {
+    return 'image/gif';
+  }
+
+  // WebP
+  if (
+    buffer[0] === 0x52 &&
+    buffer[1] === 0x49 &&
+    buffer[2] === 0x46 &&
+    buffer[3] === 0x46 &&
+    buffer[8] === 0x57 &&
+    buffer[9] === 0x45 &&
+    buffer[10] === 0x42 &&
+    buffer[11] === 0x50
+  ) {
+    return 'image/webp';
+  }
+
+  // BMP
+  if (buffer[0] === 0x42 && buffer[1] === 0x4d) {
+    return 'image/bmp';
+  }
+
+  // TIFF
+  if (
+    (buffer[0] === 0x49 && buffer[1] === 0x49 && buffer[2] === 0x2a && buffer[3] === 0x00) ||
+    (buffer[0] === 0x4d && buffer[1] === 0x4d && buffer[2] === 0x00 && buffer[3] === 0x2a)
+  ) {
+    return 'image/tiff';
+  }
+
+  // AVIF/HEIF family by ftyp box
+  const ftyp = buffer.subarray(4, 12).toString('ascii');
+  if (ftyp === 'ftypavif' || ftyp === 'ftypavis' || ftyp === 'ftypheic' || ftyp === 'ftypheif') {
+    return 'image/avif';
+  }
+
+  // SVG (text-based)
+  const head = buffer.subarray(0, Math.min(buffer.length, 512)).toString('utf8').trim().toLowerCase();
+  if (head.includes('<svg') || (head.startsWith('<?xml') && head.includes('<svg'))) {
+    return 'image/svg+xml';
+  }
+
+  return undefined;
+}
+
+function extractUploadFilenameFromUrl(url: string, mimeType?: string | null): string {
+  const preferredExt = extensionFromMimeType(mimeType) || '.jpg';
+  try {
+    const parsed = new URL(url);
+    const fromQuery = extractFilenameFromSearchParams(parsed.searchParams);
+    if (fromQuery) {
+      return withExtension(cleanUploadFilename(fromQuery), preferredExt);
+    }
+
+    const rawSegment = parsed.pathname.split('/').filter(Boolean).pop() || '';
+    const decodedSegment = decodeUrlComponentSafe(rawSegment);
+
+    try {
+      const nested = new URL(decodedSegment);
+      const nestedQueryName = extractFilenameFromSearchParams(nested.searchParams);
+      if (nestedQueryName) {
+        return withExtension(cleanUploadFilename(nestedQueryName), preferredExt);
+      }
+      const nestedName = nested.pathname.split('/').filter(Boolean).pop();
+      if (nestedName) {
+        return withExtension(cleanUploadFilename(nestedName), preferredExt);
+      }
+    } catch {
+      // Not a nested URL.
+    }
+
+    const queryBlobName = extractFilenameFromQueryBlob(decodedSegment);
+    if (queryBlobName) {
+      return withExtension(cleanUploadFilename(queryBlobName), preferredExt);
+    }
+    if (decodedSegment) {
+      return withExtension(cleanUploadFilename(decodedSegment), preferredExt);
+    }
+  } catch {
+    // Ignore malformed URLs and use fallback.
+  }
+  return withExtension('UploadedImage', preferredExt);
+}
+
+function looksLikeTransportFilename(filename: string): boolean {
+  const lowered = filename.toLowerCase();
+  const stem = lowered.replace(/\.[^.]+$/, '');
+  if (stem.includes('view_filename=')) return true;
+  if (stem.includes('filename=') && stem.includes('&')) return true;
+  if (stem === 'view' || stem === 'image' || stem === 'uploaded-image' || stem === 'remote-image') return true;
+  if (/^comfyui[_-]?\d+_?$/.test(stem)) return true;
+  return /[=&]/.test(stem);
+}
+
+function estimateBase64Bytes(value?: string): number | undefined {
+  if (!value) return undefined;
+  const payload = value.startsWith('data:') ? value.split(',', 2)[1] || '' : value;
+  if (!payload) return 0;
+  const padding = payload.endsWith('==') ? 2 : payload.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((payload.length * 3) / 4) - padding);
+}
+
+async function suggestSemanticDisplayNameFromUrl(
+  url: string,
+  hints: { filename?: string; folder?: string; tags?: string[] } = {}
+): Promise<string | undefined> {
+  try {
+    const form = new FormData();
+    form.append('remoteUrl', url);
+    if (hints.filename) form.append('filename', hints.filename);
+    if (hints.folder) form.append('folder', hints.folder);
+    if (hints.tags?.length) form.append('tags', hints.tags.join(','));
+
+    const response = await fetch(`${BASE_URL}/api/display-name/suggest`, {
+      method: 'POST',
+      body: form,
+    });
+    if (!response.ok) return undefined;
+
+    const payload = (await response.json()) as { displayName?: unknown };
+    const displayName = typeof payload.displayName === 'string' ? payload.displayName.trim() : '';
+    if (!displayName) return undefined;
+    return camelizeUploadStem(displayName);
+  } catch {
+    return undefined;
+  }
+}
+
 async function uploadFromUrl(
   url: string,
   options: {
+    displayName?: string;
     folder?: string;
     tags?: string[];
     namespace?: string;
@@ -573,8 +964,9 @@ async function uploadFromUrl(
     originalUrl?: string;
     sourceUrl?: string;
     parentId?: string;
+    prompt?: string;
   } = {}
-): Promise<{ success: boolean; imageId?: string; error?: string }> {
+): Promise<{ success: boolean; imageId?: string; error?: string; promptSave?: Record<string, unknown> }> {
   try {
     // Fetch the image
     const imageResponse = await fetch(url);
@@ -582,16 +974,47 @@ async function uploadFromUrl(
       return { success: false, error: `Failed to fetch image from URL: ${imageResponse.status}` };
     }
 
-    const blob = await imageResponse.blob();
-    const filename = url.split('/').pop() || 'uploaded-image';
+    const imageBytes = Buffer.from(await imageResponse.arrayBuffer());
+    if (!imageBytes.length) {
+      return { success: false, error: 'Downloaded file is empty' };
+    }
+    const inferredMime =
+      detectImageMimeFromBuffer(imageBytes)
+      || imageResponse.headers.get('content-type')?.split(';')[0]?.trim()
+      || undefined;
+    if (!inferredMime || !inferredMime.startsWith('image/')) {
+      return { success: false, error: 'Downloaded content is not valid image data' };
+    }
+
+    const extractedFilename = extractUploadFilenameFromUrl(url, inferredMime);
+    const extractedExtension = extensionFromFilename(extractedFilename) || extensionFromMimeType(inferredMime) || '.jpg';
+    const extractedStem = extractedFilename.replace(/\.[^.]+$/, '');
+
+    let semanticDisplayName = options.displayName ? camelizeUploadStem(options.displayName) : '';
+    if (!semanticDisplayName) {
+      if (looksLikeTransportFilename(extractedFilename)) {
+        const suggested = await suggestSemanticDisplayNameFromUrl(url, {
+          filename: extractedFilename,
+          folder: options.folder,
+          tags: options.tags,
+        });
+        semanticDisplayName = suggested || camelizeUploadStem(extractedStem);
+      } else {
+        semanticDisplayName = camelizeUploadStem(extractedStem);
+      }
+    }
+    const filename = withExtension(semanticDisplayName || 'UploadedImage', extractedExtension);
 
     // Create form data
     const formData = new FormData();
-    formData.append('file', blob, filename);
+    formData.append('file', new Blob([new Uint8Array(imageBytes)], { type: inferredMime }), filename);
+    formData.append('displayName', semanticDisplayName || filename.replace(/\.[^.]+$/, ''));
     if (options.folder) formData.append('folder', options.folder);
     if (options.tags) formData.append('tags', options.tags.join(','));
     if (options.namespace) formData.append('namespace', options.namespace);
     if (options.description) formData.append('description', options.description);
+    const prompt = normalizeManualPrompt(options.prompt);
+    if (prompt) formData.append('prompt', prompt);
     formData.append('originalUrl', options.originalUrl || url);
     if (options.sourceUrl) formData.append('sourceUrl', options.sourceUrl);
     if (options.parentId) formData.append('parentId', options.parentId);
@@ -607,7 +1030,17 @@ async function uploadFromUrl(
       return { success: false, error: result.error || 'Upload failed' };
     }
 
-    return { success: true, imageId: result.id };
+    const imageId = typeof result.id === 'string' ? result.id : undefined;
+    const promptSave =
+      result && typeof result === 'object' && !Array.isArray(result) && 'promptSave' in result
+        ? (result as Record<string, unknown>).promptSave
+        : undefined;
+
+    return {
+      success: true,
+      imageId,
+      ...(promptSave !== undefined ? { promptSave: promptSave as Record<string, unknown> } : {}),
+    };
   } catch (error) {
     return { success: false, error: String(error) };
   }
@@ -860,6 +1293,12 @@ async function generatePromptRecord(imageId: string, options: {
   });
 }
 
+function normalizeManualPrompt(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
 async function getExtras(imageId: string): Promise<{ imageId: string; record: { description?: string; altText?: string } | null }> {
   return apiRequest(`/api/images/${imageId}/extras`);
 }
@@ -926,13 +1365,25 @@ async function downloadUpload(uploadId: string): Promise<{ filename?: string; co
   };
 }
 
-async function downloadImageById(imageId: string, variant?: string): Promise<{ filename?: string; contentType?: string; size?: number; base64: string }> {
+async function downloadImageById(
+  imageId: string,
+  variant?: string
+): Promise<{
+  filename?: string;
+  contentType?: string;
+  size?: number;
+  base64: string;
+  requestedVariant?: string;
+  servedVariant?: string;
+}> {
   const params = new URLSearchParams();
   if (variant) params.set('variant', variant);
   const response = await apiRequestRaw(`/api/images/${imageId}/download${params.toString() ? `?${params}` : ''}`, { method: 'GET' });
   const contentType = response.headers.get('content-type') || undefined;
   const disposition = response.headers.get('content-disposition') || undefined;
   const sizeHeader = response.headers.get('content-length') || undefined;
+  const requestedVariant = response.headers.get('x-photarium-variant-requested') || undefined;
+  const servedVariant = response.headers.get('x-photarium-variant-served') || undefined;
   const arrayBuffer = await response.arrayBuffer();
   const base64 = Buffer.from(arrayBuffer).toString('base64');
   const filenameMatch = disposition?.match(/filename="?([^";]+)"?/i);
@@ -941,6 +1392,8 @@ async function downloadImageById(imageId: string, variant?: string): Promise<{ f
     contentType,
     size: sizeHeader ? Number(sizeHeader) : undefined,
     base64,
+    requestedVariant,
+    servedVariant,
   };
 }
 
@@ -1373,6 +1826,7 @@ async function uploadFileBase64(
     sourcePath?: string;
     namespace?: string;
     parentId?: string;
+    prompt?: string;
   }
 ): Promise<Record<string, unknown>> {
   const { buffer, mimeType } = decodeBase64(payload.base64);
@@ -1382,6 +1836,8 @@ async function uploadFileBase64(
   if (payload.folder) formData.append('folder', payload.folder);
   if (payload.tags?.length) formData.append('tags', payload.tags.join(','));
   if (payload.description) formData.append('description', payload.description);
+  const prompt = normalizeManualPrompt(payload.prompt);
+  if (prompt) formData.append('prompt', prompt);
   if (payload.originalUrl) formData.append('originalUrl', payload.originalUrl);
   if (payload.sourceUrl) formData.append('sourceUrl', payload.sourceUrl);
   if (payload.sourcePath) formData.append('sourcePath', payload.sourcePath);
@@ -1872,7 +2328,7 @@ const TOOLS: Tool[] = [
         },
         includeBase64: {
           type: 'boolean',
-          description: 'If false and savePath is provided, omit base64 from the response (default: true).',
+          description: 'Include base64 in the response (default: false). Set true only when raw bytes are required.',
         },
       },
       required: ['imageId'],
@@ -1895,7 +2351,7 @@ const TOOLS: Tool[] = [
         },
         includeBase64: {
           type: 'boolean',
-          description: 'If false and savePath is provided, omit base64 from the response (default: true).',
+          description: 'Include base64 in the response (default: false). Set true only when raw bytes are required.',
         },
       },
       required: ['imageId'],
@@ -2208,6 +2664,14 @@ const TOOLS: Tool[] = [
           type: 'string',
           description: 'Optional description for the image',
         },
+        prompt: {
+          type: 'string',
+          description: 'Optional manual prompt text to save to the image PromptThis record after upload',
+        },
+        displayName: {
+          type: 'string',
+          description: 'Optional semantic display name. If omitted, a clean CamelCase name is generated pre-upload.',
+        },
         originalUrl: {
           type: 'string',
           description: 'Original URL for duplicate detection',
@@ -2238,6 +2702,10 @@ const TOOLS: Tool[] = [
         url: {
           type: 'string',
           description: 'The URL of the image to import',
+        },
+        includeData: {
+          type: 'boolean',
+          description: 'Include base64 image data in response (default: false).',
         },
       },
       required: ['url'],
@@ -2274,6 +2742,10 @@ const TOOLS: Tool[] = [
         description: {
           type: 'string',
           description: 'Description to store with the image',
+        },
+        prompt: {
+          type: 'string',
+          description: 'Optional manual prompt text to save to the image PromptThis record after upload',
         },
         originalUrl: {
           type: 'string',
@@ -2331,6 +2803,10 @@ const TOOLS: Tool[] = [
           type: 'string',
           description: 'Description to store with the image',
         },
+        prompt: {
+          type: 'string',
+          description: 'Optional manual prompt text to save to the image PromptThis record after upload',
+        },
         originalUrl: {
           type: 'string',
           description: 'Original URL for duplicate detection',
@@ -2387,6 +2863,10 @@ const TOOLS: Tool[] = [
           type: 'string',
           description: 'Description to store with the image',
         },
+        prompt: {
+          type: 'string',
+          description: 'Optional manual prompt text to save to the image PromptThis record after upload',
+        },
         originalUrl: {
           type: 'string',
           description: 'Original URL for duplicate detection',
@@ -2434,6 +2914,10 @@ const TOOLS: Tool[] = [
         description: {
           type: 'string',
           description: 'Description to store with the image',
+        },
+        prompt: {
+          type: 'string',
+          description: 'Optional manual prompt text to save to the image PromptThis record after upload',
         },
         originalUrl: {
           type: 'string',
@@ -2512,6 +2996,34 @@ const TOOLS: Tool[] = [
         uploadId: { type: 'string', description: 'Upload ID to download' },
       },
       required: ['uploadId'],
+    },
+  },
+  {
+    name: 'photarium_fs_ingest',
+    description:
+      'Recursively ingest local image/video files from a directory tree into a specific namespace via Photarium. Includes subdirectory path in descriptions and can optionally generate image display names/tags with AI.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        rootPath: { type: 'string', description: 'Directory to scan recursively' },
+        namespace: { type: 'string', description: 'Target namespace (required, must be specific)' },
+        apiBase: { type: 'string', description: 'Photarium base URL override (default: PHOTARIUM_BASE_URL)' },
+        folder: { type: 'string', description: 'Optional folder value applied to all uploads' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Base tags for all files' },
+        descriptionPrefix: { type: 'string', description: 'Optional prefix prepended to generated descriptions' },
+        includeFilename: { type: 'boolean', description: 'Include filename in generated description' },
+        includePathTags: { type: 'boolean', description: 'Add subdirectory names as tags' },
+        aiMetadata: { type: 'boolean', description: 'Generate both displayName and tags for images using AI' },
+        aiDisplayName: { type: 'boolean', description: 'Generate image displayName using AI' },
+        aiTags: { type: 'boolean', description: 'Generate image tags using AI' },
+        tagCount: { type: 'number', description: 'AI tag count target (default: 4)' },
+        concurrency: { type: 'number', description: 'Parallel upload concurrency (default: 2)' },
+        throttleMs: { type: 'number', description: 'Minimum delay between upload requests in milliseconds (global throttle)' },
+        limit: { type: 'number', description: 'Stop after N matching files' },
+        dryRun: { type: 'boolean', description: 'Scan only; do not upload' },
+        verbose: { type: 'boolean', description: 'Print detailed per-file logs' },
+      },
+      required: ['rootPath', 'namespace'],
     },
   },
 
@@ -2788,8 +3300,8 @@ const TOOLS: Tool[] = [
 // Server setup
 const server = new Server(
   {
-    name: 'photarium-mcp-server',
-    version: '0.3.0',
+    name: SERVICE_NAME,
+    version: SERVICE_VERSION,
   },
   {
     capabilities: {
@@ -2989,9 +3501,16 @@ async function handleToolCall(name: string, args: Record<string, unknown> = {}) 
           const fallbackFilename = result.filename || `${imageId}${variant ? `_${variant}` : ''}.bin`;
           savedPath = await saveBase64ToFile(result.base64, savePath, fallbackFilename);
         }
-        const response = includeBase64 === false && savePath
-          ? { ...result, base64: undefined, savedPath }
-          : { ...result, savedPath };
+        const includeRaw = includeBase64 === true;
+        const response = includeRaw
+          ? { ...result, savedPath }
+          : {
+              ...result,
+              base64: undefined,
+              base64Omitted: true,
+              base64Bytes: estimateBase64Bytes(result.base64),
+              savedPath,
+            };
         return {
           content: [
             {
@@ -3014,9 +3533,16 @@ async function handleToolCall(name: string, args: Record<string, unknown> = {}) 
           const fallbackFilename = result.filename || `${imageId}_original.bin`;
           savedPath = await saveBase64ToFile(result.base64, savePath, fallbackFilename);
         }
-        const response = includeBase64 === false && savePath
-          ? { ...result, base64: undefined, savedPath }
-          : { ...result, savedPath };
+        const includeRaw = includeBase64 === true;
+        const response = includeRaw
+          ? { ...result, savedPath }
+          : {
+              ...result,
+              base64: undefined,
+              base64Omitted: true,
+              base64Bytes: estimateBase64Bytes(result.base64),
+              savedPath,
+            };
         return {
           content: [
             {
@@ -3265,17 +3791,19 @@ async function handleToolCall(name: string, args: Record<string, unknown> = {}) 
 
       // ===== Upload =====
       case 'photarium_upload_url': {
-        const { url, folder, tags, namespace, description, originalUrl, sourceUrl, parentId } = args as {
+        const { url, folder, tags, namespace, description, prompt, displayName, originalUrl, sourceUrl, parentId } = args as {
           url: string;
           folder?: string;
           tags?: string[];
           namespace?: string;
           description?: string;
+          prompt?: string;
+          displayName?: string;
           originalUrl?: string;
           sourceUrl?: string;
           parentId?: string;
         };
-        const result = await uploadFromUrl(url, { folder, tags, namespace, description, originalUrl, sourceUrl, parentId });
+        const result = await uploadFromUrl(url, { folder, tags, namespace, description, prompt, displayName, originalUrl, sourceUrl, parentId });
         return {
           content: [
             {
@@ -3287,26 +3815,35 @@ async function handleToolCall(name: string, args: Record<string, unknown> = {}) 
       }
 
       case 'photarium_import_url': {
-        const { url } = args as { url: string };
+        const { url, includeData } = args as { url: string; includeData?: boolean };
         const result = await importFromUrl(url);
+        const response = includeData === true
+          ? result
+          : {
+              ...result,
+              data: undefined,
+              dataOmitted: true,
+              dataBytes: estimateBase64Bytes(result.data),
+            };
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(result, null, 2),
+              text: JSON.stringify(response, null, 2),
             },
           ],
         };
       }
 
       case 'photarium_upload_file': {
-        const { base64, filename, contentType, folder, tags, description, originalUrl, sourceUrl, sourcePath, namespace, parentId } = args as {
+        const { base64, filename, contentType, folder, tags, description, prompt, originalUrl, sourceUrl, sourcePath, namespace, parentId } = args as {
           base64: string;
           filename: string;
           contentType?: string;
           folder?: string;
           tags?: string[];
           description?: string;
+          prompt?: string;
           originalUrl?: string;
           sourceUrl?: string;
           sourcePath?: string;
@@ -3320,6 +3857,7 @@ async function handleToolCall(name: string, args: Record<string, unknown> = {}) 
           folder,
           tags,
           description,
+          prompt,
           originalUrl,
           sourceUrl,
           sourcePath,
@@ -3337,13 +3875,14 @@ async function handleToolCall(name: string, args: Record<string, unknown> = {}) 
       }
 
       case 'photarium_upload_image': {
-        const { base64, filename, contentType, folder, tags, description, originalUrl, sourceUrl, namespace, parentId, useExternalApi } = args as {
+        const { base64, filename, contentType, folder, tags, description, prompt, originalUrl, sourceUrl, namespace, parentId, useExternalApi } = args as {
           base64: string;
           filename: string;
           contentType?: string;
           folder?: string;
           tags?: string[];
           description?: string;
+          prompt?: string;
           originalUrl?: string;
           sourceUrl?: string;
           namespace?: string;
@@ -3358,6 +3897,7 @@ async function handleToolCall(name: string, args: Record<string, unknown> = {}) 
           folder,
           tags,
           description,
+          prompt,
           originalUrl,
           sourceUrl,
           namespace,
@@ -3374,13 +3914,14 @@ async function handleToolCall(name: string, args: Record<string, unknown> = {}) 
       }
 
       case 'photarium_upload_external_file': {
-        const { base64, filename, contentType, folder, tags, description, originalUrl, sourceUrl, namespace, parentId } = args as {
+        const { base64, filename, contentType, folder, tags, description, prompt, originalUrl, sourceUrl, namespace, parentId } = args as {
           base64: string;
           filename: string;
           contentType?: string;
           folder?: string;
           tags?: string[];
           description?: string;
+          prompt?: string;
           originalUrl?: string;
           sourceUrl?: string;
           namespace?: string;
@@ -3393,6 +3934,7 @@ async function handleToolCall(name: string, args: Record<string, unknown> = {}) 
           folder,
           tags,
           description,
+          prompt,
           originalUrl,
           sourceUrl,
           namespace,
@@ -3409,12 +3951,13 @@ async function handleToolCall(name: string, args: Record<string, unknown> = {}) 
       }
 
       case 'photarium_upload_from_path': {
-        const { filePath, filename, folder, tags, description, originalUrl, sourceUrl, namespace, parentId } = args as {
+        const { filePath, filename, folder, tags, description, prompt, originalUrl, sourceUrl, namespace, parentId } = args as {
           filePath: string;
           filename?: string;
           folder?: string;
           tags?: string[];
           description?: string;
+          prompt?: string;
           originalUrl?: string;
           sourceUrl?: string;
           namespace?: string;
@@ -3422,30 +3965,42 @@ async function handleToolCall(name: string, args: Record<string, unknown> = {}) 
         };
 
         try {
-          const { readFileSync } = await import('node:fs');
-          const fileBuffer = readFileSync(filePath);
-          const finalFilename = filename || filePath.split('/').pop() || 'upload.bin';
+          const { readFileSync, statSync } = await import('node:fs');
+          const stats = statSync(filePath);
+          if (!stats.isFile()) {
+            throw new Error(`Path is not a file: ${filePath}`);
+          }
+          if (stats.size <= 0) {
+            throw new Error(`File is empty: ${filePath}`);
+          }
 
-          // Determine MIME type from extension
-          const ext = finalFilename.split('.').pop()?.toLowerCase() || '';
-          const mimeMap: Record<string, string> = {
-            png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
-            gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
-            bmp: 'image/bmp', tiff: 'image/tiff', tif: 'image/tiff',
-            avif: 'image/avif',
-          };
-          const mimeType = mimeMap[ext] || 'application/octet-stream';
+          const fileBuffer = readFileSync(filePath);
+          const detectedMime = detectImageMimeFromBuffer(fileBuffer);
+          if (!detectedMime) {
+            throw new Error('File does not contain recognized image data');
+          }
+
+          const requestedFilename = cleanUploadFilename(filename || filePath.split('/').pop() || 'upload');
+          const requestedExt = extensionFromFilename(requestedFilename);
+          const effectiveExt = requestedExt || extensionFromMimeType(detectedMime) || '.png';
+          const semanticStem = camelizeUploadStem(requestedFilename.replace(/\.[^.]+$/, ''));
+          const finalFilename = withExtension(semanticStem || 'UploadedImage', effectiveExt);
+          const displayName = semanticStem || finalFilename.replace(/\.[^.]+$/, '');
+          const mimeType = detectedMime;
 
           const form = new FormData();
-          form.append('file', new Blob([fileBuffer], { type: mimeType }), finalFilename);
+          form.append('file', new Blob([new Uint8Array(fileBuffer)], { type: mimeType }), finalFilename);
+          form.append('displayName', displayName);
           if (folder) form.append('folder', folder);
           if (description) form.append('description', description);
+          const cleanedPrompt = normalizeManualPrompt(prompt);
+          if (cleanedPrompt) form.append('prompt', cleanedPrompt);
           if (originalUrl) form.append('originalUrl', originalUrl);
           if (sourceUrl) form.append('sourceUrl', sourceUrl);
           if (namespace) form.append('namespace', namespace);
           if (parentId) form.append('parentId', parentId);
           if (tags && tags.length > 0) {
-            tags.forEach((tag: string) => form.append('tags', tag));
+            form.append('tags', tags.join(','));
           }
 
           const response = await fetch(`${BASE_URL}/api/upload`, {
@@ -3453,12 +4008,52 @@ async function handleToolCall(name: string, args: Record<string, unknown> = {}) 
             body: form,
           });
 
-          const result = await response.json();
+          const rawText = await response.text();
+          let result: Record<string, unknown>;
+          try {
+            result = rawText ? (JSON.parse(rawText) as Record<string, unknown>) : {};
+          } catch {
+            result = { raw: rawText };
+          }
+          if (!response.ok) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(
+                    {
+                      error: (result.error as string | undefined) || `Upload failed (${response.status})`,
+                      status: response.status,
+                      filePath,
+                      uploadFilename: finalFilename,
+                      mimeType,
+                      bytes: fileBuffer.byteLength,
+                      response: result,
+                    },
+                    null,
+                    2
+                  ),
+                },
+              ],
+              isError: true,
+            };
+          }
+
           return {
             content: [
               {
                 type: 'text',
-                text: JSON.stringify(result, null, 2),
+                text: JSON.stringify(
+                  {
+                    ...result,
+                    uploadFilename: finalFilename,
+                    displayName,
+                    mimeType,
+                    bytes: fileBuffer.byteLength,
+                  },
+                  null,
+                  2
+                ),
               },
             ],
           };
@@ -3523,6 +4118,84 @@ async function handleToolCall(name: string, args: Record<string, unknown> = {}) 
               text: JSON.stringify(result, null, 2),
             },
           ],
+        };
+      }
+
+      case 'photarium_fs_ingest': {
+        const {
+          rootPath,
+          namespace,
+          apiBase,
+          folder,
+          tags,
+          descriptionPrefix,
+          includeFilename,
+          includePathTags,
+          aiMetadata,
+          aiDisplayName,
+          aiTags,
+          tagCount,
+          concurrency,
+          throttleMs,
+          limit,
+          dryRun,
+          verbose,
+        } = args as {
+          rootPath: string;
+          namespace: string;
+          apiBase?: string;
+          folder?: string;
+          tags?: string[];
+          descriptionPrefix?: string;
+          includeFilename?: boolean;
+          includePathTags?: boolean;
+          aiMetadata?: boolean;
+          aiDisplayName?: boolean;
+          aiTags?: boolean;
+          tagCount?: number;
+          concurrency?: number;
+          throttleMs?: number;
+          limit?: number;
+          dryRun?: boolean;
+          verbose?: boolean;
+        };
+
+        const result = await runFilesystemIngest({
+          rootPath,
+          namespace,
+          apiBase: apiBase || BASE_URL,
+          folder,
+          tags,
+          descriptionPrefix,
+          includeFilename,
+          includePathTags,
+          aiMetadata,
+          aiDisplayName,
+          aiTags,
+          tagCount,
+          concurrency,
+          throttleMs,
+          limit,
+          dryRun,
+          verbose,
+        });
+
+        const response = {
+          ok: result.ok,
+          exitCode: result.exitCode,
+          command: result.command,
+          stdout: result.stdout,
+          stderr: result.stderr,
+        };
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(response, null, 2),
+            },
+          ],
+          ...(result.ok ? {} : { isError: true }),
         };
       }
 
@@ -3830,6 +4503,48 @@ const HTTP_PORT = process.env.PHOTARIUM_HTTP_PORT ? Number(process.env.PHOTARIUM
 const HTTP_ENABLED = new Set(['1', 'true', 'yes', 'on']).has(
   (process.env.PHOTARIUM_HTTP_ENABLED || '').toLowerCase()
 );
+const STARTED_AT = new Date().toISOString();
+
+function gitOutput(args: string[]): string | null {
+  try {
+    return execSync(`git ${args.join(' ')}`, {
+      cwd: process.cwd(),
+      stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf8',
+    }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function gitDirty(): boolean | null {
+  try {
+    execSync('git diff --quiet --ignore-submodules HEAD --', {
+      cwd: process.cwd(),
+      stdio: 'ignore',
+    });
+    return false;
+  } catch (error: unknown) {
+    if (error && typeof error === 'object' && 'status' in error) {
+      const status = (error as { status?: number }).status;
+      if (status === 1) return true;
+    }
+    return null;
+  }
+}
+
+function runtimeInfo() {
+  return {
+    service: SERVICE_NAME,
+    service_version: SERVICE_VERSION,
+    git_commit: gitOutput(['rev-parse', '--short=12', 'HEAD']),
+    git_branch: gitOutput(['rev-parse', '--abbrev-ref', 'HEAD']),
+    git_dirty: gitDirty(),
+    node_version: process.version,
+    started_at: STARTED_AT,
+    tool_count: TOOLS.length,
+  };
+}
 
 function getTokenFromHeaders(headers: Record<string, string | string[] | undefined>): string | undefined {
   const rawAuth = headers.authorization || headers.Authorization;
@@ -3894,12 +4609,29 @@ async function startHttpServer() {
       const path = url.pathname.replace(/\/+$/, '') || '/';
 
       if (req.method === 'GET' && path === '/health') {
-        sendJson(res, 200, { status: 'ok' });
+        sendJson(res, 200, { status: 'ok', ...runtimeInfo() });
+        return;
+      }
+
+      if (req.method === 'GET' && path === '/version') {
+        sendJson(res, 200, runtimeInfo());
         return;
       }
 
       if (req.method === 'GET' && path === '/tools') {
         sendJson(res, 200, { tools: TOOLS });
+        return;
+      }
+
+      if (req.method === 'GET' && path === '/help') {
+        sendJson(res, 200, buildHttpHelp());
+        return;
+      }
+
+      if (req.method === 'GET' && path.startsWith('/help/')) {
+        const name = path.slice('/help/'.length);
+        const payload = buildHttpHelp(name);
+        sendJson(res, payload && typeof payload === 'object' && 'ok' in payload && payload.ok === false ? 404 : 200, payload);
         return;
       }
 

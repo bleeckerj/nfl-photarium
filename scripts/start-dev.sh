@@ -13,35 +13,42 @@ echo -e "${BLUE}║${NC}       ${GREEN}Photarium Development Server${NC}       $
 echo -e "${BLUE}╚════════════════════════════════════════╝${NC}"
 echo ""
 
-# Check if Docker is running
-if ! docker info > /dev/null 2>&1; then
-    echo -e "${RED}✖ Docker is not running!${NC}"
-    echo ""
-    echo -e "${YELLOW}Please start Docker Desktop first:${NC}"
-    echo ""
-    echo "  macOS:   Open Docker Desktop from Applications"
-    echo "           or run: open -a Docker"
-    echo ""
-    echo "  Linux:   sudo systemctl start docker"
-    echo ""
-    echo -e "${YELLOW}Then run this command again:${NC}"
-    echo "  npm run dev:full"
-    echo ""
-    exit 1
+CACHE_STORAGE="${CACHE_STORAGE_TYPE:-redis}"
+
+if [ "$CACHE_STORAGE" != "redis" ]; then
+    echo -e "${YELLOW}→ Skipping Redis startup (CACHE_STORAGE_TYPE=$CACHE_STORAGE)${NC}"
+else
+    # Check if Docker is running
+    if ! docker info > /dev/null 2>&1; then
+        echo -e "${RED}✖ Docker is not running!${NC}"
+        echo ""
+        echo -e "${YELLOW}Please start Docker Desktop first:${NC}"
+        echo ""
+        echo "  macOS:   Open Docker Desktop from Applications"
+        echo "           or run: open -a Docker"
+        echo ""
+        echo "  Linux:   sudo systemctl start docker"
+        echo ""
+        echo -e "${YELLOW}Then run this command again:${NC}"
+        echo "  npm run dev:full"
+        echo ""
+        exit 1
+    fi
+
+    echo -e "${GREEN}✔ Docker is running${NC}"
+
+    # Start Redis with docker compose
+    echo -e "${BLUE}→ Starting Redis...${NC}"
+    docker compose up -d --wait
+
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}✖ Failed to start Redis${NC}"
+        exit 1
+    fi
+
+    echo -e "${GREEN}✔ Redis is ready${NC}"
 fi
 
-echo -e "${GREEN}✔ Docker is running${NC}"
-
-# Start Redis with docker compose
-echo -e "${BLUE}→ Starting Redis...${NC}"
-docker compose up -d --wait
-
-if [ $? -ne 0 ]; then
-    echo -e "${RED}✖ Failed to start Redis${NC}"
-    exit 1
-fi
-
-echo -e "${GREEN}✔ Redis is ready${NC}"
 echo ""
 echo -e "${BLUE}→ Starting Next.js dev server...${NC}"
 echo ""

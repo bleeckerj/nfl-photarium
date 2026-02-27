@@ -12,10 +12,13 @@ import { OrientationIcon } from './icons';
 
 interface AspectRatioDisplayProps {
   imageId: string;
+  aspectRatio?: string;
 }
 
-export const AspectRatioDisplay: React.FC<AspectRatioDisplayProps> = ({ imageId }) => {
-  const { aspectRatio, loading, error } = useImageAspectRatio(imageId);
+export const AspectRatioDisplay: React.FC<AspectRatioDisplayProps> = ({ imageId, aspectRatio: presetAspectRatio }) => {
+  const shouldCalculate = !presetAspectRatio;
+  const { aspectRatio, loading, error } = useImageAspectRatio(imageId, shouldCalculate);
+  const effectiveAspectRatio = presetAspectRatio || aspectRatio;
 
   if (loading) {
     return (
@@ -25,13 +28,13 @@ export const AspectRatioDisplay: React.FC<AspectRatioDisplayProps> = ({ imageId 
     );
   }
 
-  if (error || !aspectRatio) {
+  if (error || !effectiveAspectRatio) {
     return <p className="text-sm font-mono text-gray-400">📐 --</p>;
   }
 
   return (
     <p className="text-[0.6rem] font-mono text-gray-500 flex items-center gap-1">
-      📐 {aspectRatio} <OrientationIcon aspectRatioString={aspectRatio} />
+      📐 {effectiveAspectRatio} <OrientationIcon aspectRatioString={effectiveAspectRatio} />
     </p>
   );
 };

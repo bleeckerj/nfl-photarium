@@ -1,5 +1,6 @@
 export interface GalleryImage {
   id: string;
+  assetType?: 'image' | 'video';
   filename: string;
   displayName?: string;
   promptThis?: string;
@@ -9,6 +10,9 @@ export interface GalleryImage {
   tags?: string[];
   description?: string;
   altTag?: string;
+  generatedBy?: string;
+  comfyMetadataDetected?: boolean;
+  comfyMetadataSource?: string;
   parentId?: string;
   linkedAssetId?: string;
   originalUrl?: string;
@@ -19,6 +23,12 @@ export interface GalleryImage {
   namespace?: string;
   aspectRatio?: string;
   dimensions?: { width: number; height: number };
+  videoStatus?: 'pending' | 'ready' | 'error';
+  videoDurationSeconds?: number;
+  videoPlaybackUrl?: string;
+  videoHlsUrl?: string;
+  videoThumbnailUrl?: string;
+  videoPreviewUrl?: string;
   // Embedding status fields
   hasClipEmbedding?: boolean;
   hasColorEmbedding?: boolean;
@@ -36,6 +46,10 @@ export interface GalleryFilterOptions {
 }
 
 const normalize = (value?: string) => value?.toLowerCase() ?? '';
+const splitCamelCase = (value?: string) =>
+  (value ?? '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
 
 const matchesFolderFilter = (image: GalleryImage, selectedFolder: string) => {
   if (selectedFolder === 'all') return true;
@@ -59,6 +73,7 @@ const matchesSearchFilter = (image: GalleryImage, searchTerm: string) => {
     normalize(image.id),
     normalize(image.filename),
     normalize(image.displayName),
+    normalize(splitCamelCase(image.displayName)),
     normalize(image.promptThis),
     normalize(image.folder),
     normalize(image.altTag),

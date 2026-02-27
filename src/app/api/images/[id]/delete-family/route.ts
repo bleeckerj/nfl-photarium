@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCachedImages, removeCachedImage } from '@/server/cloudflareImageCache';
+import { getCachedImages } from '@/server/cloudflareImageCache';
 import { getCloudflareCredentials } from '@/server/cloudflareClient';
-import { deleteImageVectors, isVectorSearchAvailable } from '@/server/vectorSearch';
+import { cleanupImageArtifacts } from '@/server/imageArtifactCleanup';
+import { isVectorSearchAvailable } from '@/server/vectorSearch';
 import { listImageFamilyIds } from '@/server/imageFamily';
 import {
   bumpDeleteFamilyJobAttempt,
@@ -109,9 +110,15 @@ export async function POST(
       );
 
       if (response.status === 404) {
-        removeCachedImage(imageId);
-        if (redisAvailable) {
-          await deleteImageVectors(imageId).catch(() => {});
+        const cleanup = await cleanupImageArtifacts(imageId, {
+          includeVectors: redisAvailable,
+          includeWorkflowIntentEmbedding: true,
+        });
+        if (!cleanup.success) {
+          console.warn('[DeleteFamily] Local artifact cleanup had failures (404 path)', {
+            imageId,
+            steps: cleanup.steps,
+          });
         }
         return { ok: true, id: imageId };
       }
@@ -129,9 +136,15 @@ export async function POST(
         };
       }
 
-      removeCachedImage(imageId);
-      if (redisAvailable) {
-        await deleteImageVectors(imageId).catch(() => {});
+      const cleanup = await cleanupImageArtifacts(imageId, {
+        includeVectors: redisAvailable,
+        includeWorkflowIntentEmbedding: true,
+      });
+      if (!cleanup.success) {
+        console.warn('[DeleteFamily] Local artifact cleanup had failures', {
+          imageId,
+          steps: cleanup.steps,
+        });
       }
 
       return { ok: true, id: imageId };

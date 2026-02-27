@@ -2,12 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   type CachedCloudflareImage,
   getCachedImage,
-  removeCachedImage,
   transformApiImageToCached,
   upsertCachedImage
 } from '@/server/cloudflareImageCache';
 import { fetchCloudflareImage, getCloudflareCredentials } from '@/server/cloudflareClient';
-import { deleteImageVectors, isVectorSearchAvailable } from '@/server/vectorSearch';
+import { cleanupImageArtifacts } from '@/server/imageArtifactCleanup';
+import { deleteStreamVideo } from '@/server/cloudflareStreamClient';
+import {
+  deleteVideoAssetRecord,
+  getVideoAssetRecord,
+} from '@/server/videoCatalogStorage';
 
 const pickVariantUrl = (variants: string[] | undefined): string | undefined => {
   if (!Array.isArray(variants) || variants.length === 0) return undefined;
@@ -98,6 +102,33 @@ export async function DELETE(
       );
     }
 
+    const videoRecord = await getVideoAssetRecord(imageId);
+    if (videoRecord) {
+      try {
+        await deleteStreamVideo(videoRecord.streamUid);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!message.toLowerCase().includes('not found') && !message.toLowerCase().includes('(404)')) {
+          console.error('[VideoDelete] Stream API error:', error);
+          return NextResponse.json(
+            { error: 'Failed to delete video from Cloudflare Stream' },
+            { status: 502 }
+          );
+        }
+      }
+
+      await deleteVideoAssetRecord(imageId);
+      const cleanup = await cleanupImageArtifacts(imageId);
+      if (!cleanup.success) {
+        console.warn('[VideoDelete] Local artifact cleanup had failures', {
+          imageId,
+          steps: cleanup.steps,
+        });
+      }
+
+      return NextResponse.json({ success: true, assetType: 'video' });
+    }
+
     const { accountId, apiToken } = getCloudflareCredentials();
 
     // Delete image from Cloudflare
@@ -111,26 +142,22 @@ export async function DELETE(
       }
     );
 
-    const result = await response.json();
+    const result = await response.json().catch(() => null);
 
-    if (!response.ok) {
+    if (!response.ok && response.status !== 404) {
       console.error('Cloudflare API error:', result);
       return NextResponse.json(
-        { error: result.errors?.[0]?.message || 'Failed to delete image from Cloudflare' },
+        { error: result?.errors?.[0]?.message || 'Failed to delete image from Cloudflare' },
         { status: response.status }
       );
     }
 
-    removeCachedImage(imageId);
-
-    // Best-effort cleanup of vector metadata in Redis.
-    try {
-      const redisAvailable = await isVectorSearchAvailable();
-      if (redisAvailable) {
-        await deleteImageVectors(imageId);
-      }
-    } catch {
-      // ignore
+    const cleanup = await cleanupImageArtifacts(imageId);
+    if (!cleanup.success) {
+      console.warn('[ImageDelete] Local artifact cleanup had failures', {
+        imageId,
+        steps: cleanup.steps,
+      });
     }
 
     return NextResponse.json({ success: true });

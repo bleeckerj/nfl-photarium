@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Agent } from 'undici';
 import { toDuplicateSummary } from '@/server/duplicateDetector';
-import { SUPPORTED_IMAGE_TYPES, uploadImageBuffer } from '@/server/uploadService';
+import { sanitizeFilename, SUPPORTED_IMAGE_TYPES, uploadImageBuffer } from '@/server/uploadService';
 import { validateParentForNewChild } from '@/server/parentValidation';
+import { extractFilenameFromUrl } from '@/utils/filename';
+import { normalizeCookieHeader } from '@/server/pageImportCookies';
 import type { UploadFailure, UploadSuccess } from '@/server/uploadService';
 
 // Use a browser-like User-Agent to avoid sites (e.g. Google Drive) redirecting to login pages
@@ -35,18 +37,21 @@ const isCertError = (error: unknown) => {
   return code === 'CERT_HAS_EXPIRED' || code === 'DEPTH_ZERO_SELF_SIGNED_CERT' || code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE';
 };
 
+type FetchInitWithDispatcher = RequestInit & { dispatcher?: Agent };
+
 const fetchWithCertFallback = async (url: string, allowInsecure: boolean, init?: RequestInit) => {
   const baseHeaders = { 'User-Agent': BROWSER_USER_AGENT, ...(init?.headers || {}) };
-  const firstInit = allowInsecure
-    ? { ...(init as any), headers: baseHeaders, dispatcher: insecureAgent }
+  const firstInit: FetchInitWithDispatcher = allowInsecure
+    ? { ...init, headers: baseHeaders, dispatcher: insecureAgent }
     : { ...init, headers: baseHeaders };
   try {
-    return await fetch(url, firstInit as any);
+    return await fetch(url, firstInit as RequestInit);
   } catch (error) {
     if (!allowInsecure) throw error;
     if (isCertError(error)) {
-      if (!firstInit || !(firstInit as any).dispatcher) {
-        return await fetch(url, { ...(init as any), dispatcher: insecureAgent } as any);
+      if (!firstInit.dispatcher) {
+        const retryInit: FetchInitWithDispatcher = { ...init, headers: baseHeaders, dispatcher: insecureAgent };
+        return await fetch(url, retryInit as RequestInit);
       }
     }
     throw error;
@@ -96,22 +101,6 @@ const getMimeFromExtension = (value: string) => {
   return undefined;
 };
 
-const getFilenameFromUrl = (url: string, mimeType?: string | null) => {
-  try {
-    const parsed = new URL(url);
-    const pathname = parsed.pathname;
-    const segments = pathname.split('/').filter(Boolean);
-    const lastSegment = segments[segments.length - 1];
-    if (lastSegment) {
-      return lastSegment;
-    }
-  } catch {
-    // ignore
-  }
-  const extension = mimeType?.split('/')[1] || 'jpg';
-  return `remote-image-${Date.now()}.${extension}`;
-};
-
 const getFilenameFromContentDisposition = (value: string | null) => {
   if (!value) return undefined;
   const match = /filename\*=UTF-8''([^;]+)|filename="?([^\";]+)"?/i.exec(value);
@@ -127,6 +116,7 @@ const getFilenameFromContentDisposition = (value: string | null) => {
 type UploadItem = {
   clientId: string;
   url: string;
+  displayName?: string;
   folder?: string;
   tags?: string;
   description?: string;
@@ -134,6 +124,7 @@ type UploadItem = {
   sourceUrl?: string;
   namespace?: string;
   parentId?: string;
+  cookieHeader?: string;
 };
 
 export async function POST(request: NextRequest) {
@@ -150,6 +141,12 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const items = Array.isArray(body?.items) ? (body.items as UploadItem[]) : [];
+    let requestCookieHeader: string | null = null;
+    try {
+      requestCookieHeader = normalizeCookieHeader(body?.cookieHeader);
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid cookie header' }, { status: 400 });
+    }
     const allowInsecureEnv = process.env.IMPORT_ALLOW_INSECURE_TLS === 'true';
     const allowInsecure = allowInsecureEnv && Boolean(body?.allowInsecure);
     if (process.env.NODE_ENV !== 'production') {
@@ -159,14 +156,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No URLs provided' }, { status: 400 });
     }
 
-    const defaultNamespace = process.env.IMAGE_NAMESPACE || process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || undefined;
-
     const results: Array<UploadSuccess & { clientId: string }> = [];
     const failures: Array<UploadFailure & { clientId: string }> = [];
 
     for (const item of items) {
       const sourceUrl = typeof item.sourceUrl === 'string' ? item.sourceUrl.trim() : undefined;
       const originalUrl = typeof item.originalUrl === 'string' ? item.originalUrl.trim() : undefined;
+      const cleanDisplayName =
+        typeof item.displayName === 'string' && item.displayName.trim()
+          ? item.displayName.trim()
+          : undefined;
       const cleanFolder = typeof item.folder === 'string' && item.folder.trim() ? item.folder.trim() : undefined;
       const cleanTags = typeof item.tags === 'string'
         ? item.tags.split(',').map((tag) => tag.trim()).filter(Boolean)
@@ -179,7 +178,16 @@ export async function POST(request: NextRequest) {
         rawNamespace && rawNamespace !== 'undefined' && rawNamespace !== '__all__' && rawNamespace !== '__none__'
           ? rawNamespace
           : undefined;
-      const effectiveNamespace = cleanNamespace || defaultNamespace;
+      if (!cleanNamespace) {
+        failures.push({
+          clientId: item.clientId,
+          filename: item.url || 'unknown',
+          error: 'A specific namespace is required for uploads. Select a namespace instead of All.',
+          reason: 'upload'
+        });
+        continue;
+      }
+      const effectiveNamespace = cleanNamespace;
       const parentIdValue = typeof item.parentId === 'string' ? item.parentId.trim() : '';
       const cleanParentId = parentIdValue && parentIdValue !== 'undefined' ? parentIdValue : undefined;
 
@@ -193,6 +201,7 @@ export async function POST(request: NextRequest) {
         });
         continue;
       }
+      const resolvedParentId = parentValidation.canonicalParentId;
 
       if (!item.url || !isValidUrl(item.url)) {
         failures.push({
@@ -216,7 +225,24 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        const response = await fetchWithCertFallback(item.url, allowInsecure);
+        let itemCookieHeader: string | null = requestCookieHeader;
+        try {
+          itemCookieHeader = normalizeCookieHeader(item.cookieHeader) ?? requestCookieHeader;
+        } catch (error) {
+          failures.push({
+            clientId: item.clientId,
+            filename: item.url,
+            error: error instanceof Error ? error.message : 'Invalid cookie header',
+            reason: 'invalid-type'
+          });
+          continue;
+        }
+
+        const response = await fetchWithCertFallback(
+          item.url,
+          allowInsecure,
+          itemCookieHeader ? { headers: { Cookie: itemCookieHeader } } : undefined
+        );
         if (!response.ok) {
           failures.push({
             clientId: item.clientId,
@@ -257,7 +283,9 @@ export async function POST(request: NextRequest) {
 
         const contentDisposition = response.headers.get('content-disposition');
         const dispositionName = getFilenameFromContentDisposition(contentDisposition);
-        const filename = dispositionName || getFilenameFromUrl(item.url, inferredContentType);
+        const filename = dispositionName
+          ? sanitizeFilename(dispositionName)
+          : extractFilenameFromUrl(item.url, inferredContentType);
 
         const outcome = await uploadImageBuffer({
           buffer,
@@ -270,11 +298,12 @@ export async function POST(request: NextRequest) {
             apiToken,
             folder: cleanFolder,
             tags: cleanTags,
+            displayName: cleanDisplayName,
             description: cleanDescription,
             originalUrl: originalUrl || item.url,
             sourceUrl: sourceUrl,
             namespace: effectiveNamespace,
-            parentId: cleanParentId
+            parentId: resolvedParentId
           }
         });
 

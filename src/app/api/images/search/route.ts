@@ -17,7 +17,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getCachedImages, type CachedCloudflareImage } from '@/server/cloudflareImageCache';
+import { getCachedImages } from '@/server/cloudflareImageCache';
+import { listVideoAssetRecordsWithSync } from '@/server/videoCatalogStorage';
 import {
   searchByText,
   searchByHexColor,
@@ -42,6 +43,18 @@ interface SearchRequest {
   };
 }
 
+type SearchAssetMeta = {
+  id: string;
+  assetType: 'image' | 'video';
+  filename?: string;
+  displayName?: string;
+  folder?: string;
+  namespace?: string;
+  tags?: string[];
+  videoThumbnailUrl?: string;
+  videoPlaybackUrl?: string;
+};
+
 type SearchResultRow = {
   imageId?: string;
   id?: string;
@@ -58,6 +71,110 @@ type SearchResultNormalized = SearchResultRow & {
   canonicalImageId: string;
   requestedImageId?: string;
 };
+
+const normalizeText = (value?: string | null) => String(value ?? '').toLowerCase();
+
+const tokenize = (value: string): string[] =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+const splitCamelCase = (value?: string) =>
+  (value ?? '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
+
+function lexicalNameScore(image: SearchAssetMeta, query: string): number {
+  const tokens = tokenize(query);
+  if (!tokens.length) return 0;
+
+  const displayName = normalizeText(image.displayName);
+  const displayNameSplit = normalizeText(splitCamelCase(image.displayName));
+  const filename = normalizeText(image.filename);
+  const tags = normalizeText((image.tags ?? []).join(' '));
+  const joinedQuery = tokens.join(' ');
+
+  const tokenCoverage = (haystack: string) => {
+    if (!haystack) return 0;
+    let matched = 0;
+    for (const token of tokens) {
+      if (haystack.includes(token)) matched += 1;
+    }
+    return matched / tokens.length;
+  };
+
+  const phraseBonus = (haystack: string) => {
+    if (!haystack) return 0;
+    return haystack.includes(joinedQuery) ? 0.2 : 0;
+  };
+
+  const displayScore = Math.max(tokenCoverage(displayName), tokenCoverage(displayNameSplit)) + phraseBonus(displayNameSplit);
+  const tagScore = tokenCoverage(tags) + phraseBonus(tags);
+  const fileScore = tokenCoverage(filename) + phraseBonus(filename);
+
+  return Math.min(1, displayScore * 0.6 + tagScore * 0.25 + fileScore * 0.15);
+}
+
+function rerankSemanticTextResults(
+  vectorResults: SearchResultNormalized[],
+  allImages: SearchAssetMeta[],
+  query: string,
+  limit: number,
+  namespace: string | null
+): SearchResultNormalized[] {
+  const scopedImages =
+    namespace === null
+      ? allImages
+      : allImages.filter((img) => (namespace === '' ? !img.namespace : (img.namespace || '') === namespace));
+
+  const byId = new Map(scopedImages.map((img) => [img.id, img]));
+  const vectorRowById = new Map(vectorResults.map((row) => [row.imageId, row]));
+  const vectorRankById = new Map<string, number>();
+  vectorResults.forEach((row, index) => {
+    vectorRankById.set(row.imageId, 1 - index / Math.max(1, vectorResults.length));
+  });
+
+  const lexical = new Map<string, number>();
+  for (const image of scopedImages) {
+    const score = lexicalNameScore(image, query);
+    if (score > 0) lexical.set(image.id, score);
+  }
+
+  const candidateIds = new Set<string>([
+    ...vectorRankById.keys(),
+    ...Array.from(lexical.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, Math.max(limit * 2, 60))
+      .map(([id]) => id),
+  ]);
+
+  const combined = Array.from(candidateIds).map((id) => {
+    const vRank = vectorRankById.get(id) ?? 0;
+    const lScore = lexical.get(id) ?? 0;
+    const score = vRank * 0.82 + lScore * 0.18;
+    const base = vectorRowById.get(id);
+    const image = byId.get(id);
+
+    const row: SearchResultNormalized =
+      base ??
+      {
+        imageId: id,
+        id,
+        canonicalImageId: id,
+        filename: image?.filename,
+        displayName: image?.displayName,
+        folder: image?.folder,
+      };
+
+    return { row, score, vRank, lScore };
+  });
+
+  combined.sort((a, b) => b.score - a.score || b.vRank - a.vRank || b.lScore - a.lScore);
+  return combined.slice(0, limit).map((entry) => entry.row);
+}
 
 function normalizeNamespace(raw: string | null | undefined): string | null {
   if (raw == null) return null;
@@ -86,8 +203,8 @@ function _norm(value: string | undefined | null): string {
   return String(value ?? '').trim().toLowerCase();
 }
 
-function buildImageLookup(images: CachedCloudflareImage[]) {
-  const byId = new Map<string, CachedCloudflareImage>();
+function buildImageLookup(images: SearchAssetMeta[]) {
+  const byId = new Map<string, SearchAssetMeta>();
   const byFilename = new Map<string, string[]>();
   const byDisplayName = new Map<string, string[]>();
 
@@ -137,7 +254,7 @@ function resolveCanonicalImageId(
 
 function normalizeSearchResults(
   results: SearchResultRow[],
-  allImages: CachedCloudflareImage[]
+  allImages: SearchAssetMeta[]
 ): SearchResultNormalized[] {
   const lookup = buildImageLookup(allImages);
   const normalized: SearchResultNormalized[] = [];
@@ -159,6 +276,12 @@ function normalizeSearchResults(
       id: canonicalId,
       canonicalImageId: canonicalId,
     };
+    const meta = lookup.byId.get(canonicalId);
+    if (meta) {
+      item.assetType = meta.assetType;
+      if (meta.videoThumbnailUrl) item.videoThumbnailUrl = meta.videoThumbnailUrl;
+      if (meta.videoPlaybackUrl) item.videoPlaybackUrl = meta.videoPlaybackUrl;
+    }
     if (rawId && rawId !== canonicalId) {
       item.requestedImageId = rawId;
     }
@@ -288,11 +411,31 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         );
     }
 
-    const allImages = await getCachedImages();
+    const [cachedImages, videos] = await Promise.all([
+      getCachedImages(),
+      listVideoAssetRecordsWithSync(),
+    ]);
+    const allImages: SearchAssetMeta[] = [
+      ...cachedImages.map((img) => ({ ...img, assetType: 'image' as const })),
+      ...videos.map((video) => ({
+        id: video.id,
+        assetType: 'video' as const,
+        filename: video.filename,
+        displayName: video.filename,
+        folder: video.folder,
+        namespace: video.namespace,
+        tags: video.tags,
+        videoThumbnailUrl: video.thumbnailUrl || video.previewUrl,
+        videoPlaybackUrl: video.playbackUrl,
+      })),
+    ];
     if (namespace !== null) {
       results = filterResultsByNamespace(results, allImages, namespace);
     }
     results = normalizeSearchResults(results as SearchResultRow[], allImages);
+    if (type === 'text' && query) {
+      results = rerankSemanticTextResults(results, allImages, query, limit, namespace);
+    }
 
     results = results.slice(0, limit);
 
@@ -376,11 +519,31 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       });
     }
 
-    const allImages = await getCachedImages();
+    const [cachedImages, videos] = await Promise.all([
+      getCachedImages(),
+      listVideoAssetRecordsWithSync(),
+    ]);
+    const allImages: SearchAssetMeta[] = [
+      ...cachedImages.map((img) => ({ ...img, assetType: 'image' as const })),
+      ...videos.map((video) => ({
+        id: video.id,
+        assetType: 'video' as const,
+        filename: video.filename,
+        displayName: video.filename,
+        folder: video.folder,
+        namespace: video.namespace,
+        tags: video.tags,
+        videoThumbnailUrl: video.thumbnailUrl || video.previewUrl,
+        videoPlaybackUrl: video.playbackUrl,
+      })),
+    ];
     if (namespace !== null) {
       results = filterResultsByNamespace(results, allImages, namespace);
     }
     results = normalizeSearchResults(results as SearchResultRow[], allImages);
+    if (type === 'text' && query) {
+      results = rerankSemanticTextResults(results, allImages, query, limit, namespace);
+    }
 
     results = results.slice(0, limit);
 

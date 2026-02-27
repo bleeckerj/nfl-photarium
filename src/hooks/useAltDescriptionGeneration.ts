@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
-import { requestAltTag, requestDescription } from '@/services/imageAltDescriptionService';
+import { requestAltTag, requestDescription, requestDisplayName } from '@/services/imageAltDescriptionService';
+import { patchImageMetadata } from '@/services/imageMetadataService';
 
 type Toast = { push: (message: string) => void };
 
@@ -10,6 +11,7 @@ type ImageLike = {
   uploaded: string;
   altTag?: string;
   description?: string;
+  displayName?: string;
 };
 
 type UseAltDescriptionGenerationParams = {
@@ -17,6 +19,7 @@ type UseAltDescriptionGenerationParams = {
   descriptionInput: string;
   selectedVariationIds: Set<string>;
   setDescriptionInput: Dispatch<SetStateAction<string>>;
+  setDisplayNameInput: Dispatch<SetStateAction<string>>;
   setAltTextInput: (value: string) => void;
   setImage: Dispatch<SetStateAction<ImageLike | null>>;
   setAllImages: Dispatch<SetStateAction<ImageLike[]>>;
@@ -28,6 +31,7 @@ export function useAltDescriptionGeneration({
   descriptionInput,
   selectedVariationIds,
   setDescriptionInput,
+  setDisplayNameInput,
   setAltTextInput,
   setImage,
   setAllImages,
@@ -36,6 +40,7 @@ export function useAltDescriptionGeneration({
   const [altLoadingMap, setAltLoadingMap] = useState<Record<string, boolean>>({});
   const [variationAltLoadingMap, setVariationAltLoadingMap] = useState<Record<string, boolean>>({});
   const [descriptionGenerating, setDescriptionGenerating] = useState(false);
+  const [displayNameGenerating, setDisplayNameGenerating] = useState(false);
 
   const variationAltBusy = useMemo(
     () => Object.keys(variationAltLoadingMap).length > 0,
@@ -153,12 +158,47 @@ export function useAltDescriptionGeneration({
     }
   }, [descriptionInput, imageId, setAllImages, setDescriptionInput, setImage, toast]);
 
+  const generateDisplayName = useCallback(async () => {
+    if (!imageId) {
+      return;
+    }
+    setDisplayNameGenerating(true);
+    try {
+      const { ok, payload } = await requestDisplayName(imageId);
+      if (!ok || !payload?.displayName) {
+        toast.push(payload?.error || 'Failed to generate display name');
+        return;
+      }
+      const suggestedName = payload.displayName;
+      setDisplayNameInput(suggestedName);
+      const { ok: saved, payload: savePayload } = await patchImageMetadata(imageId, {
+        displayName: suggestedName,
+      });
+      if (!saved) {
+        toast.push(savePayload?.error || 'Display name generated, but failed to save');
+        return;
+      }
+      setImage(prev => (prev?.id === imageId ? { ...prev, displayName: suggestedName } : prev));
+      setAllImages(prev =>
+        prev.map(img => (img.id === imageId ? { ...img, displayName: suggestedName } : img))
+      );
+      toast.push('Display name generated and saved');
+    } catch (error) {
+      console.error('Failed to generate display name:', error);
+      toast.push('Failed to generate display name');
+    } finally {
+      setDisplayNameGenerating(false);
+    }
+  }, [imageId, setAllImages, setDisplayNameInput, setImage, toast]);
+
   return {
     altLoadingMap,
     variationAltBusy,
     descriptionGenerating,
+    displayNameGenerating,
     generateAltTag,
     generateAltForSelectedVariations,
-    generateDescription
+    generateDescription,
+    generateDisplayName
   };
 }

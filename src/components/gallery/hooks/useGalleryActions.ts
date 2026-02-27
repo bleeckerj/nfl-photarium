@@ -26,6 +26,8 @@ interface UseGalleryActionsReturn {
   deleteImage: (imageId: string) => Promise<void>;
   generateAltTag: (imageId: string) => Promise<void>;
   altLoadingMap: Record<string, boolean>;
+  generateDisplayName: (imageId: string) => Promise<void>;
+  displayNameLoadingMap: Record<string, boolean>;
   
   // Edit modal state
   editingImage: string | null;
@@ -62,7 +64,7 @@ interface BulkUpdateOptions {
   tagsMode: 'replace' | 'append';
   tagsInput: string;
   applyDisplayName: boolean;
-  displayNameMode: 'custom' | 'auto' | 'clear';
+  displayNameMode: 'custom' | 'auto' | 'clear' | 'ai';
   displayNameInput: string;
   applyNamespace: boolean;
   namespaceInput: string;
@@ -86,6 +88,7 @@ export function useGalleryActions({
 }: UseGalleryActionsOptions): UseGalleryActionsReturn {
   // ALT generation loading state
   const [altLoadingMap, setAltLoadingMap] = useState<Record<string, boolean>>({});
+  const [displayNameLoadingMap, setDisplayNameLoadingMap] = useState<Record<string, boolean>>({});
   
   // Edit modal state
   const [editingImage, setEditingImage] = useState<string | null>(null);
@@ -144,6 +147,55 @@ export function useGalleryActions({
       toast.push('Failed to generate ALT text');
     } finally {
       setAltLoadingMap(prev => {
+        const next = { ...prev };
+        delete next[imageId];
+        return next;
+      });
+    }
+  }, [setImages, toast]);
+
+  const generateDisplayName = useCallback(async (imageId: string) => {
+    setDisplayNameLoadingMap(prev => ({ ...prev, [imageId]: true }));
+    try {
+      const response = await fetch(`/api/images/${imageId}/display-name`, {
+        method: 'POST',
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        const message = typeof data?.error === 'string' ? data.error : 'Failed to generate display name';
+        toast.push(message);
+        return;
+      }
+
+      if (!data?.displayName) {
+        toast.push('Display name response was empty');
+        return;
+      }
+
+      const saveResponse = await fetch(`/api/images/${imageId}/update`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: data.displayName }),
+      });
+      if (!saveResponse.ok) {
+        const savePayload = await saveResponse.json().catch(() => ({}));
+        const message = typeof savePayload?.error === 'string'
+          ? savePayload.error
+          : 'Failed to save display name';
+        toast.push(message);
+        return;
+      }
+
+      setImages(prev => prev.map(img =>
+        img.id === imageId ? { ...img, displayName: data.displayName } : img
+      ));
+      toast.push('Display name updated');
+    } catch (error) {
+      console.error('Failed to generate display name:', error);
+      toast.push('Failed to generate display name');
+    } finally {
+      setDisplayNameLoadingMap(prev => {
         const next = { ...prev };
         delete next[imageId];
         return next;
@@ -250,6 +302,10 @@ export function useGalleryActions({
 
     setBulkUpdating(true);
     try {
+      const wantsAiDisplayName = options.applyDisplayName && options.displayNameMode === 'ai';
+      const generatedDisplayNames = new Map<string, string>();
+      let aiSuccessCount = 0;
+      let aiFailureCount = 0;
       const familyFields: string[] = [];
       if (options.applyFolder) familyFields.push('folder');
       if (options.applyNamespace) familyFields.push('namespace');
@@ -307,46 +363,63 @@ export function useGalleryActions({
         }
       }
 
-      if (hasPerImageChanges) {
-        Array.from(selectedImageIds).forEach(id => {
-          const payload: Record<string, unknown> = {};
+      const perImageRequests = hasPerImageChanges
+        ? Array.from(selectedImageIds).map(async id => {
+            const payload: Record<string, unknown> = {};
 
-          if (options.applyTags) {
-            if (options.tagsMode === 'replace') {
-              payload.tags = options.tagsInput;
-            } else if (parsedBulkTags.length > 0) {
-              const target = imageById.get(id);
-              const existingTags = Array.isArray(target?.tags) ? target.tags : [];
-              const merged = new Map<string, string>();
-              existingTags.forEach(tag => merged.set(tag.toLowerCase(), tag));
-              parsedBulkTags.forEach(tag => merged.set(tag.toLowerCase(), tag));
-              payload.tags = Array.from(merged.values());
+            if (options.applyTags) {
+              if (options.tagsMode === 'replace') {
+                payload.tags = options.tagsInput;
+              } else if (parsedBulkTags.length > 0) {
+                const target = imageById.get(id);
+                const existingTags = Array.isArray(target?.tags) ? target.tags : [];
+                const merged = new Map<string, string>();
+                existingTags.forEach(tag => merged.set(tag.toLowerCase(), tag));
+                parsedBulkTags.forEach(tag => merged.set(tag.toLowerCase(), tag));
+                payload.tags = Array.from(merged.values());
+              }
             }
-          }
 
-          if (options.applyDisplayName) {
-            if (options.displayNameMode === 'clear') {
-              payload.displayName = '';
-            } else if (options.displayNameMode === 'custom') {
-              payload.displayName = options.displayNameInput.trim();
-            } else if (options.displayNameMode === 'auto') {
-              const target = imageById.get(id);
-              const baseName = target?.filename || '';
-              payload.displayName = truncateMiddle(baseName, 64);
+            if (options.applyDisplayName) {
+              if (options.displayNameMode === 'clear') {
+                payload.displayName = '';
+              } else if (options.displayNameMode === 'custom') {
+                payload.displayName = options.displayNameInput.trim();
+              } else if (options.displayNameMode === 'auto') {
+                const target = imageById.get(id);
+                const baseName = target?.filename || '';
+                payload.displayName = truncateMiddle(baseName, 64);
+              } else if (options.displayNameMode === 'ai') {
+                try {
+                  const displayNameResponse = await fetch(`/api/images/${id}/display-name`, { method: 'POST' });
+                  const displayNamePayload = await displayNameResponse.json();
+                  if (displayNameResponse.ok && displayNamePayload?.displayName) {
+                    payload.displayName = displayNamePayload.displayName;
+                    generatedDisplayNames.set(id, displayNamePayload.displayName);
+                    aiSuccessCount += 1;
+                  } else {
+                    aiFailureCount += 1;
+                  }
+                } catch (error) {
+                  console.error('Failed to generate display name', error);
+                  aiFailureCount += 1;
+                }
+              }
             }
-          }
 
-          requests.push(
-            fetch(`/api/images/${id}/update`, {
+            if (Object.keys(payload).length === 0) {
+              return null;
+            }
+
+            return fetch(`/api/images/${id}/update`, {
               method: 'PATCH',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(payload),
-            })
-          );
-        });
-      }
+            });
+          })
+        : [];
 
-      await Promise.all(requests);
+      await Promise.all([...requests, ...perImageRequests]);
 
       // Update local state
       setImages(prev =>
@@ -380,6 +453,9 @@ export function useGalleryActions({
               updatedDisplayName = options.displayNameInput.trim();
             } else if (options.displayNameMode === 'auto') {
               updatedDisplayName = truncateMiddle(img.filename || '', 64);
+            } else if (options.displayNameMode === 'ai') {
+              const generated = generatedDisplayNames.get(img.id);
+              updatedDisplayName = generated ?? updatedDisplayName;
             }
           }
 
@@ -397,6 +473,16 @@ export function useGalleryActions({
         })
       );
 
+      if (wantsAiDisplayName) {
+        const total = selectedImageIds.size;
+        if (aiSuccessCount === 0) {
+          toast.push('No display names generated');
+        } else if (aiSuccessCount < total || aiFailureCount > 0) {
+          toast.push(`Generated display names for ${aiSuccessCount}/${total} images`);
+        } else {
+          toast.push('Display names generated');
+        }
+      }
       toast.push('Images updated');
       clearSelection();
       setBulkSelectionMode(false);
@@ -536,6 +622,8 @@ export function useGalleryActions({
     deleteImage,
     generateAltTag,
     altLoadingMap,
+    generateDisplayName,
+    displayNameLoadingMap,
     editingImage,
     editTags,
     setEditTags,

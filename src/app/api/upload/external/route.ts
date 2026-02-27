@@ -6,6 +6,7 @@ import { toDuplicateSummary } from '@/server/duplicateDetector';
 import {
   evaluateUploadDeduplicationPolicy,
   logContentHashDuplicate,
+  logCrossNamespaceContentHashWarning,
   logOriginalUrlReuseWarning,
 } from '@/server/uploadDuplicatePolicy';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
@@ -18,6 +19,7 @@ import { queueAutoEmbeddingsForImage } from '@/server/autoEmbeddings';
 import { extractComfyWorkflowMetadata } from '@/utils/comfyMetadata';
 import { ingestComfyWorkflowForImage } from '@/server/comfy/workflowIngestion';
 import { validateParentForNewChild } from '@/server/parentValidation';
+import { getPromptThisRecord, setPromptThisRecord, type PromptThisRecord } from '@/server/promptThis';
 import type { ComfyWorkflowExtraction } from '@/utils/comfyMetadata';
 
 const corsHeaders = {
@@ -32,6 +34,7 @@ type CloudflareUploadApiResult = {
     filename?: string;
     uploaded?: string;
     variants?: string[];
+    size?: number;
     meta?: Record<string, unknown>;
   };
   errors?: Array<{ message?: string }>;
@@ -90,6 +93,89 @@ function applyWorkflowOverride(
   };
 }
 
+type PromptSaveSummary = {
+  requested: true;
+  promptLength: number;
+  attempted: number;
+  saved: number;
+  failed: number;
+  imageIds: string[];
+  errors?: Array<{ imageId: string; error: string }>;
+};
+
+function parseOptionalPromptField(
+  value: FormDataEntryValue | null
+): { ok: true; prompt?: string } | { ok: false; error: string } {
+  if (value === null) return { ok: true };
+  if (typeof value !== 'string') {
+    return { ok: false, error: 'Invalid prompt: expected a text field' };
+  }
+  const prompt = value.trim();
+  return prompt ? { ok: true, prompt } : { ok: true };
+}
+
+async function persistUploadPrompt(
+  imageIds: Array<string | undefined>,
+  prompt?: string
+): Promise<PromptSaveSummary | undefined> {
+  if (!prompt) return undefined;
+
+  const uniqueIds = Array.from(new Set(imageIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)));
+  if (!uniqueIds.length) {
+    return {
+      requested: true,
+      promptLength: prompt.length,
+      attempted: 0,
+      saved: 0,
+      failed: 0,
+      imageIds: [],
+    };
+  }
+
+  const errors: Array<{ imageId: string; error: string }> = [];
+  let saved = 0;
+
+  for (const imageId of uniqueIds) {
+    try {
+      const existing = await getPromptThisRecord(imageId);
+      const now = new Date().toISOString();
+      const record: PromptThisRecord = {
+        imageId,
+        prompt,
+        model: 'manual',
+        provider: 'manual',
+        createdAt: existing?.createdAt || now,
+        updatedAt: now,
+      };
+      await setPromptThisRecord(record);
+      saved += 1;
+    } catch (error) {
+      errors.push({
+        imageId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (errors.length) {
+    logExternalIssue('Failed to persist prompt for one or more uploaded images', {
+      attempted: uniqueIds.length,
+      failed: errors.length,
+      imageIds: uniqueIds,
+    });
+  }
+
+  return {
+    requested: true,
+    promptLength: prompt.length,
+    attempted: uniqueIds.length,
+    saved,
+    failed: errors.length,
+    imageIds: uniqueIds,
+    errors: errors.length ? errors : undefined,
+  };
+}
+
 export async function OPTIONS() {
   return withCors(new NextResponse(null, { status: 204 }));
 }
@@ -140,11 +226,22 @@ export async function POST(request: NextRequest) {
     const folder = formData.get('folder') as string;
     const tags = formData.get('tags') as string;
     const description = formData.get('description') as string;
+    const promptField = parseOptionalPromptField(formData.get('prompt'));
+    const displayName = formData.get('displayName') as string;
     const originalUrl = formData.get('originalUrl') as string;
     const sourceUrl = formData.get('sourceUrl') as string;
     const namespace = formData.get('namespace') as string;
     const parentIdRaw = formData.get('parentId');
     const workflowJsonField = parseOptionalWorkflowJson(formData.get('comfyWorkflowJson'));
+
+    if (!promptField.ok) {
+      logExternalIssue('Rejected invalid prompt payload');
+      return withCors(NextResponse.json(
+        { error: promptField.error },
+        { status: 400 }
+      ));
+    }
+    const cleanPrompt = promptField.prompt;
 
     if (!workflowJsonField.ok) {
       logExternalIssue('Rejected invalid comfy workflow payload', { reason: workflowJsonField.error });
@@ -157,6 +254,7 @@ export async function POST(request: NextRequest) {
     const cleanFolder = folder && folder.trim() && folder !== 'undefined' ? folder.trim() : undefined;
     const cleanTags = tags && tags.trim() ? tags.trim().split(',').map(t => t.trim()).filter(Boolean) : [];
     const cleanDescription = description && description.trim() && description !== 'undefined' ? description.trim() : undefined;
+    const cleanDisplayName = displayName && displayName.trim() && displayName !== 'undefined' ? displayName.trim() : undefined;
     const cleanOriginalUrl = originalUrl && originalUrl.trim() && originalUrl !== 'undefined' ? originalUrl.trim() : undefined;
     const normalizedOriginalUrl = normalizeOriginalUrl(cleanOriginalUrl);
     const cleanSourceUrl = sourceUrl && sourceUrl.trim() && sourceUrl !== 'undefined' ? sourceUrl.trim() : undefined;
@@ -166,8 +264,17 @@ export async function POST(request: NextRequest) {
       rawNamespace && rawNamespace !== 'undefined' && rawNamespace !== '__all__' && rawNamespace !== '__none__'
         ? rawNamespace
         : undefined;
-    const defaultNamespace = process.env.IMAGE_NAMESPACE || process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || undefined;
-    const effectiveNamespace = cleanNamespace || defaultNamespace;
+    if (!cleanNamespace) {
+      return withCors(
+        NextResponse.json(
+          {
+            error: 'A specific namespace is required for uploads. Select a namespace instead of All.',
+          },
+          { status: 400 }
+        )
+      );
+    }
+    const effectiveNamespace = cleanNamespace;
     const parentIdValue = typeof parentIdRaw === 'string' ? parentIdRaw.trim() : '';
     const cleanParentId = parentIdValue && parentIdValue !== 'undefined' ? parentIdValue : undefined;
 
@@ -180,6 +287,7 @@ export async function POST(request: NextRequest) {
         )
       );
     }
+    const resolvedParentId = parentValidation.canonicalParentId;
 
     const bytes = await file.arrayBuffer();
     const originalBuffer = Buffer.from(bytes);
@@ -255,6 +363,14 @@ export async function POST(request: NextRequest) {
         warning: deduplication.originalUrlWarning,
       });
     }
+    if (deduplication.crossNamespaceContentHashMatches.length) {
+      logCrossNamespaceContentHashWarning({
+        logScope: 'upload/external',
+        contentHash,
+        targetNamespace: effectiveNamespace,
+        matches: deduplication.crossNamespaceContentHashMatches,
+      });
+    }
 
     if (deduplication.contentHashDuplicates.length) {
       logContentHashDuplicate({
@@ -278,7 +394,7 @@ export async function POST(request: NextRequest) {
 
     const metadataPayload: Record<string, unknown> = {
       filename: workingName,
-      displayName: workingName,
+      displayName: cleanDisplayName || workingName,
       uploadedAt: new Date().toISOString(),
       size: workingBuffer.byteLength,
       type: workingType,
@@ -291,7 +407,7 @@ export async function POST(request: NextRequest) {
       sourceUrlNormalized: normalizedSourceUrl,
       namespace: effectiveNamespace,
       contentHash,
-      variationParentId: cleanParentId,
+      variationParentId: resolvedParentId,
       exif: exifSummary,
       generatedBy: comfyExtraction.detected ? 'comfyui' : undefined,
       comfyMetadataDetected: comfyExtraction.detected ? true : undefined,
@@ -439,8 +555,8 @@ export async function POST(request: NextRequest) {
         const webpMetadata = {
           ...metadataPayload,
           filename: webpName,
-          displayName: webpName,
-          variationParentId: cleanParentId,
+          displayName: cleanDisplayName || webpName,
+          variationParentId: resolvedParentId,
           linkedAssetId: imageData.id,
         };
         const { metadata: limitedWebpMetadata, dropped, size, limitBytes } = enforceCloudflareMetadataLimit(webpMetadata);
@@ -524,6 +640,8 @@ export async function POST(request: NextRequest) {
 
     await upsertRegistryNamespace(effectiveNamespace);
 
+    const promptSave = await persistUploadPrompt([primaryId, webpVariantId], cleanPrompt);
+
     return withCors(NextResponse.json({
       id: primaryId,
       filename: workingName,
@@ -536,10 +654,11 @@ export async function POST(request: NextRequest) {
       originalUrl: cleanOriginalUrl,
       sourceUrl: cleanSourceUrl,
       namespace: effectiveNamespace,
-      parentId: cleanParentId,
+      parentId: resolvedParentId,
       linkedAssetId: webpVariantId,
       webpVariantId,
       autoEmbeddings,
+      ...(promptSave ? { promptSave } : {}),
     }));
 
   } catch (error) {

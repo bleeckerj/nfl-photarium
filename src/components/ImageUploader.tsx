@@ -12,6 +12,7 @@ import { sanitizeFilename, needsSanitization, MAX_FILENAME_LENGTH } from "@/util
 
 interface UploadedImage {
   id: string;
+  assetType: "image" | "video";
   url: string;
   filename: string;
   status: "uploading" | "success" | "error";
@@ -41,10 +42,13 @@ interface ImageUploaderProps {
 
 interface QueuedFile {
   id: string;
+  assetType?: "image" | "video";
   file?: File;
   filename: string;
   remoteUrl?: string;
   previewUrl?: string;
+  posterUrl?: string;
+  isBlobSource?: boolean;
   sizeBytes?: number;
   contentType?: string;
   selected?: boolean;
@@ -254,6 +258,12 @@ const base64ToFile = (base64: string, filename: string, mimeType: string) => {
 };
 
 const MAX_BYTES = 10 * 1024 * 1024;
+const PAGE_IMPORT_PREVIEW_LIMIT = 60;
+const VIDEO_REMOTE_UPLOAD_CONCURRENCY = 2;
+const QUEUE_RENDER_LIMIT = 250;
+const STREAM_QUEUE_FLUSH_BATCH_SIZE = 24;
+const STREAM_PROGRESS_UPDATE_INTERVAL_MS = 200;
+const NAMESPACE_REQUIRED_UPLOAD_ERROR = 'Select a specific namespace before uploading. "All namespaces" and "(no namespace)" are browse-only for uploads.';
 
 const isZipFile = (file: File) => (
   file.type === 'application/zip' ||
@@ -266,6 +276,13 @@ const isKeynoteFile = (file: File) => file.name.toLowerCase().endsWith('.key');
 const isArchiveFile = (file: File) => isZipFile(file) || isKeynoteFile(file);
 
 const isImageFile = (file: File) => file.type.startsWith('image/');
+const isVideoFile = (file: File) => file.type.startsWith('video/');
+const inferAssetTypeFromUrl = (value?: string): "image" | "video" => {
+  if (!value) return 'image';
+  if (/^blob:/i.test(value)) return 'video';
+  return /\.(mp4|webm|mov|m4v|ogv|ogg)(\?|$)/i.test(value) ? 'video' : 'image';
+};
+const inferAssetTypeFromFile = (file: File): "image" | "video" => (isVideoFile(file) ? 'video' : 'image');
 const KEYNOTE_IMAGE_EXTENSIONS = ['.jpeg', '.jpg', '.png', '.gif', '.webp', '.svg'];
 const MIME_BY_EXTENSION: Record<string, string> = {
   '.jpeg': 'image/jpeg',
@@ -325,6 +342,26 @@ const resolveTagInput = (globalTags: string, itemTags?: string): string => {
     return '';
   }
   return mergeTagInputs(globalTags, itemTags);
+};
+
+const runWithConcurrency = async <T,>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>
+): Promise<void> => {
+  const safeConcurrency = Math.max(1, Math.floor(concurrency));
+  let index = 0;
+
+  const runners = Array.from({ length: Math.min(safeConcurrency, items.length) }, async () => {
+    while (true) {
+      const current = index;
+      index += 1;
+      if (current >= items.length) return;
+      await worker(items[current]);
+    }
+  });
+
+  await Promise.all(runners);
 };
 
 const renderBitmapToBlob = (bitmap: ImageBitmap, width: number, height: number, type: string, quality: number) =>
@@ -481,11 +518,12 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
   const [pageImportLoading, setPageImportLoading] = useState(false);
   const [pageImportError, setPageImportError] = useState<string | null>(null);
   const [pageImportAllowInsecure, setPageImportAllowInsecure] = useState(false);
-  const [pageImportScrollMode, setPageImportScrollMode] = useState(false);
+  const [pageImportScrollMode, setPageImportScrollMode] = useState(true);
   const [pageImportAutoScroll, setPageImportAutoScroll] = useState(true);
   const [pageImportMaxScrolls, setPageImportMaxScrolls] = useState('10');
   const [pageImportScrollDelayMs, setPageImportScrollDelayMs] = useState('1500');
   const [pageImportMaxPages, setPageImportMaxPages] = useState('1');
+  const [pageImportCookieHeader, setPageImportCookieHeader] = useState('');
   const [pageImportProgress, setPageImportProgress] = useState<{
     message: string;
     scrollCount: number;
@@ -502,9 +540,13 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
   const [animateLoading, setAnimateLoading] = useState(false);
   const [animateError, setAnimateError] = useState<string | null>(null);
   const [expandedQueueMetadata, setExpandedQueueMetadata] = useState<Record<string, boolean>>({});
+  const [showAllQueuedItems, setShowAllQueuedItems] = useState(false);
+  const [aiRefiningNames, setAiRefiningNames] = useState(false);
   const [embeddingQueueDepth, setEmbeddingQueueDepth] = useState(0);
+  const [activeUploadOps, setActiveUploadOps] = useState(0);
   const embeddingQueueRef = useRef<Array<{ id: string; clip: boolean; color: boolean }>>([]);
   const embeddingWorkerRef = useRef(false);
+  const activeUploadOpsRef = useRef(0);
 
   const updateEmbeddingPending = useCallback((
     id: string,
@@ -526,6 +568,18 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     });
   }, []);
 
+  const beginUploadActivity = useCallback(() => {
+    activeUploadOpsRef.current += 1;
+    setActiveUploadOps(activeUploadOpsRef.current);
+    setIsUploading(true);
+  }, []);
+
+  const endUploadActivity = useCallback(() => {
+    activeUploadOpsRef.current = Math.max(0, activeUploadOpsRef.current - 1);
+    setActiveUploadOps(activeUploadOpsRef.current);
+    setIsUploading(activeUploadOpsRef.current > 0);
+  }, []);
+
   const createQueueId = useCallback(
     () =>
       typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -541,6 +595,12 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
   }, []);
 
   const handlePreviewLoadError = useCallback(async (item: QueuedFile) => {
+    const effectiveAssetType = item.assetType ?? (item.file ? inferAssetTypeFromFile(item.file) : inferAssetTypeFromUrl(item.remoteUrl));
+    if (effectiveAssetType === 'video') {
+      setPreviewFailures((prev) => ({ ...prev, [item.id]: true }));
+      return;
+    }
+
     // Local files or items without a remote URL can't be recovered via import proxy.
     if (item.file || !item.remoteUrl) {
       setPreviewFailures((prev) => ({ ...prev, [item.id]: true }));
@@ -644,19 +704,18 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
   }, [queuedFiles, updateQueuedFile]);
 
   const processEmbeddingQueue = useCallback(async () => {
-    if (embeddingWorkerRef.current) {
-      console.log('[Uploader] Embedding worker already running, skipping');
-      return;
-    }
+    if (embeddingWorkerRef.current) return;
+    if (activeUploadOpsRef.current > 0) return;
     embeddingWorkerRef.current = true;
-    console.log('[Uploader] Starting embedding queue processing, depth:', embeddingQueueRef.current.length);
 
     while (embeddingQueueRef.current.length > 0) {
+      if (activeUploadOpsRef.current > 0) {
+        break;
+      }
       const job = embeddingQueueRef.current.shift();
       setEmbeddingQueueDepth(embeddingQueueRef.current.length);
       if (!job) continue;
 
-      console.log('[Uploader] Processing embedding job:', job.id, { clip: job.clip, color: job.color });
       updateEmbeddingPending(job.id, 'embedding', job.clip, job.color);
       setUploadedImages((prev) =>
         prev.map((img) =>
@@ -678,7 +737,6 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
           body: JSON.stringify({ clip: job.clip, color: job.color })
         });
         const data = await response.json().catch(() => null);
-        console.log('[Uploader] Embedding response for', job.id, ':', response.status, data);
         if (!response.ok) {
           const message = typeof data?.error === 'string' ? data.error : 'Embedding failed';
           throw new Error(message);
@@ -740,6 +798,12 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     void processEmbeddingQueue();
   }, [processEmbeddingQueue, updateEmbeddingPending]);
 
+  useEffect(() => {
+    if (activeUploadOps > 0) return;
+    if (embeddingQueueRef.current.length === 0) return;
+    void processEmbeddingQueue();
+  }, [activeUploadOps, processEmbeddingQueue]);
+
   const estimateMetadataBytes = useCallback((payload: Record<string, unknown>) => {
     const filtered = Object.fromEntries(
       Object.entries(payload).filter(([, value]) => value !== undefined && value !== "")
@@ -747,6 +811,12 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     const json = JSON.stringify(filtered);
     return new TextEncoder().encode(json).length;
   }, []);
+
+  const uploadNamespace = useMemo(() => {
+    const trimmed = (namespace || '').trim();
+    if (!trimmed || trimmed === '__all__' || trimmed === '__none__') return null;
+    return trimmed;
+  }, [namespace]);
 
   const buildMetadataEstimate = useCallback(
     (
@@ -774,11 +844,11 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         originalUrlNormalized: normalizedOriginalUrl,
         sourceUrl: overrides.sourceUrl || undefined,
         sourceUrlNormalized: normalizedSourceUrl,
-        namespace: namespace || undefined,
+        namespace: uploadNamespace || undefined,
         variationParentId: selectedParentId || undefined
       });
     },
-    [estimateMetadataBytes, namespace, selectedParentId]
+    [estimateMetadataBytes, uploadNamespace, selectedParentId]
   );
 
   const formatUploadErrorMessage = useCallback((response: Response, payload: unknown) => {
@@ -830,6 +900,10 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     () => queuedFiles.filter((item) => item.selected !== false).length,
     [queuedFiles]
   );
+  const visibleQueuedFiles = useMemo(
+    () => (showAllQueuedItems ? queuedFiles : queuedFiles.slice(0, QUEUE_RENDER_LIMIT)),
+    [queuedFiles, showAllQueuedItems]
+  );
 
   // Activity stats for the prominent progress indicator
   const activityStats = useMemo((): ActivityStats => {
@@ -852,8 +926,8 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
   }, [uploadedImages, embeddingQueueDepth]);
 
   const isActivityActive = useMemo(() => 
-    isUploading || activityStats.uploading > 0 || activityStats.embedding > 0 || embeddingQueueDepth > 0,
-    [isUploading, activityStats.uploading, activityStats.embedding, embeddingQueueDepth]
+    activeUploadOps > 0 || activityStats.uploading > 0 || activityStats.embedding > 0 || embeddingQueueDepth > 0,
+    [activeUploadOps, activityStats.uploading, activityStats.embedding, embeddingQueueDepth]
   );
 
   useEffect(() => {
@@ -865,6 +939,12 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     const next = Math.max(1, selectedQueuedCount / 2);
     setAnimateFps(next.toString());
   }, [animateFpsTouched, selectedQueuedCount]);
+
+  useEffect(() => {
+    if (queuedFiles.length <= QUEUE_RENDER_LIMIT && showAllQueuedItems) {
+      setShowAllQueuedItems(false);
+    }
+  }, [queuedFiles.length, showAllQueuedItems]);
 
   // Keep track of queued files for cleanup on unmount
   const queuedFilesRef = useRef(queuedFiles);
@@ -881,10 +961,6 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       });
     };
   }, []);
-
-  // Debug: Log current state
-  console.log("ImageUploader - Selected folder:", selectedFolder);
-  console.log("ImageUploader - Available folders:", folders);
 
   // Fetch existing folders from images endpoint and merge with local presets
   const fetchFolders = useCallback(async () => {
@@ -934,9 +1010,31 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     return "";
   }, [selectedFolder, newFolder, folders]);
 
+  const markNamespaceUploadFailures = useCallback((items: QueuedFile[]) => {
+    const failures: UploadedImage[] = items.map((item) => ({
+      id: item.id,
+      assetType: item.assetType ?? (item.file ? inferAssetTypeFromFile(item.file) : inferAssetTypeFromUrl(item.remoteUrl)),
+      url: '',
+      filename: item.filename,
+      status: 'error',
+      error: NAMESPACE_REQUIRED_UPLOAD_ERROR,
+      file: item.file,
+      remoteUrl: item.remoteUrl,
+    }));
+    setUploadedImages((prev) => {
+      const ids = new Set(failures.map((entry) => entry.id));
+      return [...prev.filter((entry) => !ids.has(entry.id)), ...failures];
+    });
+  }, []);
+
   const uploadFiles = useCallback(
     async (filesToUpload: QueuedFile[]) => {
-      setIsUploading(true);
+      if (!uploadNamespace) {
+        markNamespaceUploadFailures(filesToUpload);
+        return;
+      }
+
+      beginUploadActivity();
 
       const shouldEmbedClip = embedClipOnUpload;
       const shouldEmbedColor = embedColorOnUpload;
@@ -974,12 +1072,28 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
           
           if (isRateLimit || isServerError || isTimeout) {
             const waitTime = isRateLimit ? RATE_LIMIT_DELAY_MS : RETRY_DELAY_MS;
-            console.log(`[Uploader] Retry ${retryCount + 1}/${MAX_RETRIES} after ${waitTime}ms (${isRateLimit ? 'rate limited' : isServerError ? 'server error' : 'timeout'})`);
             await delay(waitTime);
             return uploadWithRetry(formData, retryCount + 1);
           }
         }
         
+        return { response, result };
+      };
+
+      const uploadVideoWithRetry = async (
+        formData: FormData,
+        retryCount = 0
+      ): Promise<{ response: Response; result: unknown }> => {
+        const response = await fetch('/api/import/page/upload-video', {
+          method: 'POST',
+          body: formData,
+        });
+
+        const result = await response.json();
+        if (!response.ok && retryCount < MAX_RETRIES && response.status >= 500) {
+          await delay(RETRY_DELAY_MS);
+          return uploadVideoWithRetry(formData, retryCount + 1);
+        }
         return { response, result };
       };
 
@@ -998,6 +1112,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
 
         return {
           id: entry.id,
+          assetType: entry.assetType ?? (entry.file ? inferAssetTypeFromFile(entry.file) : 'image'),
           url: "",
           filename: entry.filename,
           status: "uploading" as const,
@@ -1028,6 +1143,8 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       for (let i = 0; i < filesToUpload.length; i++) {
         const {
           file,
+          assetType,
+          filename: queuedFilename,
           originalUrl: queuedOriginalUrl,
           sourceUrl: queuedSourceUrl,
           sourcePath: queuedSourcePath,
@@ -1050,6 +1167,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         const tagsToSend = resolveTagInput(tags, queuedTags);
         const descriptionToSend =
           queuedDescription !== undefined ? queuedDescription : description;
+        const displayNameToSend = queuedFilename?.trim() || file?.name || '';
         const groupId = queuedGroupId || '';
         const groupParentId = groupId ? groupParentMap.get(groupId) : undefined;
         const isGroupParent = groupId ? groupFirstId.get(groupId) === imageId : false;
@@ -1082,6 +1200,10 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         try {
           const formData = new FormData();
           formData.append("file", file);
+          const effectiveAssetType = assetType ?? inferAssetTypeFromFile(file);
+          if (displayNameToSend) {
+            formData.append("displayName", displayNameToSend);
+          }
           if (folderToSend && folderToSend.trim()) {
             formData.append("folder", folderToSend.trim());
           }
@@ -1100,9 +1222,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
           if (sourcePathToSend) {
             formData.append("sourcePath", sourcePathToSend);
           }
-          if (namespace) {
-            formData.append("namespace", namespace);
-          }
+          formData.append("namespace", uploadNamespace);
           if (parentIdToSend) {
             formData.append("parentId", parentIdToSend);
           }
@@ -1113,7 +1233,9 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
           }
 
           // Upload with automatic retry on rate limits/server errors
-          const { response, result } = await uploadWithRetry(formData);
+          const { response, result } = effectiveAssetType === 'video'
+            ? await uploadVideoWithRetry(formData)
+            : await uploadWithRetry(formData);
 
           if (response.ok) {
             if (result && typeof result === 'object' && Array.isArray((result as { results?: unknown }).results)) {
@@ -1133,6 +1255,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
               };
               const successEntries: UploadedImage[] = zipResult.results.map((item) => ({
                 id: item.id,
+                assetType: 'image',
                 url: item.url,
                 filename: item.filename,
                 status: "success",
@@ -1146,6 +1269,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
               }));
               const failureEntries: UploadedImage[] = (zipResult.failures || []).map((item) => ({
                 id: Math.random().toString(36).substring(7),
+                assetType: 'image',
                 url: "",
                 filename: item.filename,
                 status: "error",
@@ -1153,6 +1277,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
               }));
               const skippedEntries: UploadedImage[] = (zipResult.skipped || []).map((item) => ({
                 id: Math.random().toString(36).substring(7),
+                assetType: 'image',
                 url: "",
                 filename: item.filename,
                 status: "error",
@@ -1175,7 +1300,13 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
                 }, 500);
               }
             } else {
-              const typedResult = result as { id?: string; url?: string };
+              const typedResult = result as {
+                id?: string;
+                url?: string;
+                playbackUrl?: string;
+                hlsUrl?: string;
+                thumbnailUrl?: string;
+              };
               const serverId = typedResult && typeof typedResult === 'object' && 'id' in typedResult && typeof typedResult.id === 'string'
                 ? typedResult.id
                 : imageId;
@@ -1189,9 +1320,10 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
                         ...img,
                         id: serverId,
                         status: "success",
-                        embeddingStatus: shouldEmbedAnything ? "queued" : undefined,
-                        embeddingRequested: shouldEmbedAnything ? { clip: shouldEmbedClip, color: shouldEmbedColor } : undefined,
-                        url: typedResult.url || '',
+                        embeddingStatus: effectiveAssetType === 'image' && shouldEmbedAnything ? "queued" : undefined,
+                        embeddingRequested: effectiveAssetType === 'image' && shouldEmbedAnything ? { clip: shouldEmbedClip, color: shouldEmbedColor } : undefined,
+                        assetType: effectiveAssetType,
+                        url: typedResult.url || typedResult.playbackUrl || typedResult.hlsUrl || typedResult.thumbnailUrl || '',
                         folder: folderToSend || undefined,
                         tags: tagsToSend
                           .trim()
@@ -1206,7 +1338,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
                 )
               );
 
-              if (shouldEmbedAnything) {
+              if (effectiveAssetType === 'image' && shouldEmbedAnything) {
                 enqueueEmbedding(serverId, shouldEmbedClip, shouldEmbedColor);
               }
 
@@ -1238,7 +1370,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         }
       }
 
-      setIsUploading(false);
+      endUploadActivity();
 
       // Refresh available folders after upload (new folder may have been added by server)
       try {
@@ -1257,14 +1389,18 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       setSourceUrl("");
       setSelectedParentId("");
     },
-    [resolveFolder, tags, description, originalUrl, sourceUrl, namespace, selectedParentId, onImageUploaded, fetchFolders, formatUploadErrorMessage, embedClipOnUpload, embedColorOnUpload, enqueueEmbedding, omitOriginalUrl]
+    [resolveFolder, tags, description, originalUrl, sourceUrl, uploadNamespace, selectedParentId, onImageUploaded, fetchFolders, formatUploadErrorMessage, embedClipOnUpload, embedColorOnUpload, enqueueEmbedding, omitOriginalUrl, markNamespaceUploadFailures, beginUploadActivity, endUploadActivity]
   );
 
   const uploadRemoteFiles = useCallback(
     async (itemsToUpload: QueuedFile[]) => {
       const validItems = itemsToUpload.filter((item) => Boolean(item.remoteUrl));
       if (validItems.length === 0) return;
-      setIsUploading(true);
+      if (!uploadNamespace) {
+        markNamespaceUploadFailures(validItems);
+        return;
+      }
+      beginUploadActivity();
 
       const shouldEmbedClip = embedClipOnUpload;
       const shouldEmbedColor = embedColorOnUpload;
@@ -1272,6 +1408,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
 
       const folderToUse = resolveFolder();
       const initialImages: UploadedImage[] = validItems.map((entry) => {
+        const effectiveAssetType = entry.assetType ?? inferAssetTypeFromUrl(entry.remoteUrl);
         const originalUrlToSend = omitOriginalUrl
           ? ''
           : entry.originalUrl !== undefined
@@ -1285,6 +1422,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
 
         return {
           id: entry.id,
+          assetType: effectiveAssetType,
           url: "",
           filename: entry.filename,
           status: "uploading" as const,
@@ -1303,7 +1441,9 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         return [...prev.filter((img) => !ids.has(img.id)), ...initialImages];
       });
 
-      const payloadItems = validItems.map((entry) => {
+      const imagePayloadItems = validItems
+        .filter((entry) => (entry.assetType ?? inferAssetTypeFromUrl(entry.remoteUrl)) === 'image')
+        .map((entry) => {
         const originalUrlToSend = omitOriginalUrl
           ? ''
           : entry.originalUrl !== undefined
@@ -1315,42 +1455,152 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         const tagsToSend = resolveTagInput(tags, entry.tags);
         const descriptionToSend =
           entry.description !== undefined ? entry.description : description;
+        const displayNameToSend = entry.filename?.trim() || undefined;
 
         return {
           clientId: entry.id,
           url: entry.remoteUrl,
+          displayName: displayNameToSend,
           folder: folderToSend && folderToSend.trim() ? folderToSend.trim() : undefined,
           tags: tagsToSend && tagsToSend.trim() ? tagsToSend.trim() : undefined,
           description: descriptionToSend && descriptionToSend.trim() ? descriptionToSend.trim() : undefined,
           originalUrl: originalUrlToSend || undefined,
           sourceUrl: sourceUrlToSend || undefined,
-          namespace,
+          namespace: uploadNamespace,
           parentId: selectedParentId || undefined
         };
       });
 
-      try {
-        const response = await fetch('/api/import/page/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ items: payloadItems, allowInsecure: pageImportAllowInsecure })
+      const videoPayloadItems = validItems
+        .filter((entry) => (entry.assetType ?? inferAssetTypeFromUrl(entry.remoteUrl)) === 'video')
+        .map((entry) => {
+          const originalUrlToSend = omitOriginalUrl
+            ? ''
+            : entry.originalUrl !== undefined
+              ? entry.originalUrl
+              : originalUrl.trim() || entry.remoteUrl || '';
+          const sourceUrlToSend =
+            entry.sourceUrl !== undefined ? entry.sourceUrl : sourceUrl.trim() || '';
+          const folderToSend = entry.folder !== undefined ? entry.folder : folderToUse;
+          const tagsToSend = resolveTagInput(tags, entry.tags);
+          const descriptionToSend =
+            entry.description !== undefined ? entry.description : description;
+          return {
+            clientId: entry.id,
+            url: entry.remoteUrl || '',
+            filename: entry.filename,
+            isBlobSource: Boolean(entry.isBlobSource) || (entry.remoteUrl || '').startsWith('blob:'),
+            folder: folderToSend && folderToSend.trim() ? folderToSend.trim() : undefined,
+            tags: tagsToSend && tagsToSend.trim() ? tagsToSend.trim() : undefined,
+            description: descriptionToSend && descriptionToSend.trim() ? descriptionToSend.trim() : undefined,
+            originalUrl: originalUrlToSend || undefined,
+            sourceUrl: sourceUrlToSend || undefined,
+            namespace: uploadNamespace,
+          };
         });
-        const data = await response.json();
 
-        if (!response.ok) {
-          const message = typeof data?.error === 'string' ? data.error : 'Failed to upload page images';
-          setUploadedImages((prev) =>
-            prev.map((img) =>
-              payloadItems.some((item) => item.clientId === img.id)
-                ? { ...img, status: "error", error: message }
-                : img
-            )
-          );
-          return;
+      try {
+        const resultList: UploadResult[] = [];
+        const failureList: UploadFailure[] = [];
+
+        if (imagePayloadItems.length > 0) {
+          const imageResponse = await fetch('/api/import/page/upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              items: imagePayloadItems,
+              allowInsecure: pageImportAllowInsecure,
+              ...(pageImportCookieHeader.trim() ? { cookieHeader: pageImportCookieHeader.trim() } : {}),
+            })
+          });
+          const imageData = await imageResponse.json();
+
+          if (!imageResponse.ok) {
+            const message = typeof imageData?.error === 'string' ? imageData.error : 'Failed to upload page images';
+            setUploadedImages((prev) =>
+              prev.map((img) =>
+                imagePayloadItems.some((item) => item.clientId === img.id)
+                  ? { ...img, status: "error", error: message }
+                  : img
+              )
+            );
+            return;
+          }
+
+          if (Array.isArray(imageData?.results)) {
+            resultList.push(...imageData.results);
+          }
+          if (Array.isArray(imageData?.failures)) {
+            failureList.push(...imageData.failures);
+          }
         }
 
-        const resultList = Array.isArray(data?.results) ? data.results : [];
-        const failureList = Array.isArray(data?.failures) ? data.failures : [];
+        if (videoPayloadItems.length > 0) {
+          await runWithConcurrency(videoPayloadItems, VIDEO_REMOTE_UPLOAD_CONCURRENCY, async (item) => {
+            const isBlobSource = item.isBlobSource || item.url.startsWith('blob:');
+            let videoResponse: Response;
+            if (isBlobSource) {
+              try {
+                const blobResponse = await fetch(item.url);
+                if (!blobResponse.ok) {
+                  throw new Error(`Blob fetch failed (${blobResponse.status})`);
+                }
+                const blob = await blobResponse.blob();
+                const extension = blob.type.includes('webm') ? 'webm' : blob.type.includes('ogg') ? 'ogv' : 'mp4';
+                const filename = item.filename || `captured-video.${extension}`;
+                const file = new File([blob], filename, { type: blob.type || 'video/mp4' });
+                const formData = new FormData();
+                formData.append('file', file);
+                if (item.folder) formData.append('folder', item.folder);
+                if (item.tags) formData.append('tags', item.tags);
+                if (item.description) formData.append('description', item.description);
+                if (item.originalUrl) formData.append('originalUrl', item.originalUrl);
+                if (item.sourceUrl) formData.append('sourceUrl', item.sourceUrl);
+                if (item.namespace) formData.append('namespace', item.namespace);
+                videoResponse = await fetch('/api/import/page/upload-video', {
+                  method: 'POST',
+                  body: formData,
+                });
+              } catch (error) {
+                failureList.push({
+                  clientId: item.clientId,
+                  error: `Blob video capture failed. Open the source page and upload/download the video manually. (${error instanceof Error ? error.message : 'Unknown error'})`,
+                });
+                return;
+              }
+            } else {
+              videoResponse = await fetch('/api/import/page/upload-video', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  url: item.url,
+                  filename: item.filename,
+                  folder: item.folder,
+                  tags: item.tags,
+                  description: item.description,
+                  originalUrl: item.originalUrl,
+                  sourceUrl: item.sourceUrl,
+                  namespace: item.namespace,
+                })
+              });
+            }
+            const videoData = await videoResponse.json();
+            if (!videoResponse.ok) {
+              failureList.push({ clientId: item.clientId, error: videoData?.error || 'Video upload failed' });
+              return;
+            }
+            resultList.push({
+              clientId: item.clientId,
+              id: videoData.id,
+              url: videoData.playbackUrl || videoData.hlsUrl || videoData.thumbnailUrl || '',
+              folder: videoData.folder,
+              tags: videoData.tags,
+              description: videoData.description,
+              originalUrl: videoData.originalUrl,
+              sourceUrl: videoData.sourceUrl,
+            });
+          });
+        }
 
         interface UploadResult {
           clientId: string;
@@ -1379,12 +1629,15 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
           prev.map((img) => {
             const success = successMap.get(img.id);
             if (success) {
+              const sourceItem = validItems.find((item) => item.id === img.id);
+              const assetType = sourceItem?.assetType ?? inferAssetTypeFromUrl(sourceItem?.remoteUrl);
               return {
                 ...img,
                 id: success.id ?? img.id,
                 status: "success" as const,
-                embeddingStatus: shouldEmbedAnything ? "queued" : undefined,
-                embeddingRequested: shouldEmbedAnything ? { clip: shouldEmbedClip, color: shouldEmbedColor } : undefined,
+                assetType,
+                embeddingStatus: assetType === 'image' && shouldEmbedAnything ? "queued" : undefined,
+                embeddingRequested: assetType === 'image' && shouldEmbedAnything ? { clip: shouldEmbedClip, color: shouldEmbedColor } : undefined,
                 url: success.url ?? img.url,
                 folder: success.folder,
                 tags: success.tags,
@@ -1402,7 +1655,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
                 error: failure.error || 'Upload failed'
               };
             }
-            if (payloadItems.some((item) => item.clientId === img.id)) {
+            if (validItems.some((item) => item.id === img.id)) {
               return {
                 ...img,
                 status: "error" as const,
@@ -1415,7 +1668,9 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
 
         if (shouldEmbedAnything) {
           resultList.forEach((item: UploadResult) => {
-            if (item.id) {
+            const sourceItem = validItems.find((entry) => entry.id === item.clientId);
+            const assetType = sourceItem?.assetType ?? inferAssetTypeFromUrl(sourceItem?.remoteUrl);
+            if (item.id && assetType === 'image') {
               enqueueEmbedding(item.id, shouldEmbedClip, shouldEmbedColor);
             }
           });
@@ -1430,13 +1685,13 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         console.error('Remote upload error:', error);
         setUploadedImages((prev) =>
           prev.map((img) =>
-            payloadItems.some((item) => item.clientId === img.id)
+            validItems.some((item) => item.id === img.id)
               ? { ...img, status: "error", error: "Network error" }
               : img
           )
         );
       } finally {
-        setIsUploading(false);
+        endUploadActivity();
         try {
           await fetchFolders();
         } catch (e) {
@@ -1451,7 +1706,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         setSelectedParentId("");
       }
     },
-    [resolveFolder, tags, description, originalUrl, sourceUrl, namespace, selectedParentId, onImageUploaded, fetchFolders, embedClipOnUpload, embedColorOnUpload, enqueueEmbedding, omitOriginalUrl]
+    [resolveFolder, tags, description, originalUrl, sourceUrl, uploadNamespace, selectedParentId, onImageUploaded, fetchFolders, embedClipOnUpload, embedColorOnUpload, enqueueEmbedding, omitOriginalUrl, pageImportAllowInsecure, pageImportCookieHeader, markNamespaceUploadFailures, beginUploadActivity, endUploadActivity]
   );
 
   // Handle drag and drop - either queue or upload immediately
@@ -1479,6 +1734,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
           extracted.forEach((entry, index) => {
             queued.push({
               id: createQueueId(),
+              assetType: 'image',
               file: entry.file,
               filename: entry.filename,
               tags: 'keynote',
@@ -1503,6 +1759,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
           extracted.forEach((entry) => {
             queued.push({
               id: createQueueId(),
+              assetType: 'image',
               file: entry.file,
               filename: entry.filename,
               sourcePath,
@@ -1521,6 +1778,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       const tagOverride = isSnagx ? 'snagx' : undefined;
       queued.push({
         id: createQueueId(),
+        assetType: inferAssetTypeFromFile(file),
         file,
         filename: file.name,
         tags: tagOverride,
@@ -1553,12 +1811,15 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         if (!item.file) continue;
         const processedFile = isArchiveFile(item.file) ? item.file : item.file;
         processed.push({
+          assetType: item.assetType,
           file: processedFile,
-          filename: processedFile.name,
+          filename: item.filename,
           id: item.id,
           originalUrl: item.originalUrl,
           sourceUrl: item.sourceUrl,
           sourcePath: item.sourcePath,
+          posterUrl: item.posterUrl,
+          isBlobSource: item.isBlobSource,
           folder: item.folder,
           tags: item.tags,
           description: item.description,
@@ -1581,6 +1842,63 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     setQueuedFiles((prev) => prev.filter((item) => !selectedIds.has(item.id)));
   };
 
+  const handleAiRefineSelectedNames = useCallback(async () => {
+    const selectedItems = queuedFiles.filter((item) => item.selected !== false);
+    if (selectedItems.length === 0) return;
+
+    setAiRefiningNames(true);
+    try {
+      const fallbackFolder = resolveFolder();
+      for (const item of selectedItems) {
+        const effectiveAssetType = item.assetType ?? (item.file ? inferAssetTypeFromFile(item.file) : inferAssetTypeFromUrl(item.remoteUrl));
+        if (effectiveAssetType !== 'image') {
+          updateQueuedFile(item.id, { processingNote: 'AI naming currently supports images only' });
+          continue;
+        }
+        const formData = new FormData();
+        if (item.file) {
+          formData.append('file', item.file);
+        } else if (item.remoteUrl) {
+          formData.append('remoteUrl', item.remoteUrl);
+        } else {
+          updateQueuedFile(item.id, { processingNote: 'AI naming skipped: no image source' });
+          continue;
+        }
+
+        formData.append('filename', item.filename);
+        const folderHint = item.folder !== undefined ? item.folder : fallbackFolder;
+        if (folderHint) formData.append('folder', folderHint);
+        const tagHint = resolveTagInput(tags, item.tags);
+        if (tagHint) formData.append('tags', tagHint);
+
+        const response = await fetch('/api/display-name/suggest', {
+          method: 'POST',
+          body: formData,
+        });
+        const payload = (await response.json().catch(() => ({}))) as {
+          displayName?: string;
+          error?: string;
+        };
+
+        if (!response.ok || !payload.displayName) {
+          updateQueuedFile(item.id, {
+            processingNote: payload.error || 'AI naming failed',
+          });
+          continue;
+        }
+
+        updateQueuedFile(item.id, {
+          filename: payload.displayName,
+          processingNote: `AI shortname: ${payload.displayName}`,
+        });
+      }
+    } catch (error) {
+      console.error('Failed to refine queued names with AI', error);
+    } finally {
+      setAiRefiningNames(false);
+    }
+  }, [queuedFiles, resolveFolder, tags, updateQueuedFile]);
+
   // Clear queued files
   const clearQueue = () => {
     queuedFiles.forEach((file) => {
@@ -1595,6 +1913,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     onDrop,
     accept: {
       "image/*": [".jpeg", ".jpg", ".png", ".gif", ".webp"],
+      "video/*": [".mp4", ".webm", ".mov", ".m4v", ".ogv", ".ogg"],
       "application/octet-stream": [".snagx", ".key"],
       "application/zip": [".zip", ".snagx", ".key"],
       "application/x-zip-compressed": [".zip", ".key"],
@@ -1613,6 +1932,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       if (image.file) {
         const retryItem: QueuedFile = {
           id: image.id,
+          assetType: image.assetType,
           file: image.file,
           filename: image.filename,
           originalUrl: image.originalUrlInput ?? image.originalUrl,
@@ -1628,8 +1948,10 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       if (image.remoteUrl) {
         const retryItem: QueuedFile = {
           id: image.id,
+          assetType: image.assetType,
           filename: image.filename,
           remoteUrl: image.remoteUrl,
+          posterUrl: image.url || undefined,
           originalUrl: image.originalUrlInput ?? image.originalUrl,
           sourceUrl: image.sourceUrlInput ?? image.sourceUrl,
           folder: image.folderInput,
@@ -1705,6 +2027,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         ...prev,
         {
           id: createQueueId(),
+          assetType: 'image',
           file,
           filename: file.name,
           originalUrl: sourceUrl,
@@ -1727,8 +2050,18 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     }
   };
 
-  const handleImportFromPage = async () => {
+  const parseCookieHeaderFromClipboard = (raw: string) => {
+    const trimmed = raw.trim();
+    if (!trimmed) return '';
+    const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const cookieLine = lines.find((line) => /^cookie\s*:/i.test(line));
+    const candidate = (cookieLine || trimmed).replace(/^cookie\s*:\s*/i, '').trim();
+    return candidate;
+  };
+
+  const handleImportFromPage = async (cookieHeaderOverride?: string) => {
     if (!pageImportUrl.trim()) return;
+    const cookieHeaderValue = (cookieHeaderOverride ?? pageImportCookieHeader).trim();
     try {
       setPageImportLoading(true);
       setPageImportError(null);
@@ -1749,6 +2082,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
             maxPages,
             scrollDelayMs,
             autoScrollUntilStable,
+            ...(cookieHeaderValue ? { cookieHeader: cookieHeaderValue } : {}),
             ...(autoScrollUntilStable ? {} : { maxScrolls })
           })
         });
@@ -1760,9 +2094,16 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
-        let totalImages = 0;
+        let totalAssets = 0;
         let scrollCount = 0;
+        let lastProgressUpdateAt = 0;
+        const pendingQueueItems: QueuedFile[] = [];
         const existingUrls = new Set(queuedFiles.map(f => f.remoteUrl || f.originalUrl || f.filename));
+        const flushPendingQueueItems = () => {
+          if (pendingQueueItems.length === 0) return;
+          const batch = pendingQueueItems.splice(0, pendingQueueItems.length);
+          setQueuedFiles((prev) => [...prev, ...batch]);
+        };
 
         while (true) {
           const { done, value } = await reader.read();
@@ -1781,35 +2122,50 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
                 const data = JSON.parse(line.slice(6));
                 
                 if (eventType === 'status') {
-                  setPageImportProgress({
-                    message: data.message || 'Processing...',
-                    scrollCount: data.scrollCount || 0,
-                    imageCount: data.imageCount || 0
-                  });
+                  const now = Date.now();
+                  if (now - lastProgressUpdateAt >= STREAM_PROGRESS_UPDATE_INTERVAL_MS) {
+                    setPageImportProgress({
+                      message: data.message || 'Processing...',
+                      scrollCount: data.scrollCount || 0,
+                      imageCount: data.imageCount || 0
+                    });
+                    lastProgressUpdateAt = now;
+                  }
                   scrollCount = data.scrollCount || 0;
-                } else if (eventType === 'image') {
-                  // Add image to queue progressively
-                  const imageUrl = data.url;
-                  if (imageUrl && !existingUrls.has(imageUrl)) {
-                    existingUrls.add(imageUrl);
-                    totalImages++;
-                    
+                } else if (eventType === 'image' || eventType === 'video' || eventType === 'media') {
+                  const mediaUrl = typeof data.url === 'string' ? data.url : '';
+                  if (mediaUrl && !existingUrls.has(mediaUrl)) {
+                    existingUrls.add(mediaUrl);
+                    totalAssets++;
+                    const isBlobSource = Boolean(data.isBlob) || mediaUrl.startsWith('blob:');
+                    const inferredAssetType: 'image' | 'video' =
+                      data.kind === 'video' || eventType === 'video' || inferAssetTypeFromUrl(mediaUrl) === 'video'
+                        ? 'video'
+                        : 'image';
                     const newItem: QueuedFile = {
                       id: createQueueId(),
-                      filename: data.filename || imageUrl.split('/').pop() || 'remote-image',
-                      remoteUrl: imageUrl,
-                      previewUrl: imageUrl,
-                      originalUrl: imageUrl,
+                      assetType: inferredAssetType,
+                      filename: data.filename || mediaUrl.split('/').pop() || (inferredAssetType === 'video' ? 'remote-video' : 'remote-image'),
+                      remoteUrl: mediaUrl,
+                      previewUrl: totalAssets <= PAGE_IMPORT_PREVIEW_LIMIT
+                        ? (inferredAssetType === 'image' ? mediaUrl : (typeof data.posterUrl === 'string' ? data.posterUrl : undefined))
+                        : undefined,
+                      posterUrl: typeof data.posterUrl === 'string' ? data.posterUrl : undefined,
+                      originalUrl: mediaUrl,
+                      isBlobSource,
                       selected: true
                     };
-                    
-                    setQueuedFiles(prev => [...prev, newItem]);
+                    pendingQueueItems.push(newItem);
+                    if (pendingQueueItems.length >= STREAM_QUEUE_FLUSH_BATCH_SIZE) {
+                      flushPendingQueueItems();
+                    }
                   }
                 } else if (eventType === 'done') {
+                  flushPendingQueueItems();
                   setPageImportProgress({
                     message: data.message || 'Complete',
                     scrollCount: data.scrollCount || scrollCount,
-                    imageCount: data.imageCount || totalImages
+                    imageCount: data.imageCount || totalAssets
                   });
                 } else if (eventType === 'error') {
                   throw new Error(data.error || 'Unknown error');
@@ -1824,11 +2180,11 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
             }
           }
         }
+        flushPendingQueueItems();
 
-        if (totalImages === 0) {
-          setPageImportError(`No images found after ${scrollCount} scroll${scrollCount !== 1 ? 's' : ''}. The page may require login, use complex lazy-loading, or block automated browsers.`);
+        if (totalAssets === 0) {
+          setPageImportError(`No media found after ${scrollCount} scroll${scrollCount !== 1 ? 's' : ''}. The page may require login, use complex lazy-loading, or block automated browsers.`);
         } else {
-          console.log(`[page-import] Streamed ${totalImages} images`);
         }
         
         if (!sourceUrl.trim()) {
@@ -1849,6 +2205,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
           url: pageImportUrl.trim(),
           minBytes: 8 * 1024,
           allowInsecure: pageImportAllowInsecure,
+          ...(cookieHeaderValue ? { cookieHeader: cookieHeaderValue } : {}),
         })
       });
       const contentType = response.headers.get('content-type') || '';
@@ -1883,30 +2240,38 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       if (!isJson || typeof data !== 'object' || !data) {
         throw new Error('Failed to inspect page');
       }
+      const media = Array.isArray(data?.media) ? data.media : [];
       const images = Array.isArray(data?.images) ? data.images : [];
+      const videos = Array.isArray(data?.videos) ? data.videos : [];
+      const mergedMedia = media.length > 0 ? media : [
+        ...images.map((image: { url: string; filename?: string; contentLength?: number; contentType?: string }) => ({ ...image, kind: 'image' as const })),
+        ...videos.map((video: { url: string; filename?: string; contentType?: string; isBlob?: boolean; posterUrl?: string }) => ({ ...video, kind: 'video' as const })),
+      ];
+      const includePreviews = mergedMedia.length <= PAGE_IMPORT_PREVIEW_LIMIT;
       
-      if (images.length === 0) {
-        setPageImportError('No images found on that page. The images may be loaded via JavaScript—try enabling "Scroll mode" to load infinite scroll content.');
+      if (mergedMedia.length === 0) {
+        setPageImportError('No media found on that page. The assets may be loaded via JavaScript—try enabling "Scroll mode" to load infinite scroll content.');
         return;
       }
       
-      console.log(`[page-import] Received ${images.length} images from server`);
 
-      const newItems: QueuedFile[] = images.map((image: { url: string; filename?: string; contentLength?: number; contentType?: string }) => ({
+      const newItems: QueuedFile[] = mergedMedia.map((entry: { kind?: 'image' | 'video'; url: string; filename?: string; contentLength?: number; contentType?: string; isBlob?: boolean; posterUrl?: string }) => ({
         id: createQueueId(),
-        filename: image.filename || image.url.split('/').pop() || 'remote-image',
-        remoteUrl: image.url,
-        previewUrl: image.url,
-        sizeBytes: typeof image.contentLength === 'number' ? image.contentLength : undefined,
-        contentType: typeof image.contentType === 'string' ? image.contentType : undefined,
-        originalUrl: image.url,
+        assetType: entry.kind === 'video' || inferAssetTypeFromUrl(entry.url) === 'video' ? 'video' : 'image',
+        filename: entry.filename || entry.url.split('/').pop() || (entry.kind === 'video' ? 'remote-video' : 'remote-image'),
+        remoteUrl: entry.url,
+        previewUrl: includePreviews ? (entry.kind === 'video' ? entry.posterUrl : entry.url) : undefined,
+        posterUrl: entry.posterUrl,
+        isBlobSource: Boolean(entry.isBlob) || entry.url.startsWith('blob:'),
+        sizeBytes: typeof entry.contentLength === 'number' ? entry.contentLength : undefined,
+        contentType: typeof entry.contentType === 'string' ? entry.contentType : undefined,
+        originalUrl: entry.url,
         selected: true
       }));
 
       setQueuedFiles((prev) => {
         const existing = new Set(prev.map((item) => item.remoteUrl || item.originalUrl || item.filename));
         const filtered = newItems.filter((item) => !existing.has(item.remoteUrl || item.originalUrl || item.filename));
-        console.log(`[page-import] Adding ${filtered.length} new images (${newItems.length - filtered.length} duplicates skipped)`);
         return [...prev, ...filtered];
       });
       if (!sourceUrl.trim()) {
@@ -1921,8 +2286,43 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     }
   };
 
+  const handlePasteCookiesAndScan = async () => {
+    if (pageImportLoading) return;
+    if (!pageImportUrl.trim()) {
+      setPageImportError('Enter a page URL first, then paste cookies and scan.');
+      return;
+    }
+    if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) {
+      setPageImportError('Clipboard read is unavailable. Paste the Cookie header manually.');
+      return;
+    }
+
+    try {
+      const clipboardText = await navigator.clipboard.readText();
+      const parsedCookieHeader = parseCookieHeaderFromClipboard(clipboardText);
+      if (!parsedCookieHeader) {
+        setPageImportError('Clipboard does not contain a Cookie header.');
+        return;
+      }
+      setPageImportCookieHeader(parsedCookieHeader);
+      await handleImportFromPage(parsedCookieHeader);
+    } catch (error) {
+      console.error('Paste cookies + scan failed', error);
+      setPageImportError('Could not read clipboard. Allow clipboard permission, then try again.');
+    }
+  };
+
   const handleCreateAnimation = async () => {
-    const selectedItems = queuedFiles.filter((item) => item.selected !== false);
+    if (!uploadNamespace) {
+      setAnimateError(NAMESPACE_REQUIRED_UPLOAD_ERROR);
+      return;
+    }
+
+    const selectedItems = queuedFiles.filter((item) => {
+      if (item.selected === false) return false;
+      const effectiveAssetType = item.assetType ?? (item.file ? inferAssetTypeFromFile(item.file) : inferAssetTypeFromUrl(item.remoteUrl));
+      return effectiveAssetType === 'image';
+    });
     if (selectedItems.length < 2) {
       setAnimateError('Select at least two images to animate');
       return;
@@ -2026,9 +2426,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       if (sourceUrl.trim()) {
         formData.append('sourceUrl', sourceUrl.trim());
       }
-      if (namespace) {
-        formData.append('namespace', namespace);
-      }
+      formData.append('namespace', uploadNamespace);
       if (selectedParentId) {
         formData.append('parentId', selectedParentId);
       }
@@ -2040,7 +2438,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       const data = await response.json();
       if (!response.ok) {
         const details = Array.isArray(data?.details)
-          ? data.details.filter((entry: unknown): entry is string => typeof entry === 'string' && entry.trim()).slice(0, 4)
+          ? data.details.filter((entry: unknown): entry is string => typeof entry === 'string' && entry.trim().length > 0).slice(0, 4)
           : [];
         const frameCounts =
           typeof data?.validFrames === 'number' && typeof data?.totalRequested === 'number'
@@ -2084,6 +2482,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         ...prev,
         {
           id: data.id,
+          assetType: 'image',
           url: data.url,
           filename: data.filename,
           status: 'success',
@@ -2110,11 +2509,21 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
 
   return (
     <div className="bg-white rounded-lg shadow-lg p-6">
-      <h2 className="text-xs font-mono  text-gray-900 mb-4">Upload Images</h2>
+      <h2 className="text-xs font-mono  text-gray-900 mb-4">Upload Media</h2>
 
       {/* Activity Indicator - prominent progress during bulk operations */}
       {(isActivityActive || activityStats.total > 0) && (
         <ActivityIndicator stats={activityStats} isActive={isActivityActive} />
+      )}
+      {!uploadNamespace && (
+        <div className="mb-4 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          {NAMESPACE_REQUIRED_UPLOAD_ERROR}
+        </div>
+      )}
+      {uploadNamespace && (
+        <div className="mb-4 rounded border border-blue-300 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+          You are uploading to the <span className="font-mono font-semibold">{uploadNamespace}</span> namespace. Are you sure this is what you want?
+        </div>
       )}
 
       {/* Organization Controls */}
@@ -2364,12 +2773,23 @@ A long list of filenames is not user friendly and essentially useless for select
           />
           <button
             type="button"
-            onClick={handleImportFromPage}
+            onClick={() => {
+              void handleImportFromPage();
+            }}
             disabled={pageImportLoading || !pageImportUrl.trim()}
             className="px-4 py-2 text-xs bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
           >
             {pageImportLoading && <Loader2 className="h-3 w-3 animate-spin" />}
             {pageImportLoading ? (pageImportScrollMode ? 'Scrolling…' : 'Scanning…') : 'Scan page'}
+          </button>
+          <button
+            type="button"
+            onClick={handlePasteCookiesAndScan}
+            disabled={pageImportLoading || !pageImportUrl.trim()}
+            className="px-4 py-2 text-xs bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50"
+            title="Reads clipboard, extracts Cookie header, and starts scan"
+          >
+            Paste cookies + scan
           </button>
         </div>
         
@@ -2392,7 +2812,7 @@ A long list of filenames is not user friendly and essentially useless for select
                     {pageImportProgress.scrollCount} scroll{pageImportProgress.scrollCount !== 1 ? 's' : ''}
                   </span>
                   <span className="text-[11px] text-blue-700">
-                    {pageImportProgress.imageCount} image{pageImportProgress.imageCount !== 1 ? 's' : ''} found
+                    {pageImportProgress.imageCount} asset{pageImportProgress.imageCount !== 1 ? 's' : ''} found
                   </span>
                 </div>
               </div>
@@ -2410,7 +2830,7 @@ A long list of filenames is not user friendly and essentially useless for select
           <div className="mt-3 p-2 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2">
             <CheckCircle className="h-4 w-4 text-green-600" />
             <span className="text-xs text-green-800">
-              {pageImportProgress.message} — {pageImportProgress.imageCount} image{pageImportProgress.imageCount !== 1 ? 's' : ''} added
+              {pageImportProgress.message} — {pageImportProgress.imageCount} asset{pageImportProgress.imageCount !== 1 ? 's' : ''} added
             </span>
           </div>
         )}
@@ -2436,7 +2856,7 @@ A long list of filenames is not user friendly and essentially useless for select
                   className="h-3 w-3"
                   disabled={pageImportLoading}
                 />
-                Auto-scroll until no new images
+                Auto-scroll until no new assets
               </label>
               {!pageImportAutoScroll && (
                 <label className="flex items-center gap-2 text-[11px] text-gray-600">
@@ -2490,11 +2910,37 @@ A long list of filenames is not user friendly and essentially useless for select
           />
           Allow insecure TLS (expired/self-signed certs). Requires IMPORT_ALLOW_INSECURE_TLS=true on the server.
         </label>
+        <label className="mt-2 block text-[11px] text-gray-600">
+          Optional Cookie header (for authenticated scraping on sites that block anonymous automation)
+          <textarea
+            value={pageImportCookieHeader}
+            onChange={(e) => setPageImportCookieHeader(e.target.value)}
+            placeholder="sessionid=...; other_cookie=..."
+            className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1 text-[11px] font-mono focus:outline-none focus:ring-1 focus:ring-blue-400"
+            rows={2}
+            disabled={pageImportLoading}
+          />
+        </label>
+        <details className="mt-2 text-[11px] text-gray-600">
+          <summary className="cursor-pointer select-none text-gray-700">
+            How to get the request Cookie header
+          </summary>
+          <ol className="mt-2 list-decimal space-y-1 pl-4">
+            <li>Open the target page in your regular browser where you are already logged in.</li>
+            <li>Open DevTools, then go to the Network tab.</li>
+            <li>Refresh the page and click the main page request (usually type Document).</li>
+            <li>In Request Headers, copy the full <span className="font-mono">Cookie</span> header value.</li>
+            <li>Paste it into this field, or use <span className="font-mono">Paste cookies + scan</span>.</li>
+          </ol>
+          <p className="mt-2 text-[11px] text-gray-500">
+            If this still fails on protected sites, use CLI browser ingest (<span className="font-mono">npm run page:browser-ingest -- --namespace your-ns --url https://target-page</span>) to extract from a live logged-in browser session.
+          </p>
+        </details>
         {pageImportError && <p className="text-xs text-red-600 mt-1">{pageImportError}</p>}
         <p className="text-[11px] text-gray-500 mt-1">
           {pageImportScrollMode 
-            ? 'Uses a headless browser to trigger lazy/infinite loading and follow pagination links. Auto-scroll stops when no new images are found (with a safety cap). Requires puppeteer.'
-            : 'Scans the page HTML for image URLs. Fast but may miss JavaScript-loaded content.'}
+            ? 'Uses a headless browser to trigger lazy/infinite loading and follow pagination links. Auto-scroll stops when no new assets are found (with a safety cap). Requires puppeteer.'
+            : 'Scans the page HTML for image/video URLs. Fast but may miss JavaScript-loaded content.'}
         </p>
       </div>
 
@@ -2521,6 +2967,14 @@ A long list of filenames is not user friendly and essentially useless for select
                 </button>
               )}
               <button
+                onClick={handleAiRefineSelectedNames}
+                className="px-3 py-1 text-xs text-fuchsia-700 hover:text-fuchsia-800 border border-fuchsia-300 bg-fuchsia-50 rounded-md hover:bg-fuchsia-100 disabled:opacity-50"
+                disabled={isUploading || aiRefiningNames || selectedQueuedCount === 0}
+                title="Use AI vision to generate CamelCase shortnames for selected queue items"
+              >
+                {aiRefiningNames ? 'Refining…' : 'AI Refine Selected Names'}
+              </button>
+              <button
                 onClick={clearQueue}
                 className="px-3 py-1 text-xs text-gray-600 hover:text-red-600 border border-gray-300 rounded-md hover:border-red-300"
                 disabled={isUploading}
@@ -2539,6 +2993,30 @@ A long list of filenames is not user friendly and essentially useless for select
               </button>
             </div>
           </div>
+          {queuedFiles.length > QUEUE_RENDER_LIMIT && !showAllQueuedItems && (
+            <div className="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+              Rendering first {QUEUE_RENDER_LIMIT} queue items for performance.
+              <button
+                type="button"
+                onClick={() => setShowAllQueuedItems(true)}
+                className="ml-2 underline hover:text-amber-900"
+              >
+                Show all
+              </button>
+            </div>
+          )}
+          {queuedFiles.length > QUEUE_RENDER_LIMIT && showAllQueuedItems && (
+            <div className="mb-3 rounded border border-gray-200 bg-gray-50 px-3 py-2 text-[11px] text-gray-700">
+              Showing all {queuedFiles.length} queue items.
+              <button
+                type="button"
+                onClick={() => setShowAllQueuedItems(false)}
+                className="ml-2 underline hover:text-gray-900"
+              >
+                Show first {QUEUE_RENDER_LIMIT}
+              </button>
+            </div>
+          )}
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between mb-3 border border-blue-200 rounded-lg p-3 bg-white/70">
             <div className="flex flex-wrap items-center gap-3">
               <label className="text-[11px] text-gray-600 flex items-center gap-2">
@@ -2589,13 +3067,14 @@ A long list of filenames is not user friendly and essentially useless for select
           </div>
 
           <div className="grid grid-cols-1 gap-3">
-            {queuedFiles.map((item) => {
+            {visibleQueuedFiles.map((item) => {
               const hasCustomFolder = item.folder !== undefined;
               const hasCustomTags = item.tags !== undefined;
               const hasCustomDescription = item.description !== undefined;
               const hasCustomOriginalUrl = item.originalUrl !== undefined;
               const hasCustomSourceUrl = item.sourceUrl !== undefined;
               const previewUrl = item.previewUrl || item.remoteUrl;
+              const effectiveAssetType = item.assetType ?? (item.file ? inferAssetTypeFromFile(item.file) : inferAssetTypeFromUrl(item.remoteUrl));
               const previewFailed = Boolean(previewFailures[item.id]);
               const displaySizeBytes = item.file?.size ?? item.sizeBytes;
               const overMaxBytes = typeof displaySizeBytes === 'number' && displaySizeBytes > MAX_BYTES;
@@ -2623,13 +3102,34 @@ A long list of filenames is not user friendly and essentially useless for select
               <div key={item.id} className="p-3 bg-blue-50 border border-blue-200 rounded-lg w-full">
                 <div className="flex items-start gap-3">
                   {previewUrl && !previewFailed ? (
-                    <img
-                      src={previewUrl}
-                      alt={item.filename}
-                      className="h-28 w-28 rounded border border-blue-200 object-cover bg-white"
-                      onError={() => { void handlePreviewLoadError(item); }}
-                      referrerPolicy="no-referrer"
-                    />
+                    effectiveAssetType === 'video' ? (
+                      <div className="relative h-28 w-28 rounded border border-blue-200 bg-black overflow-hidden">
+                        {(item.posterUrl || (!item.file ? previewUrl : undefined)) ? (
+                          <img
+                            src={item.posterUrl || previewUrl}
+                            alt={item.filename}
+                            className="h-full w-full object-cover"
+                            onError={() => { void handlePreviewLoadError(item); }}
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-[10px] text-gray-300">
+                            VIDEO
+                          </div>
+                        )}
+                        <div className="absolute bottom-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white">
+                          VIDEO
+                        </div>
+                      </div>
+                    ) : (
+                      <img
+                        src={previewUrl}
+                        alt={item.filename}
+                        className="h-28 w-28 rounded border border-blue-200 object-cover bg-white"
+                        onError={() => { void handlePreviewLoadError(item); }}
+                        referrerPolicy="no-referrer"
+                      />
+                    )
                   ) : (
                     <div className="h-28 w-28 rounded border border-blue-200 bg-white flex items-center justify-center text-[10px] text-gray-400">
                       {item.file ? "Local file" : "No preview (source blocked?)"}
@@ -2659,10 +3159,18 @@ A long list of filenames is not user friendly and essentially useless for select
                     </div>
                     <p className="text-xs text-gray-500">
                       {formatBytesMB(displaySizeBytes)}
+                      <span className="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] uppercase text-gray-600">
+                        {effectiveAssetType}
+                      </span>
                       {item.filename.length > MAX_FILENAME_LENGTH && (
                         <span className="ml-2 text-amber-600">⚠ Long filename ({item.filename.length} chars)</span>
                       )}
                     </p>
+                    {effectiveAssetType === 'video' && item.isBlobSource && (
+                      <p className="text-[11px] text-amber-700">
+                        Blob source detected. Upload will attempt browser capture first.
+                      </p>
+                    )}
                     {(item.tags || item.description) && (
                       <div className="text-[11px] text-gray-600 space-y-0.5">
                         {item.tags && (

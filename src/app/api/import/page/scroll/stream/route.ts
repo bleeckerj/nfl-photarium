@@ -9,6 +9,17 @@
  */
 
 import { NextRequest } from 'next/server';
+import {
+  isBlockedMediaDomain,
+  looksLikeImageAssetUrl,
+  looksLikeTinyTrackingPixel,
+  looksLikeTrackingOrUtilityAsset,
+  looksLikeUiChromeAsset,
+} from '@/server/pageImportFilters';
+import {
+  cookieHeaderToPuppeteerCookies,
+  normalizeCookieHeader,
+} from '@/server/pageImportCookies';
 
 // Puppeteer types - we use any since it's an optional dependency
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -58,11 +69,25 @@ const isPrivateHost = (hostname: string) => {
 };
 
 interface ImageInfo {
+  kind: 'image';
   url: string;
   filename: string;
   naturalWidth?: number;
   naturalHeight?: number;
+  contentLength?: number;
+  inMainContent?: boolean;
+  inUiChrome?: boolean;
 }
+
+interface VideoInfo {
+  kind: 'video';
+  url: string;
+  filename: string;
+  posterUrl?: string;
+  isBlob: boolean;
+}
+
+type MediaInfo = ImageInfo | VideoInfo;
 
 const pickBestFromSrcset = (srcset: string): string => {
   if (!srcset) return '';
@@ -104,40 +129,34 @@ const getFilenameFromUrl = (value: string): string => {
   }
 };
 
-// Known tracking/ad pixel domains to exclude
-const BLOCKED_DOMAINS = [
-  'adroll.com', 'd.adroll.com',
-  'doubleclick.net', 'googlesyndication.com', 'googleadservices.com',
-  'facebook.com', 'facebook.net', 'fbcdn.net',
-  'analytics.', 'pixel.', 'tracking.',
-  'ads.', 'ad.', 'beacon.',
-  'criteo.com', 'taboola.com', 'outbrain.com',
-];
-
-const isBlockedDomain = (url: string) => {
+const inferVideoFileName = (value: string, fallback = 'remote-video.mp4'): string => {
   try {
-    const hostname = new URL(url).hostname.toLowerCase();
-    return BLOCKED_DOMAINS.some(blocked => 
-      hostname === blocked || hostname.endsWith('.' + blocked) || hostname.includes(blocked)
-    );
+    const parsed = new URL(value);
+    const segments = parsed.pathname.split('/').filter(Boolean);
+    const filename = segments[segments.length - 1];
+    if (!filename) return fallback;
+    return decodeURIComponent(filename).replace(/[?#].*$/, '');
   } catch {
-    return false;
+    const trimmed = value.trim();
+    return trimmed || fallback;
   }
 };
 
-const looksLikeImage = (url: string) => {
-  try {
-    const path = new URL(url).pathname.toLowerCase();
-    if (/\.(jpg|jpeg|png|gif|webp|avif|svg|bmp|ico)(\?|$)/i.test(path)) {
-      return true;
-    }
-    if (url.includes('/cdn/') || url.includes('/images/') || url.includes('/media/')) {
-      return true;
-    }
-  } catch {
-    // ignore
+const resolveCandidateUrl = (rawUrl: string, baseUrl: string): string | null => {
+  const trimmed = rawUrl.trim();
+  if (!trimmed || trimmed.startsWith('data:') || trimmed.startsWith('javascript:')) {
+    return null;
   }
-  return false;
+
+  try {
+    const resolved = new URL(trimmed, baseUrl);
+    if (!['http:', 'https:'].includes(resolved.protocol)) return null;
+    if (isPrivateHost(resolved.hostname)) return null;
+    resolved.hash = '';
+    return resolved.toString();
+  } catch {
+    return null;
+  }
 };
 
 const MIN_DIMENSION = 50;
@@ -149,7 +168,17 @@ const urlHasSizeHints = (url: string): boolean => {
 };
 
 const shouldIncludeImage = (img: ImageInfo): boolean => {
-  if (isBlockedDomain(img.url)) return false;
+  if (isBlockedMediaDomain(img.url)) return false;
+  if (looksLikeUiChromeAsset(img.url, img.filename)) return false;
+  if (looksLikeTrackingOrUtilityAsset(img.url, img.filename)) return false;
+  if (looksLikeTinyTrackingPixel({
+    url: img.url,
+    filenameHint: img.filename,
+    naturalWidth: img.naturalWidth,
+    naturalHeight: img.naturalHeight,
+    contentLength: img.contentLength,
+  })) return false;
+  if (img.inUiChrome && !img.inMainContent) return false;
   
   // If URL has size hints (like 800x800), trust it even if naturalWidth/Height are tiny
   // This handles lazy-loaded images where the actual image hasn't loaded yet
@@ -164,12 +193,21 @@ const shouldIncludeImage = (img: ImageInfo): boolean => {
     return true;
   }
   
-  return looksLikeImage(img.url);
+  return looksLikeImageAssetUrl(img.url);
 };
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
   const pageUrl = typeof body?.url === 'string' ? body.url.trim() : '';
+  let cookieHeader: string | null = null;
+  try {
+    cookieHeader = normalizeCookieHeader(body?.cookieHeader);
+  } catch (error) {
+    return new Response(
+      `event: error\ndata: ${JSON.stringify({ error: error instanceof Error ? error.message : 'Invalid cookie header' })}\n\n`,
+      { status: 400, headers: { 'Content-Type': 'text/event-stream' } }
+    );
+  }
   const requestedMaxScrolls = Number.isFinite(body?.maxScrolls)
     ? Math.max(1, Math.min(50, Number(body.maxScrolls))) 
     : Number(process.env.IMPORT_SCROLL_MAX_SCROLLS) || DEFAULT_MAX_SCROLLS;
@@ -231,18 +269,91 @@ export async function POST(request: NextRequest) {
 
         const page = await browser.newPage();
         await page.setViewport({ width: 1280, height: 900 });
+        if (cookieHeader) {
+          const cookies = cookieHeaderToPuppeteerCookies(pageUrl, cookieHeader);
+          if (cookies.length > 0) {
+            await page.setCookie(...cookies);
+          }
+        }
         await page.setUserAgent(
           'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         );
 
-        const seenUrls = new Set<string>();
-        const sentImages = new Set<string>();
-        let totalImagesSent = 0;
+        const seenMedia = new Set<string>();
+        const sentMedia = new Set<string>();
+        const networkImageCandidates = new Map<string, { trusted: boolean; contentLength?: number }>();
+        let totalMediaSent = 0;
         let totalScrollCount = 0;
         let currentPageNum = 1;
         let currentUrl = pageUrl;
         const visitedPages = new Set<string>();
         let stoppedByScrollCap = false;
+        const targetHost = new URL(pageUrl).hostname.toLowerCase();
+        const isMcMasterHost = targetHost === 'mcmaster.com' || targetHost.endsWith('.mcmaster.com');
+        let sawProdPage403 = false;
+        let sawProtectionPayload = false;
+
+        const queueNetworkImage = (
+          rawUrl: string,
+          pageLocation: string,
+          opts?: { contentType?: string; resourceType?: string; contentLength?: number }
+        ) => {
+          const resolved = resolveCandidateUrl(rawUrl, pageLocation);
+          if (!resolved) return;
+          if (isBlockedMediaDomain(resolved)) return;
+          if (looksLikeUiChromeAsset(resolved)) return;
+          if (looksLikeTrackingOrUtilityAsset(resolved)) return;
+          if (looksLikeTinyTrackingPixel({ url: resolved })) return;
+
+          const contentType = (opts?.contentType || '').toLowerCase();
+          const trusted = contentType.startsWith('image/') || opts?.resourceType === 'image';
+          const contentLength =
+            typeof opts?.contentLength === 'number' && Number.isFinite(opts.contentLength) && opts.contentLength > 0
+              ? opts.contentLength
+              : undefined;
+          if (!trusted && !looksLikeImageAssetUrl(resolved)) return;
+
+          const current = networkImageCandidates.get(resolved);
+          if (!current) {
+            networkImageCandidates.set(resolved, { trusted, contentLength });
+          } else if (trusted && !current.trusted) {
+            current.trusted = true;
+          }
+          if (typeof contentLength === 'number' && Number.isFinite(contentLength) && contentLength > 0) {
+            if (current) {
+              current.contentLength = contentLength;
+            } else {
+              networkImageCandidates.set(resolved, { trusted, contentLength });
+            }
+          }
+        };
+
+        page.on('response', (response: { request: () => { resourceType?: () => string }; url: () => string; headers: () => Record<string, string>; status: () => number }) => {
+          try {
+            const url = response.url();
+            if (!url) return;
+            if (isMcMasterHost) {
+              if (url.includes('ProdPageWebPart.aspx') && response.status() === 403) {
+                sawProdPage403 = true;
+              }
+              if (url.includes('prodDatProtection.aspx') && response.status() === 200) {
+                sawProtectionPayload = true;
+              }
+            }
+            const resourceType = response.request()?.resourceType?.() || '';
+            const headers = response.headers();
+            const contentType = headers?.['content-type'] || '';
+            const parsedContentLength = Number(headers?.['content-length']);
+            const contentLength = Number.isFinite(parsedContentLength) && parsedContentLength > 0
+              ? parsedContentLength
+              : undefined;
+            if (resourceType === 'image' || contentType.toLowerCase().startsWith('image/')) {
+              queueNetworkImage(url, pageUrl, { contentType, resourceType, contentLength });
+            }
+          } catch {
+            // Ignore best-effort network capture failures.
+          }
+        });
 
         // Helper to trigger all lazy-loaded images by scrolling through the page
         const triggerLazyLoad = async () => {
@@ -314,42 +425,162 @@ export async function POST(request: NextRequest) {
           }
         };
 
-        // Helper to extract and process images
+        // Helper to extract and process media (images + videos)
         const extractAndSendNewImages = async () => {
           const pageLocation = await page.evaluate(() => window.location.href);
-          const allImages = await page.evaluate(() => {
+          const allMedia = await page.evaluate(() => {
             const imgs = Array.from(document.querySelectorAll('img'));
             const sources = Array.from(document.querySelectorAll('source'));
+            const videos = Array.from(document.querySelectorAll('video'));
             
             const results: Array<{
+              mediaKind: 'image' | 'video';
               src: string;
               srcset: string;
               dataSrcset: string;
               dataSrc: string;
               naturalWidth: number;
               naturalHeight: number;
+              poster: string;
+              inMainContent: boolean;
+              inUiChrome: boolean;
             }> = [];
+            const classifyContext = (element: Element | null): { inMainContent: boolean; inUiChrome: boolean } => {
+              let inMainContent = false;
+              let inUiChrome = false;
+              let current: Element | null = element;
+              while (current) {
+                const tagName = current.tagName.toLowerCase();
+                const role = (current.getAttribute('role') || '').toLowerCase();
+                const id = (current.getAttribute('id') || '').toLowerCase();
+                const className = (current.getAttribute('class') || '').toLowerCase();
+                const ariaLabel = (current.getAttribute('aria-label') || '').toLowerCase();
+                const signal = `${id} ${className} ${ariaLabel}`;
+                if (
+                  tagName === 'main' ||
+                  tagName === 'article' ||
+                  role === 'main' ||
+                  signal.includes('product') ||
+                  signal.includes('content')
+                ) {
+                  inMainContent = true;
+                }
+                if (
+                  tagName === 'header' ||
+                  tagName === 'nav' ||
+                  tagName === 'footer' ||
+                  role === 'navigation' ||
+                  signal.includes('menu') ||
+                  signal.includes('nav') ||
+                  signal.includes('header') ||
+                  signal.includes('footer') ||
+                  signal.includes('masthead') ||
+                  signal.includes('browsecatalog')
+                ) {
+                  inUiChrome = true;
+                }
+                current = current.parentElement;
+              }
+              return { inMainContent, inUiChrome };
+            };
+            const pushBackgroundUrls = (value: string | null | undefined, sourceElement?: Element | null) => {
+              if (!value || value === 'none') return;
+              const urlRegex = /url\((['"]?)(.*?)\1\)/g;
+              let match: RegExpExecArray | null;
+              while ((match = urlRegex.exec(value)) !== null) {
+                const candidate = (match[2] || '').trim();
+                if (!candidate || candidate.startsWith('data:')) continue;
+                const context = classifyContext(sourceElement || null);
+                results.push({
+                  mediaKind: 'image',
+                  src: candidate,
+                  srcset: '',
+                  dataSrcset: '',
+                  dataSrc: '',
+                  naturalWidth: 0,
+                  naturalHeight: 0,
+                  poster: '',
+                  inMainContent: context.inMainContent,
+                  inUiChrome: context.inUiChrome,
+                });
+              }
+            };
 
             for (const img of imgs) {
+              const context = classifyContext(img);
               results.push({
+                mediaKind: 'image',
                 src: img.currentSrc || img.src || '',
                 srcset: img.srcset || '',
                 dataSrcset: img.dataset.srcset || img.getAttribute('data-srcset') || '',
                 dataSrc: img.dataset.src || img.dataset.lazySrc || img.dataset.original || img.getAttribute('data-lazy') || '',
                 naturalWidth: img.naturalWidth || 0,
                 naturalHeight: img.naturalHeight || 0,
+                poster: '',
+                inMainContent: context.inMainContent,
+                inUiChrome: context.inUiChrome,
               });
             }
 
             for (const source of sources) {
+              const context = classifyContext(source);
               results.push({
+                mediaKind: 'image',
                 src: '',
                 srcset: source.srcset || '',
                 dataSrcset: source.dataset?.srcset || source.getAttribute('data-srcset') || '',
                 dataSrc: source.dataset?.src || '',
                 naturalWidth: 0,
                 naturalHeight: 0,
+                poster: '',
+                inMainContent: context.inMainContent,
+                inUiChrome: context.inUiChrome,
               });
+            }
+
+            for (const video of videos) {
+              const source = video.querySelector('source');
+              const src = video.currentSrc || video.src || source?.src || '';
+              const filenameHint = video.getAttribute('aria-label') || video.getAttribute('title') || src;
+              const context = classifyContext(video);
+              results.push({
+                mediaKind: 'video',
+                src,
+                srcset: '',
+                dataSrcset: '',
+                dataSrc: filenameHint,
+                naturalWidth: video.videoWidth || 0,
+                naturalHeight: video.videoHeight || 0,
+                poster: video.poster || '',
+                inMainContent: context.inMainContent,
+                inUiChrome: context.inUiChrome,
+              });
+            }
+
+            for (const link of Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="preload"][as="image"]'))) {
+              if (!link.href) continue;
+              const context = classifyContext(link);
+              results.push({
+                mediaKind: 'image',
+                src: link.href,
+                srcset: '',
+                dataSrcset: '',
+                dataSrc: '',
+                naturalWidth: 0,
+                naturalHeight: 0,
+                poster: '',
+                inMainContent: context.inMainContent,
+                inUiChrome: context.inUiChrome,
+              });
+            }
+
+            for (const element of Array.from(document.querySelectorAll<HTMLElement>('*'))) {
+              const inlineStyle = element.getAttribute('style');
+              if (inlineStyle && inlineStyle.includes('background')) {
+                pushBackgroundUrls(inlineStyle, element);
+              }
+              const computedBackground = window.getComputedStyle(element).backgroundImage;
+              pushBackgroundUrls(computedBackground, element);
             }
 
             return results;
@@ -357,7 +588,7 @@ export async function POST(request: NextRequest) {
 
           let newCount = 0;
           
-          for (const img of allImages) {
+          for (const img of allMedia) {
             // Prioritize data-srcset over srcset (lazy loaders put high-res versions there)
             // Then check srcset, then data-src, then src
             const srcsetUrl = pickBestFromSrcset(img.dataSrcset) || pickBestFromSrcset(img.srcset);
@@ -365,34 +596,104 @@ export async function POST(request: NextRequest) {
             if (!rawUrl) continue;
             
             try {
-              const resolved = new URL(rawUrl, pageLocation);
-              if (!['http:', 'https:'].includes(resolved.protocol)) continue;
-              if (isPrivateHost(resolved.hostname)) continue;
+              const isBlob = rawUrl.startsWith('blob:');
+              const cleanUrl = isBlob ? rawUrl : resolveCandidateUrl(rawUrl, pageLocation);
+              if (!cleanUrl) continue;
+              const dedupeKey = `${img.mediaKind}:${cleanUrl}`;
               
-              const cleanUrl = resolved.href;
-              
-              if (seenUrls.has(cleanUrl)) continue;
-              seenUrls.add(cleanUrl);
+              if (seenMedia.has(dedupeKey)) continue;
+
+              const mediaInfo: MediaInfo =
+                img.mediaKind === 'video'
+                  ? {
+                      kind: 'video',
+                      url: cleanUrl,
+                      filename: inferVideoFileName(img.dataSrc || cleanUrl),
+                      posterUrl: img.poster ? new URL(img.poster, pageLocation).toString() : undefined,
+                      isBlob,
+                    }
+                  : {
+                      kind: 'image',
+                      url: cleanUrl,
+                      filename: getFilenameFromUrl(cleanUrl),
+                      naturalWidth: img.naturalWidth || undefined,
+                      naturalHeight: img.naturalHeight || undefined,
+                      inMainContent: img.inMainContent || undefined,
+                      inUiChrome: img.inUiChrome || undefined,
+                    };
+
+              if (mediaInfo.kind === 'image' && !shouldIncludeImage(mediaInfo)) {
+                seenMedia.add(dedupeKey);
+                continue;
+              }
+              if (
+                mediaInfo.kind === 'image' &&
+                sawProdPage403 &&
+                sawProtectionPayload &&
+                !/\/contents\/gfx\/imagecache\//i.test(mediaInfo.url)
+              ) {
+                seenMedia.add(dedupeKey);
+                continue;
+              }
+
+              seenMedia.add(dedupeKey);
               newCount++;
-              
-              const imageInfo: ImageInfo = {
-                url: cleanUrl,
-                filename: getFilenameFromUrl(cleanUrl),
-                naturalWidth: img.naturalWidth || undefined,
-                naturalHeight: img.naturalHeight || undefined,
-              };
-              
-              // Check if we should include this image
-              if (!shouldIncludeImage(imageInfo)) continue;
-              
+
               // Only send if not already sent
-              if (!sentImages.has(cleanUrl)) {
-                sentImages.add(cleanUrl);
-                totalImagesSent++;
-                send('image', imageInfo);
+              if (!sentMedia.has(dedupeKey)) {
+                sentMedia.add(dedupeKey);
+                totalMediaSent++;
+                send('media', mediaInfo);
+                if (mediaInfo.kind === 'image') {
+                  send('image', mediaInfo);
+                } else {
+                  send('video', mediaInfo);
+                }
               }
             } catch {
               // Invalid URL, skip
+            }
+          }
+
+          for (const [networkUrl, metadata] of networkImageCandidates.entries()) {
+            const dedupeKey = `image:${networkUrl}`;
+            if (seenMedia.has(dedupeKey)) continue;
+
+            const mediaInfo: ImageInfo = {
+              kind: 'image',
+              url: networkUrl,
+              filename: getFilenameFromUrl(networkUrl),
+              contentLength: metadata.contentLength,
+            };
+
+            if (looksLikeTinyTrackingPixel({
+              url: mediaInfo.url,
+              filenameHint: mediaInfo.filename,
+              contentLength: mediaInfo.contentLength,
+            })) {
+              seenMedia.add(dedupeKey);
+              continue;
+            }
+            if (!metadata.trusted && !shouldIncludeImage(mediaInfo)) {
+              seenMedia.add(dedupeKey);
+              continue;
+            }
+            if (
+              sawProdPage403 &&
+              sawProtectionPayload &&
+              !/\/contents\/gfx\/imagecache\//i.test(mediaInfo.url)
+            ) {
+              seenMedia.add(dedupeKey);
+              continue;
+            }
+
+            seenMedia.add(dedupeKey);
+            newCount++;
+            if (!sentMedia.has(dedupeKey)) {
+              sentMedia.add(dedupeKey);
+              totalMediaSent++;
+              send('media', mediaInfo);
+              send('image', mediaInfo);
             }
           }
           
@@ -435,7 +736,7 @@ export async function POST(request: NextRequest) {
           send('status', { 
             message: maxPages > 1 ? `Loading page ${currentPageNum}...` : 'Loading page...', 
             scrollCount: totalScrollCount, 
-            imageCount: totalImagesSent,
+            imageCount: totalMediaSent,
             pageNum: currentPageNum
           });
 
@@ -450,7 +751,7 @@ export async function POST(request: NextRequest) {
           send('status', { 
             message: maxPages > 1 ? `Triggering lazy load on page ${currentPageNum}...` : 'Triggering lazy load...', 
             scrollCount: totalScrollCount, 
-            imageCount: totalImagesSent,
+            imageCount: totalMediaSent,
             pageNum: currentPageNum
           });
           await triggerLazyLoad();
@@ -459,7 +760,7 @@ export async function POST(request: NextRequest) {
           send('status', { 
             message: maxPages > 1 ? `Scanning page ${currentPageNum}...` : 'Scanning page...', 
             scrollCount: totalScrollCount, 
-            imageCount: totalImagesSent,
+            imageCount: totalMediaSent,
             pageNum: currentPageNum
           });
           await extractAndSendNewImages();
@@ -516,7 +817,7 @@ export async function POST(request: NextRequest) {
                 ? `Page ${currentPageNum}: Scrolling ${scrollTargetLabel}... (${pageScrollCount}/${autoScrollUntilStable ? 'auto' : maxScrolls})` 
                 : `Scrolling ${scrollTargetLabel}... (${pageScrollCount}/${autoScrollUntilStable ? 'auto' : maxScrolls})`, 
               scrollCount: totalScrollCount, 
-              imageCount: totalImagesSent,
+              imageCount: totalMediaSent,
               pageNum: currentPageNum
             });
 
@@ -528,7 +829,7 @@ export async function POST(request: NextRequest) {
               // Continue anyway
             }
 
-            const prevSent = totalImagesSent;
+            const prevSent = totalMediaSent;
             const newUrlCount = await extractAndSendNewImages();
             
             if (newUrlCount === 0) {
@@ -537,11 +838,11 @@ export async function POST(request: NextRequest) {
               noNewImagesCount = 0;
             }
 
-            if (totalImagesSent > prevSent) {
+            if (totalMediaSent > prevSent) {
               send('status', { 
-                message: `Found ${totalImagesSent - prevSent} new images`, 
+                message: `Found ${totalMediaSent - prevSent} new media assets`, 
                 scrollCount: totalScrollCount, 
-                imageCount: totalImagesSent,
+                imageCount: totalMediaSent,
                 pageNum: currentPageNum
               });
             }
@@ -560,7 +861,7 @@ export async function POST(request: NextRequest) {
               send('status', { 
                 message: `Moving to page ${currentPageNum}...`, 
                 scrollCount: totalScrollCount, 
-                imageCount: totalImagesSent,
+                imageCount: totalMediaSent,
                 pageNum: currentPageNum
               });
             } else {
@@ -578,10 +879,19 @@ export async function POST(request: NextRequest) {
               ? `Reached auto-scroll safety cap (${maxScrolls} scrolls)`
               : `Reached max scrolls (${maxScrolls})`)
           : `Stopped after ${NO_NEW_IMAGE_STOP_THRESHOLD} rounds with no new images`;
+
+        if (sawProdPage403 && sawProtectionPayload && totalMediaSent === 0) {
+          send('error', {
+            error:
+              'This page appears to block automated product scraping (McMaster protection response). Open the page in your browser and import direct image URLs, or use an authenticated scraping workflow.',
+            details: { protectionMode: true },
+          });
+          return;
+        }
         send('done', { 
           scrollCount: totalScrollCount,
           pageCount: currentPageNum,
-          imageCount: totalImagesSent,
+          imageCount: totalMediaSent,
           message: `Completed${pageInfo} with ${totalScrollCount} scrolls (${stopReason})`
         });
 

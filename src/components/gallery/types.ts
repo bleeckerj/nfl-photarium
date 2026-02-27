@@ -9,6 +9,7 @@ import type { EmbeddingPendingEntry } from '@/utils/embeddingPending';
 
 export interface CloudflareImage {
   id: string;
+  assetType?: 'image' | 'video';
   filename: string;
   displayName?: string;
   uploaded: string;
@@ -31,6 +32,12 @@ export interface CloudflareImage {
   generatedBy?: string;
   comfyMetadataDetected?: boolean;
   comfyMetadataSource?: string;
+  videoStatus?: 'pending' | 'ready' | 'error';
+  videoDurationSeconds?: number;
+  videoPlaybackUrl?: string;
+  videoHlsUrl?: string;
+  videoThumbnailUrl?: string;
+  videoPreviewUrl?: string;
   // Embedding status fields
   hasClipEmbedding?: boolean;
   hasColorEmbedding?: boolean;
@@ -52,7 +59,7 @@ export type ViewMode = 'grid' | 'list';
 export type GridSize = 'small' | 'medium' | 'large' | 'xlarge';
 export type BulkFolderMode = 'existing' | 'new';
 export type BulkTagsMode = 'replace' | 'append';
-export type BulkDisplayNameMode = 'custom' | 'auto' | 'clear';
+export type BulkDisplayNameMode = 'custom' | 'auto' | 'clear' | 'ai';
 export type EmbeddingFilter = 'none' | 'missing-clip' | 'missing-color' | 'missing-any';
 export type AspectRatioClass = 'horizontal' | 'vertical' | 'square';
 
@@ -116,6 +123,7 @@ export interface GalleryViewFilters {
   colorMetadataMap: Record<string, ColorMetadata>;
   embeddingPendingMap: Record<string, EmbeddingPendingEntry>;
   altLoadingMap: Record<string, boolean>;
+  displayNameLoadingMap: Record<string, boolean>;
   galleryReturnHrefSuffix: string;
 }
 
@@ -163,6 +171,7 @@ export interface BulkEditState {
 export interface ImageCardActions {
   onDelete: (imageId: string) => Promise<void>;
   onGenerateAlt: (imageId: string) => Promise<void>;
+  onGenerateDisplayName: (imageId: string) => Promise<void>;
   onStartEdit: (image: CloudflareImage) => void;
   onCopyUrl: (imageId: string) => void;
   onToggleSelection: (imageId: string) => void;

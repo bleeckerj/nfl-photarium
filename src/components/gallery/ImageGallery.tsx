@@ -257,6 +257,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       bulkUpdating,
       bulkDeleting,
       bulkEmbeddingGenerating,
+      generateDisplayName,
+      displayNameLoadingMap,
       applyBulkUpdates,
       deleteSelectedImages,
       generateEmbeddingsForSelected,
@@ -859,10 +861,12 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                 colorMetadata={colorMetadataMap[image.id]}
                 embeddingPending={embeddingPendingMap[image.id]}
                 altLoading={altLoadingMap[image.id] ?? false}
+                displayNameLoading={displayNameLoadingMap[image.id] ?? false}
                 onToggleSelection={toggleSelection}
                 onStartEdit={startEdit}
                 onDelete={handleDeleteConfirm}
                 onGenerateAlt={generateAltTag}
+                onGenerateDisplayName={generateDisplayName}
                 onCopyUrl={handleCopyUrl}
                 onCopyNamespace={handleCopyNamespace}
                 onMouseEnter={handleMouseEnter}
@@ -887,10 +891,12 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                 colorMetadata={colorMetadataMap[image.id]}
                 embeddingPending={embeddingPendingMap[image.id]}
                 altLoading={altLoadingMap[image.id] ?? false}
+                displayNameLoading={displayNameLoadingMap[image.id] ?? false}
                 onToggleSelection={toggleSelection}
                 onStartEdit={startEdit}
                 onDelete={handleDeleteConfirm}
                 onGenerateAlt={generateAltTag}
+                onGenerateDisplayName={generateDisplayName}
                 onCopyUrl={handleCopyUrl}
                 onCopyNamespace={handleCopyNamespace}
                 onMouseEnter={handleMouseEnter}

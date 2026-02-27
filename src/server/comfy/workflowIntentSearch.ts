@@ -5,6 +5,7 @@ interface RedisClient {
   hset(key: string, data: Record<string, string | Buffer>): Promise<number>;
   hgetall(key: string): Promise<Record<string, string> | null>;
   del(key: string): Promise<number>;
+  scan(cursor: string, ...args: string[]): Promise<[string, string[]]>;
   connect(): Promise<void>;
   on(event: string, callback: (arg?: unknown) => void): void;
 }
@@ -278,6 +279,30 @@ export async function searchWorkflowIntentByEmbedding(params: {
 export async function deleteWorkflowIntentEmbedding(imageId: string): Promise<void> {
   const client = await getRedisClient();
   await client.del(`${WORKFLOW_INTENT_KEY_PREFIX}${imageId}`);
+}
+
+export async function listWorkflowIntentEmbeddingImageIds(): Promise<string[]> {
+  const client = await getRedisClient();
+  const ids: string[] = [];
+  let cursor = '0';
+
+  do {
+    const [nextCursor, keys] = await client.scan(
+      cursor,
+      'MATCH',
+      `${WORKFLOW_INTENT_KEY_PREFIX}*`,
+      'COUNT',
+      '200'
+    );
+    cursor = nextCursor;
+    for (const key of keys) {
+      if (key.startsWith(WORKFLOW_INTENT_KEY_PREFIX)) {
+        ids.push(key.slice(WORKFLOW_INTENT_KEY_PREFIX.length));
+      }
+    }
+  } while (cursor !== '0');
+
+  return ids;
 }
 
 export async function isWorkflowIntentSearchAvailable(): Promise<boolean> {

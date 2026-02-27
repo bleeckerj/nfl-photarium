@@ -287,6 +287,7 @@ export function useGalleryFilters({
   const aspectRatioFilteredImages = useMemo(() => {
     if (!aspectRatioFilters.length) return embeddingFilteredImages;
     return embeddingFilteredImages.filter(image => {
+      if (image.assetType === 'video') return true;
       if (!image.dimensions?.width || !image.dimensions?.height) return false;
       const ratio = image.dimensions.width / image.dimensions.height;
       const isSquare = Math.abs(ratio - 1) <= 0.05;

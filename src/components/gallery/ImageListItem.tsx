@@ -29,11 +29,13 @@ interface ImageListItemProps {
   colorMetadata?: ColorMetadata;
   embeddingPending?: EmbeddingPendingEntry;
   altLoading: boolean;
+  displayNameLoading: boolean;
   // Actions
   onToggleSelection: (imageId: string) => void;
   onStartEdit: (image: CloudflareImage) => void;
   onDelete: (imageId: string) => void;
   onGenerateAlt: (imageId: string) => void;
+  onGenerateDisplayName: (imageId: string) => void;
   onCopyUrl: (imageId: string) => void;
   onCopyNamespace: (namespace: string) => void;
   onBeforeNavigate?: (imageId: string) => void;
@@ -68,10 +70,12 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
   colorMetadata,
   embeddingPending,
   altLoading,
+  displayNameLoading,
   onToggleSelection,
   onStartEdit,
   onDelete,
   onGenerateAlt,
+  onGenerateDisplayName,
   onCopyUrl,
   onCopyNamespace,
   onBeforeNavigate,
@@ -80,10 +84,18 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
   onMouseMove,
   onMouseLeave,
 }) => {
+  const isVideoAsset = image.assetType === 'video';
   const svgImage = isSvgImage(image);
-  const imageUrl = getCloudflareImageUrl(image.id, selectedVariant === 'public' ? 'original' : selectedVariant);
-  const displayUrl = svgImage ? getCloudflareImageUrl(image.id, 'original') : imageUrl;
+  const imageUrl = isVideoAsset
+    ? image.videoThumbnailUrl || image.videoPreviewUrl || image.videoPlaybackUrl || image.videoHlsUrl || ''
+    : getCloudflareImageUrl(image.id, selectedVariant === 'public' ? 'original' : selectedVariant);
+  const displayUrl = isVideoAsset
+    ? imageUrl
+    : (svgImage ? getCloudflareImageUrl(image.id, 'original') : imageUrl);
   const fileSizeLabel = formatBytes(image.size);
+  const detailHref = isVideoAsset
+    ? `/videos/${image.id}${hrefSuffix ?? ''}`
+    : `/images/${image.id}${hrefSuffix ?? ''}`;
   const handleDragStart = (event: React.DragEvent) => {
     if (onDragStart) {
       onDragStart(event, image);
@@ -99,22 +111,49 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
       }`}
     >
       <Link
-        href={`/images/${image.id}${hrefSuffix ?? ''}`}
+        href={detailHref}
         className="w-32 h-32 relative bg-gray-100 rounded-lg overflow-hidden flex-shrink-0 cursor-pointer"
-        onMouseEnter={(e) => onMouseEnter(image.id, e)}
-        onMouseMove={(e) => onMouseMove(image.id, e)}
-        onMouseLeave={onMouseLeave}
+        onMouseEnter={(e) => {
+          if (!isVideoAsset) onMouseEnter(image.id, e);
+        }}
+        onMouseMove={(e) => {
+          if (!isVideoAsset) onMouseMove(image.id, e);
+        }}
+        onMouseLeave={() => {
+          if (!isVideoAsset) onMouseLeave();
+        }}
         onClick={(e) => {
           if (bulkSelectionMode) {
             e.preventDefault();
             onToggleSelection(image.id);
             return;
           }
+          if (isVideoAsset) {
+            onBeforeNavigate?.(image.id);
+            return;
+          }
           onBeforeNavigate?.(image.id);
         }}
         prefetch={false}
       >
-        {svgImage ? (
+        {isVideoAsset ? (
+          <>
+            {displayUrl ? (
+              <img
+                src={displayUrl}
+                alt={image.filename}
+                className="absolute inset-0 w-full h-full object-cover"
+              />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center text-[0.65rem] text-gray-600">
+                Video
+              </div>
+            )}
+            <div className="absolute bottom-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white">
+              VIDEO
+            </div>
+          </>
+        ) : svgImage ? (
           <img
             draggable
             onDragStart={handleDragStart}
@@ -166,6 +205,9 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
         <p className="text-[0.7em] font-mono text-gray-500">
           {new Date(image.uploaded).toLocaleDateString()}
         </p>
+        {isVideoAsset && (
+          <p className="text-[0.7em] font-mono text-gray-500">🎬 {image.videoStatus || 'pending'}</p>
+        )}
         <p className="text-[0.7em] font-mono text-gray-500">📦 {fileSizeLabel}</p>
         <p className="text-[0.7em] font-mono text-gray-500">📁 {image.folder ? image.folder : '[none]'}</p>
         <p className="text-[0.7em] font-mono text-gray-500 flex items-center gap-1">
@@ -186,7 +228,7 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
           )}
         </p>
         <div className="text-[0.7em] font-mono text-gray-500">
-          <AspectRatioDisplay imageId={image.id} />
+          <AspectRatioDisplay imageId={image.id} aspectRatio={image.aspectRatio} />
         </div>
         {image.tags && image.tags.length > 0 ? (
           <p className="text-[0.7em] font-mono text-gray-500">🏷️ {image.tags.join(', ')}</p>
@@ -235,14 +277,30 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
             )}
           </div>
         )}
-        <button
-          onClick={() => onGenerateAlt(image.id)}
-          disabled={altLoading}
-          className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 text-[0.7em] font-mono rounded-md border border-gray-200 text-gray-700 hover:border-gray-300 disabled:opacity-50"
-        >
-          <Sparkles className="h-3.5 w-3.5" />
-          {altLoading ? 'Generating ALT...' : image.altTag ? 'Refresh' : 'Generate ALT text'}
-        </button>
+        {!isVideoAsset && (
+          <div className="mt-2 inline-flex overflow-hidden rounded-md border border-gray-200">
+            <button
+              onClick={() => onGenerateAlt(image.id)}
+              disabled={altLoading}
+              className="inline-flex items-center gap-2 px-3 py-1.5 text-[0.7em] font-mono text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              title="Generate ALT text"
+              aria-label="Generate ALT text"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              {altLoading ? 'Generating ALT...' : image.altTag ? 'Refresh ALT' : 'Generate ALT'}
+            </button>
+            <button
+              onClick={() => onGenerateDisplayName(image.id)}
+              disabled={displayNameLoading}
+              className="inline-flex items-center gap-2 px-3 py-1.5 text-[0.7em] font-mono text-gray-700 hover:bg-gray-50 disabled:opacity-50 border-l border-gray-200"
+              title="Generate display name"
+              aria-label="Generate display name"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              {displayNameLoading ? 'Generating…' : 'Gen DSP name'}
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="flex space-x-2">
@@ -257,9 +315,9 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
           <Copy className="h-[12px] w-[12px]" />
         </button>
         <button
-          onClick={() => window.open(`/images/${image.id}`, '_blank')}
+          onClick={() => window.open(isVideoAsset ? `/videos/${image.id}` : `/images/${image.id}`, '_blank')}
           className="p-2 text-gray-400 hover:text-green-600 transition-colors cursor-pointer transition-transform transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-300"
-          title="Open in new tab"
+          title={isVideoAsset ? "Open video detail" : "Open in new tab"}
         >
           <ExternalLink className="h-[12px] w-[12px]" />
         </button>
@@ -280,7 +338,7 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
         <button
           onClick={() => onDelete(image.id)}
           className="p-2 text-gray-400 hover:text-red-600 transition-colors cursor-pointer transition-transform transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-300"
-          title="Delete image"
+          title={isVideoAsset ? "Delete video" : "Delete image"}
         >
           <Trash2 className="h-[12px] w-[12px]" />
         </button>

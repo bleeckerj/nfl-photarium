@@ -175,7 +175,11 @@ export async function POST(
     const existingPromptFromClient = typeof body?.existingPrompt === 'string' ? body.existingPrompt : undefined;
 
     const existing = await getPromptThisRecord(imageId);
-    if (existing && !force) {
+    const hasClientPrompt = typeof existingPromptFromClient === 'string';
+    // If we already have a prompt, reuse it unless the caller explicitly forces
+    // regeneration _and_ didn't provide a client prompt (cleared/edited text
+    // counts as an intentional request to regenerate).
+    if (existing && !force && !hasClientPrompt) {
       return NextResponse.json({ imageId, record: existing, generated: false, saved: true });
     }
 

@@ -17,6 +17,17 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  isBlockedMediaDomain,
+  looksLikeImageAssetUrl,
+  looksLikeTinyTrackingPixel,
+  looksLikeTrackingOrUtilityAsset,
+  looksLikeUiChromeAsset,
+} from '@/server/pageImportFilters';
+import {
+  cookieHeaderToPuppeteerCookies,
+  normalizeCookieHeader,
+} from '@/server/pageImportCookies';
 
 // Puppeteer types - we use any since it's an optional dependency
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -33,7 +44,6 @@ const loadPuppeteer = async () => {
   }
 };
 
-const DEFAULT_MIN_BYTES = 8 * 1024;
 const DEFAULT_MAX_SCROLLS = 10;
 const DEFAULT_SCROLL_DELAY_MS = 1500;
 const DEFAULT_TIMEOUT_MS = 30000;
@@ -72,6 +82,7 @@ interface ScrollOptions {
   scrollDelayMs: number;
   timeoutMs: number;
   viewport: { width: number; height: number };
+  cookieHeader?: string | null;
 }
 
 interface ImageInfo {
@@ -81,16 +92,36 @@ interface ImageInfo {
   naturalHeight?: number;
 }
 
+interface VideoInfo {
+  kind: 'video';
+  url: string;
+  filename: string;
+  posterUrl?: string;
+  isBlob: boolean;
+}
+
 /**
  * Extract all image URLs from the page after scrolling
  */
-const extractImagesFromPage = async (
+const extractMediaFromPage = async (
   pageUrl: string,
   options: ScrollOptions
-): Promise<{ images: ImageInfo[]; scrollCount: number; error?: string }> => {
+): Promise<{
+  images: ImageInfo[];
+  videos: VideoInfo[];
+  scrollCount: number;
+  protectionMode: boolean;
+  error?: string;
+}> => {
   const pup = await loadPuppeteer();
   if (!pup) {
-    return { images: [], scrollCount: 0, error: 'Puppeteer not installed. Run: npm install puppeteer' };
+    return {
+      images: [],
+      videos: [],
+      scrollCount: 0,
+      protectionMode: false,
+      error: 'Puppeteer not installed. Run: npm install puppeteer'
+    };
   }
 
   let browser;
@@ -109,11 +140,32 @@ const extractImagesFromPage = async (
 
     const page = await browser.newPage();
     await page.setViewport(options.viewport);
+    if (options.cookieHeader) {
+      const cookies = cookieHeaderToPuppeteerCookies(pageUrl, options.cookieHeader);
+      if (cookies.length > 0) {
+        await page.setCookie(...cookies);
+      }
+    }
     
     // Set a reasonable user agent
     await page.setUserAgent(
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     );
+
+    const targetHost = new URL(pageUrl).hostname.toLowerCase();
+    const isMcMasterHost = targetHost === 'mcmaster.com' || targetHost.endsWith('.mcmaster.com');
+    let sawProdPage403 = false;
+    let sawProtectionPayload = false;
+    page.on('response', (response: { url: () => string; status: () => number }) => {
+      const responseUrl = response.url();
+      if (!isMcMasterHost) return;
+      if (responseUrl.includes('ProdPageWebPart.aspx') && response.status() === 403) {
+        sawProdPage403 = true;
+      }
+      if (responseUrl.includes('prodDatProtection.aspx') && response.status() === 200) {
+        sawProtectionPayload = true;
+      }
+    });
 
     // Navigate to the page
     await page.goto(pageUrl, {
@@ -125,7 +177,6 @@ const extractImagesFromPage = async (
     await new Promise(resolve => setTimeout(resolve, 1000));
 
     let scrollCount = 0;
-    let previousImageCount = 0;
     let noNewImagesCount = 0;
     const seenUrls = new Set<string>();
 
@@ -158,8 +209,6 @@ const extractImagesFromPage = async (
         noNewImagesCount = 0;
       }
 
-      previousImageCount = seenUrls.size;
-
       // Scroll down
       await page.evaluate(() => {
         window.scrollBy(0, window.innerHeight);
@@ -179,9 +228,10 @@ const extractImagesFromPage = async (
     }
 
     // Final extraction of all images
-    const allImages = await page.evaluate(() => {
+    const allMedia = await page.evaluate(() => {
       const imgs = Array.from(document.querySelectorAll('img'));
       const sources = Array.from(document.querySelectorAll('source'));
+      const videos = Array.from(document.querySelectorAll('video'));
       
       const results: Array<{
         src: string;
@@ -189,6 +239,8 @@ const extractImagesFromPage = async (
         dataSrc: string;
         naturalWidth: number;
         naturalHeight: number;
+        mediaKind: 'image' | 'video';
+        poster: string;
       }> = [];
 
       for (const img of imgs) {
@@ -198,6 +250,8 @@ const extractImagesFromPage = async (
           dataSrc: img.dataset.src || img.dataset.lazySrc || img.dataset.original || '',
           naturalWidth: img.naturalWidth || 0,
           naturalHeight: img.naturalHeight || 0,
+          mediaKind: 'image',
+          poster: '',
         });
       }
 
@@ -209,8 +263,25 @@ const extractImagesFromPage = async (
             dataSrc: '',
             naturalWidth: 0,
             naturalHeight: 0,
+            mediaKind: 'image',
+            poster: '',
           });
         }
+      }
+
+      for (const video of videos) {
+        const source = video.querySelector('source');
+        const src = video.currentSrc || video.src || source?.src || '';
+        const filenameHint = video.getAttribute('aria-label') || video.getAttribute('title') || '';
+        results.push({
+          src,
+          srcset: '',
+          dataSrc: filenameHint,
+          naturalWidth: video.videoWidth || 0,
+          naturalHeight: video.videoHeight || 0,
+          mediaKind: 'video',
+          poster: video.poster || '',
+        });
       }
 
       return results;
@@ -218,8 +289,9 @@ const extractImagesFromPage = async (
 
     // Process and dedupe
     const imageMap = new Map<string, ImageInfo>();
+    const videoMap = new Map<string, VideoInfo>();
     
-    for (const img of allImages) {
+    for (const img of allMedia) {
       // Prefer srcset's largest image over src (src often has a smaller placeholder)
       const srcsetUrl = pickBestFromSrcset(img.srcset);
       const url = srcsetUrl || img.src || img.dataSrc;
@@ -227,12 +299,33 @@ const extractImagesFromPage = async (
       
       try {
         const resolved = new URL(url, pageUrl);
-        if (!['http:', 'https:'].includes(resolved.protocol)) continue;
-        if (isPrivateHost(resolved.hostname)) continue;
+        const isBlob = resolved.protocol === 'blob:';
+        if (!isBlob) {
+          if (!['http:', 'https:'].includes(resolved.protocol)) continue;
+          if (isPrivateHost(resolved.hostname)) continue;
+        }
         
         const cleanUrl = resolved.toString().split('#')[0]; // Remove hash
-        
-        if (!imageMap.has(cleanUrl)) {
+
+        if (img.mediaKind === 'video') {
+          if (!videoMap.has(cleanUrl)) {
+            let posterUrl: string | undefined;
+            if (img.poster) {
+              try {
+                posterUrl = new URL(img.poster, pageUrl).toString();
+              } catch {
+                posterUrl = undefined;
+              }
+            }
+            videoMap.set(cleanUrl, {
+              kind: 'video',
+              url: cleanUrl,
+              filename: getFilenameFromUrl(img.dataSrc || cleanUrl),
+              posterUrl,
+              isBlob,
+            });
+          }
+        } else if (!imageMap.has(cleanUrl)) {
           imageMap.set(cleanUrl, {
             url: cleanUrl,
             filename: getFilenameFromUrl(cleanUrl),
@@ -247,11 +340,13 @@ const extractImagesFromPage = async (
 
     return {
       images: Array.from(imageMap.values()),
+      videos: Array.from(videoMap.values()),
       scrollCount,
+      protectionMode: sawProdPage403 && sawProtectionPayload,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
-    return { images: [], scrollCount: 0, error: `Browser error: ${message}` };
+    return { images: [], videos: [], scrollCount: 0, protectionMode: false, error: `Browser error: ${message}` };
   } finally {
     if (browser) {
       await browser.close();
@@ -304,6 +399,12 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const pageUrl = typeof body?.url === 'string' ? body.url.trim() : '';
+    let cookieHeader: string | null = null;
+    try {
+      cookieHeader = normalizeCookieHeader(body?.cookieHeader);
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid cookie header' }, { status: 400 });
+    }
     const minBytes = Number.isFinite(body?.minBytes) ? Number(body.minBytes) : SCROLL_MODE_MIN_BYTES;
     const maxImages = Number.isFinite(body?.maxImages) ? Math.max(0, Number(body.maxImages)) : undefined;
     const maxScrolls = Number.isFinite(body?.maxScrolls) 
@@ -325,62 +426,50 @@ export async function POST(request: NextRequest) {
     console.log(`[import/page/scroll] Starting headless scroll for: ${pageUrl}`);
     console.log(`[import/page/scroll] maxScrolls=${maxScrolls}, scrollDelayMs=${scrollDelayMs}`);
 
-    const { images, scrollCount, error } = await extractImagesFromPage(pageUrl, {
+    const { images, videos, scrollCount, protectionMode, error } = await extractMediaFromPage(pageUrl, {
       maxScrolls,
       scrollDelayMs,
       timeoutMs: Number(process.env.IMPORT_SCROLL_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS,
       viewport: { width: 1280, height: 900 },
+      cookieHeader,
     });
 
     if (error) {
       return NextResponse.json({ error }, { status: 500 });
     }
 
-    console.log(`[import/page/scroll] Found ${images.length} images after ${scrollCount} scrolls`);
+    console.log(`[import/page/scroll] Found ${images.length} images and ${videos.length} videos after ${scrollCount} scrolls`);
 
     // For scroll mode, we trust Puppeteer found real images in the DOM
     // Skip HEAD requests entirely - they're slow and unreliable (CDNs block them, return wrong sizes, etc.)
     // Filter by: domain blocklist, file extension, and naturalWidth/naturalHeight
     const MIN_DIMENSION = 50; // Filter out tiny icons/tracking pixels
     
-    // Known tracking/ad pixel domains to exclude
-    const BLOCKED_DOMAINS = [
-      'adroll.com', 'd.adroll.com',
-      'doubleclick.net', 'googlesyndication.com', 'googleadservices.com',
-      'facebook.com', 'facebook.net', 'fbcdn.net',
-      'analytics.', 'pixel.', 'tracking.',
-      'ads.', 'ad.', 'beacon.',
-      'criteo.com', 'taboola.com', 'outbrain.com',
-    ];
-    
-    const isBlockedDomain = (url: string) => {
-      try {
-        const hostname = new URL(url).hostname.toLowerCase();
-        return BLOCKED_DOMAINS.some(blocked => 
-          hostname === blocked || hostname.endsWith('.' + blocked) || hostname.includes(blocked)
-        );
-      } catch {
+    const filteredImages = images.filter(img => {
+      // McMaster can return a protected shell to automation.
+      // In that mode, only allow product image-cache assets.
+      if (protectionMode) {
+        return /\/contents\/gfx\/imagecache\//i.test(img.url);
+      }
+
+      // Filter out tracking/ad domains
+      if (isBlockedMediaDomain(img.url)) {
         return false;
       }
-    };
-    
-    // Check if URL looks like a real image (not a tracking pixel endpoint)
-    const looksLikeImage = (url: string) => {
-      const path = new URL(url).pathname.toLowerCase();
-      // Has a real image extension
-      if (/\.(jpg|jpeg|png|gif|webp|avif|svg|bmp|ico)(\?|$)/i.test(path)) {
-        return true;
+
+      // Filter out likely UI chrome (logos/icons/sprites/nav assets)
+      if (looksLikeUiChromeAsset(img.url, img.filename)) {
+        return false;
       }
-      // Or is from a known CDN pattern
-      if (url.includes('/cdn/') || url.includes('/images/') || url.includes('/media/')) {
-        return true;
+      if (looksLikeTrackingOrUtilityAsset(img.url, img.filename)) {
+        return false;
       }
-      return false;
-    };
-    
-    const filteredImages = images.filter(img => {
-      // Filter out tracking/ad domains
-      if (isBlockedDomain(img.url)) {
+      if (looksLikeTinyTrackingPixel({
+        url: img.url,
+        filenameHint: img.filename,
+        naturalWidth: img.naturalWidth,
+        naturalHeight: img.naturalHeight,
+      })) {
         return false;
       }
       
@@ -394,15 +483,29 @@ export async function POST(request: NextRequest) {
       }
       
       // No dimensions - only keep if URL looks like a real image
-      return looksLikeImage(img.url);
+      return looksLikeImageAssetUrl(img.url);
     });
+
+    if (protectionMode && filteredImages.length === 0) {
+      return NextResponse.json(
+        {
+          error:
+            'This page appears to block automated product scraping (McMaster protection response). Open the page in your browser and import direct image URLs, or use an authenticated scraping workflow.',
+          details: { protectionMode: true },
+        },
+        { status: 403 }
+      );
+    }
     
     // Apply maxImages limit if specified
     const limitedImages = typeof maxImages === 'number' && maxImages > 0
       ? filteredImages.slice(0, maxImages)
       : filteredImages;
+    const limitedVideos = typeof maxImages === 'number' && maxImages > 0
+      ? videos.slice(0, maxImages)
+      : videos;
 
-    console.log(`[import/page/scroll] Returning ${limitedImages.length} images (filtered ${images.length - filteredImages.length} non-content images)`);
+    console.log(`[import/page/scroll] Returning ${limitedImages.length} images and ${limitedVideos.length} videos`);
 
     return NextResponse.json({
       sourceUrl: pageUrl,
@@ -411,11 +514,24 @@ export async function POST(request: NextRequest) {
       scrollCount,
       mode: 'scroll',
       images: limitedImages.map(img => ({
+        kind: 'image' as const,
         url: img.url,
         filename: img.filename,
         naturalWidth: img.naturalWidth,
         naturalHeight: img.naturalHeight,
       })),
+      videos: limitedVideos,
+      media: [
+        ...limitedImages.map((img) => ({
+          kind: 'image' as const,
+          url: img.url,
+          filename: img.filename,
+          naturalWidth: img.naturalWidth,
+          naturalHeight: img.naturalHeight,
+          isBlob: false,
+        })),
+        ...limitedVideos,
+      ],
     });
   } catch (error) {
     console.error('Scroll import error:', error);

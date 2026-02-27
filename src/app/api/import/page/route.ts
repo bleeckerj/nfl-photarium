@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Agent } from 'undici';
+import {
+  looksLikeTinyTrackingPixel,
+  looksLikeTrackingOrUtilityAsset,
+  looksLikeUiChromeAsset,
+} from '@/server/pageImportFilters';
+import { normalizeCookieHeader } from '@/server/pageImportCookies';
 
 const DEFAULT_MIN_BYTES = 8 * 1024;
 
@@ -145,11 +151,18 @@ const pickSrcsetCandidate = (srcset: string) => {
   return candidates[0].url;
 };
 
+type DiscoveredMediaCandidate = {
+  kind: 'image' | 'video';
+  rawUrl: string;
+  filenameHint?: string;
+};
+
 const extractImageUrls = (html: string) => {
-  const tags = html.match(/<(img|source)\b[^>]*>/gi) ?? [];
-  const urls: string[] = [];
+  const tags = html.match(/<img\b[^>]*>/gi) ?? [];
+  const urls: DiscoveredMediaCandidate[] = [];
   for (const tag of tags) {
     const attrs = parseAttributes(tag);
+    const typeValue = (attrs.type || '').toLowerCase();
     const srcsetCandidate = attrs.srcset ? pickSrcsetCandidate(attrs.srcset) : undefined;
     const raw =
       srcsetCandidate ||
@@ -157,11 +170,47 @@ const extractImageUrls = (html: string) => {
       attrs['data-src'] ||
       attrs['data-lazy-src'] ||
       attrs['data-original'];
-    if (raw) {
-      urls.push(raw);
-    }
+    if (!raw) continue;
+    const looksLikeVideoSource =
+      typeValue.startsWith('video/') || /\.(mp4|webm|mov|m4v|ogv|ogg)(\?|$)/i.test(raw);
+    urls.push({
+      kind: looksLikeVideoSource ? 'video' : 'image',
+      rawUrl: raw,
+    });
   }
   return urls;
+};
+
+const extractVideoUrls = (html: string) => {
+  const candidates: DiscoveredMediaCandidate[] = [];
+  const videoTags = html.match(/<video\b[^>]*>([\s\S]*?)<\/video>/gi) ?? [];
+  for (const videoTag of videoTags) {
+    const videoOpenTag = videoTag.match(/<video\b[^>]*>/i)?.[0] ?? '';
+    const videoAttrs = parseAttributes(videoOpenTag);
+    const filenameHint = videoAttrs['aria-label'] || videoAttrs['title'] || videoAttrs['data-filename'];
+    const directVideoSrc =
+      videoAttrs.src || videoAttrs['data-src'] || videoAttrs['data-original'] || videoAttrs.poster;
+    if (directVideoSrc) {
+      candidates.push({
+        kind: 'video',
+        rawUrl: directVideoSrc,
+        filenameHint,
+      });
+    }
+
+    const sourceTags = videoTag.match(/<source\b[^>]*>/gi) ?? [];
+    for (const sourceTag of sourceTags) {
+      const attrs = parseAttributes(sourceTag);
+      const raw = attrs.src || (attrs.srcset ? pickSrcsetCandidate(attrs.srcset) : undefined);
+      if (!raw) continue;
+      candidates.push({
+        kind: 'video',
+        rawUrl: raw,
+        filenameHint,
+      });
+    }
+  }
+  return candidates;
 };
 
 const resolveUrl = (value: string, baseUrl: string) => {
@@ -174,6 +223,29 @@ const resolveUrl = (value: string, baseUrl: string) => {
   } catch {
     return undefined;
   }
+};
+
+const resolveMediaCandidate = (candidate: DiscoveredMediaCandidate, baseUrl: string) => {
+  const raw = candidate.rawUrl.trim();
+  if (!raw) return null;
+
+  if (raw.startsWith('blob:')) {
+    return {
+      kind: candidate.kind,
+      url: raw,
+      isBlob: true,
+      filename: candidate.filenameHint || getFilenameFromUrl(raw),
+    };
+  }
+
+  const resolved = resolveUrl(raw, baseUrl);
+  if (!resolved) return null;
+  return {
+    kind: candidate.kind,
+    url: resolved,
+    isBlob: false,
+    filename: candidate.filenameHint || getFilenameFromUrl(resolved),
+  };
 };
 
 const mapWithConcurrency = async <T, R>(
@@ -223,6 +295,12 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const pageUrl = typeof body?.url === 'string' ? body.url.trim() : '';
+    let cookieHeader: string | null = null;
+    try {
+      cookieHeader = normalizeCookieHeader(body?.cookieHeader);
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid cookie header' }, { status: 400 });
+    }
     const minBytes = Number.isFinite(body?.minBytes) ? Number(body.minBytes) : DEFAULT_MIN_BYTES;
     const maxImages = Number.isFinite(body?.maxImages) ? Math.max(0, Number(body.maxImages)) : undefined;
     const allowInsecureEnv = process.env.IMPORT_ALLOW_INSECURE_TLS === 'true';
@@ -242,7 +320,7 @@ export async function POST(request: NextRequest) {
 
     let response: Response;
     try {
-      response = await fetchWithCertFallback(pageUrl, allowInsecure);
+      response = await fetchWithCertFallback(pageUrl, allowInsecure, cookieHeader ? { headers: { Cookie: cookieHeader } } : undefined);
     } catch (error) {
       const code = toErrorCode(error);
       const certRelated = isCertError(error);
@@ -267,7 +345,7 @@ export async function POST(request: NextRequest) {
     if (!response.ok) {
       // Retry once without browser-like headers in case the origin rejects them.
       try {
-        const fallbackResponse = await fetch(pageUrl);
+        const fallbackResponse = await fetch(pageUrl, cookieHeader ? { headers: { Cookie: cookieHeader } } : undefined);
         if (fallbackResponse.ok) {
           response = fallbackResponse;
         } else {
@@ -307,40 +385,85 @@ export async function POST(request: NextRequest) {
     const baseHref = extractBaseHref(html);
     const baseUrl = baseHref ? new URL(baseHref, pageUrl).toString() : pageUrl;
 
-    const rawUrls = extractImageUrls(html);
-    const resolvedUrls = rawUrls
-      .map((value) => resolveUrl(value, baseUrl))
-      .filter((value): value is string => Boolean(value));
+    const rawCandidates = [...extractImageUrls(html), ...extractVideoUrls(html)];
+    const resolvedCandidates = rawCandidates
+      .map((candidate) => resolveMediaCandidate(candidate, baseUrl))
+      .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate));
 
-    const uniqueUrls = Array.from(new Set(resolvedUrls));
-    const limitedUrls = typeof maxImages === 'number' && maxImages > 0
-      ? uniqueUrls.slice(0, maxImages)
-      : uniqueUrls;
+    const dedupedCandidates = Array.from(
+      new Map(
+        resolvedCandidates.map((candidate) => [
+          `${candidate.kind}:${candidate.url}`,
+          candidate,
+        ])
+      ).values()
+    );
 
-    const headInfos = await mapWithConcurrency(limitedUrls, 6, async (url) => ({
-      url,
-      ...(await fetchHeadInfo(url, allowInsecure))
+    const filteredCandidates = dedupedCandidates.filter(
+      (candidate) =>
+        !looksLikeUiChromeAsset(candidate.url, candidate.filename) &&
+        !looksLikeTrackingOrUtilityAsset(candidate.url, candidate.filename) &&
+        !looksLikeTinyTrackingPixel({
+          url: candidate.url,
+          filenameHint: candidate.filename,
+        })
+    );
+
+    const imageCandidates = filteredCandidates.filter((candidate) => candidate.kind === 'image' && !candidate.isBlob);
+    const videoCandidates = filteredCandidates.filter((candidate) => candidate.kind === 'video');
+
+    const limitedImageCandidates =
+      typeof maxImages === 'number' && maxImages > 0
+        ? imageCandidates.slice(0, maxImages)
+        : imageCandidates;
+
+    const headInfos = await mapWithConcurrency(limitedImageCandidates, 6, async (candidate) => ({
+      url: candidate.url,
+      filename: candidate.filename,
+      ...(await fetchHeadInfo(candidate.url, allowInsecure))
     }));
 
     const images = headInfos
       .filter((info) => {
+        if (looksLikeTinyTrackingPixel({
+          url: info.url,
+          filenameHint: info.filename,
+          contentLength: info.contentLength,
+        })) {
+          return false;
+        }
         if (info.contentType && !info.contentType.startsWith('image/')) return false;
         if (typeof info.contentLength === 'number' && info.contentLength < minBytes) return false;
         return true;
       })
       .map((info) => ({
         url: info.url,
-        filename: getFilenameFromUrl(info.url),
+        filename: info.filename || getFilenameFromUrl(info.url),
         contentType: info.contentType,
         contentLength: info.contentLength
       }));
+
+    const videos = videoCandidates.map((candidate) => ({
+      kind: 'video' as const,
+      url: candidate.url,
+      filename: candidate.filename || getFilenameFromUrl(candidate.url),
+      isBlob: candidate.isBlob,
+      contentType: candidate.url.startsWith('blob:') ? undefined : 'video/unknown',
+    }));
+
+    const media = [
+      ...images.map((image) => ({ kind: 'image' as const, ...image, isBlob: false })),
+      ...videos,
+    ];
 
     return NextResponse.json({
       sourceUrl: pageUrl,
       minBytes,
       maxImages: typeof maxImages === 'number' ? maxImages : null,
       allowInsecure,
-      images
+      images,
+      videos,
+      media,
     });
   } catch (error) {
     console.error('Page import discovery error:', error);

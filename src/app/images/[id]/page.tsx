@@ -25,6 +25,7 @@ import { AltTextEditor } from '@/components/image-detail/AltTextEditor';
 import { CloudflareMetadataHeader } from '@/components/image-detail/CloudflareMetadataHeader';
 import { DescriptionEditor } from '@/components/image-detail/DescriptionEditor';
 import { PromptThisEditor } from '@/components/image-detail/PromptThisEditor';
+import { ComfyWorkflowPanel, type ComfyWorkflowRecord } from '@/components/image-detail/comfy';
 import { ExifSection } from '@/components/image-detail/ExifSection';
 import { OriginalUrlSection } from '@/components/image-detail/OriginalUrlSection';
 import { ShareSection } from '@/components/image-detail/ShareSection';
@@ -245,6 +246,7 @@ export default function ImageDetailPage() {
     description?: string;
     altText?: string;
     promptThis?: { text: string; provider: string; model?: string; updatedAt?: string };
+    comfyWorkflow?: ComfyWorkflowRecord;
   } | null>(null);
   const [extrasLoading, setExtrasLoading] = useState(false);
   const [shareVariant, setShareVariant] = useState('large');
@@ -472,6 +474,7 @@ export default function ImageDetailPage() {
     imageId: typeof id === 'string' ? id : undefined,
     imageFolder: image?.folder,
     imageTags: image?.tags,
+    imageNamespace: image?.namespace,
     refreshImageList,
     toast
   });
@@ -817,6 +820,39 @@ export default function ImageDetailPage() {
     if (!targetId) return;
     router.push(`/images/${targetId}${galleryNavSuffix}`, { scroll: false });
   }, [galleryNavSuffix, router]);
+  const familyVariantSequence = useMemo(() => {
+    if (!image?.parentId) return [];
+    const familyVariants = allImages.filter((img) => img.parentId === image.parentId);
+    if (!familyVariants.length) return [];
+
+    const baseIndex = new Map(familyVariants.map((child, index) => [child.id, index]));
+    const hasSort = familyVariants.some((child) => Number.isFinite(child.variationSort));
+    if (!hasSort) {
+      return familyVariants;
+    }
+
+    return [...familyVariants].sort((a, b) => {
+      const aSort = Number.isFinite(a.variationSort) ? (a.variationSort as number) : null;
+      const bSort = Number.isFinite(b.variationSort) ? (b.variationSort as number) : null;
+      if (aSort === null && bSort === null) {
+        return (baseIndex.get(a.id) ?? 0) - (baseIndex.get(b.id) ?? 0);
+      }
+      if (aSort === null) return 1;
+      if (bSort === null) return -1;
+      if (aSort !== bSort) return aSort - bSort;
+      return (baseIndex.get(a.id) ?? 0) - (baseIndex.get(b.id) ?? 0);
+    });
+  }, [allImages, image?.parentId]);
+  const familyVariantIndex = useMemo(() => {
+    if (!image?.id) return -1;
+    return familyVariantSequence.findIndex((entry) => entry.id === image.id);
+  }, [familyVariantSequence, image?.id]);
+  const prevFamilyVariantId =
+    familyVariantIndex > 0 ? familyVariantSequence[familyVariantIndex - 1]?.id ?? null : null;
+  const nextFamilyVariantId =
+    familyVariantIndex >= 0 && familyVariantIndex < familyVariantSequence.length - 1
+      ? familyVariantSequence[familyVariantIndex + 1]?.id ?? null
+      : null;
 
   const originalUrlByteLength = useMemo(() => {
     try {
@@ -885,14 +921,17 @@ export default function ImageDetailPage() {
     altLoadingMap,
     variationAltBusy,
     descriptionGenerating,
+    displayNameGenerating,
     generateAltTag,
     generateAltForSelectedVariations,
-    generateDescription
+    generateDescription,
+    generateDisplayName
   } = useAltDescriptionGeneration({
     imageId: typeof id === 'string' ? id : undefined,
     descriptionInput,
     selectedVariationIds,
     setDescriptionInput,
+    setDisplayNameInput,
     setAltTextInput,
     setImage,
     setAllImages,
@@ -988,6 +1027,7 @@ export default function ImageDetailPage() {
       bulkAltApplying ||
       bulkDescriptionApplying ||
       descriptionGenerating ||
+      displayNameGenerating ||
       Object.keys(altLoadingMap).length > 0 ||
       variationAltBusy,
     [
@@ -996,6 +1036,7 @@ export default function ImageDetailPage() {
       bulkDescriptionApplying,
       childUploadLoading,
       descriptionGenerating,
+      displayNameGenerating,
       saving,
       variationAltBusy,
       variationOrderSaving
@@ -1803,33 +1844,64 @@ export default function ImageDetailPage() {
             <button type="button" onClick={handleBackToGallery} className="text-xs text-blue-600 underline">
               ← Back to gallery
             </button>
-            {galleryResultIds.length > 0 && (
-              <div className="flex items-center gap-2">
-                {galleryResultIndex >= 0 && (
-                  <span className="text-[11px] font-mono text-gray-500">
-                    {galleryResultIndex + 1} / {galleryResultIds.length}
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={() => handleNavigateGalleryResult(prevGalleryImageId)}
-                  disabled={!prevGalleryImageId}
-                  className="inline-flex items-center gap-1 px-2 py-1 text-xs font-mono border rounded-md border-gray-200 text-gray-600 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                  Prev
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleNavigateGalleryResult(nextGalleryImageId)}
-                  disabled={!nextGalleryImageId}
-                  className="inline-flex items-center gap-1 px-2 py-1 text-xs font-mono border rounded-md border-gray-200 text-gray-600 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  Next
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            )}
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {Boolean(image.parentId) && familyVariantSequence.length > 0 && (
+                <div className="flex items-center gap-2">
+                  {familyVariantIndex >= 0 && (
+                    <span className="text-[11px] font-mono text-gray-500">
+                      Variant {familyVariantIndex + 1} / {familyVariantSequence.length}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleNavigateGalleryResult(prevFamilyVariantId)}
+                    disabled={!prevFamilyVariantId}
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-mono border rounded-md border-amber-200 text-amber-700 hover:border-amber-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Previous variant in this parent family"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                    Prev var
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleNavigateGalleryResult(nextFamilyVariantId)}
+                    disabled={!nextFamilyVariantId}
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-mono border rounded-md border-amber-200 text-amber-700 hover:border-amber-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Next variant in this parent family"
+                  >
+                    Next var
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+              {galleryResultIds.length > 0 && (
+                <div className="flex items-center gap-2">
+                  {galleryResultIndex >= 0 && (
+                    <span className="text-[11px] font-mono text-gray-500">
+                      {galleryResultIndex + 1} / {galleryResultIds.length}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleNavigateGalleryResult(prevGalleryImageId)}
+                    disabled={!prevGalleryImageId}
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-mono border rounded-md border-gray-200 text-gray-600 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                    Prev
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleNavigateGalleryResult(nextGalleryImageId)}
+                    disabled={!nextGalleryImageId}
+                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-mono border rounded-md border-gray-200 text-gray-600 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Next
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
           <div id="image-hero-section" className="w-full mb-4">
             <div className="relative w-full aspect-[3/2] bg-gray-100 rounded overflow-hidden group">
@@ -1934,7 +2006,7 @@ export default function ImageDetailPage() {
 
           <div id="image-summary-section" className="mb-6">
             <div className="flex items-center gap-2">
-              <p className="text-xs mono font-semibold text-gray-900">{image.filename || 'Image'}</p>
+              <p className="text-xs mono font-semibold text-gray-900">{image.displayName || image.filename || 'Image'}</p>
               {(image.generatedBy === 'comfyui' || image.comfyMetadataDetected === true) && (
                 <span
                   id={`image-detail-comfy-indicator-${image.id}`}
@@ -2093,7 +2165,11 @@ export default function ImageDetailPage() {
                         <ConceptRadar 
                           imageId={image.id} 
                           size={320}
-                          onImageClick={(id) => window.location.href = `/images/${id}`}
+                          onImageClick={(result) => {
+                            window.location.href = result.assetType === 'video'
+                              ? `/videos/${result.imageId}`
+                              : `/images/${result.imageId}`;
+                          }}
                           copyVariant={listVariant}
                           onCopySuccess={(msg) => toast.push(msg)}
                           namespace={namespace}
@@ -2106,7 +2182,11 @@ export default function ImageDetailPage() {
                           type="clip" 
                           limit={8}
                           showStrangers={true}
-                          onImageClick={(id) => window.location.href = `/images/${id}`}
+                          onImageClick={(result) => {
+                            window.location.href = result.assetType === 'video'
+                              ? `/videos/${result.imageId}`
+                              : `/images/${result.imageId}`;
+                          }}
                           copyVariant={listVariant}
                           onCopySuccess={(msg) => toast.push(msg)}
                           namespace={namespace}
@@ -2119,7 +2199,11 @@ export default function ImageDetailPage() {
                     <AntipodeSearch 
                       imageId={image.id}
                       className="bg-gray-900/50 border border-amber-900/30 rounded-lg p-4"
-                      onImageClick={(id) => window.location.href = `/images/${id}`}
+                      onImageClick={(result) => {
+                        window.location.href = result.assetType === 'video'
+                          ? `/videos/${result.imageId}`
+                          : `/images/${result.imageId}`;
+                      }}
                       copyVariant={listVariant}
                       onCopySuccess={(msg) => toast.push(msg)}
                       namespace={namespace}
@@ -2201,6 +2285,17 @@ export default function ImageDetailPage() {
               onGenerate={generatePromptThis}
               onSave={savePromptThisEdits}
               onCopy={() => handleCopyText(promptThisInput || '', 'Prompt copied')}
+            />
+
+            <ComfyWorkflowPanel
+              imageId={image.id}
+              comfyWorkflow={extrasRecord?.comfyWorkflow ?? null}
+              detection={{
+                generatedBy: image.generatedBy,
+                comfyMetadataDetected: image.comfyMetadataDetected,
+                comfyMetadataSource: image.comfyMetadataSource,
+              }}
+              onCopyText={handleCopyText}
             />
 
             <div id="folder-section">
@@ -2311,7 +2406,17 @@ export default function ImageDetailPage() {
             </div>
 
             <div id="name-section">
-              <p className="text-xs font-mono font-medum text-gray-700">Display name (editable)</p>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs font-mono font-medum text-gray-700">Display name (editable)</p>
+                <button
+                  onClick={generateDisplayName}
+                  disabled={displayNameGenerating}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border border-gray-200 text-gray-700 hover:border-gray-300 disabled:opacity-50"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  {displayNameGenerating ? 'Generating…' : 'Generate short name'}
+                </button>
+              </div>
               <input
                 value={displayNameInput}
                 onChange={(e) => setDisplayNameInput(e.target.value)}

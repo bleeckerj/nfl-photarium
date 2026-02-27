@@ -1,0 +1,173 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { cleanString } from '@/utils/cloudflareMetadata';
+import { uploadVideoBuffer, uploadVideoFromRemoteUrl, type VideoUploadContext } from '@/server/videoUploadService';
+
+type UploadVideoRequestBody = {
+  url?: string;
+  filename?: string;
+  folder?: string;
+  tags?: string;
+  description?: string;
+  originalUrl?: string;
+  sourceUrl?: string;
+  namespace?: string;
+  requireSignedUrls?: boolean;
+};
+
+const isPrivateHost = (hostname: string) => {
+  const lowered = hostname.toLowerCase();
+  if (lowered === 'localhost') return true;
+  const ipv4Match = /^(\d{1,3}\.){3}\d{1,3}$/.test(lowered);
+  if (!ipv4Match) return false;
+  const octets = lowered.split('.').map((part) => Number(part));
+  if (octets.some((value) => Number.isNaN(value) || value < 0 || value > 255)) {
+    return true;
+  }
+  const [a, b] = octets;
+  if (a === 10) return true;
+  if (a === 127) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 169 && b === 254) return true;
+  return false;
+};
+
+const parseTags = (value?: string | null) =>
+  (value || '')
+    .split(',')
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+
+const normalizeNamespace = (value?: string | null) => {
+  const cleaned = cleanString(value);
+  if (!cleaned || cleaned === '__all__' || cleaned === '__none__' || cleaned === 'undefined') {
+    return undefined;
+  }
+  return cleaned;
+};
+
+const parseContext = (
+  {
+    folder,
+    tags,
+    description,
+    originalUrl,
+    sourceUrl,
+    namespace,
+    requireSignedUrls,
+  }: {
+    folder?: string | null;
+    tags?: string | null;
+    description?: string | null;
+    originalUrl?: string | null;
+    sourceUrl?: string | null;
+    namespace?: string | null;
+    requireSignedUrls?: boolean;
+  }
+): VideoUploadContext => ({
+  folder: cleanString(folder),
+  tags: parseTags(tags),
+  description: cleanString(description),
+  originalUrl: cleanString(originalUrl),
+  sourceUrl: cleanString(sourceUrl),
+  namespace: cleanString(namespace),
+  requireSignedUrls,
+});
+
+const validateRemoteUrl = (rawUrl: string): string | null => {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    if (isPrivateHost(parsed.hostname)) return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+};
+
+export async function POST(request: NextRequest) {
+  try {
+    if (request.headers.get('content-type')?.includes('application/json')) {
+      const body = (await request.json()) as UploadVideoRequestBody;
+      const sourceUrl = cleanString(body.url);
+      if (!sourceUrl) {
+        return NextResponse.json({ error: 'No video URL provided' }, { status: 400 });
+      }
+      const safeUrl = validateRemoteUrl(sourceUrl);
+      if (!safeUrl) {
+        return NextResponse.json(
+          { error: 'Only public http(s) URLs are allowed for remote video import' },
+          { status: 400 }
+        );
+      }
+      const namespaceValue = normalizeNamespace(body.namespace);
+      if (!namespaceValue) {
+        return NextResponse.json(
+          { error: 'A specific namespace is required for uploads. Select a namespace instead of All.' },
+          { status: 400 }
+        );
+      }
+
+      const outcome = await uploadVideoFromRemoteUrl({
+        sourceUrl: safeUrl,
+        fileName: cleanString(body.filename),
+        context: parseContext({
+          folder: body.folder,
+          tags: body.tags,
+          description: body.description,
+          originalUrl: body.originalUrl,
+          sourceUrl: body.sourceUrl ?? safeUrl,
+          namespace: namespaceValue,
+          requireSignedUrls: body.requireSignedUrls === true,
+        }),
+      });
+
+      if (!outcome.ok) {
+        return NextResponse.json({ error: outcome.error }, { status: outcome.status });
+      }
+      return NextResponse.json(outcome.data);
+    }
+
+    const formData = await request.formData();
+    const file = formData.get('file');
+    if (!(file instanceof File)) {
+      return NextResponse.json({ error: 'No video file provided' }, { status: 400 });
+    }
+
+    const namespaceValue = normalizeNamespace(formData.get('namespace') as string | null);
+    if (!namespaceValue) {
+      return NextResponse.json(
+        { error: 'A specific namespace is required for uploads. Select a namespace instead of All.' },
+        { status: 400 }
+      );
+    }
+    const namespace = namespaceValue;
+
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const outcome = await uploadVideoBuffer({
+      buffer,
+      fileName: file.name,
+      fileType: cleanString(file.type),
+      fileSize: file.size,
+      context: parseContext({
+        folder: formData.get('folder') as string | null,
+        tags: formData.get('tags') as string | null,
+        description: formData.get('description') as string | null,
+        originalUrl: formData.get('originalUrl') as string | null,
+        sourceUrl: formData.get('sourceUrl') as string | null,
+        namespace,
+        requireSignedUrls:
+          cleanString(formData.get('requireSignedUrls') as string | null) === 'true',
+      }),
+    });
+
+    if (!outcome.ok) {
+      return NextResponse.json({ error: outcome.error }, { status: outcome.status });
+    }
+
+    return NextResponse.json(outcome.data);
+  } catch (error) {
+    console.error('[upload-video] upload error:', error);
+    return NextResponse.json({ error: 'Failed to upload video' }, { status: 500 });
+  }
+}

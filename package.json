@@ -28,7 +28,16 @@
     "namespace:backfill": "node scripts/backfill-namespace.mjs",
     "namespace:scan": "node scripts/scan-namespaces.mjs",
     "variants:folderize": "node scripts/folder-to-variants.mjs",
-    "aspect:backfill": "node scripts/backfill-aspect-ratios.mjs"
+    "aspect:backfill": "node scripts/backfill-aspect-ratios.mjs",
+    "page:ingest": "node scripts/page-ingest.mjs ingest",
+    "page:browser-ingest": "node scripts/page-ingest.mjs browser-ingest",
+    "page:auth-help": "node scripts/page-ingest.mjs auth-help",
+    "fs:ingest": "node scripts/fs-ingest.mjs",
+    "ig:auth": "node scripts/instagram-ingest.mjs auth",
+    "ig:ingest": "node scripts/instagram-ingest.mjs ingest",
+    "ig:url": "node scripts/instagram-ingest.mjs single-url",
+    "ig:videos": "node scripts/instagram-ingest.mjs videos-from-ndjson",
+    "telegram:listen": "node scripts/telegram-channel-listener.mjs"
   },
   "dependencies": {
     "adm-zip": "^0.5.16",

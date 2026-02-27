@@ -88,6 +88,7 @@ describe('POST /api/upload/external', () => {
     formData.append('file', file);
     formData.append('folder', 'astro-uploads');
     formData.append('tags', 'astro,cloudflare');
+    formData.append('namespace', 'astro');
 
     const request = createRequest(formData);
     const response = await POST(request);
@@ -155,6 +156,7 @@ describe('POST /api/upload/external', () => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('folder', 'icons');
+    formData.append('namespace', 'icons');
     const request = createRequest(formData);
 
     const response = await POST(request);
@@ -204,6 +206,7 @@ describe('POST /api/upload/external', () => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('folder', 'comfy');
+    formData.append('namespace', 'comfy');
     formData.append(
       'comfyWorkflowJson',
       JSON.stringify({
@@ -233,6 +236,7 @@ describe('POST /api/upload/external', () => {
     const file = new File(['bad-json-image'], 'image.png', { type: 'image/png' });
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('namespace', 'comfy');
     formData.append('comfyWorkflowJson', '{bad-json');
 
     const response = await POST(createRequest(formData));
@@ -277,6 +281,7 @@ describe('POST /api/upload/external', () => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('originalUrl', 'https://example.com/dynamic-endpoint');
+    formData.append('namespace', 'ns-a');
 
     const response = await POST(createRequest(formData));
     const payload = await response.json();
@@ -308,6 +313,7 @@ describe('POST /api/upload/external', () => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('originalUrl', 'https://example.com/another-endpoint');
+    formData.append('namespace', 'ns-a');
 
     const response = await POST(createRequest(formData));
     const payload = await response.json();
@@ -317,5 +323,20 @@ describe('POST /api/upload/external', () => {
     expect(payload.duplicates?.[0]?.id).toBe('existing-hash-1');
     expect(mockFetch).not.toHaveBeenCalled();
     expect(duplicateDetector.findDuplicatesByContentHash).toHaveBeenCalled();
+  });
+
+  it('rejects uploads without an explicit namespace', async () => {
+    process.env.CLOUDFLARE_ACCOUNT_ID = 'acct';
+    process.env.CLOUDFLARE_API_TOKEN = 'token';
+
+    const file = new File(['image-bytes'], 'photo.png', { type: 'image/png' });
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await POST(createRequest(formData));
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/specific namespace is required/i);
   });
 });

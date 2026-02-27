@@ -1,7 +1,11 @@
 import { getCachedImages } from '@/server/cloudflareImageCache';
 
 export type ParentValidationResult =
-  | { ok: true }
+  | {
+      ok: true;
+      canonicalParentId?: string;
+      redirectedFromParentId?: string;
+    }
   | { ok: false; status: number; error: string };
 
 const normalizeParentId = (value?: string | null) => {
@@ -11,6 +15,13 @@ const normalizeParentId = (value?: string | null) => {
 
 const resolveImages = async (options?: { forceRefresh?: boolean }) => {
   return getCachedImages(options?.forceRefresh === true);
+};
+
+const logParentRedirection = (requestedParentId: string, canonicalParentId: string) => {
+  console.info('[parentValidation] Redirecting variant parent to canonical parent', {
+    requestedParentId,
+    canonicalParentId
+  });
 };
 
 export async function validateParentForNewChild(
@@ -23,27 +34,66 @@ export async function validateParentForNewChild(
   }
 
   let images = await resolveImages(options);
-  let parent = images.find((img) => img.id === parentId);
+  let attemptedRefresh = options?.forceRefresh === true;
+  const visited = new Set<string>();
+  let currentId = parentId;
 
-  // Avoid expensive force refresh on every request; only retry when parent lookup misses.
-  if (!parent && !options?.forceRefresh) {
-    images = await resolveImages({ forceRefresh: true });
-    parent = images.find((img) => img.id === parentId);
+  while (currentId) {
+    if (visited.has(currentId)) {
+      return {
+        ok: false,
+        status: 400,
+        error:
+          'Unable to resolve the canonical parent due to a cyclical parent relationship. Please verify the image hierarchy manually.',
+      };
+    }
+    visited.add(currentId);
+
+    let current = images.find((img) => img.id === currentId);
+    if (!current && !attemptedRefresh) {
+      images = await resolveImages({ forceRefresh: true });
+      attemptedRefresh = true;
+      current = images.find((img) => img.id === currentId);
+    }
+
+    if (!current) {
+      if (currentId === parentId) {
+        return {
+          ok: false,
+          status: 400,
+          error:
+            'Parent image was not found. Please verify the image hierarchy manually and provide a canonical parent ID.',
+        };
+      }
+      return {
+        ok: false,
+        status: 400,
+        error:
+          'Unable to resolve the canonical parent from the provided variant. Please verify the image hierarchy manually.',
+      };
+    }
+
+    const nextParentId = normalizeParentId(current.parentId);
+    if (!nextParentId) {
+      if (currentId !== parentId) {
+        logParentRedirection(parentId, currentId);
+      }
+      return {
+        ok: true,
+        canonicalParentId: currentId,
+        redirectedFromParentId: currentId !== parentId ? parentId : undefined
+      };
+    }
+
+    currentId = nextParentId;
   }
 
-  if (!parent) {
-    return { ok: false, status: 400, error: 'Parent image was not found.' };
-  }
-
-  if (parent.parentId) {
-    return {
-      ok: false,
-      status: 400,
-      error: 'Parent image must be canonical (a variation cannot be a parent).',
-    };
-  }
-
-  return { ok: true };
+  return {
+    ok: false,
+    status: 400,
+    error:
+      'Unable to resolve the canonical parent from the provided variant. Please verify the image hierarchy manually.',
+  };
 }
 
 export async function validateParentAssignmentForExistingImage(

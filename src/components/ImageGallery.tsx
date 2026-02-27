@@ -30,6 +30,7 @@ import { normalizeDateFilterValue, toDateKey } from './gallery/dateFilter';
 
 interface CloudflareImage {
   id: string;
+  assetType?: 'image' | 'video';
   filename: string;
   displayName?: string;
   promptThis?: string;
@@ -52,6 +53,12 @@ interface CloudflareImage {
   generatedBy?: string;
   comfyMetadataDetected?: boolean;
   comfyMetadataSource?: string;
+  videoStatus?: 'pending' | 'ready' | 'error';
+  videoDurationSeconds?: number;
+  videoPlaybackUrl?: string;
+  videoHlsUrl?: string;
+  videoThumbnailUrl?: string;
+  videoPreviewUrl?: string;
   // Embedding status fields
   hasClipEmbedding?: boolean;
   hasColorEmbedding?: boolean;
@@ -72,8 +79,10 @@ export interface ImageGalleryRef {
 const DEFAULT_PAGE_SIZE = 30;
 const PAGE_SIZE_OPTIONS = [12, 24, 30, 48, 60, 90, 120];
 const GALLERY_RETURN_STATE_KEY = 'galleryReturnStateV1';
+const GALLERY_RETURN_SNAPSHOT_KEY = 'galleryReturnSnapshotV1';
 const GALLERY_RETURN_TTL_MS = 10 * 60 * 1000;
 const VARIANT_DIMENSIONS = new Map(IMAGE_VARIANTS.map(variant => [variant.name, variant.width]));
+const VIDEO_LIMIT_STEP = 150;
 
 type GalleryReturnState = {
   currentPage?: number;
@@ -90,6 +99,21 @@ type GalleryWarmCacheState = {
   savedAt: number;
 };
 
+type GalleryReturnSnapshotState = {
+  namespace?: string;
+  savedAt?: number;
+  currentPage?: number;
+  images?: CloudflareImage[];
+};
+
+type VideoMetaState = {
+  enabled: boolean;
+  limit: number;
+  returned: number;
+  totalScoped: number;
+  truncated: boolean;
+} | null;
+
 let galleryWarmCache: GalleryWarmCacheState | null = null;
 
 type BulkState = {
@@ -102,7 +126,7 @@ type BulkState = {
   bulkApplyTags: boolean;
   bulkTagsMode: 'replace' | 'append';
   bulkApplyDisplayName: boolean;
-  bulkDisplayNameMode: 'custom' | 'auto' | 'clear';
+  bulkDisplayNameMode: 'custom' | 'auto' | 'clear' | 'ai';
   bulkDisplayNameInput: string;
   bulkApplyDescription: boolean;
   bulkDescriptionAppendInput: string;
@@ -374,11 +398,46 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     return galleryWarmCache.images;
   })();
 
-  const returningFromDetailRef = useRef(initialReturningFromDetail);
-  const initialSilentFetchRef = useRef(initialWarmImages.length > 0);
+  const initialSnapshotImages = (() => {
+    if (!initialReturningFromDetail || typeof window === 'undefined') {
+      return [] as CloudflareImage[];
+    }
+    const activeNamespace = namespace ?? '';
+    try {
+      const rawSnapshot = window.sessionStorage.getItem(GALLERY_RETURN_SNAPSHOT_KEY);
+      if (!rawSnapshot) {
+        return [] as CloudflareImage[];
+      }
+      const parsed = JSON.parse(rawSnapshot) as GalleryReturnSnapshotState;
+      const savedNamespace = typeof parsed?.namespace === 'string' ? parsed.namespace : '';
+      const savedAt = typeof parsed?.savedAt === 'number' ? parsed.savedAt : 0;
+      const freshEnough = !savedAt || Date.now() - savedAt < GALLERY_RETURN_TTL_MS;
+      if (!freshEnough || savedNamespace !== activeNamespace || !Array.isArray(parsed?.images)) {
+        return [] as CloudflareImage[];
+      }
+      const snapshotImages = parsed.images.filter(
+        (image): image is CloudflareImage => Boolean(image) && typeof image.id === 'string'
+      );
+      if (snapshotImages.length > 0) {
+        galleryWarmCache = {
+          namespace: activeNamespace,
+          images: snapshotImages,
+          savedAt: savedAt || Date.now(),
+        };
+      }
+      return snapshotImages;
+    } catch {
+      return [] as CloudflareImage[];
+    }
+  })();
 
-  const [images, setImages] = useState<CloudflareImage[]>(initialWarmImages);
-  const [loading, setLoading] = useState(initialWarmImages.length === 0);
+  const returningFromDetailRef = useRef(initialReturningFromDetail);
+  const initialSilentFetchRef = useRef(initialWarmImages.length > 0 || initialSnapshotImages.length > 0);
+
+  const [images, setImages] = useState<CloudflareImage[]>(
+    initialWarmImages.length > 0 ? initialWarmImages : initialSnapshotImages
+  );
+  const [loading, setLoading] = useState(initialWarmImages.length === 0 && initialSnapshotImages.length === 0);
   const [selectedVariant, setSelectedVariant] = useState<string>(storedPreferencesRef.current.variant);
   const [openCopyMenu, setOpenCopyMenu] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>((storedPreferencesRef.current.viewMode ?? 'grid') as 'grid' | 'list');
@@ -456,7 +515,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const setBulkApplyTags = useCallback((value: boolean) => setBulkField('bulkApplyTags', value), [setBulkField]);
   const setBulkTagsMode = useCallback((value: 'replace' | 'append') => setBulkField('bulkTagsMode', value), [setBulkField]);
   const setBulkApplyDisplayName = useCallback((value: boolean) => setBulkField('bulkApplyDisplayName', value), [setBulkField]);
-  const setBulkDisplayNameMode = useCallback((value: 'custom' | 'auto' | 'clear') => setBulkField('bulkDisplayNameMode', value), [setBulkField]);
+  const setBulkDisplayNameMode = useCallback((value: 'custom' | 'auto' | 'clear' | 'ai') => setBulkField('bulkDisplayNameMode', value), [setBulkField]);
   const setBulkDisplayNameInput = useCallback((value: string) => setBulkField('bulkDisplayNameInput', value), [setBulkField]);
   const setBulkApplyDescription = useCallback((value: boolean) => setBulkField('bulkApplyDescription', value), [setBulkField]);
   const setBulkDescriptionAppendInput = useCallback((value: string) => setBulkField('bulkDescriptionAppendInput', value), [setBulkField]);
@@ -476,6 +535,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [namespaceDraft, setNamespaceDraft] = useState(namespace ?? '');
   const [namespaceSelectValue, setNamespaceSelectValue] = useState('');
   const [registryNamespaces, setRegistryNamespaces] = useState<string[]>([]);
+  const [videoLimitOverride, setVideoLimitOverride] = useState<number | null>(null);
+  const [videoMeta, setVideoMeta] = useState<VideoMetaState>(null);
+  const [videoResultsNotice, setVideoResultsNotice] = useState<string | null>(null);
   const [colorMetadataMap, setColorMetadataMap] = useState<Record<string, { dominantColors?: string[]; averageColor?: string }>>({});
   const [promptThisMap, setPromptThisMap] = useState<Record<string, string | null>>({});
   const promptThisMapRef = useRef<Record<string, string | null>>({});
@@ -606,6 +668,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
 
       didRestoreReturnStateRef.current = true;
       window.sessionStorage.removeItem(GALLERY_RETURN_STATE_KEY);
+      window.sessionStorage.removeItem(GALLERY_RETURN_SNAPSHOT_KEY);
 
       const targetScrollY = typeof parsed.scrollY === 'number' ? parsed.scrollY : 0;
 
@@ -637,6 +700,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [editFolderSelect, setEditFolderSelect] = useState<string>('');
   const [newEditFolder, setNewEditFolder] = useState<string>('');
   const [altLoadingMap, setAltLoadingMap] = useState<Record<string, boolean>>({});
+  const [displayNameLoadingMap, setDisplayNameLoadingMap] = useState<Record<string, boolean>>({});
   
   // Hover preview state
   const [hoveredImage, setHoveredImage] = useState<string | null>(null);
@@ -645,6 +709,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [utilityExpanded, setUtilityExpanded] = useState(false);
   const galleryTopRef = useRef<HTMLDivElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const initialLoadStartedAtRef = useRef<number>(typeof performance !== 'undefined' ? performance.now() : Date.now());
+  const initialLoadLoggedRef = useRef(false);
+  const videoAutoExpandPageRef = useRef<number | null>(null);
+  const PERF_LOGGING_ENABLED = process.env.NODE_ENV !== 'production';
 
   const scrollToUploader = useCallback(() => {
     if (typeof window === 'undefined') {
@@ -660,6 +728,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     silent = false,
     forceRefresh = false
   }: { silent?: boolean; forceRefresh?: boolean } = {}) => {
+    const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -684,6 +753,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       } else if (namespace && namespace !== '__all__') {
         params.set('namespace', namespace);
       }
+      if (videoLimitOverride && videoLimitOverride > 0) {
+        params.set('videoLimit', String(videoLimitOverride));
+      }
       const query = params.toString();
       const url = query ? `/api/images?${query}` : '/api/images';
       const response = await fetch(url, { signal: controller.signal });
@@ -698,11 +770,42 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           return true;
         });
         setImages(uniqueImages);
+        const responseVideoMeta = data?.videoMeta as
+          | { truncated?: boolean; returned?: number; totalScoped?: number; limit?: number; enabled?: boolean }
+          | undefined;
+        const nextVideoMeta: VideoMetaState = responseVideoMeta
+          ? {
+              enabled: Boolean(responseVideoMeta.enabled),
+              limit: typeof responseVideoMeta.limit === 'number' ? responseVideoMeta.limit : 0,
+              returned: typeof responseVideoMeta.returned === 'number' ? responseVideoMeta.returned : 0,
+              totalScoped: typeof responseVideoMeta.totalScoped === 'number' ? responseVideoMeta.totalScoped : 0,
+              truncated: Boolean(responseVideoMeta.truncated),
+            }
+          : null;
+        setVideoMeta(nextVideoMeta);
+        if (nextVideoMeta?.enabled && nextVideoMeta.truncated) {
+          const returned = nextVideoMeta.returned;
+          const totalScoped = nextVideoMeta.totalScoped || returned;
+          const limit = nextVideoMeta.limit || returned;
+          setVideoResultsNotice(
+            `Showing ${returned} of ${totalScoped} videos (limit ${limit}). Page near the end to auto-load more, or use “Load more videos”.`
+          );
+        } else {
+          setVideoResultsNotice(null);
+        }
         galleryWarmCache = {
           namespace: namespace ?? '',
           images: uniqueImages,
           savedAt: Date.now(),
         };
+        if (PERF_LOGGING_ENABLED) {
+          const elapsedMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
+          const serverTiming = response.headers.get('server-timing') ?? 'n/a';
+          const stageTiming = data?.timings ? JSON.stringify(data.timings) : '{}';
+          console.info(
+            `[GalleryPerf] /api/images ${Math.round(elapsedMs)}ms (silent=${silent}, refresh=${forceRefresh}, count=${uniqueImages.length}) server_timing=${serverTiming} stages=${stageTiming}`
+          );
+        }
       }
     } catch (error) {
       if ((error as Error).name === 'AbortError') return;
@@ -715,7 +818,17 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         }
       }
     }
-  }, [namespace]);
+  }, [namespace, PERF_LOGGING_ENABLED, videoLimitOverride]);
+
+  useEffect(() => {
+    if (loading || initialLoadLoggedRef.current) return;
+    initialLoadLoggedRef.current = true;
+    if (!PERF_LOGGING_ENABLED) return;
+    const elapsedMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - initialLoadStartedAtRef.current;
+    console.info(
+      `[GalleryPerf] initial_render ${Math.round(elapsedMs)}ms (images=${images.length}, returningFromDetail=${returningFromDetailRef.current})`
+    );
+  }, [images.length, loading, PERF_LOGGING_ENABLED]);
 
   const handleFoldersChanged = async () => {
     await fetchImages({ silent: true });
@@ -744,6 +857,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       setOnlyCanonical(false); // Disable "Parents Only" as it might hide orphaned variants in the new namespace
       setAspectRatioFilters([]);
       setPromptThisMap({});
+      setVideoLimitOverride(null);
+      setVideoMeta(null);
+      setVideoResultsNotice(null);
+      videoAutoExpandPageRef.current = null;
       requestedPromptIdsRef.current.clear();
       prevNamespaceRef.current = namespace;
     }
@@ -756,53 +873,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     initialSilentFetchRef.current = false;
     fetchImages({ silent: shouldSilentFetch });
   }, [namespace, fetchImages]);
-
-  // Fetch color metadata from Redis for displayed images
-  useEffect(() => {
-    if (!ENABLE_COLOR_METADATA) return;
-    if (images.length === 0) return;
-    
-    const fetchColorMetadata = async () => {
-      const requestedNow: string[] = [];
-      try {
-        // Only fetch for images we don't already have metadata for
-        const idsToFetch = images
-          .map(img => img.id)
-          .filter(id => {
-            if (colorMetadataMap[id]) return false;
-            const lastRequestedAt = requestedColorIdsRef.current.get(id);
-            return !lastRequestedAt || Date.now() - lastRequestedAt > COLOR_METADATA_RETRY_MS;
-          });
-        
-        if (idsToFetch.length === 0) return;
-
-        // Mark ids as requested so we don't spam the server if the gallery refreshes
-        // or if React re-runs effects in dev.
-        for (const id of idsToFetch) {
-          requestedColorIdsRef.current.set(id, Date.now());
-          requestedNow.push(id);
-        }
-        
-        // Batch in chunks of 100
-        const chunkSize = 100;
-        for (let i = 0; i < idsToFetch.length; i += chunkSize) {
-          const chunk = idsToFetch.slice(i, i + chunkSize);
-          const response = await fetch(`/api/images/colors?ids=${chunk.join(',')}`);
-          if (response.ok) {
-            const data = await response.json();
-            if (data.colors) {
-              setColorMetadataMap(prev => ({ ...prev, ...data.colors }));
-            }
-          }
-        }
-      } catch (error) {
-        console.warn('Failed to fetch color metadata:', error);
-      }
-    };
-    
-    fetchColorMetadata();
-  }, [images, ENABLE_COLOR_METADATA]);
-
 
   const toast = useToast();
 
@@ -940,6 +1010,20 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     const payload = formatCopyPayload(url, altText, event.shiftKey);
     await copyToClipboard(payload, label, toast.push);
   };
+
+  const handleOpenCopyMenu = useCallback((id: string) => {
+    const target = images.find((image) => image.id === id);
+    if (target?.assetType === 'video') {
+      const videoUrl = target.videoPlaybackUrl || target.videoHlsUrl || target.videoThumbnailUrl;
+      if (!videoUrl) {
+        toast.push('No video URL available');
+        return;
+      }
+      void copyToClipboard(videoUrl, 'Video URL', toast.push);
+      return;
+    }
+    setOpenCopyMenu((prev) => (prev === id ? null : id));
+  }, [images, toast.push]);
 
   const downloadVariantToFile = async (url: string, filenameHint?: string) => {
     try {
@@ -1167,27 +1251,123 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     if (typeof window === 'undefined') return;
     try {
       const resultIds = filteredImages.map((img) => img.id);
+      const savedAt = Date.now();
       window.sessionStorage.setItem(
         GALLERY_RETURN_STATE_KEY,
         JSON.stringify({
           currentPage,
           scrollY: window.scrollY,
           namespace: namespace ?? '',
-          savedAt: Date.now(),
+          savedAt,
           selectedImageId: imageId,
           resultIds,
         })
       );
+      window.sessionStorage.setItem(
+        GALLERY_RETURN_SNAPSHOT_KEY,
+        JSON.stringify({
+          currentPage,
+          namespace: namespace ?? '',
+          savedAt,
+          images: pageImages,
+        } as GalleryReturnSnapshotState)
+      );
     } catch {
       // ignore
     }
-  }, [currentPage, filteredImages, namespace]);
+  }, [currentPage, filteredImages, namespace, pageImages]);
 
   const galleryReturnHrefSuffix = useMemo(() => {
     const page = currentPage;
     const ns = encodeURIComponent(namespace ?? '');
     return `?gpage=${page}&gns=${ns}`;
   }, [currentPage, namespace]);
+
+  const loadMoreVideos = useCallback(() => {
+    setVideoLimitOverride((prev) => {
+      const base = typeof prev === 'number' && prev > 0
+        ? prev
+        : (videoMeta?.limit && videoMeta.limit > 0 ? videoMeta.limit : VIDEO_LIMIT_STEP);
+      return base + VIDEO_LIMIT_STEP;
+    });
+  }, [videoMeta]);
+
+  useEffect(() => {
+    if (!videoMeta?.enabled || !videoMeta.truncated) return;
+    if (loading) return;
+    if (currentPage <= 1) return;
+    if (currentPage < totalPages) return;
+    if (videoAutoExpandPageRef.current === currentPage) return;
+    videoAutoExpandPageRef.current = currentPage;
+    loadMoreVideos();
+  }, [videoMeta, loading, currentPage, totalPages, loadMoreVideos]);
+
+  useEffect(() => {
+    if (!videoMeta?.truncated) {
+      videoAutoExpandPageRef.current = null;
+    }
+  }, [videoMeta]);
+
+  // Enrich only the visible page with Redis metadata after initial render.
+  useEffect(() => {
+    if (pageImages.length === 0) return;
+
+    const fetchVisiblePageMetadata = async () => {
+      try {
+        const idsToFetch = pageImages
+          .map((img) => img.id)
+          .filter((id) => {
+            const lastRequestedAt = requestedColorIdsRef.current.get(id);
+            return !lastRequestedAt || Date.now() - lastRequestedAt > COLOR_METADATA_RETRY_MS;
+          });
+
+        if (idsToFetch.length === 0) return;
+
+        for (const id of idsToFetch) {
+          requestedColorIdsRef.current.set(id, Date.now());
+        }
+
+        const chunkSize = 60;
+        for (let i = 0; i < idsToFetch.length; i += chunkSize) {
+          const chunk = idsToFetch.slice(i, i + chunkSize);
+          const response = await fetch(`/api/images/colors?ids=${encodeURIComponent(chunk.join(','))}`);
+          if (!response.ok) continue;
+          const data = await response.json();
+          const colors = data?.colors;
+          if (!colors || typeof colors !== 'object') continue;
+
+          setImages((prev) =>
+            prev.map((img) => {
+              const meta = colors[img.id] as
+                | {
+                    dominantColors?: string[];
+                    averageColor?: string;
+                    hasClipEmbedding?: boolean;
+                    hasColorEmbedding?: boolean;
+                  }
+                | undefined;
+              if (!meta) return img;
+              return {
+                ...img,
+                hasClipEmbedding: Boolean(meta.hasClipEmbedding),
+                hasColorEmbedding: Boolean(meta.hasColorEmbedding),
+                dominantColors: meta.dominantColors ?? img.dominantColors,
+                averageColor: meta.averageColor ?? img.averageColor,
+              };
+            })
+          );
+
+          if (ENABLE_COLOR_METADATA) {
+            setColorMetadataMap((prev) => ({ ...prev, ...colors }));
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to fetch visible page metadata:', error);
+      }
+    };
+
+    void fetchVisiblePageMetadata();
+  }, [COLOR_METADATA_RETRY_MS, ENABLE_COLOR_METADATA, pageImages]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1325,10 +1505,11 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     [selectDuplicatesKeepSingleBase, toast]
   );
 
-  const { deleteImage, generateAltTag, startEdit, cancelEdit, saveEdit } = useGalleryItemActions({
+  const { deleteImage, generateAltTag, generateDisplayName, startEdit, cancelEdit, saveEdit } = useGalleryItemActions({
     setImages,
     toastPush: toast.push,
     setAltLoadingMap,
+    setDisplayNameLoadingMap,
     editFolderSelect,
     newEditFolder,
     editTags,
@@ -1523,6 +1704,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     colorMetadataMap,
     embeddingPendingMap,
     altLoadingMap,
+    displayNameLoadingMap,
     galleryReturnHrefSuffix,
   }), [
     pageImages,
@@ -1535,6 +1717,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     colorMetadataMap,
     embeddingPendingMap,
     altLoadingMap,
+    displayNameLoadingMap,
     galleryReturnHrefSuffix,
   ]);
   const backupAgeDays = backupInfo
@@ -1610,31 +1793,33 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           onNextPage={goToNextPage}
           onJumpForwardTen={jumpForwardTenPages}
           onLastPage={goToLastPage}
+          backupControls={(
+            <div className="ml-1 flex items-end gap-2 text-[0.6rem] font-mono text-gray-500">
+              <div className="text-right leading-tight">
+                <div>Last backup: {backupTimeLabel}</div>
+                <div className="text-gray-400">{backupSizeLabel} • {backupAgeLabel}</div>
+                {backupError && <div className="text-red-500">{backupError}</div>}
+              </div>
+              <button
+                type="button"
+                onClick={handleCreateBackup}
+                disabled={backupLoading}
+                className="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-200 bg-white/80 text-gray-600 hover:bg-white disabled:opacity-50"
+                title="Create backup"
+                aria-label="Create backup"
+              >
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="4" y="3" width="16" height="18" rx="2" />
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M12 9v6" />
+                  <path d="M9 12h6" />
+                  <path d="M7 7h2" />
+                  <path d="M15 7h2" />
+                </svg>
+              </button>
+            </div>
+          )}
         />
-        <div className="mt-3 flex items-end justify-end gap-2 text-[0.6rem] font-mono text-gray-500">
-          <div className="text-right leading-tight">
-            <div>Last backup: {backupTimeLabel}</div>
-            <div className="text-gray-400">{backupSizeLabel} • {backupAgeLabel}</div>
-            {backupError && <div className="text-red-500">{backupError}</div>}
-          </div>
-          <button
-            type="button"
-            onClick={handleCreateBackup}
-            disabled={backupLoading}
-            className="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-200 bg-white/80 text-gray-600 hover:bg-white disabled:opacity-50"
-            title="Create backup"
-            aria-label="Create backup"
-          >
-            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="4" y="3" width="16" height="18" rx="2" />
-              <circle cx="12" cy="12" r="3" />
-              <path d="M12 9v6" />
-              <path d="M9 12h6" />
-              <path d="M7 7h2" />
-              <path d="M15 7h2" />
-            </svg>
-          </button>
-        </div>
       </div>
 
       {duplicateGroupCount > 0 && (
@@ -1668,6 +1853,19 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
               Select duplicates (keep oldest)
             </button>
           </div>
+        </div>
+      )}
+
+      {videoResultsNotice && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-200 bg-sky-50 p-3 text-[0.65rem] font-mono text-sky-900">
+          <span>{videoResultsNotice}</span>
+          <button
+            type="button"
+            onClick={loadMoreVideos}
+            className="rounded border border-sky-300 bg-white px-2 py-1 text-[0.6rem] text-sky-900 hover:bg-sky-100"
+          >
+            Load more videos
+          </button>
         </div>
       )}
 
@@ -1951,10 +2149,11 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             onToggleSelection={toggleSelection}
             onBeforeNavigate={saveGalleryReturnState}
             onCopyNamespace={(ns) => { void copyToClipboard(ns, 'Namespace', toast.push); }}
-            onToggleCopyMenu={(id) => setOpenCopyMenu(openCopyMenu === id ? null : id)}
+            onToggleCopyMenu={handleOpenCopyMenu}
             onStartEdit={startEdit}
             onDelete={deleteImage}
             onGenerateAlt={generateAltTag}
+            onGenerateDisplayName={generateDisplayName}
             onMouseEnter={handleMouseEnter}
             onMouseMove={handleMouseMove}
             onMouseLeave={handleMouseLeave}
@@ -1966,7 +2165,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             onStartEdit={startEdit}
             onDelete={deleteImage}
             onGenerateAlt={generateAltTag}
-            onCopyUrl={(id) => setOpenCopyMenu(openCopyMenu === id ? null : id)}
+            onGenerateDisplayName={generateDisplayName}
+            onCopyUrl={handleOpenCopyMenu}
             onCopyNamespace={(ns) => { void copyToClipboard(ns, 'Namespace', toast.push); }}
             onBeforeNavigate={saveGalleryReturnState}
             onDragStart={(event, img) => setDragPayloadForImage(event, img)}

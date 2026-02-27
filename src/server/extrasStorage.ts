@@ -21,6 +21,7 @@ export interface IExtrasStorage {
   getMany<T>(keys: string[]): Promise<Record<string, T | null>>;
   set<T>(key: string, value: T): Promise<void>;
   delete(key: string): Promise<void>;
+  listKeysByPrefix(prefix: string): Promise<string[]>;
   exists(key: string): Promise<boolean>;
 }
 
@@ -32,8 +33,12 @@ class FileExtrasStorage implements IExtrasStorage {
     this.baseDir = baseDir ?? path.join(process.cwd(), '.extras');
   }
 
+  private sanitizeKey(key: string): string {
+    return key.replace(/[^a-zA-Z0-9_-]/g, '_');
+  }
+
   private getFilePath(key: string): string {
-    const safeKey = key.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeKey = this.sanitizeKey(key);
     return path.join(this.baseDir, `${safeKey}.json`);
   }
 
@@ -99,6 +104,23 @@ class FileExtrasStorage implements IExtrasStorage {
     }
   }
 
+  async listKeysByPrefix(prefix: string): Promise<string[]> {
+    const sanitizedPrefix = this.sanitizeKey(prefix);
+    try {
+      const entries = await fs.readdir(this.baseDir, { withFileTypes: true });
+      return entries
+        .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+        .map((entry) => entry.name.slice(0, -5))
+        .filter((sanitizedKey) => sanitizedKey.startsWith(sanitizedPrefix))
+        .map((sanitizedKey) => `${prefix}${sanitizedKey.slice(sanitizedPrefix.length)}`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return [];
+      }
+      throw error;
+    }
+  }
+
   async exists(key: string): Promise<boolean> {
     try {
       await fs.access(this.getFilePath(key));
@@ -114,6 +136,7 @@ interface RedisClient {
   mget(...keys: string[]): Promise<Array<string | null>>;
   set(key: string, value: string): Promise<unknown>;
   del(key: string): Promise<number>;
+  scan(cursor: string, ...args: string[]): Promise<[string, string[]]>;
   exists(key: string): Promise<number>;
   quit(): Promise<unknown>;
   connect(): Promise<void>;
@@ -222,6 +245,25 @@ class RedisExtrasStorage implements IExtrasStorage {
   async delete(key: string): Promise<void> {
     const client = await this.getClient();
     await client.del(this.fullKey(key));
+  }
+
+  async listKeysByPrefix(prefix: string): Promise<string[]> {
+    const client = await this.getClient();
+    const fullPrefix = this.fullKey(prefix);
+    const keys: string[] = [];
+    let cursor = '0';
+
+    do {
+      const [nextCursor, batch] = await client.scan(cursor, 'MATCH', `${fullPrefix}*`, 'COUNT', '200');
+      cursor = nextCursor;
+      for (const fullKey of batch) {
+        if (fullKey.startsWith(this.keyPrefix)) {
+          keys.push(fullKey.slice(this.keyPrefix.length));
+        }
+      }
+    } while (cursor !== '0');
+
+    return keys;
   }
 
   async exists(key: string): Promise<boolean> {
