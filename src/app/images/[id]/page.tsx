@@ -426,12 +426,12 @@ export default function ImageDetailPage() {
     }
     try {
       const url = namespace === ''
-        ? `/api/images?namespace=__none__`
+        ? `/api/images?namespace=__none__&includeVectorMeta=1`
         : namespace === '__all__'
-          ? `/api/images?namespace=__all__`
+          ? `/api/images?namespace=__all__&includeVectorMeta=1`
           : namespace
-            ? `/api/images?namespace=${encodeURIComponent(namespace)}`
-            : '/api/images';
+            ? `/api/images?namespace=${encodeURIComponent(namespace)}&includeVectorMeta=1`
+            : '/api/images?includeVectorMeta=1';
       const response = await fetch(url);
       const data = await response.json();
       if (Array.isArray(data.images)) {
@@ -509,12 +509,12 @@ export default function ImageDetailPage() {
           return;
         }
         const url = namespace === ''
-          ? `/api/images?namespace=__none__`
+          ? `/api/images?namespace=__none__&includeVectorMeta=1`
           : namespace === '__all__'
-            ? `/api/images?namespace=__all__`
+            ? `/api/images?namespace=__all__&includeVectorMeta=1`
             : namespace
-              ? `/api/images?namespace=${encodeURIComponent(namespace)}`
-              : '/api/images';
+              ? `/api/images?namespace=${encodeURIComponent(namespace)}&includeVectorMeta=1`
+              : '/api/images?includeVectorMeta=1';
         const res = await fetch(url);
         const data = await res.json();
         if (!mounted) return;

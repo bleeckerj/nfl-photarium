@@ -343,6 +343,7 @@ export async function POST(request: NextRequest) {
         beforeBytes: prepared.data.bytesBefore,
         afterBytes: prepared.data.bytesAfter,
         note: prepared.data.note,
+        reasons: prepared.data.uploadNormalization?.reasons,
         targetType: prepared.data.fileType,
       });
     }
@@ -408,6 +409,7 @@ export async function POST(request: NextRequest) {
       namespace: effectiveNamespace,
       contentHash,
       variationParentId: resolvedParentId,
+      uploadNormalization: prepared.data.uploadNormalization,
       exif: exifSummary,
       generatedBy: comfyExtraction.detected ? 'comfyui' : undefined,
       comfyMetadataDetected: comfyExtraction.detected ? true : undefined,
@@ -658,6 +660,7 @@ export async function POST(request: NextRequest) {
       linkedAssetId: webpVariantId,
       webpVariantId,
       autoEmbeddings,
+      uploadNormalization: prepared.data.uploadNormalization,
       ...(promptSave ? { promptSave } : {}),
     }));
 

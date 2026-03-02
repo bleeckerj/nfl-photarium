@@ -485,6 +485,7 @@ const runSizeBackfillQueue = async (): Promise<void> => {
 
   let cursor = 0;
   const workerCount = Math.min(SIZE_BACKFILL_CONCURRENCY, candidates.length);
+  let mutated = false;
   const workers = Array.from({ length: workerCount }, async () => {
     while (true) {
       const index = cursor;
@@ -506,16 +507,27 @@ const runSizeBackfillQueue = async (): Promise<void> => {
       if (typeof existing.size === 'number' && Number.isFinite(existing.size) && existing.size >= 0) {
         continue;
       }
-      upsertCachedImage({
+      const updated: CachedCloudflareImage = {
         ...existing,
         size: discoveredSize,
-      });
+      };
+      cacheState.map.set(updated.id, updated);
+      const imageIndex = cacheState.images.findIndex((image) => image.id === updated.id);
+      if (imageIndex >= 0) {
+        cacheState.images[imageIndex] = updated;
+      }
+      mutated = true;
       sizeBackfillAttempts.delete(candidate.id);
     }
   });
 
   try {
     await Promise.all(workers);
+    if (mutated && !CLOUDFLARE_CACHE_DISABLED) {
+      saveToPersistentCache(cacheState.images, cacheState.lastFetched).catch((error) => {
+        console.warn('[Cache] Failed to persist size backfill updates:', error);
+      });
+    }
   } finally {
     sizeBackfillInProgress = false;
   }

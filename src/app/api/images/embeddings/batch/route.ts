@@ -19,6 +19,7 @@ import {
   storeImageVectors,
   isVectorSearchAvailable,
   ensureVectorIndex,
+  getImageVectors,
 } from '@/server/vectorSearch';
 
 interface BatchRequest {
@@ -90,9 +91,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           continue;
         }
 
-        // Check if we need to do anything
-        const needsClip = generateClip && (force || !image.hasClipEmbedding);
-        const needsColor = generateColor && (force || !image.hasColorEmbedding);
+        const existingVectors = await getImageVectors(imageId);
+        const hasStoredClip = Boolean(existingVectors?.clipEmbedding?.length);
+        const hasStoredColor = Boolean(existingVectors?.colorHistogram?.length);
+
+        // Redis vectors are the source of truth for whether embeddings exist.
+        const needsClip = generateClip && (force || !hasStoredClip);
+        const needsColor = generateColor && (force || !hasStoredColor);
 
         if (!needsClip && !needsColor) {
           results.push({ imageId, success: true, skipped: true });
@@ -131,8 +136,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           // Update cache flags
           await upsertCachedImage({
             ...image,
-            hasClipEmbedding: clipEmbedding ? true : image.hasClipEmbedding,
-            hasColorEmbedding: colorInfo ? true : image.hasColorEmbedding,
+            hasClipEmbedding: Boolean(clipEmbedding) || hasStoredClip || Boolean(image.hasClipEmbedding),
+            hasColorEmbedding: Boolean(colorInfo) || hasStoredColor || Boolean(image.hasColorEmbedding),
             dominantColors: colorInfo?.dominantColors ?? image.dominantColors,
             averageColor: colorInfo?.averageColor ?? image.averageColor,
           });

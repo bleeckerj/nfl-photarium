@@ -280,6 +280,7 @@ export function useGalleryFilters({
       const img = image as CloudflareImage;
       if (embeddingFilter === 'missing-clip') return !img.hasClipEmbedding;
       if (embeddingFilter === 'missing-color') return !img.hasColorEmbedding;
+      if (embeddingFilter === 'missing-both') return !img.hasClipEmbedding && !img.hasColorEmbedding;
       return !img.hasClipEmbedding || !img.hasColorEmbedding;
     });
   }, [comfyFilteredImages, embeddingFilter]);

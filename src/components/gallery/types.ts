@@ -58,9 +58,9 @@ export interface ImageGalleryRef {
 export type ViewMode = 'grid' | 'list';
 export type GridSize = 'small' | 'medium' | 'large' | 'xlarge';
 export type BulkFolderMode = 'existing' | 'new';
-export type BulkTagsMode = 'replace' | 'append';
+export type BulkTagsMode = 'replace' | 'append' | 'ai';
 export type BulkDisplayNameMode = 'custom' | 'auto' | 'clear' | 'ai';
-export type EmbeddingFilter = 'none' | 'missing-clip' | 'missing-color' | 'missing-any';
+export type EmbeddingFilter = 'none' | 'missing-clip' | 'missing-color' | 'missing-any' | 'missing-both';
 export type AspectRatioClass = 'horizontal' | 'vertical' | 'square';
 
 export interface DateFilter {

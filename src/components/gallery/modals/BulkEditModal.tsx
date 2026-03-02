@@ -244,18 +244,32 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
                   />
                   Append
                 </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="bulk-tags-mode"
+                    checked={tagsMode === 'ai'}
+                    onChange={() => setTagsMode('ai')}
+                    className="h-3 w-3"
+                  />
+                  AI (generate)
+                </label>
               </div>
-              <textarea
-                value={tagsInput}
-                onChange={(e) => setTagsInput(e.target.value)}
-                className="w-full border border-gray-300 rounded px-3 py-2"
-                placeholder="Comma-separated tags"
-                rows={2}
-              />
+              {tagsMode !== 'ai' && (
+                <textarea
+                  value={tagsInput}
+                  onChange={(e) => setTagsInput(e.target.value)}
+                  className="w-full border border-gray-300 rounded px-3 py-2"
+                  placeholder="Comma-separated tags"
+                  rows={2}
+                />
+              )}
               <p className="text-[0.85em] text-gray-500">
                 {tagsMode === 'replace'
                   ? 'Replace tags with this list (empty clears tags).'
-                  : 'Append tags to each image (empty keeps existing tags).'}
+                  : tagsMode === 'append'
+                    ? 'Append tags to each image (empty keeps existing tags).'
+                    : 'Generate semantic tags per image using AI and replace existing tags.'}
               </p>
             </div>
           )}

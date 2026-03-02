@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import sharp from 'sharp';
 import { POST } from '@/app/api/upload/external/route';
 import * as duplicateDetector from '@/server/duplicateDetector';
 
@@ -339,4 +340,70 @@ describe('POST /api/upload/external', () => {
     expect(response.status).toBe(400);
     expect(payload.error).toMatch(/specific namespace is required/i);
   });
+
+  it('preemptively rescales oversized dimensions before Cloudflare upload', async () => {
+    process.env.CLOUDFLARE_ACCOUNT_ID = 'acct';
+    process.env.CLOUDFLARE_API_TOKEN = 'token';
+
+    let uploadedWidth = 0;
+    let uploadedHeight = 0;
+    let uploadedMetadata: Record<string, unknown> | undefined;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      if (typeof url === 'string' && url.endsWith('/images/v1') && init?.method === 'POST') {
+        const body = init.body as FormData;
+        const uploadedFile = body.get('file') as Blob;
+        const metadataRaw = body.get('metadata');
+
+        uploadedMetadata = metadataRaw ? JSON.parse(String(metadataRaw)) : undefined;
+        const uploadedBuffer = Buffer.from(await uploadedFile.arrayBuffer());
+        const uploadedImageMeta = await sharp(uploadedBuffer).metadata();
+        uploadedWidth = uploadedImageMeta.width ?? 0;
+        uploadedHeight = uploadedImageMeta.height ?? 0;
+
+        return new Response(
+          JSON.stringify({
+            result: {
+              id: 'resized-123',
+              filename: 'wide.webp',
+              uploaded: '2026-02-01T00:00:00.000Z',
+              variants: ['https://imagedelivery.net/hash/resized-123/public'],
+              images: [],
+            },
+          }),
+          { status: 200 }
+        );
+      }
+
+      return new Response(JSON.stringify({ result: { images: [] } }), { status: 200 });
+    });
+
+    const seed = Date.now() % 255;
+    const wideImage = await sharp({
+      create: {
+        width: 16364,
+        height: 3628,
+        channels: 3,
+        background: { r: seed, g: (seed * 3) % 255, b: (seed * 7) % 255 },
+      },
+    })
+      .png()
+      .toBuffer();
+
+    const file = new File([new Uint8Array(wideImage)], `wide-${Date.now()}.png`, { type: 'image/png' });
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('namespace', 'ingest');
+
+    const response = await POST(createRequest(formData));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.id).toBe('resized-123');
+    expect(uploadedWidth).toBeLessThanOrEqual(12000);
+    expect(uploadedHeight).toBeGreaterThan(0);
+    expect(uploadedWidth * uploadedHeight).toBeLessThanOrEqual(100_000_000);
+    expect((uploadedMetadata?.uploadNormalization as { reasons?: string[] } | undefined)?.reasons).toContain('max-dimension');
+    expect((payload.uploadNormalization as { reasons?: string[] } | undefined)?.reasons).toContain('max-dimension');
+  }, 20_000);
 });

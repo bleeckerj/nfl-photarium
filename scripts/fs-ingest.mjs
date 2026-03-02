@@ -253,6 +253,14 @@ function checkpointHashKey({ namespace, kind, contentHash }) {
   return `${namespace}\n${kind}\n${contentHash}`;
 }
 
+function normalizeRelativePath(relPath) {
+  return String(relPath || "").split(path.sep).join("/");
+}
+
+function checkpointEntryKey({ rootDir, namespace, relPath }) {
+  return `${stablePathKey(rootDir, namespace)}\n${normalizeRelativePath(relPath)}`;
+}
+
 async function loadCheckpoint(checkpointPath) {
   try {
     const raw = await fs.readFile(checkpointPath, "utf8");
@@ -519,10 +527,15 @@ async function backfillHashCacheOnly({
   await runWithConcurrency(files, opts.concurrency, async (item, index) => {
     const filePath = item.path;
     const relPath = path.relative(opts.root, filePath);
+    const pathKey = checkpointEntryKey({
+      rootDir: opts.root,
+      namespace: opts.namespace,
+      relPath,
+    });
     const prefix = `[${index + 1}/${counts.total}] ${item.kind.toUpperCase()}`;
     scanned += 1;
 
-    const existingPathEntry = checkpoint.entries?.[relPath];
+    const existingPathEntry = checkpoint.entries?.[pathKey];
     const hasMatchingPathCache =
       !existingPathEntry ||
       existingPathEntry.status !== "uploaded" ||
@@ -557,7 +570,7 @@ async function backfillHashCacheOnly({
       });
       const existingHashEntry = checkpoint.hashEntries?.[hashKey];
 
-      checkpoint.entries[relPath] = {
+      checkpoint.entries[pathKey] = {
         status: "uploaded",
         kind: item.kind,
         namespace: opts.namespace,
@@ -619,7 +632,7 @@ async function backfillHashCacheOnly({
     if (
       existingPathEntry.contentHash !== contentHash
     ) {
-      checkpoint.entries[relPath] = {
+      checkpoint.entries[pathKey] = {
         ...existingPathEntry,
         contentHash,
       };
@@ -736,11 +749,16 @@ async function main() {
   await runWithConcurrency(files, opts.concurrency, async (item, index) => {
     const filePath = item.path;
     const relPath = path.relative(opts.root, filePath);
+    const pathKey = checkpointEntryKey({
+      rootDir: opts.root,
+      namespace: opts.namespace,
+      relPath,
+    });
     const relDir = path.dirname(relPath).split(path.sep).join("/");
     const filename = path.basename(filePath);
     const fileStat = await fs.stat(filePath);
     const signature = fileSignatureFromStat(fileStat);
-    const cached = checkpoint.entries?.[relPath];
+    const cached = checkpoint.entries?.[pathKey];
     const prefix = `[${index + 1}/${counts.total}] ${item.kind.toUpperCase()}`;
     if (
       cached &&
@@ -812,7 +830,7 @@ async function main() {
       ) {
         counts.skipped += 1;
         counts.skippedCached += 1;
-        checkpoint.entries[relPath] = {
+        checkpoint.entries[pathKey] = {
           status: "uploaded",
           kind: item.kind,
           namespace: opts.namespace,
@@ -907,7 +925,7 @@ async function main() {
     if (outcome.ok) {
       counts.uploaded += 1;
       const id = outcome.payload?.id || outcome.payload?.result?.id || "n/a";
-      checkpoint.entries[relPath] = {
+      checkpoint.entries[pathKey] = {
         status: "uploaded",
         kind: item.kind,
         namespace: opts.namespace,
@@ -944,7 +962,7 @@ async function main() {
     ) {
       counts.skipped += 1;
       const duplicateId = outcome.payload.duplicates.find((d) => d && typeof d.id === "string")?.id || "duplicate";
-      checkpoint.entries[relPath] = {
+      checkpoint.entries[pathKey] = {
         status: "uploaded",
         kind: item.kind,
         namespace: opts.namespace,

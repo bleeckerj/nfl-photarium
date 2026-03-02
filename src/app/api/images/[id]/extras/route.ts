@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cleanString } from '@/utils/cloudflareMetadata';
 import { getImageExtrasRecord, patchImageExtrasRecord } from '@/server/imageExtras';
+import type { DngIngestRecord, ImageExifRecord, RawSourceReference } from '@/server/imageExtras';
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
 
 export async function GET(
   _request: NextRequest,
@@ -39,7 +44,13 @@ export async function PATCH(
       }
     }
 
-    const patch: { description?: string; altText?: string } = {};
+    const patch: {
+      description?: string;
+      altText?: string;
+      rawSource?: RawSourceReference;
+      exif?: ImageExifRecord;
+      dngIngest?: DngIngestRecord;
+    } = {};
 
     if (Object.prototype.hasOwnProperty.call(body ?? {}, 'description')) {
       const raw = body?.description;
@@ -56,6 +67,33 @@ export async function PATCH(
         patch.altText = undefined;
       } else if (typeof raw === 'string') {
         patch.altText = cleanString(raw);
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body ?? {}, 'rawSource')) {
+      const raw = body?.rawSource;
+      if (raw === null) {
+        patch.rawSource = undefined;
+      } else if (isPlainObject(raw)) {
+        patch.rawSource = raw as RawSourceReference;
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body ?? {}, 'exif')) {
+      const raw = body?.exif;
+      if (raw === null) {
+        patch.exif = undefined;
+      } else if (isPlainObject(raw)) {
+        patch.exif = raw as ImageExifRecord;
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body ?? {}, 'dngIngest')) {
+      const raw = body?.dngIngest;
+      if (raw === null) {
+        patch.dngIngest = undefined;
+      } else if (isPlainObject(raw)) {
+        patch.dngIngest = raw as DngIngestRecord;
       }
     }
 

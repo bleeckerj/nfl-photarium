@@ -6,7 +6,7 @@ import { upsertCachedImage, type CachedCloudflareImage } from '@/server/cloudfla
 export type AutoEmbeddingsStatus = {
   enabled: boolean;
   queued: boolean;
-  reason?: 'disabled' | 'redis-unavailable' | 'missing-variants' | 'unknown';
+  reason?: 'disabled' | 'redis-unavailable' | 'missing-variants' | 'local-provider-disabled' | 'unknown';
 };
 
 const isTruthyDisabled = (value: string) => {
@@ -16,6 +16,15 @@ const isTruthyDisabled = (value: string) => {
 
 export const isAutoEmbedOnUploadEnabled = (): boolean => {
   const raw = process.env.AUTO_EMBED_ON_UPLOAD;
+  if (raw === undefined) return true;
+  return !isTruthyDisabled(raw);
+};
+
+const isLocalEmbeddingProvider = () =>
+  (process.env.EMBEDDING_PROVIDER || 'huggingface').trim().toLowerCase() === 'local';
+
+const isAutoEmbedAllowedForLocalProvider = () => {
+  const raw = process.env.AUTO_EMBED_ON_UPLOAD_LOCAL_PROVIDER;
   if (raw === undefined) return true;
   return !isTruthyDisabled(raw);
 };
@@ -67,6 +76,37 @@ async function generateAndStoreEmbeddings(image: CachedCloudflareImage): Promise
   });
 }
 
+const MAX_AUTO_EMBED_QUEUE = Math.max(
+  1,
+  Number(process.env.AUTO_EMBED_QUEUE_MAX ?? 200)
+);
+const AUTO_EMBED_CONCURRENCY = Math.max(
+  1,
+  Number(process.env.AUTO_EMBED_CONCURRENCY ?? 1)
+);
+
+const pendingQueue: CachedCloudflareImage[] = [];
+let activeWorkers = 0;
+
+const drainAutoEmbedQueue = () => {
+  while (activeWorkers < AUTO_EMBED_CONCURRENCY && pendingQueue.length > 0) {
+    const next = pendingQueue.shift();
+    if (!next) break;
+    activeWorkers += 1;
+    void generateAndStoreEmbeddings(next)
+      .catch((error) => {
+        console.warn('[autoEmbeddings] Failed to generate embeddings', {
+          imageId: next.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .finally(() => {
+        activeWorkers = Math.max(0, activeWorkers - 1);
+        drainAutoEmbedQueue();
+      });
+  }
+};
+
 /**
  * Best-effort: queues embedding generation and never throws.
  * Designed to be safe to call during uploads.
@@ -76,6 +116,10 @@ export async function queueAutoEmbeddingsForImage(
 ): Promise<AutoEmbeddingsStatus> {
   if (!isAutoEmbedOnUploadEnabled()) {
     return { enabled: false, queued: false, reason: 'disabled' };
+  }
+
+  if (isLocalEmbeddingProvider() && !isAutoEmbedAllowedForLocalProvider()) {
+    return { enabled: false, queued: false, reason: 'local-provider-disabled' };
   }
 
   if (!image.variants?.length) {
@@ -88,13 +132,17 @@ export async function queueAutoEmbeddingsForImage(
       return { enabled: true, queued: false, reason: 'redis-unavailable' };
     }
 
-    // Fire-and-forget; do not block upload response.
-    void generateAndStoreEmbeddings(image).catch((error) => {
-      console.warn('[autoEmbeddings] Failed to generate embeddings', {
+    if (pendingQueue.length >= MAX_AUTO_EMBED_QUEUE) {
+      console.warn('[autoEmbeddings] Queue at capacity; dropping auto-embed request', {
         imageId: image.id,
-        error: error instanceof Error ? error.message : String(error),
+        queueSize: pendingQueue.length,
+        maxQueue: MAX_AUTO_EMBED_QUEUE,
       });
-    });
+      return { enabled: true, queued: false, reason: 'unknown' };
+    }
+
+    pendingQueue.push(image);
+    drainAutoEmbedQueue();
 
     return { enabled: true, queued: true };
   } catch {

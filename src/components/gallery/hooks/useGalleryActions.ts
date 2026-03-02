@@ -9,6 +9,7 @@
 import { useState, useCallback } from 'react';
 import type { CloudflareImage } from '../types';
 import { truncateMiddle } from '../utils';
+import { setEmbeddingPendingEntry } from '@/utils/embeddingPending';
 
 interface UseGalleryActionsOptions {
   images: CloudflareImage[];
@@ -48,6 +49,8 @@ interface UseGalleryActionsReturn {
   applyBulkUpdates: (options: BulkUpdateOptions) => Promise<void>;
   deleteSelectedImages: () => Promise<void>;
   generateEmbeddingsForSelected: () => Promise<void>;
+  refreshEmbeddingsForSelected: () => Promise<void>;
+  queueEmbeddingsForSelected: () => Promise<void>;
   
   // Animation
   bulkAnimateLoading: boolean;
@@ -61,7 +64,7 @@ interface BulkUpdateOptions {
   folderMode: 'existing' | 'new';
   folderInput: string;
   applyTags: boolean;
-  tagsMode: 'replace' | 'append';
+  tagsMode: 'replace' | 'append' | 'ai';
   tagsInput: string;
   applyDisplayName: boolean;
   displayNameMode: 'custom' | 'auto' | 'clear' | 'ai';
@@ -291,7 +294,7 @@ export function useGalleryActions({
 
     const hasTagChanges =
       options.applyTags &&
-      (options.tagsMode === 'replace' || parsedBulkTags.length > 0);
+      (options.tagsMode === 'replace' || options.tagsMode === 'ai' || parsedBulkTags.length > 0);
     const hasDisplayNameChanges = options.applyDisplayName;
     const hasNamespaceChanges = options.applyNamespace;
 
@@ -303,9 +306,13 @@ export function useGalleryActions({
     setBulkUpdating(true);
     try {
       const wantsAiDisplayName = options.applyDisplayName && options.displayNameMode === 'ai';
+      const wantsAiTags = options.applyTags && options.tagsMode === 'ai';
       const generatedDisplayNames = new Map<string, string>();
+      const generatedTags = new Map<string, string[]>();
       let aiSuccessCount = 0;
       let aiFailureCount = 0;
+      let aiTagSuccessCount = 0;
+      let aiTagFailureCount = 0;
       const familyFields: string[] = [];
       if (options.applyFolder) familyFields.push('folder');
       if (options.applyNamespace) familyFields.push('namespace');
@@ -370,6 +377,42 @@ export function useGalleryActions({
             if (options.applyTags) {
               if (options.tagsMode === 'replace') {
                 payload.tags = options.tagsInput;
+              } else if (options.tagsMode === 'ai') {
+                try {
+                  const target = imageById.get(id);
+                  const remoteUrl = target?.variants?.[0];
+                  if (!remoteUrl) {
+                    aiTagFailureCount += 1;
+                  } else {
+                    const form = new FormData();
+                    form.append('remoteUrl', `${remoteUrl}?format=webp`);
+                    if (target?.filename) form.append('filename', target.filename);
+                    if (target?.folder) form.append('folder', target.folder);
+                    if (target?.tags?.length) form.append('tags', target.tags.join(','));
+                    form.append('includeTags', 'true');
+                    form.append('skipDisplayName', 'true');
+                    form.append('tagCount', '4');
+
+                    const tagResponse = await fetch('/api/display-name/suggest', {
+                      method: 'POST',
+                      body: form,
+                    });
+                    const tagPayload = await tagResponse.json();
+                    const suggestedTags = Array.isArray(tagPayload?.tags)
+                      ? tagPayload.tags.filter((tag: unknown): tag is string => typeof tag === 'string' && tag.trim().length > 0)
+                      : [];
+                    if (tagResponse.ok && suggestedTags.length > 0) {
+                      payload.tags = suggestedTags;
+                      generatedTags.set(id, suggestedTags);
+                      aiTagSuccessCount += 1;
+                    } else {
+                      aiTagFailureCount += 1;
+                    }
+                  }
+                } catch (error) {
+                  console.error('Failed to generate tags', error);
+                  aiTagFailureCount += 1;
+                }
               } else if (parsedBulkTags.length > 0) {
                 const target = imageById.get(id);
                 const existingTags = Array.isArray(target?.tags) ? target.tags : [];
@@ -437,6 +480,11 @@ export function useGalleryActions({
           if (options.applyTags && isSelected) {
             if (options.tagsMode === 'replace') {
               updatedTags = parsedBulkTags;
+            } else if (options.tagsMode === 'ai') {
+              const aiTags = generatedTags.get(img.id);
+              if (aiTags) {
+                updatedTags = aiTags;
+              }
             } else if (parsedBulkTags.length > 0) {
               const merged = new Map<string, string>();
               (img.tags ?? []).forEach(tag => merged.set(tag.toLowerCase(), tag));
@@ -481,6 +529,16 @@ export function useGalleryActions({
           toast.push(`Generated display names for ${aiSuccessCount}/${total} images`);
         } else {
           toast.push('Display names generated');
+        }
+      }
+      if (wantsAiTags) {
+        const total = selectedImageIds.size;
+        if (aiTagSuccessCount === 0) {
+          toast.push('No tags generated');
+        } else if (aiTagSuccessCount < total || aiTagFailureCount > 0) {
+          toast.push(`Generated tags for ${aiTagSuccessCount}/${total} images`);
+        } else {
+          toast.push('AI tags generated');
         }
       }
       toast.push('Images updated');
@@ -530,7 +588,7 @@ export function useGalleryActions({
   }, [selectedImageIds, setImages, toast, clearSelection, setBulkSelectionMode]);
 
   // Generate embeddings for selected
-  const generateEmbeddingsForSelected = useCallback(async () => {
+  const runBatchEmbeddingsForSelected = useCallback(async ({ force }: { force: boolean }) => {
     const selectedCount = selectedImageIds.size;
     if (!selectedCount) {
       toast.push('Select images to generate embeddings');
@@ -540,10 +598,18 @@ export function useGalleryActions({
     setBulkEmbeddingGenerating(true);
     try {
       const imageIds = Array.from(selectedImageIds);
+      for (const imageId of imageIds) {
+        setEmbeddingPendingEntry(imageId, {
+          status: 'embedding',
+          clip: true,
+          color: true,
+          updatedAt: new Date().toISOString(),
+        });
+      }
       const response = await fetch('/api/images/embeddings/batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageIds }),
+        body: JSON.stringify({ imageIds, force }),
       });
 
       if (!response.ok) {
@@ -557,24 +623,136 @@ export function useGalleryActions({
         if (selectedImageIds.has(img.id)) {
           const imgResult = result.results?.find((r: { imageId: string }) => r.imageId === img.id);
           if (imgResult?.success && !imgResult?.skipped) {
+            setEmbeddingPendingEntry(img.id, undefined);
             return {
               ...img,
               hasClipEmbedding: imgResult.clipGenerated || img.hasClipEmbedding,
               hasColorEmbedding: imgResult.colorGenerated || img.hasColorEmbedding,
             };
           }
+          if (imgResult?.success && imgResult?.skipped) {
+            setEmbeddingPendingEntry(img.id, undefined);
+          } else if (imgResult && !imgResult.success) {
+            setEmbeddingPendingEntry(img.id, {
+              status: 'error',
+              clip: true,
+              color: true,
+              error: typeof imgResult.error === 'string' ? imgResult.error : 'Embedding failed',
+              updatedAt: new Date().toISOString(),
+            });
+          }
         }
         return img;
       }));
 
-      toast.push(`Generated embeddings: ${result.success} success, ${result.skipped} skipped, ${result.errors} errors`);
+      toast.push(
+        force
+          ? `Refreshed embeddings: ${result.success} success, ${result.skipped} skipped, ${result.errors} errors`
+          : `Generated embeddings: ${result.success} success, ${result.skipped} skipped, ${result.errors} errors`
+      );
     } catch (error) {
       console.error('Batch embedding generation failed', error);
+      for (const imageId of selectedImageIds) {
+        setEmbeddingPendingEntry(imageId, {
+          status: 'error',
+          clip: true,
+          color: true,
+          error: error instanceof Error ? error.message : 'Embedding generation failed',
+          updatedAt: new Date().toISOString(),
+        });
+      }
       toast.push(error instanceof Error ? error.message : 'Embedding generation failed');
     } finally {
       setBulkEmbeddingGenerating(false);
     }
   }, [selectedImageIds, setImages, toast]);
+
+  const generateEmbeddingsForSelected = useCallback(async () => {
+    await runBatchEmbeddingsForSelected({ force: false });
+  }, [runBatchEmbeddingsForSelected]);
+
+  const refreshEmbeddingsForSelected = useCallback(async () => {
+    await runBatchEmbeddingsForSelected({ force: true });
+  }, [runBatchEmbeddingsForSelected]);
+
+  const queueEmbeddingsForSelected = useCallback(async () => {
+    const selectedCount = selectedImageIds.size;
+    if (!selectedCount) {
+      toast.push('Select images to queue embeddings');
+      return;
+    }
+
+    const imageIds = Array.from(selectedImageIds);
+    for (const imageId of imageIds) {
+      setEmbeddingPendingEntry(imageId, {
+        status: 'queued',
+        clip: true,
+        color: true,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    toast.push(`Queued ${imageIds.length} images for embedding generation`);
+
+    void (async () => {
+      const chunkSize = 20;
+      for (let index = 0; index < imageIds.length; index += chunkSize) {
+        const chunk = imageIds.slice(index, index + chunkSize);
+        try {
+          chunk.forEach((imageId) => {
+            setEmbeddingPendingEntry(imageId, {
+              status: 'embedding',
+              clip: true,
+              color: true,
+              updatedAt: new Date().toISOString(),
+            });
+          });
+          const response = await fetch('/api/images/embeddings/batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageIds: chunk, force: false }),
+          });
+          const result = await response.json();
+          if (!response.ok) {
+            throw new Error(result.error || 'Failed to process embedding queue chunk');
+          }
+          setImages((prev) =>
+            prev.map((img) => {
+              const item = result.results?.find((r: { imageId: string }) => r.imageId === img.id);
+              if (!item) return img;
+              if (item.success) {
+                setEmbeddingPendingEntry(img.id, undefined);
+                return {
+                  ...img,
+                  hasClipEmbedding: item.clipGenerated || img.hasClipEmbedding,
+                  hasColorEmbedding: item.colorGenerated || img.hasColorEmbedding,
+                };
+              }
+              setEmbeddingPendingEntry(img.id, {
+                status: 'error',
+                clip: true,
+                color: true,
+                error: typeof item.error === 'string' ? item.error : 'Embedding failed',
+                updatedAt: new Date().toISOString(),
+              });
+              return img;
+            })
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Embedding queue failed';
+          chunk.forEach((imageId) => {
+            setEmbeddingPendingEntry(imageId, {
+              status: 'error',
+              clip: true,
+              color: true,
+              error: message,
+              updatedAt: new Date().toISOString(),
+            });
+          });
+        }
+      }
+      await fetchImages({ silent: true });
+    })();
+  }, [selectedImageIds, toast, setImages, fetchImages]);
 
   // Create bulk animation
   const createBulkAnimation = useCallback(async (options: AnimationOptions) => {
@@ -640,6 +818,8 @@ export function useGalleryActions({
     applyBulkUpdates,
     deleteSelectedImages,
     generateEmbeddingsForSelected,
+    refreshEmbeddingsForSelected,
+    queueEmbeddingsForSelected,
     bulkAnimateLoading,
     bulkAnimateError,
     setBulkAnimateError,

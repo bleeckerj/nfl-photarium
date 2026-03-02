@@ -23,8 +23,8 @@ interface GalleryCommandBarProps {
   currentPage: number;
   totalPages: number;
   onGoToPage: (page: number) => void;
-  embeddingFilter: 'none' | 'missing-clip' | 'missing-color' | 'missing-any';
-  onSetEmbeddingFilter: (filter: 'none' | 'missing-clip' | 'missing-color' | 'missing-any') => void;
+  embeddingFilter: 'none' | 'missing-clip' | 'missing-color' | 'missing-any' | 'missing-both';
+  onSetEmbeddingFilter: (filter: 'none' | 'missing-clip' | 'missing-color' | 'missing-any' | 'missing-both') => void;
   onShowLastUploaded?: () => { dateKey: string; count: number } | null;
   showComfyOnly?: boolean;
   onSetComfyOnly?: (value: boolean) => void;
@@ -48,7 +48,8 @@ const baseHelp = [
   '- show only tags <a,b>: Hide every tag except the listed ones',
   '- parents only: Only show images that have variants',
   '- show all: Show every image, including solos',
-  '- show missing clip/color/embeddings: Filter to images without embeddings',
+  '- show missing clip/color/embeddings: Filter to images missing one or more embeddings',
+  '- show no embeddings: Filter to images missing both CLIP and color embeddings',
   '- clear embedding filter: Remove embedding filter',
   '- last uploaded: Filter to the latest upload day',
   '- show only comfy: Filter to images with detected ComfyUI workflow metadata',
@@ -336,7 +337,14 @@ export default function GalleryCommandBar({
       return;
     }
 
-    if (/^show\s+(missing\s+)?(embeddings?|any)$/i.test(trimmed) || /^(missing|no)\s+embeddings?$/i.test(trimmed)) {
+    if (/^show\s+no\s+embeddings?$/i.test(trimmed) || /^no\s+embeddings?$/i.test(trimmed)) {
+      onSetEmbeddingFilter('missing-both');
+      toast.push('Filtering: no embeddings');
+      setStatusLine('Showing images with no CLIP and no color embeddings.');
+      return;
+    }
+
+    if (/^show\s+(missing\s+)?(embeddings?|any)$/i.test(trimmed) || /^missing\s+embeddings?$/i.test(trimmed)) {
       onSetEmbeddingFilter('missing-any');
       toast.push('Filtering: missing any embedding');
       setStatusLine('Showing images missing CLIP or color embeddings.');

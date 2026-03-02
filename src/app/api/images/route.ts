@@ -3,6 +3,76 @@ import { getCachedImages, getCacheStats } from '@/server/cloudflareImageCache';
 import { batchGetAspectMetadata, batchGetColorMetadata, isVectorSearchAvailable } from '@/server/vectorSearch';
 import { listVideoAssetRecordsWithSync } from '@/server/videoCatalogStorage';
 
+type ListableImage = {
+  id: string;
+  assetType?: 'image' | 'video';
+  filename: string;
+  displayName?: string;
+  uploaded: string;
+  variants: string[];
+  size?: number;
+  folder?: string;
+  tags?: string[];
+  aspectRatio?: string;
+  dimensions?: { width: number; height: number };
+  altTag?: string;
+  parentId?: string;
+  linkedAssetId?: string;
+  namespace?: string;
+  generatedBy?: string;
+  comfyMetadataDetected?: boolean;
+  comfyMetadataSource?: string;
+  videoStatus?: 'pending' | 'ready' | 'error';
+  videoDurationSeconds?: number;
+  videoPlaybackUrl?: string;
+  videoHlsUrl?: string;
+  videoThumbnailUrl?: string;
+  videoPreviewUrl?: string;
+  hasClipEmbedding?: boolean;
+  hasColorEmbedding?: boolean;
+  dominantColors?: string[];
+  averageColor?: string;
+};
+
+function toListableImage(image: Record<string, unknown>): ListableImage {
+  const rawDimensions = image.dimensions as { width?: unknown; height?: unknown } | undefined;
+  const width = typeof rawDimensions?.width === 'number' ? rawDimensions.width : undefined;
+  const height = typeof rawDimensions?.height === 'number' ? rawDimensions.height : undefined;
+  const dimensions = width && height ? { width, height } : undefined;
+
+  // Intentionally omit heavy fields like EXIF from the gallery list payload.
+  return {
+    id: String(image.id ?? ''),
+    assetType: image.assetType as 'image' | 'video' | undefined,
+    filename: typeof image.filename === 'string' ? image.filename : '',
+    displayName: typeof image.displayName === 'string' ? image.displayName : undefined,
+    uploaded: typeof image.uploaded === 'string' ? image.uploaded : '',
+    variants: Array.isArray(image.variants) ? (image.variants as string[]) : [],
+    size: typeof image.size === 'number' ? image.size : undefined,
+    folder: typeof image.folder === 'string' ? image.folder : undefined,
+    tags: Array.isArray(image.tags) ? (image.tags as string[]) : undefined,
+    aspectRatio: typeof image.aspectRatio === 'string' ? image.aspectRatio : undefined,
+    dimensions,
+    altTag: typeof image.altTag === 'string' ? image.altTag : undefined,
+    parentId: typeof image.parentId === 'string' ? image.parentId : undefined,
+    linkedAssetId: typeof image.linkedAssetId === 'string' ? image.linkedAssetId : undefined,
+    namespace: typeof image.namespace === 'string' ? image.namespace : undefined,
+    generatedBy: typeof image.generatedBy === 'string' ? image.generatedBy : undefined,
+    comfyMetadataDetected: Boolean(image.comfyMetadataDetected),
+    comfyMetadataSource: typeof image.comfyMetadataSource === 'string' ? image.comfyMetadataSource : undefined,
+    videoStatus: image.videoStatus as 'pending' | 'ready' | 'error' | undefined,
+    videoDurationSeconds: typeof image.videoDurationSeconds === 'number' ? image.videoDurationSeconds : undefined,
+    videoPlaybackUrl: typeof image.videoPlaybackUrl === 'string' ? image.videoPlaybackUrl : undefined,
+    videoHlsUrl: typeof image.videoHlsUrl === 'string' ? image.videoHlsUrl : undefined,
+    videoThumbnailUrl: typeof image.videoThumbnailUrl === 'string' ? image.videoThumbnailUrl : undefined,
+    videoPreviewUrl: typeof image.videoPreviewUrl === 'string' ? image.videoPreviewUrl : undefined,
+    hasClipEmbedding: typeof image.hasClipEmbedding === 'boolean' ? image.hasClipEmbedding : undefined,
+    hasColorEmbedding: typeof image.hasColorEmbedding === 'boolean' ? image.hasColorEmbedding : undefined,
+    dominantColors: Array.isArray(image.dominantColors) ? (image.dominantColors as string[]) : undefined,
+    averageColor: typeof image.averageColor === 'string' ? image.averageColor : undefined,
+  };
+}
+
 export async function GET(request: NextRequest) {
   const startedAt = performance.now();
   const mark = (value: number) => Number(value.toFixed(1));
@@ -158,7 +228,7 @@ export async function GET(request: NextRequest) {
     const cache = getCacheStats();
     timings.total = mark(performance.now() - startedAt);
     const response = NextResponse.json({
-      images: finalImages,
+      images: finalImages.map((image) => toListableImage(image as Record<string, unknown>)),
       cache,
       namespace: namespace ?? null,
       videoMeta,

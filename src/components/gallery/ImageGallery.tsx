@@ -262,6 +262,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       applyBulkUpdates,
       deleteSelectedImages,
       generateEmbeddingsForSelected,
+      refreshEmbeddingsForSelected,
+      queueEmbeddingsForSelected,
       bulkAnimateLoading,
       bulkAnimateError,
       setBulkAnimateError,
@@ -539,13 +541,31 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
               Bulk edit
             </button>
             <button
+              onClick={queueEmbeddingsForSelected}
+              className="px-2 py-1 border border-amber-300 text-amber-700 rounded-md hover:bg-amber-50 disabled:opacity-40 inline-flex items-center gap-1"
+              disabled={!selectedCount || bulkEmbeddingGenerating}
+              title="Queue selected images for embedding generation"
+            >
+              <Cpu className="h-3 w-3" />
+              Queue Embeddings
+            </button>
+            <button
               onClick={generateEmbeddingsForSelected}
               className="px-2 py-1 border border-green-300 text-green-700 rounded-md hover:bg-green-50 disabled:opacity-40 inline-flex items-center gap-1"
               disabled={!selectedCount || bulkEmbeddingGenerating}
               title="Generate CLIP and color embeddings for selected images"
             >
               <Cpu className="h-3 w-3" />
-              {bulkEmbeddingGenerating ? 'Generating…' : 'Embeddings'}
+              {bulkEmbeddingGenerating ? 'Generating…' : 'Generate Embeddings'}
+            </button>
+            <button
+              onClick={refreshEmbeddingsForSelected}
+              className="px-2 py-1 border border-emerald-300 text-emerald-700 rounded-md hover:bg-emerald-50 disabled:opacity-40 inline-flex items-center gap-1"
+              disabled={!selectedCount || bulkEmbeddingGenerating}
+              title="Force refresh CLIP and color embeddings for selected images"
+            >
+              <Cpu className="h-3 w-3" />
+              Refresh Embeddings
             </button>
             <button
               onClick={deleteSelectedImages}
@@ -684,11 +704,20 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             <label className="flex items-center gap-1">
               <input
                 type="checkbox"
+                checked={embeddingFilter === 'missing-both'}
+                onChange={(e) => setEmbeddingFilter(e.target.checked ? 'missing-both' : 'none')}
+                className="h-3 w-3"
+              />
+              no embeddings
+            </label>
+            <label className="flex items-center gap-1">
+              <input
+                type="checkbox"
                 checked={showComfyOnly}
                 onChange={(e) => setShowComfyOnly(e.target.checked)}
                 className="h-3 w-3"
               />
-              comfy
+              comfyui
             </label>
             <label className="flex items-center gap-1">
               <input

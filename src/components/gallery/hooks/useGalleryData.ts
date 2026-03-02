@@ -61,6 +61,7 @@ export function useGalleryData({ namespace, refreshTrigger }: UseGalleryDataOpti
       if (forceRefresh) {
         params.set('refresh', '1');
       }
+      params.set('includeVectorMeta', '1');
       if (namespace === '') {
         params.set('namespace', '__none__');
       } else if (namespace === '__all__') {

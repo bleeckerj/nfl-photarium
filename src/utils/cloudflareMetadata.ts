@@ -24,6 +24,20 @@ export type CloudflareMetadata = {
   generatedBy?: string;
   comfyMetadataDetected?: boolean;
   comfyMetadataSource?: string;
+  uploadNormalization?: {
+    reasons?: string[];
+    originalBytes?: number;
+    finalBytes?: number;
+    maxBytes?: number;
+    maxDimension?: number;
+    maxArea?: number;
+    originalType?: string;
+    finalType?: string;
+    originalWidth?: number;
+    originalHeight?: number;
+    finalWidth?: number;
+    finalHeight?: number;
+  };
   uploadedAt?: string;
   updatedAt?: string;
   variationSort?: number;
@@ -49,6 +63,7 @@ export const CLOUDFLARE_METADATA_FIELDS = [
   'generatedBy',
   'comfyMetadataDetected',
   'comfyMetadataSource',
+  'uploadNormalization',
   'variationSort',
   'updatedAt'
 ] as const;
@@ -164,6 +179,7 @@ export function enforceCloudflareMetadataLimit(
     'generatedBy',
     'comfyMetadataDetected',
     'comfyMetadataSource',
+    'uploadNormalization',
     'uploadedAt',
     'type',
     'size',

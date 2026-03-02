@@ -24,6 +24,8 @@ import { ingestComfyWorkflowForImage } from '@/server/comfy/workflowIngestion';
 export { sanitizeFilename, MAX_FILENAME_LENGTH } from '@/utils/filename';
 
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+export const CLOUDFLARE_MAX_IMAGE_DIMENSION = 12_000;
+export const CLOUDFLARE_MAX_IMAGE_AREA = 100_000_000;
 export const SUPPORTED_IMAGE_TYPES = new Set([
   'image/jpeg',
   'image/jpg',
@@ -63,6 +65,7 @@ export type UploadSuccess = {
   linkedAssetId?: string;
   webpVariantId?: string;
   autoEmbeddings?: AutoEmbeddingsStatus;
+  uploadNormalization?: UploadNormalizationMetadata;
 };
 
 export type UploadFailure = {
@@ -120,6 +123,76 @@ export type PreparedUploadPayload = {
   bytesBefore: number;
   bytesAfter: number;
   note?: string;
+  uploadNormalization?: UploadNormalizationMetadata;
+};
+
+type UploadNormalizationReason = 'max-bytes' | 'max-dimension' | 'max-area';
+
+export type UploadNormalizationMetadata = {
+  reasons: UploadNormalizationReason[];
+  originalBytes: number;
+  finalBytes: number;
+  maxBytes: number;
+  maxDimension: number;
+  maxArea: number;
+  originalType: string;
+  finalType: string;
+  originalWidth?: number;
+  originalHeight?: number;
+  finalWidth?: number;
+  finalHeight?: number;
+};
+
+const evaluateConstraintReasons = ({
+  bytes,
+  width,
+  height,
+  maxBytes,
+  maxDimension,
+  maxArea,
+}: {
+  bytes: number;
+  width?: number;
+  height?: number;
+  maxBytes: number;
+  maxDimension: number;
+  maxArea: number;
+}): UploadNormalizationReason[] => {
+  const reasons: UploadNormalizationReason[] = [];
+  if (bytes > maxBytes) {
+    reasons.push('max-bytes');
+  }
+  if (typeof width === 'number' && typeof height === 'number') {
+    if (width > maxDimension || height > maxDimension) {
+      reasons.push('max-dimension');
+    }
+    if (width * height > maxArea) {
+      reasons.push('max-area');
+    }
+  }
+  return reasons;
+};
+
+const describeReasons = (reasons: UploadNormalizationReason[]): string => {
+  const labels = reasons.map((reason) => {
+    if (reason === 'max-bytes') return 'byte limit';
+    if (reason === 'max-dimension') return 'dimension limit';
+    return 'pixel-area limit';
+  });
+  return labels.join(', ');
+};
+
+const resolveFitInsideDimensions = (
+  sourceWidth: number,
+  sourceHeight: number,
+  targetWidth: number,
+  targetHeight: number
+) => {
+  const scale = Math.min(targetWidth / sourceWidth, targetHeight / sourceHeight, 1);
+  return {
+    width: Math.max(1, Math.round(sourceWidth * scale)),
+    height: Math.max(1, Math.round(sourceHeight * scale)),
+  };
 };
 
 export async function prepareImageForUpload({
@@ -134,7 +207,31 @@ export async function prepareImageForUpload({
   maxBytes?: number;
 }): Promise<{ ok: true; data: PreparedUploadPayload } | { ok: false; error: string }> {
   const bytesBefore = buffer.byteLength;
-  if (bytesBefore <= maxBytes) {
+
+  if (!fileType.startsWith('image/')) {
+    return { ok: false, error: 'File must be an image' };
+  }
+
+  let metadata: sharp.Metadata | undefined;
+  try {
+    metadata = await sharp(buffer).metadata();
+  } catch {
+    metadata = undefined;
+  }
+
+  const sourceWidth = typeof metadata?.width === 'number' ? metadata.width : 0;
+  const sourceHeight = typeof metadata?.height === 'number' ? metadata.height : 0;
+  const canResize = Boolean(sourceWidth && sourceHeight);
+  const sourceReasons = evaluateConstraintReasons({
+    bytes: bytesBefore,
+    width: canResize ? sourceWidth : undefined,
+    height: canResize ? sourceHeight : undefined,
+    maxBytes,
+    maxDimension: CLOUDFLARE_MAX_IMAGE_DIMENSION,
+    maxArea: CLOUDFLARE_MAX_IMAGE_AREA,
+  });
+
+  if (sourceReasons.length === 0) {
     return {
       ok: true,
       data: {
@@ -148,36 +245,76 @@ export async function prepareImageForUpload({
     };
   }
 
-  if (!fileType.startsWith('image/')) {
-    return { ok: false, error: 'File must be an image' };
+  if (!canResize && sourceReasons.some((reason) => reason !== 'max-bytes')) {
+    return { ok: false, error: 'Unable to determine image dimensions for Cloudflare upload limits.' };
   }
 
-  const metadata = await sharp(buffer).metadata();
-  const sourceWidth = metadata.width ?? 0;
-  const sourceHeight = metadata.height ?? 0;
-  const canResize = Boolean(sourceWidth && sourceHeight);
-
-  const hasAlpha = metadata.hasAlpha === true;
+  const hasAlpha = metadata?.hasAlpha === true;
   const qualitySteps = [92, 88, 84, 80, 76, 72, 68, 64, 60];
-  const scaleSteps = canResize
-    ? [1, 0.96, 0.92, 0.88, 0.84, 0.8, 0.75, 0.7, 0.65, 0.6, 0.55, 0.5, 0.45, 0.4, 0.35, 0.3]
+  const sourceArea = canResize ? sourceWidth * sourceHeight : 0;
+  const scaleToRespectDimension = canResize
+    ? Math.min(1, CLOUDFLARE_MAX_IMAGE_DIMENSION / Math.max(sourceWidth, sourceHeight))
+    : 1;
+  const scaleToRespectArea = canResize && sourceArea > 0
+    ? Math.min(1, Math.sqrt(CLOUDFLARE_MAX_IMAGE_AREA / sourceArea))
+    : 1;
+  const requiredScale = Math.min(1, scaleToRespectDimension, scaleToRespectArea);
+  const rawScaleSteps = canResize
+    ? Array.from(new Set([
+        1,
+        0.96,
+        0.92,
+        0.88,
+        0.84,
+        0.8,
+        0.75,
+        0.7,
+        0.65,
+        0.6,
+        0.55,
+        0.5,
+        0.45,
+        0.4,
+        0.35,
+        0.3,
+        Number(requiredScale.toFixed(4)),
+        Number((requiredScale * 0.98).toFixed(4)),
+      ].filter((scale) => scale > 0 && scale <= 1))).sort((a, b) => b - a)
     : [1];
+  const requiresDimensionOrAreaDownscale = sourceReasons.includes('max-dimension') || sourceReasons.includes('max-area');
+  const scaleSteps = requiresDimensionOrAreaDownscale
+    ? rawScaleSteps.filter((scale) => scale <= requiredScale + 0.0005)
+    : rawScaleSteps;
   const minDimension = 320;
   const formatOrder = hasAlpha ? ['image/webp', 'image/jpeg'] : ['image/webp', 'image/jpeg'];
 
-  let smallestCandidate: { buffer: Buffer; type: string; quality: number; width: number; height: number } | null = null;
+  let smallestCandidate:
+    | {
+        buffer: Buffer;
+        type: string;
+        quality: number;
+        width?: number;
+        height?: number;
+        reasons: UploadNormalizationReason[];
+      }
+    | null = null;
 
   for (const scale of scaleSteps) {
-    const width = canResize ? Math.max(minDimension, Math.round(sourceWidth * scale)) : 0;
-    const height = canResize ? Math.max(minDimension, Math.round(sourceHeight * scale)) : 0;
-    const needsResize = canResize && (width !== sourceWidth || height !== sourceHeight);
+    const requestedWidth = canResize ? Math.max(minDimension, Math.round(sourceWidth * scale)) : 0;
+    const requestedHeight = canResize ? Math.max(minDimension, Math.round(sourceHeight * scale)) : 0;
+    const needsResize = canResize && (requestedWidth !== sourceWidth || requestedHeight !== sourceHeight);
+    const resizedDimensions = canResize
+      ? (needsResize
+          ? resolveFitInsideDimensions(sourceWidth, sourceHeight, requestedWidth, requestedHeight)
+          : { width: sourceWidth, height: sourceHeight })
+      : undefined;
 
     for (const quality of qualitySteps) {
-      const passing: Array<{ buffer: Buffer; type: string }> = [];
+      const passing: Array<{ buffer: Buffer; type: string; width?: number; height?: number }> = [];
       for (const nextType of formatOrder) {
         let pipeline = sharp(buffer).rotate();
         if (canResize && needsResize) {
-          pipeline = pipeline.resize(width, height, {
+          pipeline = pipeline.resize(requestedWidth, requestedHeight, {
             fit: 'inside',
             withoutEnlargement: true,
           });
@@ -190,20 +327,44 @@ export async function prepareImageForUpload({
                 .jpeg({ quality, mozjpeg: true, chromaSubsampling: '4:4:4' })
                 .toBuffer();
 
+        const encodedReasons = evaluateConstraintReasons({
+          bytes: encoded.byteLength,
+          width: resizedDimensions?.width,
+          height: resizedDimensions?.height,
+          maxBytes,
+          maxDimension: CLOUDFLARE_MAX_IMAGE_DIMENSION,
+          maxArea: CLOUDFLARE_MAX_IMAGE_AREA,
+        });
+
         if (!smallestCandidate || encoded.byteLength < smallestCandidate.buffer.byteLength) {
-          smallestCandidate = { buffer: encoded, type: nextType, quality, width, height };
+          smallestCandidate = {
+            buffer: encoded,
+            type: nextType,
+            quality,
+            width: resizedDimensions?.width,
+            height: resizedDimensions?.height,
+            reasons: encodedReasons,
+          };
         }
 
-        if (encoded.byteLength <= maxBytes) {
-          passing.push({ buffer: encoded, type: nextType });
+        if (encodedReasons.length === 0) {
+          passing.push({
+            buffer: encoded,
+            type: nextType,
+            width: resizedDimensions?.width,
+            height: resizedDimensions?.height,
+          });
         }
       }
 
       if (passing.length > 0) {
         const chosen = passing.sort((a, b) => b.buffer.byteLength - a.buffer.byteLength)[0];
-        const note = canResize && needsResize
-          ? `Converted to ${chosen.type === 'image/webp' ? 'WebP' : 'JPEG'} and resized to ${width}x${height} (q${quality})`
-          : `Converted to ${chosen.type === 'image/webp' ? 'WebP' : 'JPEG'} (q${quality})`;
+        const notePrefix = sourceReasons.length
+          ? `Adjusted for ${describeReasons(sourceReasons)}`
+          : 'Adjusted for upload limits';
+        const note = canResize && chosen.width && chosen.height && needsResize
+          ? `${notePrefix}: converted to ${chosen.type === 'image/webp' ? 'WebP' : 'JPEG'} and resized to ${chosen.width}x${chosen.height} (q${quality})`
+          : `${notePrefix}: converted to ${chosen.type === 'image/webp' ? 'WebP' : 'JPEG'} (q${quality})`;
         return {
           ok: true,
           data: {
@@ -214,6 +375,20 @@ export async function prepareImageForUpload({
             bytesBefore,
             bytesAfter: chosen.buffer.byteLength,
             note,
+            uploadNormalization: {
+              reasons: sourceReasons,
+              originalBytes: bytesBefore,
+              finalBytes: chosen.buffer.byteLength,
+              maxBytes,
+              maxDimension: CLOUDFLARE_MAX_IMAGE_DIMENSION,
+              maxArea: CLOUDFLARE_MAX_IMAGE_AREA,
+              originalType: fileType,
+              finalType: chosen.type,
+              originalWidth: canResize ? sourceWidth : undefined,
+              originalHeight: canResize ? sourceHeight : undefined,
+              finalWidth: chosen.width,
+              finalHeight: chosen.height,
+            },
           },
         };
       }
@@ -221,9 +396,12 @@ export async function prepareImageForUpload({
   }
 
   if (smallestCandidate) {
+    const unsatisfied = smallestCandidate.reasons.length
+      ? ` Remaining issues: ${describeReasons(smallestCandidate.reasons)}.`
+      : '';
     return {
       ok: false,
-      error: `Unable to reduce image below 10MB (smallest attempt: ${(smallestCandidate.buffer.byteLength / 1024 / 1024).toFixed(2)}MB).`,
+      error: `Unable to satisfy upload limits (smallest attempt: ${(smallestCandidate.buffer.byteLength / 1024 / 1024).toFixed(2)}MB).${unsatisfied}`,
     };
   }
 
@@ -348,6 +526,7 @@ export async function uploadImageBuffer({
       beforeBytes: prepared.data.bytesBefore,
       afterBytes: prepared.data.bytesAfter,
       note: prepared.data.note,
+      reasons: prepared.data.uploadNormalization?.reasons,
       targetType: workingFileType,
     });
   }
@@ -413,6 +592,7 @@ export async function uploadImageBuffer({
     namespace: normalizedNamespace,
     contentHash,
     variationParentId: parentId,
+    uploadNormalization: prepared.data.uploadNormalization,
     exif: exifSummary,
     generatedBy: comfyExtraction.detected ? 'comfyui' : undefined,
     comfyMetadataDetected: comfyExtraction.detected ? true : undefined,
@@ -630,6 +810,7 @@ export async function uploadImageBuffer({
       linkedAssetId: webpVariantId,
       webpVariantId,
       autoEmbeddings,
+      uploadNormalization: prepared.data.uploadNormalization,
     }
   };
 }

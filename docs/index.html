@@ -290,83 +290,14 @@
         footer {
             background: white;
             border-top: 1px solid var(--border);
-            padding: 5rem 2rem;
+            padding: 2rem;
             text-align: center;
-            color: var(--text-dark);
-        }
-
-        .footer-content {
-            max-width: 900px;
-            margin: 0 auto;
-            display: flex;
-            flex-direction: column;
-            gap: 2.5rem;
-            align-items: center;
-        }
-
-        .footer-cta {
-            font-family: 'Warbler Banner', serif;
-            font-size: 1.1rem;
-            line-height: 1.8;
-        }
-
-        .footer-cta a {
-            color: var(--text-dark);
-            text-decoration: underline;
-            text-underline-offset: 4px;
-            transition: color 0.2s;
-        }
-        
-        .footer-cta a:hover {
-            color: var(--accent);
-        }
-
-        .nfl-logo img {
-            width: 100px;
-            height: auto;
-            display: block;
-            margin: 0 auto;
-        }
-
-        .social-icons {
-            display: flex;
-            justify-content: center;
-            flex-wrap: wrap;
-            gap: 1.25rem;
-            margin: 0.5rem 0;
-        }
-
-        .social-icons img {
-            width: 24px;
-            height: 24px;
-            opacity: 0.6;
-            transition: all 0.2s;
-        }
-
-        .social-icons a:hover img {
-            opacity: 1;
-            transform: translateY(-2px);
-        }
-
-        .project-credits {
-            font-size: 0.85rem;
             color: var(--text-light);
-            border-top: 1px solid var(--border);
-            border-bottom: 1px solid var(--border);
-            padding: 2rem 0;
-            width: 100%;
+            font-size: 0.9rem;
         }
 
-        .copyright {
-            font-size: 0.7rem;
-            color: #999;
-            line-height: 1.6;
-            font-style: italic;
-        }
-
-        .copyright a {
-            color: #999;
-            text-decoration: underline;
+        footer a {
+            color: var(--accent);
         }
 
         /* Responsive */
@@ -416,7 +347,7 @@
     <main>
         <section class="hero">
             <h1>Self-Hosted Image Management</h1>
-            <p>Upload, organize, and explore your images with semantic AI, vector search, and color-aware discovery. Lightning-fast CDN delivery via Cloudflare. No vendor lock-in.</p>
+            <p>Upload, organize, and distribute images via Cloudflare's global CDN. No vendor lock-in. Your infrastructure.</p>
             <div class="cta-buttons">
                 <a href="https://github.com/bleeckerj/nfl-photarium" class="btn btn-primary">Get Started</a>
                 <a href="https://github.com/bleeckerj/nfl-photarium#features" class="btn btn-secondary">Learn More</a>
@@ -426,120 +357,45 @@
 
         <section class="features" id="features">
             <div class="features-container">
-                <h2>Core Workflow</h2>
+                <h2>Designed for Teams</h2>
                 <div class="features-grid">
                     <div class="feature">
                         <h3>Upload & Organize</h3>
                         <p>Drag-and-drop interface with folders, tags, and bulk operations.</p>
                     </div>
                     <div class="feature">
-                        <h3>External Uploads & Imports</h3>
-                        <p>Programmatic uploads plus bulk import tooling for existing libraries.</p>
-                    </div>
-                    <div class="feature">
                         <h3>Search & Filter</h3>
                         <p>Find images by name, folder, tag, or date range instantly.</p>
                     </div>
                     <div class="feature">
-                        <h3>Semantic & Color Search</h3>
-                        <p>Natural language queries and hex color matching without manual tagging.</p>
+                        <h3>Dual View Modes</h3>
+                        <p>Grid view for browsing, list view for bulk operations and metadata.</p>
                     </div>
                     <div class="feature">
-                        <h3>Similarity + Antipode</h3>
-                        <p>Surface neighbors and opposites to explore the edges of your catalog.</p>
+                        <h3>Smart Pagination</h3>
+                        <p>Date-aware page controls with sticky filters and quick navigation.</p>
                     </div>
                     <div class="feature">
-                        <h3>Metadata Precision</h3>
-                        <p>Assign variants, edit tags, and manage alt text with confidence.</p>
+                        <h3>AI-Generated ALT Text</h3>
+                        <p>Auto-generate accessible descriptions with GPT-4o mini integration.</p>
                     </div>
                     <div class="feature">
-                        <h3>Embedding Pipeline</h3>
-                        <p>Batch generation, backfills, and status tracking for vector readiness.</p>
+                        <h3>Image Variants</h3>
+                        <p>Automatic responsive sizing: thumbnail, medium, large, public.</p>
                     </div>
                     <div class="feature">
-                        <h3>Operational Controls</h3>
-                        <p>Namespace isolation, deduping, and cleanup scripts for large archives.</p>
+                        <h3>External API</h3>
+                        <p>Upload programmatically from Astro, Node scripts, or any HTTP client.</p>
+                    </div>
+                    <div class="feature">
+                        <h3>Namespace Isolation</h3>
+                        <p>Logical separation for multi-tenant or multi-app deployments.</p>
                     </div>
                     <div class="feature">
                         <h3>CDN Delivery</h3>
                         <p>Lightning-fast global distribution via Cloudflare's trusted network.</p>
                     </div>
                 </div>
-            </div>
-        </section>
-
-        <section class="features" id="ai-features" style="background: #f9f7f4;">
-            <div class="features-container">
-                <h2>Machine Intelligence</h2>
-                <p style="text-align: center; color: var(--text-light); max-width: 700px; margin: -1.5rem auto 3rem;">
-                    Powered by Redis Stack vector search and CLIP embeddings, Photarium understands your images semantically — not just by filename.
-                </p>
-                <div class="features-grid">
-                    <div class="feature">
-                        <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px;"><path d="M12 2a8 8 0 1 0 8 8"/><path d="M12 2v4"/><path d="M12 18v4"/><path d="M4.93 4.93l2.83 2.83"/><path d="M16.24 16.24l2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="M4.93 19.07l2.83-2.83"/><path d="M16.24 7.76l2.83-2.83"/></svg>CLIP Embeddings</h3>
-                        <p>512-dimensional semantic vectors capture meaning, mood, and concept — a lonely chair neighbors a portrait of solitude.</p>
-                    </div>
-                    <div class="feature">
-                        <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px;"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="19" cy="17" r="2"/><circle cx="6" cy="12" r="3"/><circle cx="12" cy="19" r="2"/></svg>Color Histograms</h3>
-                        <p>64-dimensional color vectors for palette-based search. Find all your sunset oranges or ocean blues.</p>
-                    </div>
-                    <div class="feature">
-                        <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px;"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>Semantic Search</h3>
-                        <p>Type natural language like "vintage car at sunset" and find conceptually matching images, no tags required.</p>
-                    </div>
-                    <div class="feature">
-                        <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>Concept Radar</h3>
-                        <p>Visualize how the machine perceives your image across 10 aesthetic axes: warm↔cold, minimal↔complex, nostalgic↔futuristic.</p>
-                    </div>
-                    <div class="feature">
-                        <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px;"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51 15.42 17.49"/><path d="M15.41 6.51 8.59 10.49"/></svg>Semantic Clustering</h3>
-                        <p>See neighbors and antipodes to explore your collection's semantic topology.</p>
-                    </div>
-                    <div class="feature">
-                        <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px;"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>Click-to-Search Radar</h3>
-                        <p>Click anywhere on the concept radar to search for images matching those semantic coordinates. Interactive exploration.</p>
-                    </div>
-                    <div class="feature">
-                        <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px;"><path d="M17 6.1H3"/><path d="M21 12.1H3"/><path d="M15.1 18H3"/></svg>Machine Haiku</h3>
-                        <p>Generate contemplative 5-7-5 haiku from CLIP embeddings. The machine's poetic interpretation of your image's essence.</p>
-                    </div>
-                    <div class="feature">
-                        <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px;"><path d="M3 12h18"/><path d="M12 3v18"/></svg>Embedding Ops</h3>
-                        <p>Batch embeddings, backfills, and status visibility keep large libraries searchable.</p>
-                    </div>
-                    <div class="feature">
-                        <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px;"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>Redis Stack</h3>
-                        <p>High-performance vector similarity search via RediSearch. Sub-millisecond KNN queries across your entire library.</p>
-                    </div>
-                    <div class="feature">
-                        <h3><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -3px; margin-right: 6px;"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>Color Search</h3>
-                        <p>Search by hex color like #3B82F6 to find images with matching palettes. Perfect for brand consistency.</p>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <section class="precision-control" style="background: white; border-bottom: 1px solid var(--border); padding: 4rem 2rem;">
-            <div style="max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; align-items: center; gap: 2rem;">
-                <div style="max-width: 800px; text-align: center;">
-                    <h2 style="font-family: 'Warbler Display', serif; font-size: 2.5rem; margin-bottom: 1rem;">Precision Control</h2>
-                    <p style="color: var(--text-light); font-size: 1.1rem; line-height: 1.6;">
-                        Manage metadata, edit tags, and assign image variants with granular precision. Keep your library organized by grouping related assets (like thumbnails or social crops) under a single master image.
-                    </p>
-                </div>
-                <img src="https://imagedelivery.net/gaLGizR3kCgx5yRLtiRIOw/f3c92cba-97a8-4a13-2633-e705ea605a00/full?format=webp" alt="Photarium Detail View" style="max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08); border: 1px solid var(--border);">
-            </div>
-        </section>
-
-        <section class="gallery-view" style="background: #f9f7f4; padding: 4rem 2rem; border-bottom: 1px solid var(--border);">
-            <div style="max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; align-items: center; gap: 2rem;">
-                <div style="max-width: 800px; text-align: center;">
-                    <h2 style="font-family: 'Warbler Display', serif; font-size: 2.5rem; margin-bottom: 1rem;">Organized Gallery Management</h2>
-                    <p style="color: var(--text-light); font-size: 1.1rem; line-height: 1.6;">
-                        Browse thousands of assets with smart filtering, sticky controls, and instant quick actions. Find exactly what you need in seconds.
-                    </p>
-                </div>
-                <img src="https://imagedelivery.net/gaLGizR3kCgx5yRLtiRIOw/c36db84c-f515-4f41-92f2-a2bc6dcc8600/full?format=webp" alt="Photarium Gallery View" style="max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08); border: 1px solid var(--border);">
             </div>
         </section>
 
@@ -568,16 +424,11 @@
                 </div>
                 <div class="step">
                     <div class="step-number">5</div>
-                    <h3>Enable Vector Search (Optional)</h3>
-                    <p>Run Redis Stack and generate embeddings for semantic search and similarity.</p>
-                </div>
-                <div class="step">
-                    <div class="step-number">6</div>
                     <h3>Deploy Anywhere</h3>
                     <p>Deploy to Vercel, Railway, Render, or any Node.js host.</p>
                 </div>
                 <div class="step">
-                    <div class="step-number">7</div>
+                    <div class="step-number">6</div>
                     <h3>Start Managing</h3>
                     <p>Upload images, organize with folders and tags, copy CDN URLs.</p>
                 </div>
@@ -594,71 +445,8 @@
     </main>
 
     <footer>
-        <div class="footer-content">
-            <!-- CTA Links -->
-            <div class="footer-cta">
-                <a href="https://nearfuturelaboratory.com/newsletter/">Subscribe to the newsletter</a> ✼
-                <span style='margin-left: 1.5rem'></span> <a href="https://nearfuturelaboratory.com/connect/">Schedule a consultation call</a> ✼ 
-            </div>
-
-            <!-- NFL Logo -->
-            <div class="nfl-logo">
-                <a href="https://nearfuturelaboratory.com">
-                    <img src="https://imagedelivery.net/gaLGizR3kCgx5yRLtiRIOw/e666aac1-5728-4012-6860-4fe945321f00/w=150?format=webp" alt="Near Future Laboratory">
-                </a>
-            </div>
-
-            <!-- Social Icons -->
-            <div class="social-icons">
-                <a href="https://github.com/bleeckerj" title="Personal GitHub">
-                    <img src="https://img.icons8.com/ios-glyphs/24/000000/github.png" alt="GitHub">
-                </a>
-                <a href="https://github.com/nearfuturelaboratory" title="Near Future Laboratory GitHub">
-                    <img src="https://img.icons8.com/ios-glyphs/24/000000/github.png" alt="NFL GitHub">
-                </a>
-                <a href="https://podcasts.apple.com/us/podcast/near-future-laboratory-podcast/id1546452193" title="Podcast">
-                    <img src="https://img.icons8.com/?size=24&id=ZsAN3pzKcy09&format=png" alt="Podcast">
-                </a>
-                <a href="https://open.spotify.com/show/1vHzwGE5J19LvXSo8M93MM" title="Spotify">
-                    <img src="https://img.icons8.com/ios-glyphs/24/000000/spotify.png" alt="Spotify">
-                </a>
-                <a href="https://instagram.com/darthjulian" title="Personal Instagram">
-                    <img src="https://img.icons8.com/ios-glyphs/24/000000/instagram-new.png" alt="Instagram">
-                </a>
-                <a href="https://instagram.com/nearfuturelaboratory" title="Company Instagram">
-                    <img src="https://img.icons8.com/ios-glyphs/24/000000/instagram-new.png" alt="NFL Instagram">
-                </a>
-                <a href="https://linkedin.com/in/julianbleecker" title="Personal LinkedIn">
-                    <img src="https://img.icons8.com/ios-glyphs/24/000000/linkedin.png" alt="LinkedIn">
-                </a>
-                <a href="https://www.linkedin.com/company/near-future-laboratory/" title="Company LinkedIn">
-                    <img src="https://img.icons8.com/ios-glyphs/24/000000/linkedin.png" alt="NFL LinkedIn">
-                </a>
-                <a href="https://youtube.com/@nearfuturelaboratory" title="YouTube">
-                    <img src="https://img.icons8.com/ios-glyphs/24/000000/youtube-play.png" alt="YouTube">
-                </a>
-                <a href="https://patreon.com/nearfuturelaboratory" title="Patreon">
-                    <img src="https://img.icons8.com/ios-glyphs/24/000000/discord.png" alt="Discord">
-                </a>
-                <a href="https://newsletter.substack.com" title="Substack">
-                    <img src="https://img.icons8.com/?size=100&id=kcZe5woKzcQY&format=png&color=000000" alt="Substack">
-                </a>
-            </div>
-
-            <!-- Project Credits -->
-            <div class="project-credits">
-                <p>Photarium is open source and self-hosted. <a href="https://github.com/bleeckerj/nfl-photarium">View on GitHub</a></p>
-                <p>Built with Next.js, Tailwind CSS, Cloudflare Images, Redis Stack, and CLIP</p>
-            </div>
-
-            <!-- Copyright -->
-            <div class="copyright">
-                <p>Content © 2026 Near Future Laboratory Venice Beach, California United States</p>
-                <br>
-                <p>Software is released under the MIT License</p>
-                <p>Icons by <a href="https://icons8.com">Icons8</a></p>
-            </div>
-        </div>
+        <p>Photarium is open source and self-hosted. <a href="https://github.com/bleeckerj/nfl-photarium">View on GitHub</a></p>
+        <p>Built with Next.js, Tailwind CSS, and Cloudflare Images</p>
     </footer>
 </body>
 </html>
