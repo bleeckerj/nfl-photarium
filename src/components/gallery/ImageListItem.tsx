@@ -205,6 +205,9 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
         <p className="text-[0.7em] font-mono text-gray-500">
           {new Date(image.uploaded).toLocaleDateString()}
         </p>
+        <p className="text-[0.65em] font-mono text-gray-400">
+          {new Date(image.uploaded).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+        </p>
         {isVideoAsset && (
           <p className="text-[0.7em] font-mono text-gray-500">🎬 {image.videoStatus || 'pending'}</p>
         )}

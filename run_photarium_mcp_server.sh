@@ -20,6 +20,12 @@ export PHOTARIUM_HTTP_ENABLED="${PHOTARIUM_HTTP_ENABLED:-true}"
 export PHOTARIUM_HTTP_HOST="${PHOTARIUM_HTTP_HOST:-127.0.0.1}"
 export PHOTARIUM_HTTP_PORT="${PHOTARIUM_HTTP_PORT:-8787}"
 
+prepare_runtime_env() {
+  if [[ "$PHOTARIUM_HTTP_ENABLED" != "true" ]]; then
+    unset PHOTARIUM_HTTP_PORT
+  fi
+}
+
 port_pids() {
   lsof -tiTCP:"$PHOTARIUM_HTTP_PORT" -sTCP:LISTEN 2>/dev/null || true
 }
@@ -71,21 +77,27 @@ case "$ACTION" in
     stop_listeners
     ;;
   restart)
-    stop_listeners
+    if [[ "$PHOTARIUM_HTTP_ENABLED" == "true" ]]; then
+      stop_listeners
+    fi
+    prepare_runtime_env
     exec node "$MCP_DIR/dist/index.js"
     ;;
   start)
-    if show_port_owners >/dev/null 2>&1; then
-      if [[ "${KILL_IF_OCCUPIED:-0}" == "1" ]]; then
-        echo "Port $PHOTARIUM_HTTP_PORT is occupied; KILL_IF_OCCUPIED=1 so restarting..."
-        stop_listeners
-      else
-        echo "Port $PHOTARIUM_HTTP_PORT is already in use."
-        show_port_owners || true
-        echo "Use: $0 stop   (or KILL_IF_OCCUPIED=1 $0 start)"
-        exit 1
+    if [[ "$PHOTARIUM_HTTP_ENABLED" == "true" ]]; then
+      if show_port_owners >/dev/null 2>&1; then
+        if [[ "${KILL_IF_OCCUPIED:-0}" == "1" ]]; then
+          echo "Port $PHOTARIUM_HTTP_PORT is occupied; KILL_IF_OCCUPIED=1 so restarting..."
+          stop_listeners
+        else
+          echo "Port $PHOTARIUM_HTTP_PORT is already in use."
+          show_port_owners || true
+          echo "Use: $0 stop   (or KILL_IF_OCCUPIED=1 $0 start)"
+          exit 1
+        fi
       fi
     fi
+    prepare_runtime_env
     exec node "$MCP_DIR/dist/index.js"
     ;;
   *)

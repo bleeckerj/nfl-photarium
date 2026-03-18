@@ -35,10 +35,11 @@ export async function PATCH(
       return NextResponse.json({ error: 'Image ID is required' }, { status: 400 });
     }
 
-    let body: any = null;
+    let body: Record<string, unknown> | null = null;
     if (request.headers.get('content-type')?.includes('application/json')) {
       try {
-        body = await request.json();
+        const parsed = await request.json();
+        body = isPlainObject(parsed) ? parsed : null;
       } catch {
         body = null;
       }
@@ -47,6 +48,10 @@ export async function PATCH(
     const patch: {
       description?: string;
       altText?: string;
+      sourceUrl?: string;
+      sourceUrlNormalized?: string;
+      originalUrl?: string;
+      originalUrlNormalized?: string;
       rawSource?: RawSourceReference;
       exif?: ImageExifRecord;
       dngIngest?: DngIngestRecord;
@@ -67,6 +72,42 @@ export async function PATCH(
         patch.altText = undefined;
       } else if (typeof raw === 'string') {
         patch.altText = cleanString(raw);
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body ?? {}, 'sourceUrl')) {
+      const raw = body?.sourceUrl;
+      if (raw === null || raw === '') {
+        patch.sourceUrl = undefined;
+      } else if (typeof raw === 'string') {
+        patch.sourceUrl = cleanString(raw);
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body ?? {}, 'sourceUrlNormalized')) {
+      const raw = body?.sourceUrlNormalized;
+      if (raw === null || raw === '') {
+        patch.sourceUrlNormalized = undefined;
+      } else if (typeof raw === 'string') {
+        patch.sourceUrlNormalized = cleanString(raw);
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body ?? {}, 'originalUrl')) {
+      const raw = body?.originalUrl;
+      if (raw === null || raw === '') {
+        patch.originalUrl = undefined;
+      } else if (typeof raw === 'string') {
+        patch.originalUrl = cleanString(raw);
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body ?? {}, 'originalUrlNormalized')) {
+      const raw = body?.originalUrlNormalized;
+      if (raw === null || raw === '') {
+        patch.originalUrlNormalized = undefined;
+      } else if (typeof raw === 'string') {
+        patch.originalUrlNormalized = cleanString(raw);
       }
     }
 

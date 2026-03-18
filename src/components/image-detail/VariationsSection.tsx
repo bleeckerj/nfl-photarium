@@ -4,10 +4,17 @@ import Link from 'next/link';
 import { ChevronDown, ChevronUp, GripVertical } from 'lucide-react';
 
 import MonoSelect from '@/components/MonoSelect';
+import {
+  getAssetCopyUrl,
+  getAssetDetailPath,
+  getAssetPreviewUrl,
+  isVideoAsset,
+} from '@/utils/assetUrls';
 import { formatBytes } from '@/utils/formatBytes';
 
 export interface ImageLike {
   id: string;
+  assetType?: 'image' | 'video';
   filename: string;
   displayName?: string;
   uploaded: string;
@@ -17,6 +24,11 @@ export interface ImageLike {
   altTag?: string;
   aspectRatio?: string;
   dimensions?: { width: number; height: number };
+  videoPlaybackUrl?: string;
+  videoHlsUrl?: string;
+  videoThumbnailUrl?: string;
+  videoPreviewUrl?: string;
+  variants?: string[];
 }
 
 export interface SelectOption {
@@ -67,7 +79,6 @@ export interface VariationsSectionProps {
   onDropVariation: (targetId: string) => Promise<void>;
   onMoveVariation: (childId: string, direction: -1 | 1) => void | Promise<void>;
 
-  getCloudflareImageUrl: (imageId: string, variant: string) => string;
   onHandleThumbMouseMove: (url: string, label: string, evt: React.MouseEvent) => void;
   onHandleThumbLeave: () => void;
   onHandleImageDragStart: (evt: React.DragEvent, image: ImageLike) => void;
@@ -134,7 +145,6 @@ export function VariationsSection(props: VariationsSectionProps) {
     setDragOverVariationId,
     onDropVariation,
     onMoveVariation,
-    getCloudflareImageUrl,
     onHandleThumbMouseMove,
     onHandleThumbLeave,
     onHandleImageDragStart,
@@ -362,14 +372,18 @@ export function VariationsSection(props: VariationsSectionProps) {
               const displayName = child.displayName?.trim() || child.filename || child.id;
               const cloudName = child.filename || child.id;
               const fileSize = typeof child.fileSizeBytes === 'number' ? child.fileSizeBytes : child.size;
+              const videoAsset = isVideoAsset(child);
+              const thumbUrl = getAssetPreviewUrl(child, { imageVariant: 'w=300' });
+              const hoverUrl = getAssetPreviewUrl(child, { imageVariant: 'w=600' }) || thumbUrl;
+              const copyUrl = getAssetCopyUrl(child, { imageVariant: 'original' });
               return (
               <div
                 key={child.id}
                 className={`${variationLayout === 'grid' ? 'flex flex-col gap-2 p-2' : 'flex items-center gap-4 p-3'} border border-gray-200 rounded-lg relative ${dragOverVariationId === child.id ? 'bg-blue-50 border-blue-200' : ''}`}
                 onMouseLeave={onHandleThumbLeave}
-                draggable={!isChildImage}
+                draggable={!isChildImage && !videoAsset}
                 onDragStart={(event) => {
-                  if (isChildImage) return;
+                  if (isChildImage || videoAsset) return;
                   setDraggingVariationId(child.id);
                   event.dataTransfer.effectAllowed = 'move';
                   event.dataTransfer.setData('text/plain', child.id);
@@ -379,12 +393,12 @@ export function VariationsSection(props: VariationsSectionProps) {
                   setDragOverVariationId(null);
                 }}
                 onDragOver={(event) => {
-                  if (isChildImage) return;
+                  if (isChildImage || videoAsset) return;
                   event.preventDefault();
                   setDragOverVariationId(child.id);
                 }}
                 onDrop={async (event) => {
-                  if (isChildImage) return;
+                  if (isChildImage || videoAsset) return;
                   event.preventDefault();
                   await onDropVariation(child.id);
                   setDraggingVariationId(null);
@@ -392,7 +406,7 @@ export function VariationsSection(props: VariationsSectionProps) {
                 }}
               >
                 {(() => {
-                  if (isChildImage) {
+                  if (isChildImage || videoAsset) {
                     return null;
                   }
                   const orderIndex = variationOrderIndex.get(child.id) ?? -1;
@@ -436,27 +450,35 @@ export function VariationsSection(props: VariationsSectionProps) {
                 </label>
 
                 <Link
-                  href={`/images/${child.id}`}
+                  href={getAssetDetailPath(child)}
+                  prefetch={false}
                   className={`${variationLayout === 'grid' ? 'w-full' : 'w-32 shrink-0'} relative rounded overflow-hidden bg-gray-100 block`}
                   style={{ aspectRatio: String(thumbAspectRatio) }}
-                  onMouseMove={(e) =>
+                  onMouseMove={(e) => {
+                    if (!hoverUrl) return;
                     onHandleThumbMouseMove(
-                      getCloudflareImageUrl(child.id, 'w=600'),
-                      child.filename || 'Variation',
+                      hoverUrl,
+                      child.filename || (videoAsset ? 'Video variation' : 'Variation'),
                       e
-                    )
-                  }
+                    );
+                  }}
                 >
-                  <Image
-                    draggable
-                    onDragStart={(e) => onHandleImageDragStart(e, child)}
-                    src={getCloudflareImageUrl(child.id, 'w=300')}
-                    alt={child.filename || 'Variation'}
-                    fill
-                    className={variationTrueAspect ? 'object-contain' : 'object-cover'}
-                    sizes={variationLayout === 'grid' ? '320px' : '64px'}
-                    unoptimized
-                  />
+                  {thumbUrl ? (
+                    <Image
+                      draggable
+                      onDragStart={(e) => onHandleImageDragStart(e, child)}
+                      src={thumbUrl}
+                      alt={child.filename || (videoAsset ? 'Video variation' : 'Variation')}
+                      fill
+                      className={variationTrueAspect ? 'object-contain' : 'object-cover'}
+                      sizes={variationLayout === 'grid' ? '320px' : '64px'}
+                      unoptimized
+                    />
+                  ) : (
+                    <div className="absolute inset-0 flex items-center justify-center text-[10px] font-mono text-gray-500">
+                      No preview
+                    </div>
+                  )}
                 </Link>
 
                 <div className={`${variationLayout === 'grid' ? 'w-full space-y-1' : 'flex-1 min-w-0 space-y-1'}`}>
@@ -471,19 +493,21 @@ export function VariationsSection(props: VariationsSectionProps) {
                     <button
                       onClick={() => void onCopyVariationId(child.id)}
                       className="text-[10px] text-blue-600 hover:text-blue-700 underline"
-                      title="Copy image ID"
+                      title="Copy asset ID"
                     >
                       Copy
                     </button>
                   </div>
                   <AspectRatioDisplay imageId={child.id} />
                   <div className="text-[11px] text-gray-500 break-words">ALT: {child.altTag || '—'}</div>
-                  <button
-                    onClick={() => onOpenVariantSizes(child)}
-                    className="inline-flex items-center gap-1 text-xs text-blue-600 underline"
-                  >
-                    View sizes
-                  </button>
+                  {!videoAsset && (
+                    <button
+                      onClick={() => onOpenVariantSizes(child)}
+                      className="inline-flex items-center gap-1 text-xs text-blue-600 underline"
+                    >
+                      View sizes
+                    </button>
+                  )}
                 </div>
 
                 <div className={`${variationLayout === 'grid' ? 'flex flex-wrap gap-2' : 'flex flex-col gap-2 items-end'}`}>
@@ -491,16 +515,17 @@ export function VariationsSection(props: VariationsSectionProps) {
                     onClick={async (event) =>
                       await onHandleCopyUrl(
                         event,
-                        getCloudflareImageUrl(child.id, 'original'),
-                        'Variation',
+                        copyUrl,
+                        videoAsset ? 'Video variation' : 'Variation',
                         child.altTag
                       )
                     }
+                    disabled={!copyUrl}
                     className="text-xs text-blue-600 hover:underline"
                   >
                     Copy URL
                   </button>
-                  {!isChildImage && (
+                  {!isChildImage && !videoAsset && (
                     <button
                       onClick={() => void onSwapParent(child.id)}
                       disabled={Boolean(swappingParentId)}

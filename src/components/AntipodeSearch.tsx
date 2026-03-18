@@ -26,12 +26,13 @@ interface SearchResult {
   imageId: string;
   score: number;
   filename?: string;
+  assetType?: 'image' | 'video';
 }
 
 interface AntipodeSearchProps {
   imageId: string;
   className?: string;
-  onImageClick?: (imageId: string) => void;
+  onImageClick?: (result: SearchResult) => void;
   copyVariant?: string;
   onCopySuccess?: (message: string) => void;
   // Current operating namespace. Use '__all__' to disable scoping.
@@ -266,7 +267,10 @@ export function AntipodeSearch({ imageId, className = '', onImageClick, copyVari
                              border-2 border-amber-900/50 cursor-pointer 
                              hover:border-amber-500 hover:scale-105 transition-all duration-150"
                   style={{ minWidth: '80px', minHeight: '80px' }}
-                  onClick={() => onImageClick?.(result.imageId)}
+                  onClick={(event) => {
+                    if (!event.isTrusted || event.detail === 0) return;
+                    onImageClick?.(result);
+                  }}
                   onMouseEnter={(e) => handleMouseEnter(e, result)}
                   onMouseLeave={handleMouseLeave}
                   title={`${result.filename || result.imageId}\nDistance: ${result.score.toFixed(3)} (${proximityTerm})`}

@@ -1,16 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cleanString } from '@/utils/cloudflareMetadata';
 import { uploadVideoBuffer, uploadVideoFromRemoteUrl, type VideoUploadContext } from '@/server/videoUploadService';
+import { validateParentForNewChild } from '@/server/parentValidation';
 
 type UploadVideoRequestBody = {
   url?: string;
   filename?: string;
+  displayName?: string;
   folder?: string;
   tags?: string;
   description?: string;
   originalUrl?: string;
   sourceUrl?: string;
   namespace?: string;
+  parentId?: string;
   requireSignedUrls?: boolean;
 };
 
@@ -53,7 +56,9 @@ const parseContext = (
     description,
     originalUrl,
     sourceUrl,
+    displayName,
     namespace,
+    parentId,
     requireSignedUrls,
   }: {
     folder?: string | null;
@@ -61,16 +66,20 @@ const parseContext = (
     description?: string | null;
     originalUrl?: string | null;
     sourceUrl?: string | null;
+    displayName?: string | null;
     namespace?: string | null;
+    parentId?: string | null;
     requireSignedUrls?: boolean;
   }
 ): VideoUploadContext => ({
   folder: cleanString(folder),
   tags: parseTags(tags),
   description: cleanString(description),
+  displayName: cleanString(displayName),
   originalUrl: cleanString(originalUrl),
   sourceUrl: cleanString(sourceUrl),
   namespace: cleanString(namespace),
+  parentId: cleanString(parentId),
   requireSignedUrls,
 });
 
@@ -107,6 +116,10 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
+      const parentValidation = await validateParentForNewChild(body.parentId);
+      if (!parentValidation.ok) {
+        return NextResponse.json({ error: parentValidation.error }, { status: parentValidation.status });
+      }
 
       const outcome = await uploadVideoFromRemoteUrl({
         sourceUrl: safeUrl,
@@ -115,9 +128,11 @@ export async function POST(request: NextRequest) {
           folder: body.folder,
           tags: body.tags,
           description: body.description,
+          displayName: body.displayName,
           originalUrl: body.originalUrl,
           sourceUrl: body.sourceUrl ?? safeUrl,
           namespace: namespaceValue,
+          parentId: parentValidation.canonicalParentId,
           requireSignedUrls: body.requireSignedUrls === true,
         }),
       });
@@ -142,6 +157,11 @@ export async function POST(request: NextRequest) {
       );
     }
     const namespace = namespaceValue;
+    const rawParentId = cleanString(formData.get('parentId') as string | null);
+    const parentValidation = await validateParentForNewChild(rawParentId);
+    if (!parentValidation.ok) {
+      return NextResponse.json({ error: parentValidation.error }, { status: parentValidation.status });
+    }
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const outcome = await uploadVideoBuffer({
@@ -153,9 +173,11 @@ export async function POST(request: NextRequest) {
         folder: formData.get('folder') as string | null,
         tags: formData.get('tags') as string | null,
         description: formData.get('description') as string | null,
+        displayName: formData.get('displayName') as string | null,
         originalUrl: formData.get('originalUrl') as string | null,
         sourceUrl: formData.get('sourceUrl') as string | null,
         namespace,
+        parentId: parentValidation.canonicalParentId,
         requireSignedUrls:
           cleanString(formData.get('requireSignedUrls') as string | null) === 'true',
       }),

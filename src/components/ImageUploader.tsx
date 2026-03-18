@@ -9,6 +9,7 @@ import MonoSelect from "./MonoSelect";
 import { normalizeOriginalUrl } from "@/utils/urlNormalization";
 import { setEmbeddingPendingEntry } from "@/utils/embeddingPending";
 import { sanitizeFilename, needsSanitization, MAX_FILENAME_LENGTH } from "@/utils/filename";
+import { inferAssetTypeFromUrl, isImageOnlyImportError } from "@/utils/mediaAssetType";
 
 interface UploadedImage {
   id: string;
@@ -38,6 +39,7 @@ interface UploadedImage {
 interface ImageUploaderProps {
   onImageUploaded?: () => void;
   namespace?: string;
+  onNamespaceChange?: (value: string) => void;
 }
 
 interface QueuedFile {
@@ -277,11 +279,6 @@ const isArchiveFile = (file: File) => isZipFile(file) || isKeynoteFile(file);
 
 const isImageFile = (file: File) => file.type.startsWith('image/');
 const isVideoFile = (file: File) => file.type.startsWith('video/');
-const inferAssetTypeFromUrl = (value?: string): "image" | "video" => {
-  if (!value) return 'image';
-  if (/^blob:/i.test(value)) return 'video';
-  return /\.(mp4|webm|mov|m4v|ogv|ogg)(\?|$)/i.test(value) ? 'video' : 'image';
-};
 const inferAssetTypeFromFile = (file: File): "image" | "video" => (isVideoFile(file) ? 'video' : 'image');
 const KEYNOTE_IMAGE_EXTENSIONS = ['.jpeg', '.jpg', '.png', '.gif', '.webp', '.svg'];
 const MIME_BY_EXTENSION: Record<string, string> = {
@@ -490,7 +487,7 @@ const extractZipImages = async (file: File) => {
   return extracted;
 };
 
-export default function ImageUploader({ onImageUploaded, namespace }: ImageUploaderProps) {
+export default function ImageUploader({ onImageUploaded, namespace, onNamespaceChange }: ImageUploaderProps) {
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [embedClipOnUpload, setEmbedClipOnUpload] = useState(true);
@@ -508,6 +505,9 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     "social-media",
     "blog-posts",
   ]);
+  const [registryNamespaces, setRegistryNamespaces] = useState<string[]>([]);
+  const [uploadNamespaceSelectValue, setUploadNamespaceSelectValue] = useState<string>('');
+  const [uploadNamespaceDraft, setUploadNamespaceDraft] = useState<string>('');
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
   const [selectedParentId, setSelectedParentId] = useState<string>('');
   const [parentOptions, setParentOptions] = useState<GalleryImageSummary[]>([]);
@@ -518,6 +518,8 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
   const [pageImportLoading, setPageImportLoading] = useState(false);
   const [pageImportError, setPageImportError] = useState<string | null>(null);
   const [pageImportAllowInsecure, setPageImportAllowInsecure] = useState(false);
+  const [pageImportIncludeUiChrome, setPageImportIncludeUiChrome] = useState(false);
+  const [pageImportIncludeSmallAssets, setPageImportIncludeSmallAssets] = useState(false);
   const [pageImportScrollMode, setPageImportScrollMode] = useState(true);
   const [pageImportAutoScroll, setPageImportAutoScroll] = useState(true);
   const [pageImportMaxScrolls, setPageImportMaxScrolls] = useState('10');
@@ -542,6 +544,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
   const [expandedQueueMetadata, setExpandedQueueMetadata] = useState<Record<string, boolean>>({});
   const [showAllQueuedItems, setShowAllQueuedItems] = useState(false);
   const [aiRefiningNames, setAiRefiningNames] = useState(false);
+  const [queueRenameValue, setQueueRenameValue] = useState('');
   const [embeddingQueueDepth, setEmbeddingQueueDepth] = useState(0);
   const [activeUploadOps, setActiveUploadOps] = useState(0);
   const embeddingQueueRef = useRef<Array<{ id: string; clip: boolean; color: boolean }>>([]);
@@ -818,6 +821,47 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     return trimmed;
   }, [namespace]);
 
+  const uploadNamespaceOptions = useMemo(() => {
+    const envDefault = (process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || '').trim();
+    const knownRaw = process.env.NEXT_PUBLIC_KNOWN_NAMESPACES || '';
+    const defaults = new Set<string>();
+    const known = new Set<string>();
+    const registry = new Set<string>();
+
+    if (envDefault) defaults.add(envDefault);
+
+    knownRaw
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .forEach((entry) => {
+        if (!defaults.has(entry)) known.add(entry);
+      });
+
+    registryNamespaces
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .forEach((entry) => {
+        if (!defaults.has(entry) && !known.has(entry)) registry.add(entry);
+      });
+
+    const options = [
+      { value: '__all__', label: 'All namespaces' },
+      { value: '', label: '(no namespace)' },
+    ];
+
+    defaults.forEach((value) => options.push({ value, label: `${value} (default)` }));
+    Array.from(known).sort().forEach((value) => options.push({ value, label: value }));
+    Array.from(registry).sort().forEach((value) => options.push({ value, label: `${value} (registry)` }));
+    options.push({ value: '__custom__', label: 'Enter manually...' });
+
+    if (namespace && namespace !== '__custom__' && !options.some((option) => option.value === namespace)) {
+      options.splice(options.length - 1, 0, { value: namespace, label: namespace });
+    }
+
+    return options;
+  }, [namespace, registryNamespaces]);
+
   const buildMetadataEstimate = useCallback(
     (
       item: QueuedFile,
@@ -853,12 +897,13 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
 
   const formatUploadErrorMessage = useCallback((response: Response, payload: unknown) => {
     if (response.status === 409 && payload && typeof payload === 'object' && 'duplicates' in payload) {
-      const data = payload as { error?: string; duplicates?: Array<{ filename?: string; folder?: string }> };
+      const data = payload as { error?: string; duplicates?: Array<{ id?: string; filename?: string; folder?: string }> };
       if (Array.isArray(data.duplicates) && data.duplicates.length > 0) {
         const summary = data.duplicates
           .map((dup) => {
             const label = dup.filename || 'Untitled';
-            return dup.folder ? `${label} (${dup.folder})` : label;
+            const location = dup.folder ? `${label} (${dup.folder})` : label;
+            return dup.id ? `${location} [${dup.id}]` : location;
           })
           .slice(0, 3)
           .join(', ');
@@ -900,6 +945,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     () => queuedFiles.filter((item) => item.selected !== false).length,
     [queuedFiles]
   );
+  const uploadBlockedByNamespace = selectedQueuedCount > 0 && !uploadNamespace;
   const visibleQueuedFiles = useMemo(
     () => (showAllQueuedItems ? queuedFiles : queuedFiles.slice(0, QUEUE_RENDER_LIMIT)),
     [queuedFiles, showAllQueuedItems]
@@ -929,6 +975,64 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     activeUploadOps > 0 || activityStats.uploading > 0 || activityStats.embedding > 0 || embeddingQueueDepth > 0,
     [activeUploadOps, activityStats.uploading, activityStats.embedding, embeddingQueueDepth]
   );
+  const uploadGuardActive = useMemo(
+    () => isActivityActive || importLoading || pageImportLoading || aiRefiningNames || animateLoading,
+    [aiRefiningNames, animateLoading, importLoading, isActivityActive, pageImportLoading]
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !uploadGuardActive) {
+      return;
+    }
+
+    const originalPushState = window.history.pushState.bind(window.history);
+    const originalReplaceState = window.history.replaceState.bind(window.history);
+    const currentPath = window.location.pathname + window.location.search + window.location.hash;
+
+    const blockSpaNav = (kind: 'pushState' | 'replaceState', target?: string | URL | null) => {
+      const targetUrl = target ? String(target) : '';
+      // Allow no-op updates to the same URL.
+      if (targetUrl && targetUrl === currentPath) {
+        return false;
+      }
+      console.warn('[UploadGuard] Blocked SPA navigation during active upload work', {
+        kind,
+        target: targetUrl || '(unknown)',
+      });
+      return true;
+    };
+
+    window.history.pushState = ((data: unknown, unused: string, url?: string | URL | null) => {
+      if (blockSpaNav('pushState', url)) return;
+      return originalPushState(data, unused, url);
+    }) as History['pushState'];
+
+    window.history.replaceState = ((data: unknown, unused: string, url?: string | URL | null) => {
+      if (blockSpaNav('replaceState', url)) return;
+      return originalReplaceState(data, unused, url);
+    }) as History['replaceState'];
+
+    const handlePopState = () => {
+      console.warn('[UploadGuard] Blocked popstate navigation during active upload work');
+      originalPushState(null, '', currentPath);
+    };
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+      return '';
+    };
+
+    window.addEventListener('popstate', handlePopState, true);
+    window.addEventListener('beforeunload', handleBeforeUnload, true);
+
+    return () => {
+      window.history.pushState = originalPushState;
+      window.history.replaceState = originalReplaceState;
+      window.removeEventListener('popstate', handlePopState, true);
+      window.removeEventListener('beforeunload', handleBeforeUnload, true);
+    };
+  }, [uploadGuardActive]);
 
   useEffect(() => {
     if (animateFpsTouched) return;
@@ -945,6 +1049,17 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       setShowAllQueuedItems(false);
     }
   }, [queuedFiles.length, showAllQueuedItems]);
+
+  useEffect(() => {
+    const nextNamespace = namespace ?? '';
+    setUploadNamespaceDraft(nextNamespace && nextNamespace !== '__all__' ? nextNamespace : '');
+    if (!nextNamespace) {
+      setUploadNamespaceSelectValue('');
+      return;
+    }
+    const hasKnownOption = uploadNamespaceOptions.some((option) => option.value === nextNamespace);
+    setUploadNamespaceSelectValue(hasKnownOption ? nextNamespace : '__custom__');
+  }, [namespace, uploadNamespaceOptions]);
 
   // Keep track of queued files for cleanup on unmount
   const queuedFilesRef = useRef(queuedFiles);
@@ -994,6 +1109,34 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     fetchFolders();
   }, [fetchFolders]);
 
+  useEffect(() => {
+    fetch('/api/namespaces', { cache: 'no-store' })
+      .then((response) => response.json())
+      .then((data) => {
+        const namespaces = Array.isArray(data?.namespaces)
+          ? data.namespaces.filter((entry: unknown): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+          : [];
+        setRegistryNamespaces(namespaces);
+      })
+      .catch((error) => {
+        console.warn('Failed to load namespace registry for uploader', error);
+      });
+  }, []);
+
+  const handleUploadNamespaceSelectChange = useCallback((value: string) => {
+    setUploadNamespaceSelectValue(value);
+    if (value === '__custom__') return;
+    setUploadNamespaceDraft(value && value !== '__all__' ? value : '');
+    onNamespaceChange?.(value);
+  }, [onNamespaceChange]);
+
+  const handleUploadNamespaceApply = useCallback(() => {
+    const nextNamespace = uploadNamespaceDraft.trim();
+    if (!nextNamespace) return;
+    setUploadNamespaceSelectValue('__custom__');
+    onNamespaceChange?.(nextNamespace);
+  }, [onNamespaceChange, uploadNamespaceDraft]);
+
   // Function to actually upload files
   const resolveFolder = useCallback(() => {
     if (selectedFolder && selectedFolder.trim()) {
@@ -1035,6 +1178,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       }
 
       beginUploadActivity();
+      let uploadedAny = false;
 
       const shouldEmbedClip = embedClipOnUpload;
       const shouldEmbedColor = embedColorOnUpload;
@@ -1294,10 +1438,8 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
                 successEntries.forEach((entry) => enqueueEmbedding(entry.id, shouldEmbedClip, shouldEmbedColor));
               }
 
-              if (onImageUploaded && successEntries.length > 0) {
-                setTimeout(() => {
-                  onImageUploaded();
-                }, 500);
+              if (successEntries.length > 0) {
+                uploadedAny = true;
               }
             } else {
               const typedResult = result as {
@@ -1342,13 +1484,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
                 enqueueEmbedding(serverId, shouldEmbedClip, shouldEmbedColor);
               }
 
-              // Call the callback to refresh the gallery after a short delay
-              // This ensures Cloudflare has processed the image
-              if (onImageUploaded) {
-                setTimeout(() => {
-                  onImageUploaded();
-                }, 500);
-              }
+              uploadedAny = true;
             }
           } else {
             const errorMessage = formatUploadErrorMessage(response, result);
@@ -1388,6 +1524,11 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       setOriginalUrl("");
       setSourceUrl("");
       setSelectedParentId("");
+      if (onImageUploaded && uploadedAny) {
+        setTimeout(() => {
+          onImageUploaded();
+        }, 500);
+      }
     },
     [resolveFolder, tags, description, originalUrl, sourceUrl, uploadNamespace, selectedParentId, onImageUploaded, fetchFolders, formatUploadErrorMessage, embedClipOnUpload, embedColorOnUpload, enqueueEmbedding, omitOriginalUrl, markNamespaceUploadFailures, beginUploadActivity, endUploadActivity]
   );
@@ -1510,6 +1651,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
             body: JSON.stringify({
               items: imagePayloadItems,
               allowInsecure: pageImportAllowInsecure,
+              includeSmallAssets: pageImportIncludeSmallAssets,
               ...(pageImportCookieHeader.trim() ? { cookieHeader: pageImportCookieHeader.trim() } : {}),
             })
           });
@@ -1801,6 +1943,10 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
   const handleManualUpload = async () => {
     const selectedItems = queuedFiles.filter((item) => item.selected !== false);
     if (selectedItems.length === 0) return;
+    if (!uploadNamespace) {
+      markNamespaceUploadFailures(selectedItems);
+      return;
+    }
 
     const localItems = selectedItems.filter((item) => Boolean(item.file));
     const remoteItems = selectedItems.filter((item) => Boolean(item.remoteUrl) && !item.file);
@@ -1833,13 +1979,14 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       await uploadRemoteFiles(remoteItems);
     }
 
-    const selectedIds = new Set(selectedItems.map((item) => item.id));
-    selectedItems.forEach((item) => {
-      if (item.previewUrl && item.previewUrl.startsWith('blob:')) {
-        URL.revokeObjectURL(item.previewUrl);
-      }
-    });
-    setQueuedFiles((prev) => prev.filter((item) => !selectedIds.has(item.id)));
+    const attemptedIds = new Set(selectedItems.map((item) => item.id));
+    setQueuedFiles((prev) =>
+      prev.map((item) =>
+        attemptedIds.has(item.id)
+          ? { ...item, selected: false }
+          : item
+      )
+    );
   };
 
   const handleAiRefineSelectedNames = useCallback(async () => {
@@ -1850,47 +1997,77 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
     try {
       const fallbackFolder = resolveFolder();
       for (const item of selectedItems) {
-        const effectiveAssetType = item.assetType ?? (item.file ? inferAssetTypeFromFile(item.file) : inferAssetTypeFromUrl(item.remoteUrl));
-        if (effectiveAssetType !== 'image') {
-          updateQueuedFile(item.id, { processingNote: 'AI naming currently supports images only' });
-          continue;
-        }
-        const formData = new FormData();
-        if (item.file) {
-          formData.append('file', item.file);
-        } else if (item.remoteUrl) {
-          formData.append('remoteUrl', item.remoteUrl);
-        } else {
-          updateQueuedFile(item.id, { processingNote: 'AI naming skipped: no image source' });
-          continue;
-        }
+        try {
+          const effectiveAssetType = item.assetType ?? (item.file ? inferAssetTypeFromFile(item.file) : inferAssetTypeFromUrl(item.remoteUrl));
+          if (effectiveAssetType !== 'image') {
+            updateQueuedFile(item.id, { processingNote: 'AI naming currently supports images only' });
+            continue;
+          }
 
-        formData.append('filename', item.filename);
-        const folderHint = item.folder !== undefined ? item.folder : fallbackFolder;
-        if (folderHint) formData.append('folder', folderHint);
-        const tagHint = resolveTagInput(tags, item.tags);
-        if (tagHint) formData.append('tags', tagHint);
+          const formData = new FormData();
+          if (item.file) {
+            formData.append('file', item.file);
+          } else if (item.remoteUrl) {
+            formData.append('remoteUrl', item.remoteUrl);
+          } else {
+            updateQueuedFile(item.id, { processingNote: 'AI naming skipped: no image source' });
+            continue;
+          }
 
-        const response = await fetch('/api/display-name/suggest', {
-          method: 'POST',
-          body: formData,
-        });
-        const payload = (await response.json().catch(() => ({}))) as {
-          displayName?: string;
-          error?: string;
-        };
+          formData.append('filename', item.filename);
+          const folderHint = item.folder !== undefined ? item.folder : fallbackFolder;
+          if (folderHint) formData.append('folder', folderHint);
+          const tagHint = resolveTagInput(tags, item.tags);
+          if (tagHint) formData.append('tags', tagHint);
 
-        if (!response.ok || !payload.displayName) {
+          let response: Response | null = null;
+          let payload: { displayName?: string; error?: string } = {};
+          for (let attempt = 0; attempt < 2; attempt += 1) {
+            try {
+              response = await fetch('/api/display-name/suggest', {
+                method: 'POST',
+                body: formData,
+              });
+              payload = (await response.json().catch(() => ({}))) as {
+                displayName?: string;
+                error?: string;
+              };
+              break;
+            } catch (error) {
+              const abortedLike =
+                error instanceof Error &&
+                (error.name === 'AbortError' ||
+                  error.message.includes('aborted') ||
+                  error.message.includes('ECONNRESET'));
+              if (attempt === 0 && abortedLike) {
+                await new Promise((resolve) => setTimeout(resolve, 200));
+                continue;
+              }
+              throw error;
+            }
+          }
+
+          if (!response || !response.ok || !payload.displayName) {
+            updateQueuedFile(item.id, {
+              processingNote: payload.error || 'AI naming failed',
+            });
+            continue;
+          }
+
           updateQueuedFile(item.id, {
-            processingNote: payload.error || 'AI naming failed',
+            filename: payload.displayName,
+            processingNote: `AI shortname: ${payload.displayName}`,
           });
-          continue;
+        } catch (error) {
+          const message =
+            error instanceof Error && error.message.trim().length > 0
+              ? error.message
+              : 'Network request failed';
+          updateQueuedFile(item.id, {
+            processingNote: `AI naming failed: ${message}`,
+          });
+          console.error('Failed to refine queued name for item', { itemId: item.id, error });
         }
-
-        updateQueuedFile(item.id, {
-          filename: payload.displayName,
-          processingNote: `AI shortname: ${payload.displayName}`,
-        });
       }
     } catch (error) {
       console.error('Failed to refine queued names with AI', error);
@@ -1898,6 +2075,14 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       setAiRefiningNames(false);
     }
   }, [queuedFiles, resolveFolder, tags, updateQueuedFile]);
+
+  const applyQueueNameToAll = useCallback(() => {
+    const nextName = queueRenameValue.trim();
+    if (!nextName) {
+      return;
+    }
+    setQueuedFiles((prev) => prev.map((item) => ({ ...item, filename: nextName })));
+  }, [queueRenameValue]);
 
   // Clear queued files
   const clearQueue = () => {
@@ -2001,24 +2186,64 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
   };
 
   const handleImportFromUrl = async () => {
-    if (!importUrl.trim()) return;
+    const sourceUrl = importUrl.trim();
+    if (!sourceUrl) return;
     try {
       setImportLoading(true);
       setImportError(null);
+      const inferredAssetType = inferAssetTypeFromUrl(sourceUrl);
+      if (inferredAssetType === 'video') {
+        setQueuedFiles((prev) => [
+          ...prev,
+          {
+            id: createQueueId(),
+            assetType: 'video',
+            filename: sourceUrl.split('/').pop() || 'remote-video',
+            remoteUrl: sourceUrl,
+            originalUrl: sourceUrl,
+            selected: true
+          }
+        ]);
+        if (!originalUrl.trim()) {
+          setOriginalUrl(sourceUrl);
+        }
+        setImportUrl('');
+        return;
+      }
+
       const response = await fetch('/api/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: importUrl.trim() })
+        body: JSON.stringify({ url: sourceUrl })
       });
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to import image');
+        const errorMessage = data?.error || 'Failed to import image';
+        if (isImageOnlyImportError(errorMessage)) {
+          setQueuedFiles((prev) => [
+            ...prev,
+            {
+              id: createQueueId(),
+              assetType: 'video',
+              filename: sourceUrl.split('/').pop() || 'remote-video',
+              remoteUrl: sourceUrl,
+              originalUrl: sourceUrl,
+              selected: true
+            }
+          ]);
+          if (!originalUrl.trim()) {
+            setOriginalUrl(sourceUrl);
+          }
+          setImportUrl('');
+          return;
+        }
+        throw new Error(errorMessage);
       }
       if (!data?.data || !data?.type || !data?.name) {
         throw new Error('Invalid response from import service');
       }
       const file = base64ToFile(String(data.data), String(data.name), String(data.type));
-      const sourceUrl = String(data.originalUrl || importUrl.trim());
+      const importedSourceUrl = String(data.originalUrl || sourceUrl);
       const descriptionFromSnagx = typeof data.snagxDescription === 'string' && data.snagxDescription.trim()
         ? data.snagxDescription.trim()
         : '';
@@ -2030,7 +2255,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
           assetType: 'image',
           file,
           filename: file.name,
-          originalUrl: sourceUrl,
+          originalUrl: importedSourceUrl,
           description: descriptionFromSnagx || undefined,
           captureDate: typeof data.captureDate === 'string' ? data.captureDate : undefined,
           tags: tagsFromSnagx,
@@ -2039,12 +2264,12 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         }
       ]);
       if (!originalUrl.trim()) {
-        setOriginalUrl(sourceUrl);
+        setOriginalUrl(importedSourceUrl);
       }
       setImportUrl('');
     } catch (err) {
       console.error('Import image failed', err);
-      setImportError(err instanceof Error ? err.message : 'Failed to import image');
+      setImportError(err instanceof Error ? err.message : 'Failed to import media');
     } finally {
       setImportLoading(false);
     }
@@ -2082,6 +2307,8 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
             maxPages,
             scrollDelayMs,
             autoScrollUntilStable,
+            includeUiChrome: pageImportIncludeUiChrome,
+            includeSmallAssets: pageImportIncludeSmallAssets,
             ...(cookieHeaderValue ? { cookieHeader: cookieHeaderValue } : {}),
             ...(autoScrollUntilStable ? {} : { maxScrolls })
           })
@@ -2203,8 +2430,10 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: pageImportUrl.trim(),
-          minBytes: 8 * 1024,
+          minBytes: pageImportIncludeSmallAssets ? 1024 : 8 * 1024,
           allowInsecure: pageImportAllowInsecure,
+          includeUiChrome: pageImportIncludeUiChrome,
+          includeSmallAssets: pageImportIncludeSmallAssets,
           ...(cookieHeaderValue ? { cookieHeader: cookieHeaderValue } : {}),
         })
       });
@@ -2515,6 +2744,11 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
       {(isActivityActive || activityStats.total > 0) && (
         <ActivityIndicator stats={activityStats} isActive={isActivityActive} />
       )}
+      {uploadGuardActive && (
+        <div className="mb-4 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          Upload guard is active. Navigation/reload is blocked while upload tasks are running.
+        </div>
+      )}
       {!uploadNamespace && (
         <div className="mb-4 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
           {NAMESPACE_REQUIRED_UPLOAD_ERROR}
@@ -2548,6 +2782,7 @@ export default function ImageUploader({ onImageUploaded, namespace }: ImageUploa
               onChange={(e) => setNewFolder(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && newFolder.trim()) {
+                  e.preventDefault();
                   const folderName = newFolder.trim().toLowerCase().replace(/\s+/g, "-");
                   if (!folders.includes(folderName)) {
                     setFolders((prev) => [...prev, folderName]);
@@ -2664,10 +2899,66 @@ A long list of filenames is not user friendly and essentially useless for select
           Select an existing canonical image to group this upload as a variation. Leave empty to store a new master asset.
         </p> 
       </div> */}
+      <div className="mt-4 rounded-lg border border-dashed bg-white/70 p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div className="flex-1">
+            <p className="text-xs font-mono font-medium text-gray-900">Upload namespace</p>
+            <p className="mt-1 text-[11px] text-gray-500">
+              This mirrors the gallery namespace so you can change the upload target without scrolling back to the toolbar.
+            </p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-[minmax(240px,320px)_minmax(180px,220px)_auto] sm:items-end">
+            <label className="block text-[11px] text-gray-700">
+              Namespace
+              <MonoSelect
+                id="upload-namespace-select"
+                value={uploadNamespaceSelectValue}
+                onChange={handleUploadNamespaceSelectChange}
+                options={uploadNamespaceOptions}
+                searchable
+                searchPlaceholder="Filter namespaces..."
+                className="mt-1"
+                disabled={isUploading}
+              />
+            </label>
+            <label className="block text-[11px] text-gray-700">
+              Custom namespace
+              <input
+                type="text"
+                value={uploadNamespaceDraft}
+                onChange={(event) => {
+                  setUploadNamespaceDraft(event.target.value);
+                  setUploadNamespaceSelectValue('__custom__');
+                }}
+                placeholder="Enter namespace"
+                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={isUploading}
+              />
+            </label>
+            <button
+              type="button"
+              onClick={handleUploadNamespaceApply}
+              disabled={isUploading || uploadNamespaceDraft.trim().length === 0}
+              className="px-3 py-2 text-xs text-blue-700 border border-blue-300 bg-blue-50 rounded-md hover:bg-blue-100 disabled:opacity-50"
+            >
+              Apply
+            </button>
+          </div>
+        </div>
+        <p className={clsx(
+          "mt-3 text-[11px]",
+          uploadNamespace ? "text-emerald-700" : "text-amber-700"
+        )}>
+          {uploadNamespace
+            ? `Uploads will go to "${uploadNamespace}".`
+            : 'Select a specific namespace before uploading. "All namespaces" and "(no namespace)" remain browse-only here.'}
+        </p>
+      </div>
+
       <div
         {...getRootProps()}
         className={clsx(
-          "border-2 border-dashed rounded-lg p-2 text-center transition-all cursor-pointer relative overflow-hidden",
+          "mt-4 border-2 border-dashed rounded-lg p-2 text-center transition-all cursor-pointer relative overflow-hidden",
           isDragActive ? "border-blue-400 bg-blue-50" : 
           isUploading ? "border-blue-300 bg-gradient-to-r from-blue-50 via-white to-blue-50" :
           "border-gray-300 hover:border-gray-400"
@@ -2733,14 +3024,14 @@ A long list of filenames is not user friendly and essentially useless for select
 
       <div className="mt-4 p-4 border border-dashed rounded-lg bg-white/60">
         <div className="flex items-center justify-between mb-2">
-          <p className="text-xs font-mono font-medium text-gray-900">Import image from URL</p>
+          <p className="text-xs font-mono font-medium text-gray-900">Import media from URL</p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <input
             type="url"
             value={importUrl}
             onChange={(e) => setImportUrl(e.target.value)}
-            placeholder="https://example.com/asset.jpg"
+            placeholder="https://example.com/asset.jpg or .mp4"
             className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           <button
@@ -2749,12 +3040,12 @@ A long list of filenames is not user friendly and essentially useless for select
             disabled={importLoading || !importUrl.trim()}
             className="px-4 py-2 text-xs bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
           >
-            {importLoading ? 'Fetching…' : 'Fetch image'}
+            {importLoading ? 'Fetching…' : 'Fetch media'}
           </button>
         </div>
         {importError && <p className="text-xs text-red-600 mt-1">{importError}</p>}
         <p className="text-[11px] text-gray-500 mt-1">
-          We’ll download the image, add it to your queue, and prefill the “Original URL” field so you can finish tagging before uploading.
+          Images are downloaded into the queue. Short videos are queued by URL and uploaded through the video pipeline when you click Upload.
         </p>
       </div>
 
@@ -2836,6 +3127,26 @@ A long list of filenames is not user friendly and essentially useless for select
         )}
         
         <div className="mt-2 flex flex-wrap items-center gap-4">
+          <label className="flex items-center gap-2 text-[11px] text-gray-600">
+            <input
+              type="checkbox"
+              checked={pageImportIncludeSmallAssets}
+              onChange={(e) => setPageImportIncludeSmallAssets(e.target.checked)}
+              className="h-3 w-3"
+              disabled={pageImportLoading}
+            />
+            Include small assets
+          </label>
+          <label className="flex items-center gap-2 text-[11px] text-gray-600">
+            <input
+              type="checkbox"
+              checked={pageImportIncludeUiChrome}
+              onChange={(e) => setPageImportIncludeUiChrome(e.target.checked)}
+              className="h-3 w-3"
+              disabled={pageImportLoading}
+            />
+            Include UI chrome / navigation images
+          </label>
           <label className="flex items-center gap-2 text-[11px] text-gray-600">
             <input
               type="checkbox"
@@ -2942,6 +3253,9 @@ A long list of filenames is not user friendly and essentially useless for select
             ? 'Uses a headless browser to trigger lazy/infinite loading and follow pagination links. Auto-scroll stops when no new assets are found (with a safety cap). Requires puppeteer.'
             : 'Scans the page HTML for image/video URLs. Fast but may miss JavaScript-loaded content.'}
         </p>
+        <p className="text-[11px] text-gray-500 mt-1">
+          Small-assets and UI-chrome options are off by default because they can surface logos, badges, nav icons, and other decorative site assets.
+        </p>
       </div>
 
       {/* Queued Files Section */}
@@ -2951,7 +3265,7 @@ A long list of filenames is not user friendly and essentially useless for select
             <p className="text-xs font-mono font-medium text-gray-900">Queued Files ({queuedFiles.length})</p>
             <div className="flex space-x-2">
               {queuedFiles.some(f => needsSanitization(f.filename)) && (
-                <button
+                <button type="button"
                   onClick={() => {
                     setQueuedFiles(prev => prev.map(f => 
                       needsSanitization(f.filename) 
@@ -2966,7 +3280,7 @@ A long list of filenames is not user friendly and essentially useless for select
                   Sanitize All Names
                 </button>
               )}
-              <button
+              <button type="button"
                 onClick={handleAiRefineSelectedNames}
                 className="px-3 py-1 text-xs text-fuchsia-700 hover:text-fuchsia-800 border border-fuchsia-300 bg-fuchsia-50 rounded-md hover:bg-fuchsia-100 disabled:opacity-50"
                 disabled={isUploading || aiRefiningNames || selectedQueuedCount === 0}
@@ -2974,17 +3288,18 @@ A long list of filenames is not user friendly and essentially useless for select
               >
                 {aiRefiningNames ? 'Refining…' : 'AI Refine Selected Names'}
               </button>
-              <button
+              <button type="button"
                 onClick={clearQueue}
                 className="px-3 py-1 text-xs text-gray-600 hover:text-red-600 border border-gray-300 rounded-md hover:border-red-300"
                 disabled={isUploading}
               >
                 Clear Queue
               </button>
-              <button
+              <button type="button"
                 onClick={handleManualUpload}
-                disabled={isUploading || selectedQueuedCount === 0}
+                disabled={isUploading || selectedQueuedCount === 0 || uploadBlockedByNamespace}
                 className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+                title={uploadBlockedByNamespace ? NAMESPACE_REQUIRED_UPLOAD_ERROR : undefined}
               >
                 <Upload className="h-4 w-4" />
                 <span>
@@ -2992,6 +3307,33 @@ A long list of filenames is not user friendly and essentially useless for select
                 </span>
               </button>
             </div>
+          </div>
+          {uploadBlockedByNamespace && (
+            <div className="mb-3 flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span>Select a namespace to enable upload.</span>
+            </div>
+          )}
+          <div className="mb-3 flex flex-col gap-2 rounded-lg border border-gray-200 bg-gray-50 p-3 md:flex-row md:items-center">
+            <label className="flex-1 text-[11px] text-gray-700">
+              Queue name override
+              <input
+                type="text"
+                value={queueRenameValue}
+                onChange={(e) => setQueueRenameValue(e.target.value)}
+                placeholder="Set one filename/display name for every queued file"
+                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                disabled={isUploading}
+              />
+            </label>
+            <button
+              type="button"
+              onClick={applyQueueNameToAll}
+              disabled={isUploading || queuedFiles.length === 0 || queueRenameValue.trim().length === 0}
+              className="px-3 py-2 text-xs text-blue-700 border border-blue-300 bg-blue-50 rounded-md hover:bg-blue-100 disabled:opacity-50"
+            >
+              Apply to all queued files
+            </button>
           </div>
           {queuedFiles.length > QUEUE_RENDER_LIMIT && !showAllQueuedItems && (
             <div className="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
@@ -3233,7 +3575,7 @@ A long list of filenames is not user friendly and essentially useless for select
                   >
                     {metadataExpanded ? "Hide metadata" : "Show metadata"}
                   </button>
-                  <button
+                  <button type="button"
                     onClick={() => {
                       if (item.previewUrl && item.previewUrl.startsWith('blob:')) {
                         URL.revokeObjectURL(item.previewUrl);
@@ -3386,7 +3728,7 @@ A long list of filenames is not user friendly and essentially useless for select
         <div className="mt-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-medium text-gray-900">Uploaded Images ({uploadedImages.length})</h3>
-            <button
+            <button type="button"
               onClick={() => setUploadedImages([])}
               className="text-sm text-gray-500 hover:text-red-600 transition-colors flex items-center gap-1"
             >
@@ -3444,7 +3786,7 @@ A long list of filenames is not user friendly and essentially useless for select
                       <p className="text-[11px] text-red-600">{image.embeddingError}</p>
                     )}
                     {image.status === "success" && image.url && (
-                      <button onClick={() => copyToClipboard(image.url)} className="text-xs text-blue-600 hover:text-blue-800 truncate block max-w-xs">
+                      <button type="button" onClick={() => copyToClipboard(image.url)} className="text-xs text-blue-600 hover:text-blue-800 truncate block max-w-xs">
                         {image.url}
                       </button>
                     )}
@@ -3466,7 +3808,7 @@ A long list of filenames is not user friendly and essentially useless for select
                     )}
                   </div>
                 </div>
-                <button onClick={() => removeImage(image.id)} className="flex-shrink-0 text-gray-400 hover:text-gray-600">
+                <button type="button" onClick={() => removeImage(image.id)} className="flex-shrink-0 text-gray-400 hover:text-gray-600">
                   <X className="h-4 w-4" />
                 </button>
               </div>

@@ -62,6 +62,7 @@ The API does not include built-in authentication. If exposing externally, protec
     - [Rotate Image](#rotate-image)
     - [Create Animation](#create-animation)
     - [Animate Selection](#animate-selection)
+    - [Video to Animated WebP](#video-to-animated-webp)
   - [Image Family Management](#image-family-management)
     - [Delete Family](#delete-family)
     - [Swap Parent](#swap-parent)
@@ -1059,6 +1060,79 @@ Content-Type: application/json
   "frameCount": 3
 }
 ```
+
+---
+
+### Video to Animated WebP
+
+Generate an animated WebP derivative from an uploaded video asset.
+
+```
+POST /api/videos/{id}/animated-webp
+Content-Type: application/json
+```
+
+**Request Body (all optional):**
+
+```json
+{
+  "variations": [
+    {
+      "maxWidth": 960,
+      "maxHeight": 960,
+      "maxOutputBytes": 10000000,
+      "fps": 12,
+      "timeoutMs": 45000,
+      "loop": true,
+      "filename": "clip-preview-a.webp"
+    },
+    {
+      "maxWidth": 640,
+      "maxHeight": 640,
+      "maxOutputBytes": 2000000,
+      "fps": 8,
+      "timeoutMs": 45000,
+      "loop": false,
+      "filename": "clip-preview-b.webp"
+    }
+  ]
+}
+```
+
+You can still send single-variation fields at top-level (`maxWidth`, `maxOutputBytes`, etc.) for backward compatibility.
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "partial": false,
+  "createdCount": 2,
+  "failedCount": 0,
+  "animatedWebp": {
+    "imageId": "derived-image-id",
+    "url": "https://imagedelivery.net/.../public",
+    "bytes": 431287,
+    "width": 640,
+    "height": 360,
+    "fps": 12,
+    "quality": 82,
+    "attempts": 1,
+    "maxWidth": 960,
+    "maxHeight": 960,
+    "maxOutputBytes": 10000000,
+    "timeoutMs": 45000
+  },
+  "variations": [
+    { "imageId": "derived-image-id", "url": "https://imagedelivery.net/.../public" }
+  ]
+}
+```
+
+Notes:
+- Requires the video to be in `ready` stream status.
+- Uses technical constraints (dimension/bytes/fps/timeout), not duration gating policy.
+- If FFmpeg lacks WebP encoder support, response includes troubleshooting hints.
 
 ---
 

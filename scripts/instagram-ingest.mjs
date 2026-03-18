@@ -95,6 +95,7 @@ Options:
   --url <url>               Instagram post/reel URL for single-url mode
   --download-dir <path>     Optional directory to download image assets
   --push-cloudflare         Push discovered images to /api/upload/external
+  --no-push-cloudflare      Disable Cloudflare pushes for single-url mode
   --skip-video-push         Skip pushing videos during ingest
   --api-base <url>          Base URL for local API (default: http://localhost:3000)
   --namespace <name>        Upload namespace (default: cf-default)
@@ -117,6 +118,7 @@ function parseArgs(argv) {
     delayMs: 1200,
     requestDelayMs: 800,
     inputPath: "",
+    inputPathProvided: false,
     outputPath: "",
     checkpointPath: "",
     instagramUrl: "",
@@ -134,6 +136,7 @@ function parseArgs(argv) {
 
   const [command, ...rest] = argv;
   out.command = command ?? "help";
+  if (out.command === "single-url") out.pushCloudflare = true;
 
   for (let i = 0; i < rest.length; i += 1) {
     const arg = rest[i];
@@ -159,6 +162,7 @@ function parseArgs(argv) {
       i += 1;
     } else if (arg === "--input" && next) {
       out.inputPath = path.resolve(next);
+      out.inputPathProvided = true;
       i += 1;
     } else if (arg === "--output" && next) {
       out.outputPath = path.resolve(next);
@@ -180,6 +184,7 @@ function parseArgs(argv) {
       out.namespace = next.trim();
       i += 1;
     } else if (arg === "--push-cloudflare") out.pushCloudflare = true;
+    else if (arg === "--no-push-cloudflare") out.pushCloudflare = false;
     else if (arg === "--skip-video-push") out.skipVideoPush = true;
     else if (arg === "--no-resume") out.resume = false;
     else if (arg === "--headful") out.headful = true;
@@ -366,10 +371,7 @@ function buildInstagramUploadTags(primaryUsername, profileUsername) {
   const cleanPrimary = typeof primaryUsername === "string" ? primaryUsername.trim() : "";
   const cleanProfile = typeof profileUsername === "string" ? profileUsername.trim() : "";
   if (cleanPrimary) tags.push(cleanPrimary);
-  if (cleanProfile) {
-    tags.push(cleanProfile);
-    tags.push(`ig_profile:${cleanProfile}`);
-  }
+  if (cleanProfile) tags.push(cleanProfile);
   return [...new Set(tags)];
 }
 
@@ -1339,7 +1341,7 @@ async function runVideosFromNdjson(opts, log) {
   }
   log.info(`push_namespace=${opts.namespace}`);
   log.info(`request_delay_ms=${opts.requestDelayMs}`);
-  log.info(`push_tags=instagram,${opts.username} push_folder=instagram`);
+  log.info(`push_tags=instagram,${opts.username || "(from rows)"} push_folder=instagram`);
 
   const raw = await fsp.readFile(opts.inputPath, "utf8");
   const lines = raw.split(/\r?\n/).filter((line) => line.trim().length > 0);
@@ -1347,6 +1349,8 @@ async function runVideosFromNdjson(opts, log) {
 
   const queue = [];
   const seen = new Set();
+  let rowsWithLikelyVideoNoUrl = 0;
+  let rowsWithAnyVideoCandidates = 0;
   for (const line of lines) {
     let row = null;
     try {
@@ -1355,13 +1359,37 @@ async function runVideosFromNdjson(opts, log) {
       log.warn("ndjson_parse_failed; skipping line");
       continue;
     }
-    const username = row?.username || opts.username;
-    const shortcode = row?.shortcode || null;
+    const username = row?.username || opts.username || "instagram";
+    const rowPermalink =
+      typeof row?.permalink === "string" && row.permalink.trim() ? row.permalink.trim() : null;
+    const shortcode =
+      row?.shortcode ||
+      (rowPermalink ? extractShortcodeFromInstagramUrl(rowPermalink) : null) ||
+      null;
     const permalink =
-      row?.permalink || (shortcode ? `https://www.instagram.com/p/${shortcode}/` : `https://www.instagram.com/${username}/`);
-    const sourcePageUrl = `https://www.instagram.com/${username}/`;
-    const videoUrls = Array.isArray(row?.videoUrls) ? row.videoUrls : [];
-    for (const videoUrl of videoUrls) {
+      rowPermalink ||
+      (shortcode ? `https://www.instagram.com/p/${shortcode}/` : `https://www.instagram.com/${username}/`);
+    const sourcePageUrl = permalink || `https://www.instagram.com/${username}/`;
+
+    const candidateVideoUrls = [];
+    if (Array.isArray(row?.videoUrls)) candidateVideoUrls.push(...row.videoUrls);
+    if (Array.isArray(row?.video_urls)) candidateVideoUrls.push(...row.video_urls);
+    if (typeof row?.videoUrl === "string") candidateVideoUrls.push(row.videoUrl);
+    if (Array.isArray(row?.cloudflare)) {
+      for (const asset of row.cloudflare) {
+        if (asset?.assetType === "video" && typeof asset?.videoUrl === "string") {
+          candidateVideoUrls.push(asset.videoUrl);
+        }
+      }
+    }
+
+    const reducedVideoUrls = reduceVideoUrlsForUpload(candidateVideoUrls);
+    if (reducedVideoUrls.length > 0) rowsWithAnyVideoCandidates += 1;
+    if (row?.likelyVideo === true && reducedVideoUrls.length === 0) {
+      rowsWithLikelyVideoNoUrl += 1;
+    }
+
+    for (const videoUrl of reducedVideoUrls) {
       const key = `${shortcode || "no_shortcode"}|${videoUrl}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -1369,6 +1397,10 @@ async function runVideosFromNdjson(opts, log) {
     }
   }
 
+  log.info(`rows_with_video_candidates=${rowsWithAnyVideoCandidates}`);
+  if (rowsWithLikelyVideoNoUrl > 0) {
+    log.warn(`rows_likely_video_but_no_video_url=${rowsWithLikelyVideoNoUrl}`);
+  }
   log.info(`video_queue_size=${queue.length}`);
 
   let uploaded = 0;
@@ -1431,7 +1463,9 @@ async function runSingleUrl(opts, log) {
     }
     log.info(`api_base=${opts.apiBase}`);
     log.info(`push_namespace=${opts.namespace}`);
-    log.info(`push_tags=instagram,${opts.username},${profileUsername},ig_profile:${profileUsername} push_folder=instagram`);
+    log.info(
+      `push_tags=${buildInstagramUploadTags(opts.username, profileUsername).join(",")} push_folder=instagram`,
+    );
   }
 
   const browser = await launchBrowser(opts.profileDir, opts.headful ? false : true);
@@ -1720,7 +1754,7 @@ async function main() {
     return;
   }
   if (opts.command === "videos-from-ndjson") {
-    if (!opts.username || !opts.username.trim()) {
+    if ((!opts.username || !opts.username.trim()) && !opts.inputPathProvided) {
       throw new Error("videos-from-ndjson requires --username <name> (or pass --input <path>)");
     }
     await runVideosFromNdjson(opts, log);

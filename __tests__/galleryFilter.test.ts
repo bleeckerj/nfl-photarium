@@ -10,6 +10,8 @@ const makeImage = (overrides: Partial<GalleryImage> = {}): GalleryImage => ({
   folder: overrides.folder,
   tags: overrides.tags,
   altTag: overrides.altTag,
+  altText: overrides.altText,
+  description: overrides.description,
   parentId: overrides.parentId,
   originalUrl: overrides.originalUrl,
   promptThis: overrides.promptThis
@@ -104,5 +106,26 @@ describe('filterImagesForGallery', () => {
     });
 
     expect(result.map((img) => img.id)).toContain('5');
+  });
+
+  it('matches search when extras altText contains the text', () => {
+    const extendedImages = [
+      ...images,
+      makeImage({
+        id: '6',
+        filename: 'extras-alt.png',
+        altText: 'A red lighthouse at dawn',
+        folder: 'internal',
+      })
+    ];
+
+    const result = filterImagesForGallery(extendedImages, {
+      selectedFolder: 'all',
+      selectedTag: '',
+      searchTerm: 'lighthouse',
+      onlyCanonical: false
+    });
+
+    expect(result.map((img) => img.id)).toContain('6');
   });
 });

@@ -338,6 +338,13 @@ const runBrowserIngest = async (options) => {
   try {
     for (const pageUrl of urls) {
       console.log(`\n[browser] ${pageUrl}`);
+      const host = new URL(pageUrl).hostname.toLowerCase();
+      if (/^archive\.[a-z0-9-]+$/i.test(host)) {
+        console.log('  -> archive.* host detected; manual CAPTCHA clearance is often required before capture');
+        if (headless || noPrompt) {
+          console.log('  -> headed interactive mode is recommended for archive.* pages');
+        }
+      }
       await page.goto(pageUrl, { waitUntil: 'networkidle2', timeout: 120000 });
 
       if (noPrompt) {
@@ -415,7 +422,6 @@ const runBrowserIngest = async (options) => {
         return Array.from(urls);
       });
 
-      const host = new URL(pageUrl).hostname.toLowerCase();
       const defaultHostFilter = host === 'mcmaster.com' || host.endsWith('.mcmaster.com')
         ? /\/contents\/gfx\/imagecache\//i
         : null;

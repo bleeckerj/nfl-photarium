@@ -21,6 +21,7 @@ export interface CloudflareImage {
   aspectRatio?: string;
   dimensions?: { width: number; height: number };
   altTag?: string;
+  altText?: string;
   parentId?: string;
   linkedAssetId?: string;
   originalUrl?: string;

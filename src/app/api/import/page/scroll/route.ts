@@ -25,6 +25,13 @@ import {
   looksLikeUiChromeAsset,
 } from '@/server/pageImportFilters';
 import {
+  buildArchiveChallengeMessage,
+  inspectArchiveText,
+  isArchiveHost,
+  logArchiveDiagnostics,
+  type ArchiveDiagnostics,
+} from '@/server/archiveDiagnostics';
+import {
   cookieHeaderToPuppeteerCookies,
   normalizeCookieHeader,
 } from '@/server/pageImportCookies';
@@ -85,6 +92,34 @@ interface ScrollOptions {
   cookieHeader?: string | null;
 }
 
+const getArchivePageDiagnostics = async (
+  pageUrl: string,
+  page: {
+    title: () => Promise<string>;
+    evaluate: <T>(pageFunction: () => T | Promise<T>) => Promise<T>;
+    url: () => string;
+  },
+  status?: number
+): Promise<ArchiveDiagnostics | null> => {
+  if (!isArchiveHost(pageUrl) && !isArchiveHost(page.url())) {
+    return null;
+  }
+
+  const [title, text] = await Promise.all([
+    page.title().catch(() => ''),
+    page.evaluate(() => document.body?.innerText?.slice(0, 4000) || '').catch(() => ''),
+  ]);
+
+  return inspectArchiveText({
+    sourceUrl: pageUrl,
+    finalUrl: page.url(),
+    status,
+    contentType: 'text/html',
+    title,
+    text,
+  });
+};
+
 interface ImageInfo {
   url: string;
   filename: string;
@@ -111,6 +146,7 @@ const extractMediaFromPage = async (
   videos: VideoInfo[];
   scrollCount: number;
   protectionMode: boolean;
+  archiveDiagnostics?: ArchiveDiagnostics | null;
   error?: string;
 }> => {
   const pup = await loadPuppeteer();
@@ -168,13 +204,25 @@ const extractMediaFromPage = async (
     });
 
     // Navigate to the page
-    await page.goto(pageUrl, {
+    const navigationResponse = await page.goto(pageUrl, {
       waitUntil: 'networkidle2',
       timeout: options.timeoutMs,
     });
 
     // Initial wait for dynamic content
     await new Promise(resolve => setTimeout(resolve, 1000));
+    const archiveDiagnostics = await getArchivePageDiagnostics(pageUrl, page, navigationResponse?.status?.());
+    logArchiveDiagnostics('import/page/scroll', archiveDiagnostics, { phase: 'page-load' });
+    if (archiveDiagnostics?.challengeDetected) {
+      return {
+        images: [],
+        videos: [],
+        scrollCount: 0,
+        protectionMode: false,
+        archiveDiagnostics,
+        error: buildArchiveChallengeMessage(archiveDiagnostics.host),
+      };
+    }
 
     let scrollCount = 0;
     let noNewImagesCount = 0;
@@ -343,10 +391,11 @@ const extractMediaFromPage = async (
       videos: Array.from(videoMap.values()),
       scrollCount,
       protectionMode: sawProdPage403 && sawProtectionPayload,
+      archiveDiagnostics,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
-    return { images: [], videos: [], scrollCount: 0, protectionMode: false, error: `Browser error: ${message}` };
+    return { images: [], videos: [], scrollCount: 0, protectionMode: false, archiveDiagnostics: null, error: `Browser error: ${message}` };
   } finally {
     if (browser) {
       await browser.close();
@@ -399,13 +448,17 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const pageUrl = typeof body?.url === 'string' ? body.url.trim() : '';
+    const includeUiChrome = Boolean(body?.includeUiChrome);
+    const includeSmallAssets = Boolean(body?.includeSmallAssets);
     let cookieHeader: string | null = null;
     try {
       cookieHeader = normalizeCookieHeader(body?.cookieHeader);
     } catch (error) {
       return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid cookie header' }, { status: 400 });
     }
-    const minBytes = Number.isFinite(body?.minBytes) ? Number(body.minBytes) : SCROLL_MODE_MIN_BYTES;
+    const minBytes = Number.isFinite(body?.minBytes)
+      ? Number(body.minBytes)
+      : (includeSmallAssets ? 1024 : SCROLL_MODE_MIN_BYTES);
     const maxImages = Number.isFinite(body?.maxImages) ? Math.max(0, Number(body.maxImages)) : undefined;
     const maxScrolls = Number.isFinite(body?.maxScrolls) 
       ? Math.max(1, Math.min(50, Number(body.maxScrolls))) 
@@ -426,7 +479,7 @@ export async function POST(request: NextRequest) {
     console.log(`[import/page/scroll] Starting headless scroll for: ${pageUrl}`);
     console.log(`[import/page/scroll] maxScrolls=${maxScrolls}, scrollDelayMs=${scrollDelayMs}`);
 
-    const { images, videos, scrollCount, protectionMode, error } = await extractMediaFromPage(pageUrl, {
+    const { images, videos, scrollCount, protectionMode, archiveDiagnostics, error } = await extractMediaFromPage(pageUrl, {
       maxScrolls,
       scrollDelayMs,
       timeoutMs: Number(process.env.IMPORT_SCROLL_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS,
@@ -435,7 +488,10 @@ export async function POST(request: NextRequest) {
     });
 
     if (error) {
-      return NextResponse.json({ error }, { status: 500 });
+      return NextResponse.json(
+        { error, details: archiveDiagnostics ? { archiveDiagnostics } : undefined },
+        { status: archiveDiagnostics?.challengeDetected ? 403 : 500 }
+      );
     }
 
     console.log(`[import/page/scroll] Found ${images.length} images and ${videos.length} videos after ${scrollCount} scrolls`);
@@ -458,7 +514,7 @@ export async function POST(request: NextRequest) {
       }
 
       // Filter out likely UI chrome (logos/icons/sprites/nav assets)
-      if (looksLikeUiChromeAsset(img.url, img.filename)) {
+      if (!includeUiChrome && looksLikeUiChromeAsset(img.url, img.filename)) {
         return false;
       }
       if (looksLikeTrackingOrUtilityAsset(img.url, img.filename)) {
@@ -475,7 +531,7 @@ export async function POST(request: NextRequest) {
       
       // If we got naturalWidth/naturalHeight from the browser, use that to filter tiny images
       if (img.naturalWidth && img.naturalHeight) {
-        if (img.naturalWidth < MIN_DIMENSION && img.naturalHeight < MIN_DIMENSION) {
+        if (!includeSmallAssets && img.naturalWidth < MIN_DIMENSION && img.naturalHeight < MIN_DIMENSION) {
           return false;
         }
         // Has valid dimensions, keep it
@@ -511,8 +567,11 @@ export async function POST(request: NextRequest) {
       sourceUrl: pageUrl,
       minBytes,
       maxImages: typeof maxImages === 'number' ? maxImages : null,
+      includeUiChrome,
+      includeSmallAssets,
       scrollCount,
       mode: 'scroll',
+      archiveDiagnostics,
       images: limitedImages.map(img => ({
         kind: 'image' as const,
         url: img.url,

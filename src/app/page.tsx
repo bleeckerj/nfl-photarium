@@ -59,12 +59,13 @@ export default function Home() {
   const router = useRouter();
 
   const handleImageUploaded = () => {
-    // Trigger gallery refresh
+    // Trigger gallery refresh (single path to avoid extra parent churn)
     if (galleryRef.current) {
       galleryRef.current.refreshImages();
+    } else {
+      // Fallback only when ref is unavailable
+      setRefreshTrigger(prev => prev + 1);
     }
-    // Also update the trigger as a fallback
-    setRefreshTrigger(prev => prev + 1);
   };
 
   return (
@@ -114,7 +115,11 @@ export default function Home() {
             <p className="text-sm font-mono text-gray-900 mb-2">
               Cloudflare Image Upload
             </p>
-            <ImageUploader onImageUploaded={handleImageUploaded} namespace={namespace} />
+            <ImageUploader
+              onImageUploaded={handleImageUploaded}
+              namespace={namespace}
+              onNamespaceChange={handleNamespaceChange}
+            />
           </section>
         </div>
       </div>

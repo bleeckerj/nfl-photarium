@@ -5,6 +5,12 @@ import {
   looksLikeTrackingOrUtilityAsset,
   looksLikeUiChromeAsset,
 } from '@/server/pageImportFilters';
+import {
+  buildArchiveChallengeMessage,
+  inspectArchiveHtml,
+  logArchiveDiagnostics,
+  readArchiveResponseDiagnostics,
+} from '@/server/archiveDiagnostics';
 import { normalizeCookieHeader } from '@/server/pageImportCookies';
 
 const DEFAULT_MIN_BYTES = 8 * 1024;
@@ -295,13 +301,17 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const pageUrl = typeof body?.url === 'string' ? body.url.trim() : '';
+    const includeUiChrome = Boolean(body?.includeUiChrome);
+    const includeSmallAssets = Boolean(body?.includeSmallAssets);
     let cookieHeader: string | null = null;
     try {
       cookieHeader = normalizeCookieHeader(body?.cookieHeader);
     } catch (error) {
       return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid cookie header' }, { status: 400 });
     }
-    const minBytes = Number.isFinite(body?.minBytes) ? Number(body.minBytes) : DEFAULT_MIN_BYTES;
+    const minBytes = Number.isFinite(body?.minBytes)
+      ? Number(body.minBytes)
+      : (includeSmallAssets ? 1024 : DEFAULT_MIN_BYTES);
     const maxImages = Number.isFinite(body?.maxImages) ? Math.max(0, Number(body.maxImages)) : undefined;
     const allowInsecureEnv = process.env.IMPORT_ALLOW_INSECURE_TLS === 'true';
     const allowInsecure = allowInsecureEnv && Boolean(body?.allowInsecure);
@@ -343,35 +353,45 @@ export async function POST(request: NextRequest) {
     }
 
     if (!response.ok) {
+      const initialArchiveDiagnostics = await readArchiveResponseDiagnostics(pageUrl, response);
+      logArchiveDiagnostics('import/page', initialArchiveDiagnostics, { phase: 'primary-fetch' });
       // Retry once without browser-like headers in case the origin rejects them.
       try {
         const fallbackResponse = await fetch(pageUrl, cookieHeader ? { headers: { Cookie: cookieHeader } } : undefined);
         if (fallbackResponse.ok) {
           response = fallbackResponse;
         } else {
+          const fallbackArchiveDiagnostics = await readArchiveResponseDiagnostics(pageUrl, fallbackResponse);
+          logArchiveDiagnostics('import/page', fallbackArchiveDiagnostics, { phase: 'fallback-fetch' });
           return NextResponse.json(
             {
-              error: buildFetchPageFailureMessage(pageUrl, fallbackResponse),
+              error: fallbackArchiveDiagnostics?.challengeDetected
+                ? buildArchiveChallengeMessage(fallbackArchiveDiagnostics.host)
+                : buildFetchPageFailureMessage(pageUrl, fallbackResponse),
               details: {
                 upstreamStatus: fallbackResponse.status,
                 upstreamStatusText: fallbackResponse.statusText,
                 finalUrl: fallbackResponse.url,
+                archiveDiagnostics: fallbackArchiveDiagnostics,
               },
             },
-            { status: 400 }
+            { status: fallbackArchiveDiagnostics?.challengeDetected ? 403 : 400 }
           );
         }
       } catch {
         return NextResponse.json(
           {
-            error: buildFetchPageFailureMessage(pageUrl, response),
+            error: initialArchiveDiagnostics?.challengeDetected
+              ? buildArchiveChallengeMessage(initialArchiveDiagnostics.host)
+              : buildFetchPageFailureMessage(pageUrl, response),
             details: {
               upstreamStatus: response.status,
               upstreamStatusText: response.statusText,
               finalUrl: response.url,
+              archiveDiagnostics: initialArchiveDiagnostics,
             },
           },
-          { status: 400 }
+          { status: initialArchiveDiagnostics?.challengeDetected ? 403 : 400 }
         );
       }
     }
@@ -382,6 +402,28 @@ export async function POST(request: NextRequest) {
     }
 
     const html = await response.text();
+    const archiveDiagnostics = inspectArchiveHtml({
+      sourceUrl: pageUrl,
+      html,
+      status: response.status,
+      finalUrl: response.url,
+      contentType,
+    });
+    logArchiveDiagnostics('import/page', archiveDiagnostics, { phase: 'html-scan' });
+    if (archiveDiagnostics?.challengeDetected) {
+      return NextResponse.json(
+        {
+          error: buildArchiveChallengeMessage(archiveDiagnostics.host),
+          details: {
+            upstreamStatus: response.status,
+            upstreamStatusText: response.statusText,
+            finalUrl: response.url,
+            archiveDiagnostics,
+          },
+        },
+        { status: 403 }
+      );
+    }
     const baseHref = extractBaseHref(html);
     const baseUrl = baseHref ? new URL(baseHref, pageUrl).toString() : pageUrl;
 
@@ -401,7 +443,7 @@ export async function POST(request: NextRequest) {
 
     const filteredCandidates = dedupedCandidates.filter(
       (candidate) =>
-        !looksLikeUiChromeAsset(candidate.url, candidate.filename) &&
+        (includeUiChrome || !looksLikeUiChromeAsset(candidate.url, candidate.filename)) &&
         !looksLikeTrackingOrUtilityAsset(candidate.url, candidate.filename) &&
         !looksLikeTinyTrackingPixel({
           url: candidate.url,
@@ -461,6 +503,9 @@ export async function POST(request: NextRequest) {
       minBytes,
       maxImages: typeof maxImages === 'number' ? maxImages : null,
       allowInsecure,
+      includeUiChrome,
+      includeSmallAssets,
+      archiveDiagnostics,
       images,
       videos,
       media,

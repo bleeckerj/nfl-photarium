@@ -49,6 +49,13 @@ interface GalleryModalsProps {
 
   bulkEditOpen: boolean;
   selectedCount: number;
+  selectedImagesForPayload: Array<{
+    id: string;
+    filename: string;
+    altText?: string;
+    altTag?: string;
+  }>;
+  onCopySelectionPayload: (payload: string) => void | Promise<void>;
   bulkApplyFolder: boolean;
   onBulkApplyFolderChange: (value: boolean) => void;
   bulkFolderMode: 'existing' | 'new';
@@ -58,10 +65,12 @@ interface GalleryModalsProps {
   onBulkFolderSelect: (value: string) => void;
   bulkApplyTags: boolean;
   onBulkApplyTagsChange: (value: boolean) => void;
-  bulkTagsMode: 'replace' | 'append';
-  onBulkTagsModeChange: (value: 'replace' | 'append') => void;
+  bulkTagsMode: 'replace' | 'append' | 'ai';
+  onBulkTagsModeChange: (value: 'replace' | 'append' | 'ai') => void;
   bulkTagsInput: string;
   onBulkTagsInputChange: (value: string) => void;
+  bulkTagsAiCount: string;
+  onBulkTagsAiCountChange: (value: string) => void;
   bulkApplyDisplayName: boolean;
   onBulkApplyDisplayNameChange: (value: boolean) => void;
   bulkDisplayNameMode: 'custom' | 'auto' | 'clear' | 'ai';
@@ -121,6 +130,8 @@ export const GalleryModals: React.FC<GalleryModalsProps> = ({
   onEditSave,
   bulkEditOpen,
   selectedCount,
+  selectedImagesForPayload,
+  onCopySelectionPayload,
   bulkApplyFolder,
   onBulkApplyFolderChange,
   bulkFolderMode,
@@ -134,6 +145,8 @@ export const GalleryModals: React.FC<GalleryModalsProps> = ({
   onBulkTagsModeChange,
   bulkTagsInput,
   onBulkTagsInputChange,
+  bulkTagsAiCount,
+  onBulkTagsAiCountChange,
   bulkApplyDisplayName,
   onBulkApplyDisplayNameChange,
   bulkDisplayNameMode,
@@ -213,6 +226,8 @@ export const GalleryModals: React.FC<GalleryModalsProps> = ({
       {bulkEditOpen && (
         <GalleryBulkEditModal
           selectedCount={selectedCount}
+          selectedImages={selectedImagesForPayload}
+          onCopySelectionPayload={onCopySelectionPayload}
           bulkApplyFolder={bulkApplyFolder}
           onBulkApplyFolderChange={onBulkApplyFolderChange}
           bulkFolderMode={bulkFolderMode}
@@ -226,6 +241,8 @@ export const GalleryModals: React.FC<GalleryModalsProps> = ({
           onBulkTagsModeChange={onBulkTagsModeChange}
           bulkTagsInput={bulkTagsInput}
           onBulkTagsInputChange={onBulkTagsInputChange}
+          bulkTagsAiCount={bulkTagsAiCount}
+          onBulkTagsAiCountChange={onBulkTagsAiCountChange}
           bulkApplyDisplayName={bulkApplyDisplayName}
           onBulkApplyDisplayNameChange={onBulkApplyDisplayNameChange}
           bulkDisplayNameMode={bulkDisplayNameMode}

@@ -20,6 +20,7 @@ import { extractComfyWorkflowMetadata } from '@/utils/comfyMetadata';
 import { ingestComfyWorkflowForImage } from '@/server/comfy/workflowIngestion';
 import { validateParentForNewChild } from '@/server/parentValidation';
 import { getPromptThisRecord, setPromptThisRecord, type PromptThisRecord } from '@/server/promptThis';
+import { patchImageExtrasRecord } from '@/server/imageExtras';
 import type { ComfyWorkflowExtraction } from '@/utils/comfyMetadata';
 
 const corsHeaders = {
@@ -401,7 +402,6 @@ export async function POST(request: NextRequest) {
       type: workingType,
       folder: cleanFolder,
       tags: cleanTags,
-      description: cleanDescription,
       originalUrl: cleanOriginalUrl,
       originalUrlNormalized: normalizedOriginalUrl,
       sourceUrl: cleanSourceUrl,
@@ -522,6 +522,10 @@ export async function POST(request: NextRequest) {
     });
     upsertCachedImage(cachedPrimary);
 
+    if (cleanDescription) {
+      await patchImageExtrasRecord(primaryId, { description: cleanDescription });
+    }
+
     if (typeof primaryId === 'string' && primaryId) {
       try {
         await ingestComfyWorkflowForImage({
@@ -592,6 +596,9 @@ export async function POST(request: NextRequest) {
               meta: webpResult.meta ?? limitedWebpMetadata
             });
             upsertCachedImage(cachedWebp);
+            if (cleanDescription) {
+              await patchImageExtrasRecord(webpResult.id, { description: cleanDescription });
+            }
             if (process.env.NODE_ENV !== 'test') {
               await queueAutoEmbeddingsForImage(cachedWebp);
             }

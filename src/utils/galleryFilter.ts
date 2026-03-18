@@ -10,6 +10,7 @@ export interface GalleryImage {
   tags?: string[];
   description?: string;
   altTag?: string;
+  altText?: string;
   generatedBy?: string;
   comfyMetadataDetected?: boolean;
   comfyMetadataSource?: string;
@@ -77,6 +78,7 @@ const matchesSearchFilter = (image: GalleryImage, searchTerm: string) => {
     normalize(image.promptThis),
     normalize(image.folder),
     normalize(image.altTag),
+    normalize(image.altText),
     normalize(image.description),
     normalize(image.originalUrl),
     normalize(image.originalUrlNormalized),

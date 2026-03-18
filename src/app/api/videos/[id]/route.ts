@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   getVideoAssetRecord,
-  getVideoAssetRecordWithSync,
+  syncVideoAssetRecordFromStream,
 } from '@/server/videoCatalogStorage';
 import { queueAutoEmbeddingsForVideo } from '@/server/videoEmbeddingService';
 
@@ -16,14 +16,20 @@ export async function GET(
     }
 
     const forceSync = request.nextUrl.searchParams.get('refresh') === '1';
-    const video = forceSync
-      ? await getVideoAssetRecordWithSync(id)
-      : await getVideoAssetRecord(id);
+    const stored = await getVideoAssetRecord(id);
+    const video = forceSync && stored
+      ? await syncVideoAssetRecordFromStream(stored)
+      : stored;
 
     if (!video) {
       return NextResponse.json({ error: 'Video not found' }, { status: 404 });
     }
-    return NextResponse.json({ video });
+    return NextResponse.json({
+      video: {
+        ...video,
+        displayName: video.displayName || video.filename,
+      },
+    });
   } catch (error) {
     console.error('[video] fetch failed', error);
     return NextResponse.json({ error: 'Failed to fetch video' }, { status: 500 });
@@ -54,4 +60,3 @@ export async function POST(
     return NextResponse.json({ error: 'Failed to queue video embeddings' }, { status: 500 });
   }
 }
-

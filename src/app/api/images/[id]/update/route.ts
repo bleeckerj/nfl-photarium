@@ -220,19 +220,11 @@ export async function PATCH(
         metadata.tags = cleanTags;
       }
 
-      if (flags.description) {
-        metadata.description = cleanDescription ?? '';
-      }
-
-      if (flags.originalUrl) {
-        metadata.originalUrl = cleanOriginalUrl ?? '';
-        metadata.originalUrlNormalized = normalizeOriginalUrl(cleanOriginalUrl) ?? '';
-      }
-
-      if (flags.sourceUrl) {
-        metadata.sourceUrl = cleanSourceUrl ?? '';
-        metadata.sourceUrlNormalized = normalizeOriginalUrl(cleanSourceUrl) ?? '';
-      }
+      // URL fields are extras-only (not Cloudflare metadata) to avoid 1024-byte pressure.
+      delete metadata.originalUrl;
+      delete metadata.originalUrlNormalized;
+      delete metadata.sourceUrl;
+      delete metadata.sourceUrlNormalized;
 
       if (flags.displayName) {
         metadata.displayName = cleanDisplayName ?? '';
@@ -247,12 +239,27 @@ export async function PATCH(
         metadata.altTag = cleanAltTag ?? '';
       }
 
-      const extrasPatch: { description?: string; altText?: string } = {};
+      const extrasPatch: {
+        description?: string;
+        altText?: string;
+        sourceUrl?: string;
+        sourceUrlNormalized?: string;
+        originalUrl?: string;
+        originalUrlNormalized?: string;
+      } = {};
       if (flags.description) {
         extrasPatch.description = cleanDescription || undefined;
       }
       if (flags.altTag) {
         extrasPatch.altText = cleanAltTag || undefined;
+      }
+      if (flags.sourceUrl) {
+        extrasPatch.sourceUrl = cleanSourceUrl || undefined;
+        extrasPatch.sourceUrlNormalized = normalizeOriginalUrl(cleanSourceUrl) || undefined;
+      }
+      if (flags.originalUrl) {
+        extrasPatch.originalUrl = cleanOriginalUrl || undefined;
+        extrasPatch.originalUrlNormalized = normalizeOriginalUrl(cleanOriginalUrl) || undefined;
       }
       if (Object.keys(extrasPatch).length > 0) {
         await patchImageExtrasRecord(targetId, extrasPatch);
@@ -260,11 +267,6 @@ export async function PATCH(
 
       // Keep Cloudflare metadata compact: description/alt text are durable in extras storage.
       // We only mirror a small preview here for compatibility/fallback surfaces.
-      metadata.description = toCloudflareTextMirror(
-        flags.description
-          ? (cleanDescription ?? '')
-          : cleanString(typeof metadata.description === 'string' ? metadata.description : undefined) ?? ''
-      );
       metadata.altTag = toCloudflareTextMirror(
         flags.altTag
           ? (cleanAltTag ?? '')
@@ -290,15 +292,6 @@ export async function PATCH(
       const requiredKeys = new Set<string>();
       if (flags.folder) requiredKeys.add('folder');
       if (flags.tags) requiredKeys.add('tags');
-      if (flags.description) requiredKeys.add('description');
-      if (flags.originalUrl) {
-        requiredKeys.add('originalUrl');
-        requiredKeys.add('originalUrlNormalized');
-      }
-      if (flags.sourceUrl) {
-        requiredKeys.add('sourceUrl');
-        requiredKeys.add('sourceUrlNormalized');
-      }
       if (flags.displayName) requiredKeys.add('displayName');
       if (flags.parentId) requiredKeys.add('variationParentId');
       if (flags.altTag) requiredKeys.add('altTag');
@@ -382,12 +375,16 @@ export async function PATCH(
     const finalParentId = cleanString(metadataPayload.variationParentId as string | undefined);
     const finalFolder = cleanString(metadataPayload.folder as string | undefined);
     const finalTags = Array.isArray(metadataPayload.tags) ? metadataPayload.tags : [];
-    const finalDescription = cleanString(metadataPayload.description as string | undefined) ?? '';
+    const finalDescription = targetFlags.description
+      ? (cleanDescription ?? '')
+      : cleanString(metadataPayload.description as string | undefined) ?? '';
     const finalOriginalUrl = cleanString(metadataPayload.originalUrl as string | undefined);
     const finalSourceUrl = cleanString(metadataPayload.sourceUrl as string | undefined);
     const finalDisplayName =
       (metadataPayload.displayName as string | undefined) ?? targetResult.filename;
-    const finalAltTag = cleanString(metadataPayload.altTag as string | undefined) ?? '';
+    const finalAltTag = targetFlags.altTag
+      ? (cleanAltTag ?? '')
+      : cleanString(metadataPayload.altTag as string | undefined) ?? '';
     const finalVariationSort =
       typeof metadataPayload.variationSort === 'number' ? metadataPayload.variationSort : undefined;
     const finalNamespace = cleanString(metadataPayload.namespace as string | undefined);

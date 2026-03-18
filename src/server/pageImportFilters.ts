@@ -29,7 +29,7 @@ const UI_CHROME_PATH_PATTERNS = [
 ];
 
 const UI_CHROME_NAME_PATTERN =
-  /(^|[\/_.-])(logo|logos|icon|icons|sprite|sprites|favicon|masthead|nav|menu|header|footer|searchicon|close|cancel|button|badge|circlex|closex|clearx)([\/_.-]|$)/i;
+  /(^|[\/_.-])(logo|logos|sprite|sprites|favicon|masthead|menu|header|footer|searchicon|close|cancel|button|badge|circlex|closex|clearx|donate)([\/_.-]|$)/i;
 
 const TRACKING_OR_UTILITY_PATH_PATTERNS = [
   /\/(?:webreports?|webreport|analytics?|tracking|tracker|metrics?|telemetry|beacon|pixel|collect|impression)(?:[\/_.-]|$)/i,

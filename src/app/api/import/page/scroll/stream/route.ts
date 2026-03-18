@@ -17,6 +17,12 @@ import {
   looksLikeUiChromeAsset,
 } from '@/server/pageImportFilters';
 import {
+  buildArchiveChallengeMessage,
+  inspectArchiveText,
+  isArchiveHost,
+  logArchiveDiagnostics,
+} from '@/server/archiveDiagnostics';
+import {
   cookieHeaderToPuppeteerCookies,
   normalizeCookieHeader,
 } from '@/server/pageImportCookies';
@@ -66,6 +72,34 @@ const isPrivateHost = (hostname: string) => {
   if (a === 172 && b >= 16 && b <= 31) return true;
   if (a === 169 && b === 254) return true;
   return false;
+};
+
+const getArchivePageDiagnostics = async (
+  pageUrl: string,
+  page: {
+    title: () => Promise<string>;
+    evaluate: <T>(pageFunction: () => T | Promise<T>) => Promise<T>;
+    url: () => string;
+  },
+  status?: number
+) => {
+  if (!isArchiveHost(pageUrl) && !isArchiveHost(page.url())) {
+    return null;
+  }
+
+  const [title, text] = await Promise.all([
+    page.title().catch(() => ''),
+    page.evaluate(() => document.body?.innerText?.slice(0, 4000) || '').catch(() => ''),
+  ]);
+
+  return inspectArchiveText({
+    sourceUrl: pageUrl,
+    finalUrl: page.url(),
+    status,
+    contentType: 'text/html',
+    title,
+    text,
+  });
 };
 
 interface ImageInfo {
@@ -167,9 +201,14 @@ const urlHasSizeHints = (url: string): boolean => {
   return /(\d{2,}x\d{2,})|(_\d{3,}w)|(@[23]x)/i.test(url);
 };
 
-const shouldIncludeImage = (img: ImageInfo): boolean => {
+const shouldIncludeImageWithOptions = (
+  img: ImageInfo,
+  options?: { includeUiChrome?: boolean; includeSmallAssets?: boolean }
+): boolean => {
+  const includeUiChrome = Boolean(options?.includeUiChrome);
+  const includeSmallAssets = Boolean(options?.includeSmallAssets);
   if (isBlockedMediaDomain(img.url)) return false;
-  if (looksLikeUiChromeAsset(img.url, img.filename)) return false;
+  if (!includeUiChrome && looksLikeUiChromeAsset(img.url, img.filename)) return false;
   if (looksLikeTrackingOrUtilityAsset(img.url, img.filename)) return false;
   if (looksLikeTinyTrackingPixel({
     url: img.url,
@@ -178,8 +217,6 @@ const shouldIncludeImage = (img: ImageInfo): boolean => {
     naturalHeight: img.naturalHeight,
     contentLength: img.contentLength,
   })) return false;
-  if (img.inUiChrome && !img.inMainContent) return false;
-  
   // If URL has size hints (like 800x800), trust it even if naturalWidth/Height are tiny
   // This handles lazy-loaded images where the actual image hasn't loaded yet
   if (urlHasSizeHints(img.url)) {
@@ -187,7 +224,7 @@ const shouldIncludeImage = (img: ImageInfo): boolean => {
   }
   
   if (img.naturalWidth && img.naturalHeight) {
-    if (img.naturalWidth < MIN_DIMENSION && img.naturalHeight < MIN_DIMENSION) {
+    if (!includeSmallAssets && img.naturalWidth < MIN_DIMENSION && img.naturalHeight < MIN_DIMENSION) {
       return false;
     }
     return true;
@@ -199,6 +236,8 @@ const shouldIncludeImage = (img: ImageInfo): boolean => {
 export async function POST(request: NextRequest) {
   const body = await request.json();
   const pageUrl = typeof body?.url === 'string' ? body.url.trim() : '';
+  const includeUiChrome = Boolean(body?.includeUiChrome);
+  const includeSmallAssets = Boolean(body?.includeSmallAssets);
   let cookieHeader: string | null = null;
   try {
     cookieHeader = normalizeCookieHeader(body?.cookieHeader);
@@ -301,7 +340,7 @@ export async function POST(request: NextRequest) {
           const resolved = resolveCandidateUrl(rawUrl, pageLocation);
           if (!resolved) return;
           if (isBlockedMediaDomain(resolved)) return;
-          if (looksLikeUiChromeAsset(resolved)) return;
+          if (!includeUiChrome && looksLikeUiChromeAsset(resolved)) return;
           if (looksLikeTrackingOrUtilityAsset(resolved)) return;
           if (looksLikeTinyTrackingPixel({ url: resolved })) return;
 
@@ -622,7 +661,7 @@ export async function POST(request: NextRequest) {
                       inUiChrome: img.inUiChrome || undefined,
                     };
 
-              if (mediaInfo.kind === 'image' && !shouldIncludeImage(mediaInfo)) {
+              if (mediaInfo.kind === 'image' && !shouldIncludeImageWithOptions(mediaInfo, { includeUiChrome, includeSmallAssets })) {
                 seenMedia.add(dedupeKey);
                 continue;
               }
@@ -674,7 +713,7 @@ export async function POST(request: NextRequest) {
               seenMedia.add(dedupeKey);
               continue;
             }
-            if (!metadata.trusted && !shouldIncludeImage(mediaInfo)) {
+            if (!metadata.trusted && !shouldIncludeImageWithOptions(mediaInfo, { includeUiChrome, includeSmallAssets })) {
               seenMedia.add(dedupeKey);
               continue;
             }
@@ -740,12 +779,24 @@ export async function POST(request: NextRequest) {
             pageNum: currentPageNum
           });
 
-          await page.goto(currentUrl, {
+          const navigationResponse = await page.goto(currentUrl, {
             waitUntil: 'networkidle2',
             timeout: timeoutMs,
           });
 
           await new Promise(resolve => setTimeout(resolve, 1000));
+          const archiveDiagnostics = await getArchivePageDiagnostics(currentUrl, page, navigationResponse?.status?.());
+          logArchiveDiagnostics('import/page/scroll/stream', archiveDiagnostics, {
+            phase: 'page-load',
+            pageNum: currentPageNum,
+          });
+          if (archiveDiagnostics?.challengeDetected) {
+            send('error', {
+              error: buildArchiveChallengeMessage(archiveDiagnostics.host),
+              details: { archiveDiagnostics },
+            });
+            return;
+          }
 
           // Trigger lazy loading by scrolling through the page first
           send('status', { 

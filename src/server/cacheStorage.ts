@@ -40,7 +40,10 @@ class FileCacheStorage implements ICacheStorage {
   private writeQueue: Map<string, Promise<void>> = new Map();
 
   constructor(cacheDir?: string) {
-    this.cacheDir = cacheDir ?? path.join(process.cwd(), '.cache');
+    const defaultDir = process.env.NODE_ENV === 'development'
+      ? path.join(os.tmpdir(), 'photarium-cache')
+      : path.join(process.cwd(), '.cache');
+    this.cacheDir = cacheDir ?? defaultDir;
   }
 
   private getFilePath(key: string): string {

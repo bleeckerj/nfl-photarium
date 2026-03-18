@@ -6,8 +6,9 @@
 
 'use client';
 
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import MonoSelect from '../MonoSelect';
+import { getCloudflareImageUrl } from '@/utils/imageUtils';
 
 interface SelectOption {
   value: string;
@@ -16,6 +17,13 @@ interface SelectOption {
 
 interface GalleryBulkEditModalProps {
   selectedCount: number;
+  selectedImages: Array<{
+    id: string;
+    filename: string;
+    altText?: string;
+    altTag?: string;
+  }>;
+  onCopySelectionPayload: (payload: string) => void | Promise<void>;
   bulkApplyFolder: boolean;
   onBulkApplyFolderChange: (value: boolean) => void;
   bulkFolderMode: 'existing' | 'new';
@@ -25,10 +33,12 @@ interface GalleryBulkEditModalProps {
   onBulkFolderSelect: (value: string) => void;
   bulkApplyTags: boolean;
   onBulkApplyTagsChange: (value: boolean) => void;
-  bulkTagsMode: 'replace' | 'append';
-  onBulkTagsModeChange: (value: 'replace' | 'append') => void;
+  bulkTagsMode: 'replace' | 'append' | 'ai';
+  onBulkTagsModeChange: (value: 'replace' | 'append' | 'ai') => void;
   bulkTagsInput: string;
   onBulkTagsInputChange: (value: string) => void;
+  bulkTagsAiCount: string;
+  onBulkTagsAiCountChange: (value: string) => void;
   bulkApplyDisplayName: boolean;
   onBulkApplyDisplayNameChange: (value: boolean) => void;
   bulkDisplayNameMode: 'custom' | 'auto' | 'clear' | 'ai';
@@ -62,6 +72,8 @@ interface GalleryBulkEditModalProps {
 
 export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
   selectedCount,
+  selectedImages,
+  onCopySelectionPayload,
   bulkApplyFolder,
   onBulkApplyFolderChange,
   bulkFolderMode,
@@ -75,6 +87,8 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
   onBulkTagsModeChange,
   bulkTagsInput,
   onBulkTagsInputChange,
+  bulkTagsAiCount,
+  onBulkTagsAiCountChange,
   bulkApplyDisplayName,
   onBulkApplyDisplayNameChange,
   bulkDisplayNameMode,
@@ -92,7 +106,6 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
   registryNamespaces,
   bulkAnimateFps,
   onBulkAnimateFpsChange,
-  bulkAnimateTouched,
   onBulkAnimateTouchedChange,
   bulkAnimateLoop,
   onBulkAnimateLoopChange,
@@ -105,9 +118,68 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
   onApply,
   onClose,
 }) => {
+  const sizeOptions = useMemo(
+    () => [
+      { value: 'w=150', label: '150px' },
+      { value: 'w=300', label: '300px' },
+      { value: 'w=600', label: '600px' },
+      { value: 'w=900', label: '900px' },
+      { value: 'w=1200', label: '1200px' },
+      { value: 'full', label: 'full' },
+      { value: 'public', label: 'public' },
+    ],
+    []
+  );
+  const [selectionSize, setSelectionSize] = useState('w=900');
+  const [sharedAltText, setSharedAltText] = useState('');
+  const [copyingSelectionPayload, setCopyingSelectionPayload] = useState(false);
+
+  const buildSelectionPayload = () => {
+    const normalizedSharedAltText = sharedAltText.trim();
+    const payload = selectedImages.map((image) => {
+      let url = '';
+      try {
+        url = getCloudflareImageUrl(image.id, selectionSize);
+      } catch {
+        url = '';
+      }
+      return {
+        url,
+        altText: normalizedSharedAltText || image.altText || image.altTag || '',
+      };
+    });
+    return JSON.stringify(payload, null, 2);
+  };
+
+  const payloadPreview = useMemo(() => {
+    const normalizedSharedAltText = sharedAltText.trim();
+    const previewItems = selectedImages.slice(0, 3).map((image) => {
+      let url = '';
+      try {
+        url = getCloudflareImageUrl(image.id, selectionSize);
+      } catch {
+        url = '';
+      }
+      return {
+        url,
+        altText: normalizedSharedAltText || image.altText || image.altTag || '',
+      };
+    });
+    return JSON.stringify(previewItems, null, 2);
+  }, [selectedImages, selectionSize, sharedAltText]);
+
+  const handleCopySelectionPayload = async () => {
+    setCopyingSelectionPayload(true);
+    try {
+      await onCopySelectionPayload(buildSelectionPayload());
+    } finally {
+      setCopyingSelectionPayload(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] px-4">
-      <div className="bg-white rounded-lg w-full max-w-lg p-6 space-y-4 text-[0.7em] font-mono">
+      <div className="bg-white rounded-lg w-full max-w-2xl p-6 space-y-4 text-[0.7em] font-mono max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between">
           <p className="text-gray-900 font-semibold">Bulk edit ({selectedCount} images)</p>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
@@ -219,18 +291,44 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
                   />
                   Append
                 </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="bulk-tags-mode"
+                    checked={bulkTagsMode === 'ai'}
+                    onChange={() => onBulkTagsModeChange('ai')}
+                    className="h-3 w-3"
+                  />
+                  Append (GenAI)
+                </label>
               </div>
-              <textarea
-                value={bulkTagsInput}
-                onChange={(e) => onBulkTagsInputChange(e.target.value)}
-                className="w-full border border-gray-300 rounded px-3 py-2"
-                placeholder="Comma-separated tags"
-                rows={3}
-              />
+              {bulkTagsMode === 'ai' ? (
+                <label className="block text-[0.65rem] text-gray-600">
+                  Tags per image
+                  <input
+                    type="number"
+                    min="1"
+                    max="12"
+                    value={bulkTagsAiCount}
+                    onChange={(e) => onBulkTagsAiCountChange(e.target.value)}
+                    className="mt-1 w-24 border border-gray-300 rounded px-3 py-2"
+                  />
+                </label>
+              ) : (
+                <textarea
+                  value={bulkTagsInput}
+                  onChange={(e) => onBulkTagsInputChange(e.target.value)}
+                  className="w-full border border-gray-300 rounded px-3 py-2"
+                  placeholder="Comma-separated tags"
+                  rows={3}
+                />
+              )}
               <p className="text-[0.6rem] text-gray-500">
                 {bulkTagsMode === 'replace'
                   ? 'Replace tags with this list (empty clears tags).'
-                  : 'Append tags to each image (empty keeps existing tags).'}
+                  : bulkTagsMode === 'append'
+                    ? 'Append tags to each image (empty keeps existing tags).'
+                    : 'Generate semantic tags for each selected image and append only new tags.'}
               </p>
             </div>
           )}
@@ -380,6 +478,49 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
               {bulkAnimateLoading ? 'Building…' : 'Create animated WebP'}
             </button>
             {bulkAnimateError && <p className="text-[0.65rem] text-red-600">{bulkAnimateError}</p>}
+          </div>
+        </div>
+        <div className="space-y-3 border-t border-gray-200 pt-3">
+          <p className="text-[0.65rem] text-gray-500 uppercase tracking-wide">Selection JSON</p>
+          <label className="block text-[0.65rem] text-gray-600">
+            Shared ALT text (optional override)
+            <input
+              type="text"
+              value={sharedAltText}
+              onChange={(e) => setSharedAltText(e.target.value)}
+              className="mt-1 w-full border border-gray-300 rounded px-2 py-1"
+              placeholder="If empty, each image uses its own alt text"
+            />
+          </label>
+          <label className="block text-[0.65rem] text-gray-600">
+            Size (applies to all selected images)
+            <div className="mt-1">
+              <MonoSelect
+                value={selectionSize}
+                onChange={setSelectionSize}
+                options={sizeOptions}
+                size="sm"
+              />
+            </div>
+          </label>
+          <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2">
+            <p className="text-[0.62rem] text-gray-700">
+              Will copy {selectedImages.length} item{selectedImages.length === 1 ? '' : 's'} as a JSON array.
+            </p>
+            <p className="mt-1 text-[0.58rem] text-gray-500">Preview (first up to 3 items):</p>
+            <pre className="mt-1 max-h-40 overflow-auto text-[0.55rem] text-gray-600 whitespace-pre-wrap break-all">
+              {payloadPreview}
+            </pre>
+          </div>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={handleCopySelectionPayload}
+              disabled={copyingSelectionPayload || selectedImages.length === 0}
+              className="px-3 py-2 bg-slate-800 text-white rounded-md disabled:opacity-50"
+            >
+              {copyingSelectionPayload ? 'Copying…' : 'Copy JSON array'}
+            </button>
           </div>
         </div>
         <div className="flex justify-end gap-2">

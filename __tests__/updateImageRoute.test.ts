@@ -146,7 +146,7 @@ describe('PATCH /api/images/:id/update', () => {
     expect(payload.tags).toEqual([]);
   });
 
-  it('stores long description in extras and keeps Cloudflare mirror compact', async () => {
+  it('stores long description in extras without writing it to Cloudflare metadata', async () => {
     const mockFetch = vi.spyOn(globalThis, 'fetch');
     const longDescription = 'A'.repeat(4000);
 
@@ -174,15 +174,16 @@ describe('PATCH /api/images/:id/update', () => {
 
     const request = createRequest({ description: longDescription });
     const response = await PATCH(request, { params: Promise.resolve({ id: 'child' }) });
+    const payload = await response.json();
 
     expect(response.status).toBe(200);
+    expect(payload.description).toBe(longDescription);
 
     const patchCall = mockFetch.mock.calls[1];
     const submittedBody = patchCall?.[1]?.body;
     const parsed = JSON.parse(String(submittedBody));
 
-    expect(typeof parsed.metadata.description).toBe('string');
-    expect(parsed.metadata.description.length).toBeLessThanOrEqual(161);
+    expect(parsed.metadata.description).toBeUndefined();
 
     expect(patchImageExtrasRecordMock).toHaveBeenCalledWith(
       'child',

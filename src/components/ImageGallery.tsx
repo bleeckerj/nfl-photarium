@@ -42,6 +42,7 @@ interface CloudflareImage {
   aspectRatio?: string;
   dimensions?: { width: number; height: number };
   altTag?: string;
+  altText?: string;
   parentId?: string;
   linkedAssetId?: string;
   originalUrl?: string;
@@ -91,6 +92,7 @@ type GalleryReturnState = {
   savedAt?: number;
   selectedImageId?: string;
   resultIds?: string[];
+  resultAssets?: Array<{ id: string; assetType?: 'image' | 'video' }>;
 };
 
 type GalleryWarmCacheState = {
@@ -122,9 +124,10 @@ type BulkState = {
   bulkFolderInput: string;
   bulkFolderMode: 'existing' | 'new';
   bulkTagsInput: string;
+  bulkTagsAiCount: string;
   bulkApplyFolder: boolean;
   bulkApplyTags: boolean;
-  bulkTagsMode: 'replace' | 'append';
+  bulkTagsMode: 'replace' | 'append' | 'ai';
   bulkApplyDisplayName: boolean;
   bulkDisplayNameMode: 'custom' | 'auto' | 'clear' | 'ai';
   bulkDisplayNameInput: string;
@@ -161,6 +164,7 @@ const bulkReducer = (state: BulkState, action: BulkAction): BulkState => {
         bulkFolderInput: '',
         bulkFolderMode: 'existing',
         bulkTagsInput: '',
+        bulkTagsAiCount: '6',
         bulkApplyFolder: false,
         bulkApplyTags: true,
         bulkTagsMode: 'append',
@@ -433,9 +437,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
 
   const returningFromDetailRef = useRef(initialReturningFromDetail);
   const initialSilentFetchRef = useRef(initialWarmImages.length > 0 || initialSnapshotImages.length > 0);
+  const deferInitialFetchRef = useRef(initialReturningFromDetail && initialSnapshotImages.length > 0);
 
   const [images, setImages] = useState<CloudflareImage[]>(
-    initialWarmImages.length > 0 ? initialWarmImages : initialSnapshotImages
+    initialSnapshotImages.length > 0 ? initialSnapshotImages : initialWarmImages
   );
   const [loading, setLoading] = useState(initialWarmImages.length === 0 && initialSnapshotImages.length === 0);
   const [selectedVariant, setSelectedVariant] = useState<string>(storedPreferencesRef.current.variant);
@@ -454,6 +459,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       bulkFolderInput: storedPreferencesRef.current.bulkFolderInput ?? '',
       bulkFolderMode: (storedPreferencesRef.current.bulkFolderMode ?? 'existing') as 'existing' | 'new',
       bulkTagsInput: '',
+      bulkTagsAiCount: '6',
       bulkApplyFolder: true,
       bulkApplyTags: false,
       bulkTagsMode: 'replace',
@@ -481,6 +487,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     bulkFolderInput,
     bulkFolderMode,
     bulkTagsInput,
+    bulkTagsAiCount,
     bulkApplyFolder,
     bulkApplyTags,
     bulkTagsMode,
@@ -511,9 +518,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const setBulkFolderInput = useCallback((value: string) => setBulkField('bulkFolderInput', value), [setBulkField]);
   const setBulkFolderMode = useCallback((value: 'existing' | 'new') => setBulkField('bulkFolderMode', value), [setBulkField]);
   const setBulkTagsInput = useCallback((value: string) => setBulkField('bulkTagsInput', value), [setBulkField]);
+  const setBulkTagsAiCount = useCallback((value: string) => setBulkField('bulkTagsAiCount', value), [setBulkField]);
   const setBulkApplyFolder = useCallback((value: boolean) => setBulkField('bulkApplyFolder', value), [setBulkField]);
   const setBulkApplyTags = useCallback((value: boolean) => setBulkField('bulkApplyTags', value), [setBulkField]);
-  const setBulkTagsMode = useCallback((value: 'replace' | 'append') => setBulkField('bulkTagsMode', value), [setBulkField]);
+  const setBulkTagsMode = useCallback((value: 'replace' | 'append' | 'ai') => setBulkField('bulkTagsMode', value), [setBulkField]);
   const setBulkApplyDisplayName = useCallback((value: boolean) => setBulkField('bulkApplyDisplayName', value), [setBulkField]);
   const setBulkDisplayNameMode = useCallback((value: 'custom' | 'auto' | 'clear' | 'ai') => setBulkField('bulkDisplayNameMode', value), [setBulkField]);
   const setBulkDisplayNameInput = useCallback((value: string) => setBulkField('bulkDisplayNameInput', value), [setBulkField]);
@@ -868,6 +876,24 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     // Cancel any pending request for the previous namespace
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
+    }
+    if (deferInitialFetchRef.current) {
+      deferInitialFetchRef.current = false;
+      const useIdleCallback = typeof window !== 'undefined' && 'requestIdleCallback' in window;
+      const scheduled = useIdleCallback
+        ? window.requestIdleCallback(() => {
+            fetchImages({ silent: true });
+          })
+        : window.setTimeout(() => {
+            fetchImages({ silent: true });
+          }, 250);
+      return () => {
+        if (useIdleCallback && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+          window.cancelIdleCallback(scheduled);
+        } else {
+          window.clearTimeout(scheduled as number);
+        }
+      };
     }
     const shouldSilentFetch = initialSilentFetchRef.current;
     initialSilentFetchRef.current = false;
@@ -1261,6 +1287,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           savedAt,
           selectedImageId: imageId,
           resultIds,
+          resultAssets: filteredImages.map((img) => ({
+            id: img.id,
+            assetType: img.assetType === 'video' ? 'video' : 'image',
+          })),
         })
       );
       window.sessionStorage.setItem(
@@ -1541,6 +1571,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     bulkApplyTags,
     bulkFolderInput,
     bulkTagsInput,
+    bulkTagsAiCount,
     bulkTagsMode,
     bulkApplyDisplayName,
     bulkDisplayNameInput,
@@ -1661,6 +1692,32 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       }
     },
     [setBulkFolderInput, setBulkFolderMode]
+  );
+
+  const selectedImagesForPayload = useMemo(
+    () =>
+      images
+        .filter((image) => selectedImageIds.has(image.id))
+        .map((image) => ({
+          id: image.id,
+          filename: image.filename || image.displayName || image.id,
+          altText: image.altText,
+          altTag: image.altTag,
+        })),
+    [images, selectedImageIds]
+  );
+
+  const handleCopySelectionPayload = useCallback(
+    async (payload: string) => {
+      try {
+        await navigator.clipboard.writeText(payload);
+        toast.push('Selection JSON copied');
+      } catch (error) {
+        console.error('Failed to copy selection JSON payload', error);
+        toast.push('Failed to copy selection JSON');
+      }
+    },
+    [toast]
   );
 
   useEffect(() => {
@@ -2284,6 +2341,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         }}
         bulkEditOpen={bulkEditOpen}
         selectedCount={selectedCount}
+        selectedImagesForPayload={selectedImagesForPayload}
+        onCopySelectionPayload={handleCopySelectionPayload}
         bulkApplyFolder={bulkApplyFolder}
         onBulkApplyFolderChange={setBulkApplyFolder}
         bulkFolderMode={bulkFolderMode}
@@ -2297,6 +2356,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         onBulkTagsModeChange={setBulkTagsMode}
         bulkTagsInput={bulkTagsInput}
         onBulkTagsInputChange={setBulkTagsInput}
+        bulkTagsAiCount={bulkTagsAiCount}
+        onBulkTagsAiCountChange={setBulkTagsAiCount}
         bulkApplyDisplayName={bulkApplyDisplayName}
         onBulkApplyDisplayNameChange={setBulkApplyDisplayName}
         bulkDisplayNameMode={bulkDisplayNameMode}

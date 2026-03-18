@@ -10,6 +10,7 @@ import { useState, useCallback } from 'react';
 import type { CloudflareImage } from '../types';
 import { truncateMiddle } from '../utils';
 import { setEmbeddingPendingEntry } from '@/utils/embeddingPending';
+import { requestSemanticTags } from '@/services/imageAltDescriptionService';
 
 interface UseGalleryActionsOptions {
   images: CloudflareImage[];
@@ -66,12 +67,31 @@ interface BulkUpdateOptions {
   applyTags: boolean;
   tagsMode: 'replace' | 'append' | 'ai';
   tagsInput: string;
+  tagsAiCount: number;
   applyDisplayName: boolean;
   displayNameMode: 'custom' | 'auto' | 'clear' | 'ai';
   displayNameInput: string;
   applyNamespace: boolean;
   namespaceInput: string;
 }
+
+const mergeUniqueTags = (existingTags: string[], incomingTags: string[]) => {
+  const merged = new Map<string, string>();
+  existingTags.forEach((tag) => {
+    const normalized = tag.trim().toLowerCase();
+    if (normalized) {
+      merged.set(normalized, tag.trim());
+    }
+  });
+  incomingTags.forEach((tag) => {
+    const trimmed = tag.trim();
+    const normalized = trimmed.toLowerCase();
+    if (normalized && !merged.has(normalized)) {
+      merged.set(normalized, trimmed);
+    }
+  });
+  return Array.from(merged.values());
+};
 
 interface AnimationOptions {
   fps: string;
@@ -384,26 +404,15 @@ export function useGalleryActions({
                   if (!remoteUrl) {
                     aiTagFailureCount += 1;
                   } else {
-                    const form = new FormData();
-                    form.append('remoteUrl', `${remoteUrl}?format=webp`);
-                    if (target?.filename) form.append('filename', target.filename);
-                    if (target?.folder) form.append('folder', target.folder);
-                    if (target?.tags?.length) form.append('tags', target.tags.join(','));
-                    form.append('includeTags', 'true');
-                    form.append('skipDisplayName', 'true');
-                    form.append('tagCount', '4');
-
-                    const tagResponse = await fetch('/api/display-name/suggest', {
-                      method: 'POST',
-                      body: form,
-                    });
-                    const tagPayload = await tagResponse.json();
+                    const { ok, payload: tagPayload } = await requestSemanticTags(id, options.tagsAiCount);
                     const suggestedTags = Array.isArray(tagPayload?.tags)
                       ? tagPayload.tags.filter((tag: unknown): tag is string => typeof tag === 'string' && tag.trim().length > 0)
                       : [];
-                    if (tagResponse.ok && suggestedTags.length > 0) {
-                      payload.tags = suggestedTags;
-                      generatedTags.set(id, suggestedTags);
+                    if (ok && suggestedTags.length > 0) {
+                      const existingTags = Array.isArray(target?.tags) ? target.tags : [];
+                      const mergedTags = mergeUniqueTags(existingTags, suggestedTags);
+                      payload.tags = mergedTags;
+                      generatedTags.set(id, mergedTags);
                       aiTagSuccessCount += 1;
                     } else {
                       aiTagFailureCount += 1;

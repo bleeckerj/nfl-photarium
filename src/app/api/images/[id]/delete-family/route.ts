@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCachedImages } from '@/server/cloudflareImageCache';
 import { getCloudflareCredentials } from '@/server/cloudflareClient';
 import { cleanupImageArtifacts } from '@/server/imageArtifactCleanup';
 import { isVectorSearchAvailable } from '@/server/vectorSearch';
+import { listCatalogAssets } from '@/server/assetCatalog';
 import { listImageFamilyIds } from '@/server/imageFamily';
+import { deleteStreamVideo } from '@/server/cloudflareStreamClient';
+import {
+  deleteVideoAssetRecord,
+  getVideoAssetRecord,
+} from '@/server/videoCatalogStorage';
 import {
   bumpDeleteFamilyJobAttempt,
   completeDeleteFamilyJob,
@@ -74,13 +79,16 @@ export async function POST(
   }
 
   // Refresh cache so we have the best chance of including all variants.
-  const images = await getCachedImages(true);
-  const target = images.find((img) => img.id === requestedId);
+  const assets = await listCatalogAssets({ forceRefreshImages: true });
+  const target = assets.find((asset) => asset.id === requestedId);
   if (!target) {
     return NextResponse.json({ error: 'Image not found' }, { status: 404 });
   }
+  if (target.assetType !== 'image') {
+    return NextResponse.json({ error: 'Only images can be family parents.' }, { status: 400 });
+  }
 
-  const { rootId, memberIds } = listImageFamilyIds(images, requestedId);
+  const { rootId, memberIds } = listImageFamilyIds(assets, requestedId);
 
   if (dryRun) {
     return NextResponse.json({
@@ -99,6 +107,36 @@ export async function POST(
 
   const performDelete = async (imageId: string): Promise<{ ok: boolean; id: string; status?: number; message?: string }> => {
     try {
+      const videoRecord = await getVideoAssetRecord(imageId);
+      if (videoRecord) {
+        try {
+          await deleteStreamVideo(videoRecord.streamUid);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (!message.toLowerCase().includes('not found') && !message.toLowerCase().includes('(404)')) {
+            return {
+              ok: false,
+              id: imageId,
+              status: 502,
+              message: 'Failed to delete video from Cloudflare Stream',
+            };
+          }
+        }
+
+        await deleteVideoAssetRecord(imageId);
+        const cleanup = await cleanupImageArtifacts(imageId, {
+          includeVectors: redisAvailable,
+          includeWorkflowIntentEmbedding: true,
+        });
+        if (!cleanup.success) {
+          console.warn('[DeleteFamily] Local artifact cleanup had failures (video path)', {
+            imageId,
+            steps: cleanup.steps,
+          });
+        }
+        return { ok: true, id: imageId };
+      }
+
       const response = await fetch(
         `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${imageId}`,
         {

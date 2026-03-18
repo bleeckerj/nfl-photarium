@@ -27,7 +27,7 @@ const maybeBytesFromNumericObject = (value: unknown): Uint8Array | null => {
   const bytes = new Uint8Array(sorted.length);
   for (const idx of sorted) {
     const raw = obj[String(idx)];
-    if (!Number.isInteger(raw) || raw < 0 || raw > 255) return null;
+    if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 0 || raw > 255) return null;
     bytes[idx] = raw;
   }
   return bytes;
@@ -167,7 +167,9 @@ export const extractExifSummary = async (buffer: Buffer): Promise<ExifSummary | 
     addValue(summary, 'fNumber', parsed?.Photo?.FNumber);
     addValue(summary, 'iso', parsed?.Photo?.ISOSpeedRatings || parsed?.Photo?.PhotographicSensitivity);
     addValue(summary, 'focalLength', parsed?.Photo?.FocalLength);
-    addValue(summary, 'userComment', parsed?.Exif?.UserComment || parsed?.Photo?.UserComment);
+    const parsedRecord = parsed as Record<string, unknown>;
+    const exifSection = parsedRecord.Exif as Record<string, unknown> | undefined;
+    addValue(summary, 'userComment', exifSection?.UserComment || parsed?.Photo?.UserComment);
     return Object.keys(summary).length ? summary : undefined;
   } catch (error) {
     console.warn('Failed to extract EXIF data:', error);

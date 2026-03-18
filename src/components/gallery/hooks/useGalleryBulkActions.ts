@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import type { CloudflareImage } from '../types';
 import { truncateMiddle } from '@/components/gallery/utils';
+import { requestSemanticTags } from '@/services/imageAltDescriptionService';
 
 interface UseGalleryBulkActionsOptions {
   images: CloudflareImage[];
@@ -19,7 +20,8 @@ interface UseGalleryBulkActionsOptions {
   bulkApplyTags: boolean;
   bulkFolderInput: string;
   bulkTagsInput: string;
-  bulkTagsMode: 'replace' | 'append';
+  bulkTagsMode: 'replace' | 'append' | 'ai';
+  bulkTagsAiCount: string;
   bulkApplyDisplayName: boolean;
   bulkDisplayNameInput: string;
   bulkDisplayNameMode: 'custom' | 'auto' | 'clear' | 'ai';
@@ -58,6 +60,7 @@ export const useGalleryBulkActions = ({
   bulkFolderInput,
   bulkTagsInput,
   bulkTagsMode,
+  bulkTagsAiCount,
   bulkApplyDisplayName,
   bulkDisplayNameInput,
   bulkDisplayNameMode,
@@ -77,6 +80,23 @@ export const useGalleryBulkActions = ({
   namespace,
   fetchImages,
 }: UseGalleryBulkActionsOptions) => {
+  const mergeUniqueTags = useCallback((existingTags: string[], incomingTags: string[]) => {
+    const merged = new Map<string, string>();
+    existingTags.forEach((tag) => {
+      const trimmed = tag.trim();
+      if (!trimmed) return;
+      merged.set(trimmed.toLowerCase(), trimmed);
+    });
+    incomingTags.forEach((tag) => {
+      const trimmed = tag.trim();
+      if (!trimmed) return;
+      if (!merged.has(trimmed.toLowerCase())) {
+        merged.set(trimmed.toLowerCase(), trimmed);
+      }
+    });
+    return Array.from(merged.values());
+  }, []);
+
   const applyBulkUpdates = useCallback(async () => {
     if (!selectedCount) {
       toastPush('No images selected');
@@ -86,9 +106,10 @@ export const useGalleryBulkActions = ({
       .split(',')
       .map(tag => tag.trim())
       .filter(Boolean);
+    const aiTagCount = Math.min(12, Math.max(1, Number.parseInt(bulkTagsAiCount, 10) || 6));
     const hasTagChanges =
       bulkApplyTags &&
-      (bulkTagsMode === 'replace' || parsedBulkTags.length > 0);
+      (bulkTagsMode === 'replace' || bulkTagsMode === 'ai' || parsedBulkTags.length > 0);
     const hasDisplayNameChanges = bulkApplyDisplayName;
     const descriptionAppendText = bulkDescriptionAppendInput.trim();
     const hasDescriptionChanges = bulkApplyDescription && descriptionAppendText.length > 0;
@@ -100,10 +121,16 @@ export const useGalleryBulkActions = ({
     setBulkUpdating(true);
     try {
       const wantsAiDisplayName = bulkApplyDisplayName && bulkDisplayNameMode === 'ai';
+      const wantsAiTags = bulkApplyTags && bulkTagsMode === 'ai';
       const generatedDisplayNames = new Map<string, string>();
+      const generatedTags = new Map<string, string[]>();
       let aiSuccessCount = 0;
       let aiFailureCount = 0;
-      await Promise.all(
+      let aiTagSuccessCount = 0;
+      let aiTagFailureCount = 0;
+      let aiTagNoopCount = 0;
+      const imageById = new Map(images.map((image) => [image.id, image]));
+      const updateTasks = await Promise.all(
         Array.from(selectedImageIds).map(async id => {
           const payload: Record<string, unknown> = {};
           if (bulkApplyFolder) {
@@ -116,13 +143,40 @@ export const useGalleryBulkActions = ({
           if (bulkApplyTags) {
             if (bulkTagsMode === 'replace') {
               payload.tags = bulkTagsInput;
+            } else if (bulkTagsMode === 'ai') {
+              const target = imageById.get(id);
+              if (target?.assetType === 'video') {
+                aiTagFailureCount += 1;
+              } else {
+                try {
+                  const { ok, payload: tagPayload } = await requestSemanticTags(id, aiTagCount);
+                  const suggestedTags = Array.isArray(tagPayload?.tags)
+                    ? tagPayload.tags.filter((tag): tag is string => typeof tag === 'string' && tag.trim().length > 0)
+                    : [];
+                  if (!ok) {
+                    aiTagFailureCount += 1;
+                  } else if (suggestedTags.length === 0) {
+                    aiTagNoopCount += 1;
+                  } else {
+                    const existingTags = Array.isArray(target?.tags) ? target.tags : [];
+                    const mergedTags = mergeUniqueTags(existingTags, suggestedTags);
+                    if (mergedTags.length === existingTags.length) {
+                      aiTagNoopCount += 1;
+                    } else {
+                      payload.tags = mergedTags;
+                      generatedTags.set(id, mergedTags);
+                      aiTagSuccessCount += 1;
+                    }
+                  }
+                } catch (error) {
+                  console.error('Failed to generate semantic tags', error);
+                  aiTagFailureCount += 1;
+                }
+              }
             } else if (parsedBulkTags.length > 0) {
-              const target = images.find(img => img.id === id);
+              const target = imageById.get(id);
               const existingTags = Array.isArray(target?.tags) ? target.tags : [];
-              const merged = new Map<string, string>();
-              existingTags.forEach(tag => merged.set(tag.toLowerCase(), tag));
-              parsedBulkTags.forEach(tag => merged.set(tag.toLowerCase(), tag));
-              payload.tags = Array.from(merged.values());
+              payload.tags = mergeUniqueTags(existingTags, parsedBulkTags);
             }
           }
           if (bulkApplyDisplayName) {
@@ -131,11 +185,16 @@ export const useGalleryBulkActions = ({
             } else if (bulkDisplayNameMode === 'custom') {
               payload.displayName = bulkDisplayNameInput.trim();
             } else if (bulkDisplayNameMode === 'auto') {
-              const target = images.find(img => img.id === id);
+              const target = imageById.get(id);
               const baseName = target?.filename || '';
               payload.displayName = truncateMiddle(baseName, 64);
             } else if (bulkDisplayNameMode === 'ai') {
               try {
+                const target = imageById.get(id);
+                if (target?.assetType === 'video') {
+                  aiFailureCount += 1;
+                  return null;
+                }
                 const response = await fetch(`/api/images/${id}/display-name`, { method: 'POST' });
                 const data = await response.json();
                 if (response.ok && data?.displayName) {
@@ -152,7 +211,7 @@ export const useGalleryBulkActions = ({
             }
           }
           if (hasDescriptionChanges) {
-            const target = images.find(img => img.id === id);
+            const target = imageById.get(id);
             const currentDescription = (target?.description || '').trim();
             payload.description = currentDescription
               ? `${currentDescription}\n\n${descriptionAppendText}`
@@ -164,16 +223,47 @@ export const useGalleryBulkActions = ({
           if (!Object.keys(payload).length) {
             return null;
           }
-          return fetch(`/api/images/${id}/update`, {
+          const target = imageById.get(id);
+          const updateEndpoint = target?.assetType === 'video'
+            ? `/api/videos/${id}/update`
+            : `/api/images/${id}/update`;
+          return {
+            id,
+            request: fetch(updateEndpoint, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
-          });
+            }),
+          };
         })
       );
+      const effectiveTasks = updateTasks.filter((task): task is { id: string; request: Promise<Response> } => Boolean(task));
+      const settled = await Promise.allSettled(effectiveTasks.map((task) => task.request));
+      const successfulIds = new Set<string>();
+      let failedCount = 0;
+      for (let i = 0; i < settled.length; i += 1) {
+        const result = settled[i];
+        const task = effectiveTasks[i];
+        if (result.status === 'rejected') {
+          failedCount += 1;
+          continue;
+        }
+        if (!result.value.ok) {
+          failedCount += 1;
+          continue;
+        }
+        successfulIds.add(task.id);
+      }
+      if (effectiveTasks.length > 0 && successfulIds.size === 0) {
+        toastPush('Bulk update failed');
+        return;
+      }
       setImages(prev =>
         prev.map(img => {
           if (!selectedImageIds.has(img.id)) {
+            return img;
+          }
+          if (effectiveTasks.length > 0 && !successfulIds.has(img.id)) {
             return img;
           }
           const updatedFolder: string | undefined =
@@ -186,11 +276,10 @@ export const useGalleryBulkActions = ({
           if (bulkApplyTags) {
             if (bulkTagsMode === 'replace') {
               updatedTags = parsedBulkTags;
+            } else if (bulkTagsMode === 'ai') {
+              updatedTags = generatedTags.get(img.id) ?? updatedTags;
             } else if (parsedBulkTags.length > 0) {
-              const merged = new Map<string, string>();
-              (img.tags ?? []).forEach(tag => merged.set(tag.toLowerCase(), tag));
-              parsedBulkTags.forEach(tag => merged.set(tag.toLowerCase(), tag));
-              updatedTags = Array.from(merged.values());
+              updatedTags = mergeUniqueTags(img.tags ?? [], parsedBulkTags);
             }
           }
           let updatedDisplayName = img.displayName;
@@ -232,7 +321,23 @@ export const useGalleryBulkActions = ({
           toastPush('Display names generated');
         }
       }
-      toastPush('Images updated');
+      if (wantsAiTags) {
+        const total = selectedImageIds.size;
+        if (aiTagSuccessCount === 0 && aiTagFailureCount === 0) {
+          toastPush('No new tags generated');
+        } else if (aiTagSuccessCount === 0) {
+          toastPush('No new tags generated');
+        } else if (aiTagFailureCount > 0 || aiTagNoopCount > 0) {
+          toastPush(`Generated tags for ${aiTagSuccessCount}/${total} images`);
+        } else {
+          toastPush('AI tags generated');
+        }
+      }
+      if (failedCount > 0) {
+        toastPush(`Updated ${successfulIds.size}, failed ${failedCount}`);
+      } else {
+        toastPush('Images updated');
+      }
       clearSelection();
       setBulkSelectionMode(false);
       setBulkEditOpen(false);
@@ -248,6 +353,7 @@ export const useGalleryBulkActions = ({
     bulkApplyFolder,
     bulkApplyNamespace,
     bulkApplyTags,
+    bulkTagsAiCount,
     bulkDescriptionAppendInput,
     bulkDisplayNameInput,
     bulkDisplayNameMode,
@@ -264,7 +370,8 @@ export const useGalleryBulkActions = ({
     setBulkSelectionMode,
     setBulkUpdating,
     setImages,
-    toastPush
+    toastPush,
+    mergeUniqueTags
   ]);
 
   const createBulkAnimation = useCallback(async () => {

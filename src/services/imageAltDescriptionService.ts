@@ -16,6 +16,12 @@ type DisplayNameResponse = {
   error?: string;
 };
 
+type SemanticTagsResponse = {
+  tags?: string[];
+  model?: string;
+  error?: string;
+};
+
 export const requestAltTag = async (imageId: string) => {
   const response = await fetch(`/api/images/${imageId}/alt`, { method: 'POST' });
   const payload = (await response.json()) as AltTagResponse;
@@ -35,5 +41,15 @@ export const requestDescription = async (imageId: string, existingDescription: s
 export const requestDisplayName = async (imageId: string) => {
   const response = await fetch(`/api/images/${imageId}/display-name`, { method: 'POST' });
   const payload = (await response.json()) as DisplayNameResponse;
+  return { ok: response.ok, payload };
+};
+
+export const requestSemanticTags = async (imageId: string, count: number) => {
+  const response = await fetch(`/api/images/${imageId}/tags`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ count })
+  });
+  const payload = (await response.json()) as SemanticTagsResponse;
   return { ok: response.ok, payload };
 };

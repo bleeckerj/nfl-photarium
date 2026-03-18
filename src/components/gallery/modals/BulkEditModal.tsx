@@ -19,6 +19,7 @@ export interface BulkEditOptions {
   applyTags: boolean;
   tagsMode: BulkTagsMode;
   tagsInput: string;
+  tagsAiCount: number;
   applyDisplayName: boolean;
   displayNameMode: BulkDisplayNameMode;
   displayNameInput: string;
@@ -65,6 +66,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
   const [applyTags, setApplyTags] = useState(false);
   const [tagsMode, setTagsMode] = useState<BulkTagsMode>('replace');
   const [tagsInput, setTagsInput] = useState('');
+  const [tagsAiCount, setTagsAiCount] = useState('6');
 
   // Display name state
   const [applyDisplayName, setApplyDisplayName] = useState(false);
@@ -118,6 +120,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
       applyTags,
       tagsMode,
       tagsInput,
+      tagsAiCount: Math.min(12, Math.max(1, Number.parseInt(tagsAiCount, 10) || 6)),
       applyDisplayName,
       displayNameMode,
       displayNameInput,
@@ -242,7 +245,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
                     onChange={() => setTagsMode('append')}
                     className="h-3 w-3"
                   />
-                  Append
+                  Append (manual)
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -252,7 +255,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
                     onChange={() => setTagsMode('ai')}
                     className="h-3 w-3"
                   />
-                  AI (generate)
+                  Append (GenAI)
                 </label>
               </div>
               {tagsMode !== 'ai' && (
@@ -264,12 +267,25 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
                   rows={2}
                 />
               )}
+              {tagsMode === 'ai' && (
+                <label className="block text-[0.85em] text-gray-600">
+                  Tags per image
+                  <input
+                    type="number"
+                    min={1}
+                    max={12}
+                    value={tagsAiCount}
+                    onChange={(e) => setTagsAiCount(e.target.value)}
+                    className="mt-1 w-24 border border-gray-300 rounded px-3 py-2"
+                  />
+                </label>
+              )}
               <p className="text-[0.85em] text-gray-500">
                 {tagsMode === 'replace'
                   ? 'Replace tags with this list (empty clears tags).'
                   : tagsMode === 'append'
-                    ? 'Append tags to each image (empty keeps existing tags).'
-                    : 'Generate semantic tags per image using AI and replace existing tags.'}
+                    ? 'Append these manual tags to each image.'
+                    : 'Generate one-shot single-word keywords per image, append only new ones, and save automatically.'}
               </p>
             </div>
           )}

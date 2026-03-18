@@ -26,6 +26,19 @@ type StreamUploadResult = {
   duration?: number;
 };
 
+export type StreamDownloadStatus = 'ready' | 'inprogress' | 'error';
+
+export type StreamDownloadInfo = {
+  status?: StreamDownloadStatus;
+  percentComplete?: number;
+  url?: string;
+};
+
+export type StreamDownloadsResult = {
+  default?: StreamDownloadInfo;
+  audio?: StreamDownloadInfo;
+};
+
 const STREAM_API_BASE = 'https://api.cloudflare.com/client/v4';
 
 const getStreamApiToken = () =>
@@ -178,6 +191,36 @@ export async function deleteStreamVideo(uid: string, credentials?: StreamCredent
     `/${encodeURIComponent(uid)}`,
     {
       method: 'DELETE',
+    },
+    credentials
+  );
+}
+
+export async function getStreamDownloads(
+  uid: string,
+  credentials?: StreamCredentials
+): Promise<StreamDownloadsResult> {
+  return streamApiFetch<StreamDownloadsResult>(
+    `/${encodeURIComponent(uid)}/downloads`,
+    {
+      method: 'GET',
+    },
+    credentials
+  );
+}
+
+export async function createStreamDownload(
+  uid: string,
+  credentials?: StreamCredentials
+): Promise<StreamDownloadInfo> {
+  return streamApiFetch<StreamDownloadInfo>(
+    `/${encodeURIComponent(uid)}/downloads`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: '{}',
     },
     credentials
   );

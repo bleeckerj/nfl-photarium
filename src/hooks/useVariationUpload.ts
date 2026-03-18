@@ -8,7 +8,7 @@ export type VariationUploadToast = {
 type UploadFailureItem = {
   filename?: string;
   error?: string;
-  duplicates?: Array<{ filename?: string; folder?: string }>;
+  duplicates?: Array<{ id?: string; filename?: string; folder?: string }>;
 };
 
 type UseVariationUploadParams = {
@@ -35,7 +35,8 @@ const formatDuplicateMessage = (failure: UploadFailureItem, fallback?: string) =
   const summary = duplicates
     .map((dup) => {
       const label = dup.filename || 'Untitled';
-      return dup.folder ? `${label} (${dup.folder})` : label;
+      const location = dup.folder ? `${label} (${dup.folder})` : label;
+      return dup.id ? `${location} [${dup.id}]` : location;
     })
     .slice(0, 3)
     .join(', ');

@@ -7,7 +7,10 @@ export type VideoAssetRecord = {
   id: string;
   assetType: 'video';
   filename: string;
+  displayName?: string;
   uploaded: string;
+  parentId?: string;
+  variationSort?: number;
   streamUid: string;
   playbackUrl?: string;
   hlsUrl?: string;
@@ -27,8 +30,45 @@ export type VideoAssetRecord = {
   originalUrl?: string;
   sourceUrl?: string;
   namespace?: string;
+  mux?: VideoMuxMetadata;
+  animatedWebpImageId?: string;
+  animatedWebpUrl?: string;
+  animatedWebpStatus?: 'pending' | 'ready' | 'error';
+  animatedWebpError?: string;
+  animatedWebpUpdatedAt?: string;
+  animatedWebpBytes?: number;
+  animatedWebpWidth?: number;
+  animatedWebpHeight?: number;
+  animatedWebpVariants?: Array<{
+    imageId: string;
+    url?: string;
+    filename: string;
+    bytes: number;
+    width?: number;
+    height?: number;
+    fps: number;
+    loop: boolean;
+    maxWidth: number;
+    maxHeight: number;
+    maxOutputBytes: number;
+    timeoutMs: number;
+    encoder?: string;
+    createdAt: string;
+  }>;
   createdAt: string;
   updatedAt: string;
+};
+
+export type VideoMuxMetadata = {
+  assetId: string;
+  status: 'queued' | 'ingesting' | 'ready' | 'error';
+  ingestUrl?: string;
+  playbackId?: string;
+  playbackIds?: string[];
+  playbackUrl?: string;
+  exportedAt?: string;
+  syncedAt?: string;
+  error?: string;
 };
 
 type VideoAssetRecordInput = Omit<VideoAssetRecord, 'id' | 'createdAt' | 'updatedAt'> & {

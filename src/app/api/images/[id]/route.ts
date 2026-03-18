@@ -88,6 +88,8 @@ const enrichImageSize = async (image: CachedCloudflareImage): Promise<CachedClou
   return { ...image, size: discoveredSize };
 };
 
+const mark = (value: number) => Number(value.toFixed(1));
+
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -175,27 +177,76 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const startedAt = performance.now();
+  const timings: Record<string, number> = {};
+  const diagnostics: Record<string, number | boolean | string | null> = {};
+
   try {
     const { id: imageId } = await params;
     if (!imageId) {
       return NextResponse.json({ error: 'Image ID is required' }, { status: 400 });
     }
 
+    const cacheStartedAt = performance.now();
     const cached = await getCachedImage(imageId);
+    timings.cache_lookup = mark(performance.now() - cacheStartedAt);
     if (cached) {
-      const enriched = await enrichImageSize(cached);
-      if ((cached.size ?? null) !== (enriched.size ?? null)) {
-        upsertCachedImage(enriched);
+      diagnostics.source = 'cache';
+      diagnostics.had_known_size = typeof readKnownSize(cached) === 'number';
+      if (typeof readKnownSize(cached) !== 'number') {
+        void enrichImageSize(cached).then((enriched) => {
+          if ((cached.size ?? null) !== (enriched.size ?? null)) {
+            upsertCachedImage(enriched);
+          }
+        }).catch((error) => {
+          console.warn('[SingleImage] Background size enrichment failed', { imageId, error });
+        });
       }
-      return NextResponse.json({ image: { ...enriched, fileSizeBytes: enriched.size ?? null } });
+      timings.total = mark(performance.now() - startedAt);
+      const response = NextResponse.json({
+        image: { ...cached, fileSizeBytes: cached.size ?? null },
+        timings,
+        diagnostics,
+      });
+      response.headers.set(
+        'Server-Timing',
+        Object.entries(timings)
+          .map(([name, duration]) => `${name};dur=${duration}`)
+          .join(', ')
+      );
+      return response;
     }
 
+    const cloudflareStartedAt = performance.now();
     const image = await fetchCloudflareImage(imageId);
+    timings.cloudflare_fetch = mark(performance.now() - cloudflareStartedAt);
+    diagnostics.source = 'cloudflare';
     const transformed = transformApiImageToCached(image);
-    const cachedImage = await enrichImageSize(transformed);
-    upsertCachedImage(cachedImage);
+    diagnostics.had_known_size = typeof readKnownSize(transformed) === 'number';
+    upsertCachedImage(transformed);
+    if (typeof readKnownSize(transformed) !== 'number') {
+      void enrichImageSize(transformed).then((enriched) => {
+        if ((transformed.size ?? null) !== (enriched.size ?? null)) {
+          upsertCachedImage(enriched);
+        }
+      }).catch((error) => {
+        console.warn('[SingleImage] Background size enrichment failed', { imageId, error });
+      });
+    }
 
-    return NextResponse.json({ image: { ...cachedImage, fileSizeBytes: cachedImage.size ?? null } });
+    timings.total = mark(performance.now() - startedAt);
+    const response = NextResponse.json({
+      image: { ...transformed, fileSizeBytes: transformed.size ?? null },
+      timings,
+      diagnostics,
+    });
+    response.headers.set(
+      'Server-Timing',
+      Object.entries(timings)
+        .map(([name, duration]) => `${name};dur=${duration}`)
+        .join(', ')
+    );
+    return response;
   } catch (error) {
     console.error('Fetch single image error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

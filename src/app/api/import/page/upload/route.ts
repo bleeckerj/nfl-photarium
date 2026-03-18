@@ -3,6 +3,11 @@ import { Agent } from 'undici';
 import { toDuplicateSummary } from '@/server/duplicateDetector';
 import { sanitizeFilename, SUPPORTED_IMAGE_TYPES, uploadImageBuffer } from '@/server/uploadService';
 import { validateParentForNewChild } from '@/server/parentValidation';
+import {
+  buildArchiveChallengeMessage,
+  logArchiveDiagnostics,
+  readArchiveResponseDiagnostics,
+} from '@/server/archiveDiagnostics';
 import { extractFilenameFromUrl } from '@/utils/filename';
 import { normalizeCookieHeader } from '@/server/pageImportCookies';
 import type { UploadFailure, UploadSuccess } from '@/server/uploadService';
@@ -23,6 +28,7 @@ const IMAGE_EXTENSION_MIME_MAP: Record<string, string> = {
 };
 
 const MIN_IMAGE_BYTES = 4 * 1024;
+const SMALL_ASSET_MIN_IMAGE_BYTES = 1024;
 
 const insecureAgent = new Agent({
   connect: {
@@ -141,6 +147,8 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const items = Array.isArray(body?.items) ? (body.items as UploadItem[]) : [];
+    const includeSmallAssets = Boolean(body?.includeSmallAssets);
+    const minImageBytes = includeSmallAssets ? SMALL_ASSET_MIN_IMAGE_BYTES : MIN_IMAGE_BYTES;
     let requestCookieHeader: string | null = null;
     try {
       requestCookieHeader = normalizeCookieHeader(body?.cookieHeader);
@@ -243,11 +251,18 @@ export async function POST(request: NextRequest) {
           allowInsecure,
           itemCookieHeader ? { headers: { Cookie: itemCookieHeader } } : undefined
         );
+        const archiveDiagnostics = await readArchiveResponseDiagnostics(item.url, response);
+        logArchiveDiagnostics('import/page/upload', archiveDiagnostics, {
+          clientId: item.clientId,
+          phase: 'download',
+        });
         if (!response.ok) {
           failures.push({
             clientId: item.clientId,
             filename: item.url,
-            error: 'Failed to download image',
+            error: archiveDiagnostics?.challengeDetected
+              ? buildArchiveChallengeMessage(archiveDiagnostics.host)
+              : `Failed to download image (HTTP ${response.status})`,
             reason: 'upload'
           });
           continue;
@@ -260,10 +275,17 @@ export async function POST(request: NextRequest) {
             ? normalizedType
             : undefined) ?? getMimeFromExtension(item.url);
         if (!inferredContentType || !SUPPORTED_IMAGE_TYPES.has(inferredContentType)) {
+          const contentTypeHint = archiveDiagnostics?.contentType
+            ? ` (${archiveDiagnostics.contentType})`
+            : '';
           failures.push({
             clientId: item.clientId,
             filename: item.url,
-            error: 'URL must point to a supported image',
+            error: archiveDiagnostics
+              ? archiveDiagnostics.challengeDetected
+                ? buildArchiveChallengeMessage(archiveDiagnostics.host)
+                : `${archiveDiagnostics.host} returned HTML or a non-image response instead of a supported image${contentTypeHint}`
+              : 'URL must point to a supported image',
             reason: 'invalid-type'
           });
           continue;
@@ -271,11 +293,11 @@ export async function POST(request: NextRequest) {
 
         const arrayBuffer = await response.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
-        if (buffer.byteLength < MIN_IMAGE_BYTES) {
+        if (buffer.byteLength < minImageBytes) {
           failures.push({
             clientId: item.clientId,
             filename: item.url,
-            error: 'Image smaller than 4KB',
+            error: includeSmallAssets ? 'Image smaller than 1KB' : 'Image smaller than 4KB',
             reason: 'unsupported'
           });
           continue;

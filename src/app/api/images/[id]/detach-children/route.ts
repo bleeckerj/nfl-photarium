@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCachedImages, upsertCachedImage } from '@/server/cloudflareImageCache';
-import { getCloudflareCredentials } from '@/server/cloudflareClient';
-import { pickCloudflareMetadata } from '@/utils/cloudflareMetadata';
+import { listCatalogAssets } from '@/server/assetCatalog';
+import { ParentAssignmentError, setAssetParentDirectly } from '@/server/assetParentService';
 
 type DetachChildrenRequestBody = {
   concurrency?: number;
@@ -60,10 +59,16 @@ export async function POST(
     Math.max(1, Number.isFinite(body.concurrency) ? (body.concurrency as number) : 4)
   );
 
-  const images = await getCachedImages(true);
-  const target = images.find((img) => img.id === requestedId);
+  const assets = await listCatalogAssets({
+    forceRefreshImages: true,
+    includeVideos: process.env.ENABLE_VIDEO_ASSETS === '1',
+  });
+  const target = assets.find((asset) => asset.id === requestedId);
   if (!target) {
     return NextResponse.json({ error: 'Image not found' }, { status: 404 });
+  }
+  if (target.assetType !== 'image') {
+    return NextResponse.json({ error: 'Only images can be family parents.' }, { status: 400 });
   }
 
   if (target.parentId) {
@@ -73,7 +78,9 @@ export async function POST(
     );
   }
 
-  const childIds = images.filter((img) => img.parentId === requestedId).map((img) => img.id);
+  const childIds = assets
+    .filter((asset) => asset.parentId === requestedId)
+    .map((asset) => asset.id);
 
   if (dryRun) {
     return NextResponse.json({
@@ -97,57 +104,17 @@ export async function POST(
     });
   }
 
-  const { accountId, apiToken } = getCloudflareCredentials();
-  const updatedAt = new Date().toISOString();
-
   const detachChild = async (id: string): Promise<DetachOutcome> => {
     try {
-      const metadataPayload = pickCloudflareMetadata(
-        {
-          variationParentId: '',
-          updatedAt,
-        },
-        { includeEmpty: true }
-      );
-
-      const response = await fetch(
-        `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${id}`,
-        {
-          method: 'PATCH',
-          headers: {
-            Authorization: `Bearer ${apiToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ metadata: metadataPayload }),
-        }
-      );
-
-      const result = await response.json().catch(() => null);
-      if (!response.ok) {
-        return {
-          ok: false,
-          id,
-          status: response.status,
-          message:
-            result?.errors?.[0]?.message || result?.error || 'Failed to update image metadata',
-        };
-      }
-
-      const cached = images.find((img) => img.id === id);
-      if (cached) {
-        upsertCachedImage({
-          ...cached,
-          parentId: undefined,
-        });
-      }
-
+      await setAssetParentDirectly(id, '', { forceRefreshImages: true });
       return { ok: true, id };
     } catch (error) {
+      const parentError = error instanceof ParentAssignmentError ? error : null;
       return {
         ok: false,
         id,
-        status: 500,
-        message: error instanceof Error ? error.message : 'Unknown error',
+        status: parentError?.status ?? 500,
+        message: error instanceof Error ? error.message : 'Unknown error'
       };
     }
   };

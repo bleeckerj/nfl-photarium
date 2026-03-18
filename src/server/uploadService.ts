@@ -19,6 +19,7 @@ import { classifyAspectRatio } from '@/server/aspectRatio';
 import { storeImageAspectMetadata } from '@/server/vectorSearch';
 import { extractComfyWorkflowMetadata } from '@/utils/comfyMetadata';
 import { ingestComfyWorkflowForImage } from '@/server/comfy/workflowIngestion';
+import { patchImageExtrasRecord } from '@/server/imageExtras';
 
 // Re-export for backward compatibility
 export { sanitizeFilename, MAX_FILENAME_LENGTH } from '@/utils/filename';
@@ -583,7 +584,6 @@ export async function uploadImageBuffer({
     type: workingFileType,
     folder: folder,
     tags: tags,
-    description: description,
     originalUrl: originalUrl,
     originalUrlNormalized: normalizedOriginalUrl,
     sourceUrl: sourceUrl,
@@ -674,6 +674,10 @@ export async function uploadImageBuffer({
   });
   upsertCachedImage(primaryCached);
 
+  if (description) {
+    await patchImageExtrasRecord(imageData.id, { description });
+  }
+
   try {
     await ingestComfyWorkflowForImage({
       imageId: imageData.id,
@@ -742,6 +746,9 @@ export async function uploadImageBuffer({
               : webpMetadataPayload
           });
           upsertCachedImage(cachedVariant);
+          if (description) {
+            await patchImageExtrasRecord(webpResult.id, { description });
+          }
           await persistAspectMetadataFromBuffer(webpResult.id, webpBuffer);
           await queueAutoEmbeddingsForImage(cachedVariant);
         }

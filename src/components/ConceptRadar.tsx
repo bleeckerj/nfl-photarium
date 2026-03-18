@@ -28,13 +28,14 @@ interface SearchResult {
   imageId: string;
   score: number;
   filename?: string;
+  assetType?: 'image' | 'video';
 }
 
 interface ConceptRadarProps {
   imageId: string;
   className?: string;
   size?: number;
-  onImageClick?: (imageId: string) => void;
+  onImageClick?: (result: SearchResult) => void;
   copyVariant?: string;
   onCopySuccess?: (message: string) => void;
   // Current operating namespace. Use '__all__' to disable scoping.
@@ -560,7 +561,10 @@ export function ConceptRadar({ imageId, className = '', size = 360, onImageClick
                 <div
                   key={result.imageId}
                   className="relative aspect-square rounded overflow-hidden bg-gray-800 cursor-pointer hover:ring-2 hover:ring-amber-500 transition-all"
-                  onClick={() => onImageClick?.(result.imageId)}
+                  onClick={(event) => {
+                    if (!event.isTrusted || event.detail === 0) return;
+                    onImageClick?.(result);
+                  }}
                   title={result.filename || result.imageId}
                 >
                   <Image

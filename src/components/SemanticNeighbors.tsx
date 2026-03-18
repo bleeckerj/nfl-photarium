@@ -369,7 +369,10 @@ export function SemanticNeighbors({
                 ${onImageClick ? 'cursor-pointer hover:border-blue-500 hover:scale-105 transition-all duration-150' : ''}
               `}
               style={{ minWidth: '80px', minHeight: '80px' }}
-              onClick={() => onImageClick?.(result.imageId)}
+              onClick={(event) => {
+                if (!event.isTrusted || event.detail === 0) return;
+                onImageClick?.(result.imageId);
+              }}
               onMouseEnter={(e) => handleMouseEnter(e, result)}
               onMouseLeave={handleMouseLeave}
               title={`${result.filename || result.imageId}\nDistance: ${result.score.toFixed(3)} (${proximityTerm})`}

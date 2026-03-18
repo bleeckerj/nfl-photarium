@@ -3,6 +3,28 @@ const nextConfig = {
   turbopack: {
     root: import.meta.dirname,
   },
+  webpack: (config, { dev }) => {
+    if (dev) {
+      const existingIgnored = config.watchOptions?.ignored;
+      const ignoredList = Array.isArray(existingIgnored)
+        ? existingIgnored
+        : existingIgnored
+          ? [existingIgnored]
+          : [];
+      config.watchOptions = {
+        ...config.watchOptions,
+        // Ignore runtime data/state files that can change frequently during local workflows.
+        ignored: [
+          ...ignoredList,
+          '**/data/**',
+          '**/drop-off/**',
+          '**/.codex/**',
+          '**/*.checkpoint.json',
+        ],
+      };
+    }
+    return config;
+  },
   images: {
     unoptimized: true,
     remotePatterns: [

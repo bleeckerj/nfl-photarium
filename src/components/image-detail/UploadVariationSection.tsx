@@ -60,8 +60,8 @@ export function UploadVariationSection(props: UploadVariationSectionProps) {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div>
           <h3 className="text-xs font-mono font-medum text-gray-800">Upload a new variation</h3>
-          <p className="text-xs text-gray-600">Files automatically inherit this image's folder and tags.</p>
-          <p className="text-[11px] text-gray-500">.zip and .key uploads are supported.</p>
+          <p className="text-xs text-gray-600">Files automatically inherit this image&apos;s folder and tags.</p>
+          <p className="text-[11px] text-gray-500">Images, videos, and .zip/.key uploads are supported.</p>
         </div>
       </div>
 
@@ -70,8 +70,8 @@ export function UploadVariationSection(props: UploadVariationSectionProps) {
         className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors cursor-pointer ${isVariantDragActive ? 'border-blue-500 bg-blue-100' : 'border-gray-300 bg-white hover:border-gray-400'}`}
       >
         <input {...getVariantInputProps()} />
-        <p className="text-xs font-mono text-gray-900 mb-1">Drag & drop images or a .zip/.key here</p>
-        <p className="text-[11px] text-gray-500">or click to browse files (.zip/.key supported)</p>
+        <p className="text-xs font-mono text-gray-900 mb-1">Drag & drop images, videos, or a .zip/.key archive here</p>
+        <p className="text-[11px] text-gray-500">or click to browse files (images, videos, .zip/.key supported)</p>
       </div>
 
       <div className="text-[11px] text-gray-600 bg-white/70 border border-gray-200 rounded-md p-2">
@@ -129,14 +129,14 @@ export function UploadVariationSection(props: UploadVariationSectionProps) {
 
       <div className="space-y-2">
         <label className="text-[11px] font-mono text-gray-700" htmlFor="child-variation-url">
-          Upload by URL
+          Upload asset by URL
         </label>
         <div className="flex flex-col sm:flex-row gap-2">
           <input
             id="child-variation-url"
             type="url"
             inputMode="url"
-            placeholder="https://example.com/image.jpg"
+            placeholder="https://example.com/asset.jpg"
             value={childUploadUrl}
             onChange={(event) => onChildUploadUrlChange(event.target.value)}
             className="flex-1 px-2 py-2 text-xs border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -150,7 +150,7 @@ export function UploadVariationSection(props: UploadVariationSectionProps) {
             {childUploadUrlLoading ? 'Uploading…' : 'Upload URL'}
           </button>
         </div>
-        <p className="text-[11px] text-gray-500">URL uploads use the same folder and tags as file uploads.</p>
+        <p className="text-[11px] text-gray-500">URL uploads use the same folder and tags as file uploads. Video URLs are supported when the URL points to a video file.</p>
       </div>
 
       <button

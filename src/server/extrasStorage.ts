@@ -14,6 +14,7 @@
  */
 
 import { promises as fs } from 'fs';
+import os from 'node:os';
 import path from 'path';
 
 export interface IExtrasStorage {
@@ -30,7 +31,10 @@ class FileExtrasStorage implements IExtrasStorage {
   private writeQueue: Map<string, Promise<void>> = new Map();
 
   constructor(baseDir?: string) {
-    this.baseDir = baseDir ?? path.join(process.cwd(), '.extras');
+    const defaultDir = process.env.NODE_ENV === 'development'
+      ? path.join(os.tmpdir(), 'photarium-extras')
+      : path.join(process.cwd(), '.extras');
+    this.baseDir = baseDir ?? defaultDir;
   }
 
   private sanitizeKey(key: string): string {

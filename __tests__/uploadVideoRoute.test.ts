@@ -7,9 +7,17 @@ const { uploadVideoBufferMock, uploadVideoFromRemoteUrlMock } = vi.hoisted(() =>
   uploadVideoFromRemoteUrlMock: vi.fn(),
 }));
 
+const { validateParentForNewChildMock } = vi.hoisted(() => ({
+  validateParentForNewChildMock: vi.fn(),
+}));
+
 vi.mock('@/server/videoUploadService', () => ({
   uploadVideoBuffer: uploadVideoBufferMock,
   uploadVideoFromRemoteUrl: uploadVideoFromRemoteUrlMock,
+}));
+
+vi.mock('@/server/parentValidation', () => ({
+  validateParentForNewChild: validateParentForNewChildMock,
 }));
 
 const ORIGINAL_ENV = { ...process.env };
@@ -62,6 +70,11 @@ describe('POST /api/import/page/upload-video', () => {
         tags: [],
       },
     });
+
+    validateParentForNewChildMock.mockResolvedValue({
+      ok: true,
+      canonicalParentId: undefined,
+    });
   });
 
   afterAll(() => {
@@ -101,6 +114,35 @@ describe('POST /api/import/page/upload-video', () => {
     expect(uploadVideoFromRemoteUrlMock).toHaveBeenCalledWith(
       expect.objectContaining({
         sourceUrl: 'https://cdn.example.com/video.mp4',
+        context: expect.objectContaining({
+          parentId: undefined,
+        }),
+      })
+    );
+  });
+
+  it('passes the canonical parent id for remote variation uploads', async () => {
+    validateParentForNewChildMock.mockResolvedValue({
+      ok: true,
+      canonicalParentId: 'parent-123',
+      redirectedFromParentId: 'child-parent-456',
+    });
+
+    const response = await POST(
+      createJsonRequest({
+        url: 'https://cdn.example.com/video.mp4',
+        namespace: 'ns-a',
+        parentId: 'child-parent-456',
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(validateParentForNewChildMock).toHaveBeenCalledWith('child-parent-456');
+    expect(uploadVideoFromRemoteUrlMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          parentId: 'parent-123',
+        }),
       })
     );
   });
@@ -161,8 +203,55 @@ describe('POST /api/import/page/upload-video', () => {
         context: expect.objectContaining({
           namespace: 'ns-a',
           tags: ['loop'],
+          parentId: undefined,
         }),
       })
     );
+  });
+
+  it('passes the canonical parent id for multipart variation uploads', async () => {
+    validateParentForNewChildMock.mockResolvedValue({
+      ok: true,
+      canonicalParentId: 'parent-789',
+    });
+
+    const formData = new FormData();
+    const file = new File(['video-bytes'], 'clip.mp4', { type: 'video/mp4' });
+    formData.append('file', file);
+    formData.append('namespace', 'ns-a');
+    formData.append('parentId', 'variant-parent-123');
+
+    const response = await POST(createFormRequest(formData));
+
+    expect(response.status).toBe(200);
+    expect(validateParentForNewChildMock).toHaveBeenCalledWith('variant-parent-123');
+    expect(uploadVideoBufferMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          parentId: 'parent-789',
+        }),
+      })
+    );
+  });
+
+  it('rejects invalid parent assignments before uploading', async () => {
+    validateParentForNewChildMock.mockResolvedValue({
+      ok: false,
+      status: 400,
+      error: 'Parent image was not found.',
+    });
+
+    const formData = new FormData();
+    const file = new File(['video-bytes'], 'clip.mp4', { type: 'video/mp4' });
+    formData.append('file', file);
+    formData.append('namespace', 'ns-a');
+    formData.append('parentId', 'missing-parent');
+
+    const response = await POST(createFormRequest(formData));
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toMatch(/Parent image was not found/i);
+    expect(uploadVideoBufferMock).not.toHaveBeenCalled();
   });
 });

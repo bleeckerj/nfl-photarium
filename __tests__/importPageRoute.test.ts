@@ -155,6 +155,132 @@ describe('POST /api/import/page', () => {
     );
   });
 
+  it('keeps small substantive icon assets that are not generic ui chrome', async () => {
+    const html = `
+      <html>
+        <body>
+          <div id="sidebar">
+            <nav id="nav">
+              <img src="https://www.example.com/img/folder_applications.png" />
+              <img src="https://www.example.com/img/icon_architecture.png" />
+              <img src="https://www.example.com/img/logo.png" />
+              <img src="https://www.example.com/img/donate_en.gif" />
+            </nav>
+          </div>
+        </body>
+      </html>
+    `;
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = String(input);
+      if (url === 'https://example.com/page') {
+        return Promise.resolve(new Response(html, {
+          status: 200,
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        }));
+      }
+      if (url === 'https://www.example.com/img/folder_applications.png' && init?.method === 'HEAD') {
+        return Promise.resolve(new Response(null, {
+          status: 200,
+          headers: {
+            'content-type': 'image/png',
+            'content-length': '2048',
+          },
+        }));
+      }
+      if (url === 'https://www.example.com/img/icon_architecture.png' && init?.method === 'HEAD') {
+        return Promise.resolve(new Response(null, {
+          status: 200,
+          headers: {
+            'content-type': 'image/png',
+            'content-length': '3072',
+          },
+        }));
+      }
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+
+    const response = await POST(createRequest({ url: 'https://example.com/page', minBytes: 1024 }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.images).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          url: 'https://www.example.com/img/folder_applications.png',
+        }),
+        expect.objectContaining({
+          url: 'https://www.example.com/img/icon_architecture.png',
+        }),
+      ])
+    );
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.stringContaining('/img/logo.png'),
+      expect.anything()
+    );
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.stringContaining('/img/donate_en.gif'),
+      expect.anything()
+    );
+  });
+
+  it('includes ui chrome and small assets when explicitly requested', async () => {
+    const html = `
+      <html>
+        <body>
+          <div id="sidebar">
+            <nav id="nav">
+              <img src="https://www.example.com/img/folder_applications.png" />
+              <img src="https://www.example.com/img/logo.png" />
+            </nav>
+          </div>
+        </body>
+      </html>
+    `;
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = String(input);
+      if (url === 'https://example.com/page') {
+        return Promise.resolve(new Response(html, {
+          status: 200,
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        }));
+      }
+      if (init?.method === 'HEAD' && (url === 'https://www.example.com/img/folder_applications.png' || url === 'https://www.example.com/img/logo.png')) {
+        return Promise.resolve(new Response(null, {
+          status: 200,
+          headers: {
+            'content-type': 'image/png',
+            'content-length': '2048',
+          },
+        }));
+      }
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+
+    const response = await POST(createRequest({
+      url: 'https://example.com/page',
+      includeUiChrome: true,
+      includeSmallAssets: true,
+      minBytes: 1024,
+    }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.images).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ url: 'https://www.example.com/img/folder_applications.png' }),
+        expect.objectContaining({ url: 'https://www.example.com/img/logo.png' }),
+      ])
+    );
+    expect(payload.includeUiChrome).toBe(true);
+    expect(payload.includeSmallAssets).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://www.example.com/img/logo.png',
+      expect.objectContaining({ method: 'HEAD' })
+    );
+  });
+
   it('filters tiny tracker-like pixels using size hints even when minBytes is low', async () => {
     const html = `
       <html>

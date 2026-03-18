@@ -1,9 +1,14 @@
 "use client";
 
-import React, { CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { getMultipleImageUrls, getCloudflareImageUrl, getCloudflareDownloadUrl, IMAGE_VARIANTS } from '@/utils/imageUtils';
+import {
+  getAssetCopyUrl,
+  getAssetPreviewUrl,
+  isVideoAsset,
+} from '@/utils/assetUrls';
 import { useToast } from '@/components/Toast';
 import { Sparkles, RotateCcw, RotateCw, ChevronUp, ChevronDown, GripVertical, ExternalLink, Cpu, ChevronLeft, ChevronRight } from 'lucide-react';
 import FolderManagerButton from '@/components/FolderManagerButton';
@@ -34,6 +39,7 @@ import { VariantLinksSection } from '@/components/image-detail/VariantLinksSecti
 import { VariationsSection } from '@/components/image-detail/VariationsSection';
 import { AdoptVariationSection } from '@/components/image-detail/AdoptVariationSection';
 import { UploadVariationSection } from '@/components/image-detail/UploadVariationSection';
+import { VARIATION_UPLOAD_ACCEPT } from '@/components/image-detail/variationUploadConfig';
 import { ParentInfoSection } from '@/components/image-detail/ParentInfoSection';
 
 import { useParentReassignment } from '@/hooks/useParentReassignment';
@@ -43,17 +49,28 @@ import { useBulkVariationMetadata } from '@/hooks/useBulkVariationMetadata';
 import { useAltDescriptionGeneration } from '@/hooks/useAltDescriptionGeneration';
 import { useDeleteImageFamily } from '@/hooks/useDeleteImageFamily';
 import { useShareLinks } from '@/hooks/useShareLinks';
+import { patchParentAssignment as patchParentAssignmentService } from '@/services/parentAssignmentService';
+import { usePersistentShareBaseUrl } from '@/hooks/usePersistentShareBaseUrl';
+import { requestSemanticTags } from '@/services/imageAltDescriptionService';
+import { patchImageMetadata } from '@/services/imageMetadataService';
 
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 
 const handleImageDragStart = (e: React.DragEvent, image: CloudflareImage) => {
   e.stopPropagation();
-  const filename = (image.filename || `image-${image.id}`).replace(/[^a-zA-Z0-9._-]/g, '_');
-  const cdnUrl = getCloudflareImageUrl(image.id, 'original');
-  const { mime } = getCloudflareDownloadUrl(image.id, filename);
-  
+  const filename = (image.filename || `asset-${image.id}`).replace(/[^a-zA-Z0-9._-]/g, '_');
+  const copyUrl = getAssetCopyUrl(image, { imageVariant: 'original' });
+  const previewUrl = getAssetPreviewUrl(image, { imageVariant: 'public' });
+  const cdnUrl = copyUrl || previewUrl;
+  if (!cdnUrl) {
+    return;
+  }
+
   e.dataTransfer.clearData();
-  e.dataTransfer.setData('DownloadURL', `${mime}:${filename}:${cdnUrl}`);
+  if (!isVideoAsset(image)) {
+    const { mime } = getCloudflareDownloadUrl(image.id, filename);
+    e.dataTransfer.setData('DownloadURL', `${mime}:${filename}:${cdnUrl}`);
+  }
   
   e.dataTransfer.setData('text/plain', cdnUrl);
   e.dataTransfer.setData('text/uri-list', cdnUrl);
@@ -62,6 +79,7 @@ const handleImageDragStart = (e: React.DragEvent, image: CloudflareImage) => {
 
 interface CloudflareImage {
   id: string;
+  assetType?: 'image' | 'video';
   filename: string;
   displayName?: string;
   uploaded: string;
@@ -87,6 +105,12 @@ interface CloudflareImage {
   parentId?: string;
   linkedAssetId?: string;
   variationSort?: number;
+  videoStatus?: 'pending' | 'ready' | 'error';
+  videoDurationSeconds?: number;
+  videoPlaybackUrl?: string;
+  videoHlsUrl?: string;
+  videoThumbnailUrl?: string;
+  videoPreviewUrl?: string;
   // Embedding status fields
   hasClipEmbedding?: boolean;
   hasColorEmbedding?: boolean;
@@ -97,12 +121,15 @@ interface CloudflareImage {
 const DEFAULT_LIST_VARIANT = 'full';
 const GALLERY_RETURN_STATE_KEY = 'galleryReturnStateV1';
 const GALLERY_RETURN_TTL_MS = 10 * 60 * 1000;
+const IMAGE_DETAIL_DRAFT_KEY_PREFIX = 'imageDetailDraftV1:';
+const IMAGE_DETAIL_DRAFT_TTL_MS = 6 * 60 * 60 * 1000;
 const VARIANT_DIMENSIONS = new Map(IMAGE_VARIANTS.map(variant => [variant.name, variant.width]));
 
 type GalleryReturnState = {
   namespace?: string;
   savedAt?: number;
   resultIds?: string[];
+  resultAssets?: Array<{ id: string; assetType?: 'image' | 'video' }>;
 };
 
 type BulkUpdateFailure = {
@@ -110,6 +137,18 @@ type BulkUpdateFailure = {
   name: string;
   error?: string;
   reason?: 'metadata' | 'network' | 'unknown';
+};
+
+type ImageDetailDraft = {
+  savedAt: number;
+  folderSelect: string;
+  tagsInput: string;
+  altTextInput: string;
+  descriptionInput: string;
+  originalUrlInput: string;
+  sourceUrlInput: string;
+  displayNameInput: string;
+  clearExif: boolean;
 };
 
 const ensureWebpFormat = (inputUrl: string) => {
@@ -168,6 +207,48 @@ const toCloudflareTextMirror = (value?: string) => {
     : `${compact.slice(0, MAX_CLOUDFLARE_TEXT_MIRROR_CHARS)}…`;
 };
 
+const mergeUniqueTags = (existingTags: string[], incomingTags: string[]) => {
+  const merged = new Map<string, string>();
+  existingTags.forEach((tag) => {
+    const normalized = tag.trim().toLowerCase();
+    if (normalized) {
+      merged.set(normalized, tag.trim());
+    }
+  });
+  incomingTags.forEach((tag) => {
+    const trimmed = tag.trim();
+    const normalized = trimmed.toLowerCase();
+    if (normalized && !merged.has(normalized)) {
+      merged.set(normalized, trimmed);
+    }
+  });
+  return Array.from(merged.values());
+};
+
+const mergeUniqueImagesById = (base: CloudflareImage[], incoming: CloudflareImage[]) => {
+  const merged = new Map<string, CloudflareImage>();
+  base.forEach((entry) => merged.set(entry.id, entry));
+  incoming.forEach((entry) => {
+    const existing = merged.get(entry.id);
+    merged.set(entry.id, existing ? { ...existing, ...entry } : entry);
+  });
+  return Array.from(merged.values());
+};
+
+const DETAIL_PERF_LOGGING_ENABLED = process.env.NODE_ENV !== 'production';
+
+const getNow = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+const logDetailPerf = (
+  label: string,
+  startedAt: number,
+  extra?: Record<string, unknown>
+) => {
+  if (!DETAIL_PERF_LOGGING_ENABLED) return;
+  const elapsedMs = Math.round(getNow() - startedAt);
+  console.info(`[DetailPerf] ${label} ${elapsedMs}ms`, extra ?? {});
+};
+
 export default function ImageDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -193,6 +274,9 @@ export default function ImageDetailPage() {
   const [loading, setLoading] = useState(true);
   const toast = useToast();
   const [galleryResultIds, setGalleryResultIds] = useState<string[]>([]);
+  const [galleryResultAssetTypes, setGalleryResultAssetTypes] = useState<Record<string, 'image' | 'video'>>({});
+  const lastUserNavIntentRef = useRef(0);
+  const pinnedImageIdRef = useRef<string | null>(id ?? null);
 
   const handleBackToGallery = useCallback(() => {
     if (galleryPageParam) {
@@ -203,6 +287,7 @@ export default function ImageDetailPage() {
   }, [galleryNamespaceParam, galleryPageParam, router]);
 
   const [allImages, setAllImages] = useState<CloudflareImage[]>([]);
+  const [fallbackParentImage, setFallbackParentImage] = useState<CloudflareImage | null>(null);
   const [reassignParentId, setReassignParentId] = useState('');
   const [adoptImageId, setAdoptImageId] = useState('');
   const [childDetachingId, setChildDetachingId] = useState<string | null>(null);
@@ -210,6 +295,7 @@ export default function ImageDetailPage() {
   const [adoptLoading, setAdoptLoading] = useState(false);
   const [adoptSearch, setAdoptSearch] = useState('');
   const [adoptFolderFilter, setAdoptFolderFilter] = useState('');
+  const [adoptAssetTypeFilter, setAdoptAssetTypeFilter] = useState<'' | 'image' | 'video'>('');
   const [variationPage, setVariationPage] = useState(1);
   const [variationLayout, setVariationLayout] = useState<'list' | 'grid'>('list');
   const [variationTrueAspect, setVariationTrueAspect] = useState(true);
@@ -238,11 +324,14 @@ export default function ImageDetailPage() {
   const [originalUrlInput, setOriginalUrlInput] = useState('');
   const [sourceUrlInput, setSourceUrlInput] = useState('');
   const [displayNameInput, setDisplayNameInput] = useState('');
+  const [tagGenerationCount, setTagGenerationCount] = useState(6);
+  const [tagGenerationLoading, setTagGenerationLoading] = useState(false);
   const [clearExif, setClearExif] = useState(false);
-  const [shareBaseUrl, setShareBaseUrl] = useState('');
+  const { shareBaseUrl, setShareBaseUrl } = usePersistentShareBaseUrl();
   const [embeddingGenerating, setEmbeddingGenerating] = useState(false);
   // Image Extras state (description/altText stored in Redis/file fallback)
   const [extrasRecord, setExtrasRecord] = useState<{
+    imageId?: string;
     description?: string;
     altText?: string;
     promptThis?: { text: string; provider: string; model?: string; updatedAt?: string };
@@ -265,8 +354,88 @@ export default function ImageDetailPage() {
   const [rotationLoading, setRotationLoading] = useState(false);
   const [rotationError, setRotationError] = useState<string | null>(null);
   const [rotatedAsset, setRotatedAsset] = useState<{ id: string; url: string; info?: string } | null>(null);
+  const draftAppliedRef = useRef<string | null>(null);
+  const candidatePoolLoadedRef = useRef(false);
 
   const [semanticSearchAllNamespaces, setSemanticSearchAllNamespaces] = useState(false);
+
+  const buildFamilyContextUrl = useCallback((options?: { includeCandidates?: boolean }) => {
+    if (!id) return '';
+    const params = new URLSearchParams();
+    if (options?.includeCandidates) {
+      params.set('includeCandidates', '1');
+    }
+    const serialized = params.toString();
+    return serialized
+      ? `/api/images/${encodeURIComponent(id)}/family?${serialized}`
+      : `/api/images/${encodeURIComponent(id)}/family`;
+  }, [id]);
+
+  const syncImageState = useCallback((found: CloudflareImage | null) => {
+    const extrasForCurrentImage =
+      found && extrasRecord?.imageId === found.id ? extrasRecord : null;
+    setImage(found);
+    if (found) {
+      setFolderSelect(found.folder || '');
+      setTagsInput(Array.isArray(found.tags) ? found.tags.join(', ') : '');
+      setDescriptionInput(extrasForCurrentImage?.description || found.description || '');
+      setAltTextInput(extrasForCurrentImage?.altText || found.altTag || '');
+      setOriginalUrlInput(found.originalUrl || '');
+      setSourceUrlInput(found.sourceUrl || '');
+      setDisplayNameInput(found.displayName || found.filename || '');
+      setReassignParentId(found.parentId || '');
+      setClearExif(false);
+
+      if (typeof window !== 'undefined') {
+        const draftKey = `${IMAGE_DETAIL_DRAFT_KEY_PREFIX}${found.id}`;
+        try {
+          const raw = window.sessionStorage.getItem(draftKey);
+          if (raw) {
+            const parsed = JSON.parse(raw) as Partial<ImageDetailDraft>;
+            const savedAt = typeof parsed.savedAt === 'number' ? parsed.savedAt : 0;
+            const isFresh = savedAt > 0 && Date.now() - savedAt < IMAGE_DETAIL_DRAFT_TTL_MS;
+            if (isFresh && draftAppliedRef.current !== found.id) {
+              if (typeof parsed.folderSelect === 'string') setFolderSelect(parsed.folderSelect);
+              if (typeof parsed.tagsInput === 'string') setTagsInput(parsed.tagsInput);
+              if (typeof parsed.descriptionInput === 'string') setDescriptionInput(parsed.descriptionInput);
+              if (typeof parsed.altTextInput === 'string') setAltTextInput(parsed.altTextInput);
+              if (typeof parsed.originalUrlInput === 'string') setOriginalUrlInput(parsed.originalUrlInput);
+              if (typeof parsed.sourceUrlInput === 'string') setSourceUrlInput(parsed.sourceUrlInput);
+              if (typeof parsed.displayNameInput === 'string') setDisplayNameInput(parsed.displayNameInput);
+              if (typeof parsed.clearExif === 'boolean') setClearExif(parsed.clearExif);
+              draftAppliedRef.current = found.id;
+            }
+          }
+        } catch {
+          // Ignore malformed draft payloads.
+        }
+      }
+    } else {
+      setFolderSelect('');
+      setTagsInput('');
+      setDescriptionInput('');
+      setAltTextInput('');
+      setOriginalUrlInput('');
+      setSourceUrlInput('');
+      setDisplayNameInput('');
+      setReassignParentId('');
+    }
+  }, [extrasRecord]);
+
+  const mergeContextImages = useCallback((imagesData: CloudflareImage[]) => {
+    setAllImages((prev) => {
+      const nextImages = mergeUniqueImagesById(prev, imagesData);
+      const folders = Array.from(
+        new Set(
+          nextImages
+            .filter((img) => img.folder && img.folder.trim())
+            .map((img) => String(img.folder))
+        )
+      ).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+      setUniqueFolders(folders as string[]);
+      return nextImages;
+    });
+  }, []);
 
 
   const generateEmbeddings = useCallback(async () => {
@@ -325,10 +494,12 @@ export default function ImageDetailPage() {
   }, [image?.id, image?.parentId]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const stored = window.localStorage.getItem('shareBaseUrl');
-    setShareBaseUrl(stored || window.location.origin);
-  }, []);
+    setImage(null);
+    setAllImages([]);
+    setUniqueFolders([]);
+    setFallbackParentImage(null);
+    candidatePoolLoadedRef.current = false;
+  }, [id]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -349,6 +520,7 @@ export default function ImageDetailPage() {
       const raw = window.sessionStorage.getItem(GALLERY_RETURN_STATE_KEY);
       if (!raw) {
         setGalleryResultIds([]);
+        setGalleryResultAssetTypes({});
         return;
       }
       const parsed = JSON.parse(raw) as GalleryReturnState;
@@ -357,13 +529,21 @@ export default function ImageDetailPage() {
       const savedNamespace = typeof parsed?.namespace === 'string' ? parsed.namespace : '';
       if (!freshEnough || savedNamespace !== galleryNamespaceParam || !Array.isArray(parsed?.resultIds)) {
         setGalleryResultIds([]);
+        setGalleryResultAssetTypes({});
         return;
       }
       setGalleryResultIds(
         parsed.resultIds.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
       );
+      const nextAssetTypes: Record<string, 'image' | 'video'> = {};
+      parsed.resultAssets?.forEach((entry) => {
+        if (!entry || typeof entry.id !== 'string' || !entry.id) return;
+        nextAssetTypes[entry.id] = entry.assetType === 'video' ? 'video' : 'image';
+      });
+      setGalleryResultAssetTypes(nextAssetTypes);
     } catch {
       setGalleryResultIds([]);
+      setGalleryResultAssetTypes({});
     }
   }, [galleryNamespaceParam, id]);
 
@@ -379,68 +559,92 @@ export default function ImageDetailPage() {
   }, [image?.id, image?.hasClipEmbedding, image?.hasColorEmbedding]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (!shareBaseUrl) return;
-    window.localStorage.setItem('shareBaseUrl', shareBaseUrl);
-  }, [shareBaseUrl]);
-
-  const syncImages = useCallback(
-    (imagesData: CloudflareImage[]) => {
-      setAllImages(imagesData);
-      const found = imagesData.find((img) => img.id === id) || null;
-      setImage(found);
-      if (found) {
-        setFolderSelect(found.folder || '');
-        setTagsInput(Array.isArray(found.tags) ? found.tags.join(', ') : '');
-        setDescriptionInput(found.description || '');
-        setAltTextInput(found.altTag || '');
-        setOriginalUrlInput(found.originalUrl || '');
-        setSourceUrlInput(found.sourceUrl || '');
-        setDisplayNameInput(found.displayName || found.filename || '');
-        setReassignParentId(found.parentId || '');
-      } else {
-        setFolderSelect('');
-        setTagsInput('');
-        setDescriptionInput('');
-        setAltTextInput('');
-        setOriginalUrlInput('');
-        setSourceUrlInput('');
-        setDisplayNameInput('');
-        setReassignParentId('');
+    if (!id || typeof window === 'undefined') {
+      return;
+    }
+    const draft: ImageDetailDraft = {
+      savedAt: Date.now(),
+      folderSelect,
+      tagsInput,
+      altTextInput,
+      descriptionInput,
+      originalUrlInput,
+      sourceUrlInput,
+      displayNameInput,
+      clearExif,
+    };
+    const hasMeaningfulDraft =
+      Boolean(
+        folderSelect ||
+          tagsInput ||
+          altTextInput ||
+          descriptionInput ||
+          originalUrlInput ||
+          sourceUrlInput ||
+          displayNameInput
+      ) ||
+      clearExif;
+    const draftKey = `${IMAGE_DETAIL_DRAFT_KEY_PREFIX}${id}`;
+    try {
+      if (!hasMeaningfulDraft) {
+        window.sessionStorage.removeItem(draftKey);
+        return;
       }
-      const folders = Array.from(
-        new Set(
-          imagesData
-            .filter((img) => img.folder && img.folder.trim())
-            .map((img) => String(img.folder))
-        )
-      ).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
-      setUniqueFolders(folders as string[]);
-    },
-    [id]
-  );
+      window.sessionStorage.setItem(draftKey, JSON.stringify(draft));
+    } catch {
+      // Ignore storage quota/access failures.
+    }
+  }, [
+    altTextInput,
+    clearExif,
+    descriptionInput,
+    displayNameInput,
+    folderSelect,
+    id,
+    originalUrlInput,
+    sourceUrlInput,
+    tagsInput
+  ]);
 
   const refreshImageList = useCallback(async () => {
     if (!id) {
       return;
     }
+    const startedAt = getNow();
     try {
-      const url = namespace === ''
-        ? `/api/images?namespace=__none__&includeVectorMeta=1`
-        : namespace === '__all__'
-          ? `/api/images?namespace=__all__&includeVectorMeta=1`
-          : namespace
-            ? `/api/images?namespace=${encodeURIComponent(namespace)}&includeVectorMeta=1`
-            : '/api/images?includeVectorMeta=1';
-      const response = await fetch(url);
-      const data = await response.json();
-      if (Array.isArray(data.images)) {
-        syncImages(data.images);
+      const [imageResponse, familyResponse] = await Promise.all([
+        fetch(`/api/images/${encodeURIComponent(id)}`),
+        fetch(buildFamilyContextUrl({ includeCandidates: candidatePoolLoadedRef.current })),
+      ]);
+      const [imageData, familyData] = await Promise.all([
+        imageResponse.json(),
+        familyResponse.json(),
+      ]);
+
+      if (imageResponse.ok && imageData?.image) {
+        syncImageState(imageData.image as CloudflareImage);
+        mergeContextImages([imageData.image as CloudflareImage]);
       }
+      if (familyResponse.ok) {
+        const incoming = [
+          ...(Array.isArray(familyData?.familyAssets) ? familyData.familyAssets : []),
+          ...(Array.isArray(familyData?.candidateAssets) ? familyData.candidateAssets : []),
+        ] as CloudflareImage[];
+        mergeContextImages(incoming);
+        if (Array.isArray(familyData?.candidateAssets)) {
+          candidatePoolLoadedRef.current = true;
+        }
+      }
+      logDetailPerf('refreshImageList:fetch', startedAt, {
+        imageServerTiming: imageResponse.headers.get('server-timing'),
+        familyServerTiming: familyResponse.headers.get('server-timing'),
+        familyDiagnostics: familyData?.diagnostics ?? null,
+        candidatePoolLoaded: candidatePoolLoadedRef.current,
+      });
     } catch (error) {
       console.error('Failed to refresh images', error);
     }
-  }, [syncImages, id, namespace]);
+  }, [buildFamilyContextUrl, id, mergeContextImages, syncImageState]);
 
   const {
     parentActionLoading,
@@ -490,37 +694,38 @@ export default function ImageDetailPage() {
     isDragActive: isVariantDragActive
   } = useDropzone({
     onDrop: onVariantDrop,
-    accept: {
-      'image/*': ['.jpeg', '.jpg', '.png', '.gif', '.webp', '.svg'],
-      'application/zip': ['.zip', '.key'],
-      'application/x-zip-compressed': ['.zip', '.key'],
-      'application/vnd.apple.keynote': ['.key'],
-      'application/x-iwork-keynote-sffkey': ['.key']
-    },
+    accept: VARIATION_UPLOAD_ACCEPT,
     multiple: true
   });
 
   useEffect(() => {
     let mounted = true;
     (async () => {
+      const startedAt = getNow();
       try {
         setLoading(true);
         if (!id) {
           return;
         }
-        const url = namespace === ''
-          ? `/api/images?namespace=__none__&includeVectorMeta=1`
-          : namespace === '__all__'
-            ? `/api/images?namespace=__all__&includeVectorMeta=1`
-            : namespace
-              ? `/api/images?namespace=${encodeURIComponent(namespace)}&includeVectorMeta=1`
-              : '/api/images?includeVectorMeta=1';
-        const res = await fetch(url);
+        const res = await fetch(`/api/images/${encodeURIComponent(id)}`);
+        const jsonStartedAt = getNow();
         const data = await res.json();
+        const jsonElapsedMs = Math.round(getNow() - jsonStartedAt);
         if (!mounted) return;
-        if (Array.isArray(data.images)) {
-          syncImages(data.images);
+        if (res.ok && data?.image) {
+          const syncStartedAt = getNow();
+          syncImageState(data.image as CloudflareImage);
+          mergeContextImages([data.image as CloudflareImage]);
+          logDetailPerf('primaryFetch:sync', syncStartedAt, {
+            imageId: data.image.id,
+          });
         }
+        logDetailPerf('primaryFetch:total', startedAt, {
+          jsonParseMs: jsonElapsedMs,
+          serverTiming: res.headers.get('server-timing'),
+          diagnostics: data?.diagnostics ?? null,
+          imageId: data?.image?.id ?? null,
+        });
       } catch (err) {
         console.error('Failed to fetch image from API', err);
       } finally {
@@ -530,7 +735,87 @@ export default function ImageDetailPage() {
     return () => {
       mounted = false;
     };
-  }, [id, namespace, syncImages]);
+  }, [id, mergeContextImages, syncImageState]);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const startedAt = getNow();
+      try {
+        if (!id) return;
+        const res = await fetch(buildFamilyContextUrl());
+        const jsonStartedAt = getNow();
+        const data = await res.json();
+        const jsonElapsedMs = Math.round(getNow() - jsonStartedAt);
+        if (!mounted || !res.ok) return;
+        const familyAssets = Array.isArray(data.familyAssets) ? (data.familyAssets as CloudflareImage[]) : [];
+        mergeContextImages(familyAssets);
+        logDetailPerf('familyFetch:total', startedAt, {
+          jsonParseMs: jsonElapsedMs,
+          serverTiming: res.headers.get('server-timing'),
+          diagnostics: data?.diagnostics ?? null,
+          familyCount: familyAssets.length,
+        });
+      } catch (error) {
+        console.error('Failed to fetch family context', error);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [buildFamilyContextUrl, id, mergeContextImages]);
+
+  useEffect(() => {
+    if (!id) return;
+    let mounted = true;
+    candidatePoolLoadedRef.current = false;
+    const useIdleCallback = typeof window !== 'undefined' && 'requestIdleCallback' in window;
+    const scheduler = useIdleCallback
+      ? window.requestIdleCallback(async () => {
+          try {
+            const startedAt = getNow();
+            const res = await fetch(buildFamilyContextUrl({ includeCandidates: true }));
+            const data = await res.json();
+            if (!mounted || !res.ok) return;
+            const candidates = Array.isArray(data.candidateAssets) ? (data.candidateAssets as CloudflareImage[]) : [];
+            mergeContextImages(candidates);
+            candidatePoolLoadedRef.current = true;
+            logDetailPerf('candidateFetch:total', startedAt, {
+              serverTiming: res.headers.get('server-timing'),
+              diagnostics: data?.diagnostics ?? null,
+              candidateCount: candidates.length,
+            });
+          } catch (error) {
+            console.error('Failed to fetch candidate assets', error);
+          }
+        })
+      : window.setTimeout(async () => {
+          try {
+            const startedAt = getNow();
+            const res = await fetch(buildFamilyContextUrl({ includeCandidates: true }));
+            const data = await res.json();
+            if (!mounted || !res.ok) return;
+            const candidates = Array.isArray(data.candidateAssets) ? (data.candidateAssets as CloudflareImage[]) : [];
+            mergeContextImages(candidates);
+            candidatePoolLoadedRef.current = true;
+            logDetailPerf('candidateFetch:total', startedAt, {
+              serverTiming: res.headers.get('server-timing'),
+              diagnostics: data?.diagnostics ?? null,
+              candidateCount: candidates.length,
+            });
+          } catch (error) {
+            console.error('Failed to fetch candidate assets', error);
+          }
+        }, 0);
+    return () => {
+      mounted = false;
+      if (useIdleCallback && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+        window.cancelIdleCallback(scheduler);
+      } else {
+        window.clearTimeout(scheduler as number);
+      }
+    };
+  }, [buildFamilyContextUrl, id, mergeContextImages]);
 
   // Fetch Image Extras (description/altText) from Redis/file storage with Cloudflare fallback
   useEffect(() => {
@@ -541,14 +826,17 @@ export default function ImageDetailPage() {
     let mounted = true;
     setExtrasLoading(true);
     (async () => {
+      const startedAt = getNow();
       try {
         const res = await fetch(`/api/images/${id}/extras`);
+        const jsonStartedAt = getNow();
         if (!res.ok) {
           throw new Error('Failed to fetch extras');
         }
         const data = await res.json();
+        const jsonElapsedMs = Math.round(getNow() - jsonStartedAt);
         if (!mounted) return;
-        setExtrasRecord(data.record || null);
+        setExtrasRecord(data.record ? { ...data.record, imageId: id } : null);
         // Apply extras values if they exist, otherwise keep Cloudflare values
         if (data.record?.description) {
           setDescriptionInput(data.record.description);
@@ -556,9 +844,13 @@ export default function ImageDetailPage() {
         if (data.record?.altText) {
           setAltTextInput(data.record.altText);
         }
+        logDetailPerf('extrasFetch:total', startedAt, {
+          jsonParseMs: jsonElapsedMs,
+          hasRecord: Boolean(data.record),
+        });
       } catch (err) {
         console.error('Failed to fetch image extras', err);
-        // On error, keep the Cloudflare metadata values (already set by syncImages)
+        // On error, keep the current image metadata values already loaded from /api/images/[id].
         if (mounted) setExtrasRecord(null);
       } finally {
         if (mounted) setExtrasLoading(false);
@@ -590,6 +882,46 @@ export default function ImageDetailPage() {
     currentImage: image,
     excludeId: id
   });
+  const resolvedParentImage = parentImage ?? fallbackParentImage;
+
+  useEffect(() => {
+    const parentId = image?.parentId;
+    if (!parentId) {
+      setFallbackParentImage(null);
+      return;
+    }
+    if (parentImage?.id === parentId) {
+      setFallbackParentImage(null);
+      return;
+    }
+
+    let mounted = true;
+    (async () => {
+      try {
+        const response = await fetch(`/api/images/${encodeURIComponent(parentId)}`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch parent image');
+        }
+        const data = await response.json();
+        if (!mounted) return;
+        const fetchedParent = data?.image as CloudflareImage | undefined;
+        if (fetchedParent?.id === parentId) {
+          setFallbackParentImage(fetchedParent);
+        } else {
+          setFallbackParentImage(null);
+        }
+      } catch (error) {
+        console.error('Failed to fetch fallback parent image', error);
+        if (mounted) {
+          setFallbackParentImage(null);
+        }
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [image?.parentId, parentImage?.id]);
 
   const displayedVariations = useMemo(() => {
     if (!variationCandidates.length) {
@@ -651,17 +983,23 @@ export default function ImageDetailPage() {
       if (!adoptFolderFilter) return true;
       return (img.folder || '').toLowerCase() === adoptFolderFilter.toLowerCase();
     });
+    const typeFiltered = base.filter((img) => {
+      if (!adoptAssetTypeFilter) return true;
+      if (adoptAssetTypeFilter === 'video') return isVideoAsset(img);
+      return !isVideoAsset(img);
+    });
 
     if (!adoptSearch.trim()) {
-      return base;
+      return typeFiltered;
     }
 
     const term = adoptSearch.toLowerCase();
-    return base.filter((img) => {
+    return typeFiltered.filter((img) => {
       if ((img.id || '').toLowerCase().includes(term)) {
         return true;
       }
       const haystack = [
+        img.displayName,
         img.filename,
         img.folder,
         img.description,
@@ -674,13 +1012,30 @@ export default function ImageDetailPage() {
         .toLowerCase();
       return haystack.includes(term);
     });
-  }, [adoptSearch, adoptableImages, adoptFolderFilter]);
+  }, [adoptAssetTypeFilter, adoptSearch, adoptableImages, adoptFolderFilter]);
+
+  const adoptAssetTypeOptions = useMemo(
+    () => [
+      { value: '', label: 'All types' },
+      { value: 'image', label: 'Images only' },
+      { value: 'video', label: 'Videos only' },
+    ],
+    []
+  );
 
   const totalAdoptPages = Math.max(1, Math.ceil(filteredAdoptableImages.length / ADOPT_PAGE_SIZE));
   const pagedAdoptableImages = useMemo(() => {
     const start = (adoptPage - 1) * ADOPT_PAGE_SIZE;
     return filteredAdoptableImages.slice(start, start + ADOPT_PAGE_SIZE);
   }, [filteredAdoptableImages, adoptPage]);
+
+  useEffect(() => {
+    setAdoptPage(1);
+  }, [adoptAssetTypeFilter, adoptFolderFilter, adoptSearch, id]);
+
+  useEffect(() => {
+    setAdoptPage((prev) => Math.min(prev, totalAdoptPages));
+  }, [totalAdoptPages]);
 
   const variants = useMemo(
     () => (id ? getMultipleImageUrls(id, ['thumbnail','small','medium','large','xlarge','full']) : {}),
@@ -761,7 +1116,6 @@ export default function ImageDetailPage() {
     metadata.tags = finalTags
       .map((tag) => cleanString(tag))
       .filter((tag): tag is string => Boolean(tag));
-    metadata.description = toCloudflareTextMirror(cleanDescription ?? '');
     const cleanedOriginalUrl = cleanString(originalUrlInput);
     metadata.originalUrl = cleanedOriginalUrl ?? '';
     metadata.originalUrlNormalized = normalizeOriginalUrl(cleanedOriginalUrl) ?? '';
@@ -816,10 +1170,20 @@ export default function ImageDetailPage() {
     galleryResultIndex >= 0 && galleryResultIndex < galleryResultIds.length - 1
       ? galleryResultIds[galleryResultIndex + 1]
       : null;
+  const buildAssetHref = useCallback(
+    (targetId: string) => {
+      const target = allImages.find((entry) => entry.id === targetId);
+      const assetType = target?.assetType ?? galleryResultAssetTypes[targetId];
+      const basePath = assetType === 'video' ? `/videos/${targetId}` : `/images/${targetId}`;
+      return `${basePath}${galleryNavSuffix}`;
+    },
+    [allImages, galleryNavSuffix, galleryResultAssetTypes]
+  );
+
   const handleNavigateGalleryResult = useCallback((targetId: string | null) => {
     if (!targetId) return;
-    router.push(`/images/${targetId}${galleryNavSuffix}`, { scroll: false });
-  }, [galleryNavSuffix, router]);
+    router.push(buildAssetHref(targetId), { scroll: false });
+  }, [buildAssetHref, router]);
   const familyVariantSequence = useMemo(() => {
     if (!image?.parentId) return [];
     const familyVariants = allImages.filter((img) => img.parentId === image.parentId);
@@ -984,7 +1348,9 @@ export default function ImageDetailPage() {
       }
     }
     const descriptionValue = descriptionInput ?? '';
-    const imageDescription = image.description ?? '';
+    const imageDescription = extrasRecord?.imageId === image.id
+      ? (extrasRecord.description ?? '')
+      : (image.description ?? '');
     if (descriptionValue !== imageDescription) {
       return true;
     }
@@ -1013,6 +1379,7 @@ export default function ImageDetailPage() {
     clearExif,
     descriptionInput,
     displayNameInput,
+    extrasRecord,
     folderSelect,
     image,
     newFolderInput,
@@ -1070,6 +1437,141 @@ export default function ImageDetailPage() {
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isMetadataDirty, pendingAutoSave]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const NAV_INTENT_WINDOW_MS = 3000;
+    const markUserNavIntent = () => {
+      lastUserNavIntentRef.current = Date.now();
+    };
+
+    const handleIntentKeyDown = (event: KeyboardEvent) => {
+      if (!event.isTrusted) return;
+      if (event.key === 'Enter' || event.key === ' ') {
+        markUserNavIntent();
+      }
+    };
+    const handleIntentPointerDown = (event: PointerEvent) => {
+      if (!event.isTrusted) return;
+      markUserNavIntent();
+    };
+
+    const isDetailPath = (pathname: string) => /^\/(images|videos)\//.test(pathname);
+    const toPathname = (target: string | URL | null | undefined) => {
+      if (!target) return '';
+      try {
+        return new URL(String(target), window.location.href).pathname;
+      } catch {
+        return '';
+      }
+    };
+    const hasRecentIntent = () => Date.now() - lastUserNavIntentRef.current < NAV_INTENT_WINDOW_MS;
+
+    const originalPushState = window.history.pushState.bind(window.history);
+    const originalReplaceState = window.history.replaceState.bind(window.history);
+
+    window.history.pushState = ((data: unknown, unused: string, url?: string | URL | null) => {
+      const targetPath = toPathname(url);
+      if (
+        targetPath &&
+        targetPath !== window.location.pathname &&
+        isDetailPath(targetPath) &&
+        !hasRecentIntent()
+      ) {
+        console.warn('[NavGuard] Blocked non-user pushState navigation', {
+          from: window.location.pathname,
+          to: targetPath,
+        });
+        return;
+      }
+      return originalPushState(data, unused, url);
+    }) as History['pushState'];
+
+    window.history.replaceState = ((data: unknown, unused: string, url?: string | URL | null) => {
+      const targetPath = toPathname(url);
+      if (
+        targetPath &&
+        targetPath !== window.location.pathname &&
+        isDetailPath(targetPath) &&
+        !hasRecentIntent()
+      ) {
+        console.warn('[NavGuard] Blocked non-user replaceState navigation', {
+          from: window.location.pathname,
+          to: targetPath,
+        });
+        return;
+      }
+      return originalReplaceState(data, unused, url);
+    }) as History['replaceState'];
+
+    const handlePopState = () => {
+      if (hasRecentIntent()) {
+        return;
+      }
+      const pinnedId = pinnedImageIdRef.current;
+      if (!pinnedId) {
+        return;
+      }
+      const targetPath = `/images/${pinnedId}`;
+      if (window.location.pathname !== targetPath) {
+        console.warn('[NavGuard] Reverting unexpected popstate navigation', {
+          from: window.location.pathname,
+          to: targetPath,
+        });
+        router.replace(buildAssetHref(pinnedId), { scroll: false });
+      }
+    };
+
+    const handleBeforeUnloadGuard = (event: BeforeUnloadEvent) => {
+      if (hasRecentIntent()) {
+        return;
+      }
+      event.preventDefault();
+      event.returnValue = '';
+      console.warn('[NavGuard] Blocked non-user unload/navigation');
+    };
+
+    window.addEventListener('pointerdown', handleIntentPointerDown, true);
+    window.addEventListener('keydown', handleIntentKeyDown, true);
+    window.addEventListener('popstate', handlePopState, true);
+    window.addEventListener('beforeunload', handleBeforeUnloadGuard, true);
+
+    return () => {
+      window.history.pushState = originalPushState;
+      window.history.replaceState = originalReplaceState;
+      window.removeEventListener('pointerdown', handleIntentPointerDown, true);
+      window.removeEventListener('keydown', handleIntentKeyDown, true);
+      window.removeEventListener('popstate', handlePopState, true);
+      window.removeEventListener('beforeunload', handleBeforeUnloadGuard, true);
+    };
+  }, [buildAssetHref, router]);
+
+  useEffect(() => {
+    if (!id) {
+      return;
+    }
+    const pinnedId = pinnedImageIdRef.current;
+    const hasRecentIntent = Date.now() - lastUserNavIntentRef.current < 3000;
+
+    if (!pinnedId) {
+      pinnedImageIdRef.current = id;
+      return;
+    }
+
+    if (id !== pinnedId && !hasRecentIntent) {
+      console.warn('[NavGuard] Reverting unexpected route change', {
+        fromPinnedId: pinnedId,
+        unexpectedId: id,
+      });
+      router.replace(buildAssetHref(pinnedId), { scroll: false });
+      return;
+    }
+
+    pinnedImageIdRef.current = id;
+  }, [buildAssetHref, id, router]);
 
   const detailFolderOptions = useMemo(
     () => [
@@ -1199,14 +1701,24 @@ export default function ImageDetailPage() {
       toast.push('Image data not ready');
       return;
     }
-    const buildEntry = (img: CloudflareImage) => ({
-      url: ensureWebpFormat(getCloudflareImageUrl(img.id, listVariant)),
-      altText: img.altTag || ''
-    });
-    const entries = [buildEntry(image), ...displayedVariations.map(buildEntry)];
+    const buildEntry = (img: CloudflareImage) => {
+      const assetUrl = getAssetCopyUrl(img, { imageVariant: listVariant });
+      if (!assetUrl) return null;
+      return {
+        url: isVideoAsset(img) ? assetUrl : ensureWebpFormat(assetUrl),
+        altText: img.altTag || ''
+      };
+    };
+    const entries = [buildEntry(image), ...displayedVariations.map(buildEntry)].filter(
+      (entry): entry is { url: string; altText: string } => Boolean(entry)
+    );
+    if (entries.length === 0) {
+      toast.push('No asset URLs available to copy');
+      return;
+    }
     const payload = formatEntriesAsYaml(entries);
     await handleCopyText(payload, 'Variant list copied');
-  }, [displayedVariations, handleCopyText, image, listVariant]);
+  }, [displayedVariations, handleCopyText, image, listVariant, toast]);
 
   const persistVariationOrder = useCallback(
     async (nextOrder: string[], changedIds: string[]) => {
@@ -1216,9 +1728,16 @@ export default function ImageDetailPage() {
       setVariationOrderOverride(nextOrder);
       setVariationOrderSaving(true);
       try {
+        const variationById = new Map(displayedVariations.map((entry) => [entry.id, entry]));
         const indexById = new Map(nextOrder.map((idValue, index) => [idValue, index]));
         const idsToUpdate = hasMissingVariationSort ? nextOrder : changedIds;
-        const uniqueIds = Array.from(new Set(idsToUpdate));
+        const uniqueIds = Array.from(new Set(idsToUpdate)).filter(
+          (idValue) => variationById.get(idValue)?.assetType !== 'video'
+        );
+        if (uniqueIds.length === 0) {
+          setVariationOrderOverride(null);
+          return;
+        }
         await Promise.all(
           uniqueIds.map((updateId) =>
             fetch(`/api/images/${updateId}/update`, {
@@ -1251,12 +1770,16 @@ export default function ImageDetailPage() {
         setVariationOrderSaving(false);
       }
     },
-    [hasMissingVariationSort, image, toast]
+    [displayedVariations, hasMissingVariationSort, image, toast]
   );
 
   const handleMoveVariation = useCallback(
     async (childId: string, direction: -1 | 1) => {
       if (!image || image.parentId) {
+        return;
+      }
+      const child = displayedVariations.find((entry) => entry.id === childId);
+      if (!child || child.assetType === 'video') {
         return;
       }
       const currentOrder = displayedVariations.map((child) => child.id);
@@ -1373,6 +1896,7 @@ export default function ImageDetailPage() {
           // Update local extras record
           setExtrasRecord(prev => ({
             ...prev,
+            imageId: id,
             description: descriptionInput || undefined,
             altText: cleanString(altTextInput) || undefined,
           }));
@@ -1381,17 +1905,24 @@ export default function ImageDetailPage() {
           // Continue anyway - Cloudflare metadata was saved
         }
         toast.push('Metadata updated');
+        if (typeof window !== 'undefined') {
+          try {
+            window.sessionStorage.removeItem(`${IMAGE_DETAIL_DRAFT_KEY_PREFIX}${id}`);
+          } catch {
+            // Ignore storage access failures.
+          }
+        }
         // Reset clearExif flag after successful save
         setClearExif(false);
-        setImage(prev => prev ? ({ 
-          ...prev, 
-          folder: body.folder, 
-          tags: body.tags, 
-          description: body.description, 
-          originalUrl: body.originalUrl, 
-          sourceUrl: body.sourceUrl, 
-          displayName: body.displayName, 
-          altTag: body.altTag,
+        setImage(prev => prev ? ({
+          ...prev,
+          folder: body.folder,
+          tags: body.tags,
+          description: descriptionInput,
+          originalUrl: body.originalUrl,
+          sourceUrl: body.sourceUrl,
+          displayName: body.displayName,
+          altTag: cleanString(altTextInput) ?? '',
           exif: clearExif ? undefined : prev.exif  // Clear EXIF in local state if requested
         }) : prev);
         await refreshImageList();
@@ -1420,6 +1951,45 @@ export default function ImageDetailPage() {
     toast
   ]);
 
+  const handleGenerateSemanticTags = useCallback(async () => {
+    if (!id) {
+      return;
+    }
+    setTagGenerationLoading(true);
+    try {
+      const { ok, payload } = await requestSemanticTags(id, tagGenerationCount);
+      if (!ok || !payload?.tags?.length) {
+        toast.push(payload?.error || 'Failed to generate semantic tags');
+        return;
+      }
+      const existingTags = tagsInput
+        .split(',')
+        .map((tag) => tag.trim())
+        .filter(Boolean);
+      const mergedTags = mergeUniqueTags(existingTags, payload.tags);
+      const appendedCount = Math.max(0, mergedTags.length - existingTags.length);
+      if (appendedCount === 0) {
+        toast.push('No new semantic tags to add');
+        return;
+      }
+      const saveResult = await patchImageMetadata(id, { tags: mergedTags });
+      if (!saveResult.ok) {
+        toast.push(saveResult.payload?.error || 'Failed to save semantic tags');
+        return;
+      }
+      const nextTagsInput = mergedTags.join(', ');
+      setTagsInput(nextTagsInput);
+      setImage((prev) => (prev && prev.id === id ? { ...prev, tags: mergedTags } : prev));
+      setAllImages((prev) => prev.map((entry) => (entry.id === id ? { ...entry, tags: mergedTags } : entry)));
+      toast.push(`Appended ${appendedCount} semantic tag${appendedCount === 1 ? '' : 's'} and saved`);
+    } catch (error) {
+      console.error('Failed to generate semantic tags:', error);
+      toast.push('Failed to generate semantic tags');
+    } finally {
+      setTagGenerationLoading(false);
+    }
+  }, [id, tagGenerationCount, tagsInput, toast]);
+
   const toggleVariationSelection = useCallback((variationId: string) => {
     setSelectedVariationIds((prev) => {
       const next = new Set(prev);
@@ -1447,6 +2017,14 @@ export default function ImageDetailPage() {
   const handleDropVariation = useCallback(
     async (targetId: string) => {
       if (!draggingVariationId || draggingVariationId === targetId) {
+        return;
+      }
+      const draggingVariation = displayedVariations.find((entry) => entry.id === draggingVariationId);
+      const targetVariation = displayedVariations.find((entry) => entry.id === targetId);
+      if (!draggingVariation || !targetVariation) {
+        return;
+      }
+      if (draggingVariation.assetType === 'video' || targetVariation.assetType === 'video') {
         return;
       }
       const currentOrder = displayedVariations.map((child) => child.id);
@@ -1524,13 +2102,13 @@ export default function ImageDetailPage() {
       const response = await fetch(`/api/images/${childId}`, { method: 'DELETE' });
       if (!response.ok) {
         const payload = await response.json();
-        throw new Error(payload.error || 'Failed to delete image');
+        throw new Error(payload.error || 'Failed to delete asset');
       }
-      toast.push('Image deleted');
+      toast.push('Variation deleted');
       setAllImages(prev => prev.filter(img => img.id !== childId));
       setVariationPage(1);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to delete image';
+      const message = error instanceof Error ? error.message : 'Failed to delete asset';
       toast.push(message);
     }
   }, [toast]);
@@ -1620,7 +2198,7 @@ export default function ImageDetailPage() {
       if (successCount > 0) {
         setSelectedVariationIds((prev) => {
           const next = new Set(prev);
-          detachedIds.forEach((childId) => next.delete(childId));
+          detachedIds.forEach((childId: string) => next.delete(childId));
           return next;
         });
       }
@@ -1661,6 +2239,7 @@ export default function ImageDetailPage() {
   }, [adoptImageId, id, patchParentAssignment, toast]);
 
   const [assigningId, setAssigningId] = useState<string | null>(null);
+  const [assigningBulk, setAssigningBulk] = useState(false);
 
   const handleAssignExistingAsChild = useCallback(async (targetId: string) => {
     setAssigningId(targetId);
@@ -1674,6 +2253,48 @@ export default function ImageDetailPage() {
       setAssigningId(null);
     }
   }, [id, patchParentAssignment, toast]);
+
+  const handleAssignExistingAsChildren = useCallback(async (targetIds: string[]) => {
+    if (!id) return;
+    const uniqueIds = Array.from(new Set(targetIds.filter(Boolean)));
+    if (uniqueIds.length === 0) return;
+
+    setAssigningBulk(true);
+    setAssigningId(null);
+
+    let successCount = 0;
+    const failures: Array<{ id: string; error: string }> = [];
+    const concurrency = 3;
+    let cursor = 0;
+
+    const workers = Array.from({ length: Math.min(concurrency, uniqueIds.length) }).map(async () => {
+      while (cursor < uniqueIds.length) {
+        const current = uniqueIds[cursor];
+        cursor += 1;
+        try {
+          await patchParentAssignmentService(current, id as string);
+          successCount += 1;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Failed to assign variation';
+          failures.push({ id: current, error: message });
+        }
+      }
+    });
+
+    try {
+      await Promise.all(workers);
+      await refreshImageList();
+
+      if (failures.length > 0) {
+        const first = failures[0];
+        toast.push(`Assigned ${successCount}, failed ${failures.length} (first: ${first.id})`);
+      } else {
+        toast.push(`Assigned ${successCount} variation(s)`);
+      }
+    } finally {
+      setAssigningBulk(false);
+    }
+  }, [id, refreshImageList, toast]);
 
 
   const handleFolderManagerChange = useCallback(async () => {
@@ -1854,7 +2475,10 @@ export default function ImageDetailPage() {
                   )}
                   <button
                     type="button"
-                    onClick={() => handleNavigateGalleryResult(prevFamilyVariantId)}
+                    onClick={(event) => {
+                      if (!event.isTrusted || event.detail === 0) return;
+                      handleNavigateGalleryResult(prevFamilyVariantId);
+                    }}
                     disabled={!prevFamilyVariantId}
                     className="inline-flex items-center gap-1 px-2 py-1 text-xs font-mono border rounded-md border-amber-200 text-amber-700 hover:border-amber-300 disabled:opacity-40 disabled:cursor-not-allowed"
                     title="Previous variant in this parent family"
@@ -1864,7 +2488,10 @@ export default function ImageDetailPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleNavigateGalleryResult(nextFamilyVariantId)}
+                    onClick={(event) => {
+                      if (!event.isTrusted || event.detail === 0) return;
+                      handleNavigateGalleryResult(nextFamilyVariantId);
+                    }}
                     disabled={!nextFamilyVariantId}
                     className="inline-flex items-center gap-1 px-2 py-1 text-xs font-mono border rounded-md border-amber-200 text-amber-700 hover:border-amber-300 disabled:opacity-40 disabled:cursor-not-allowed"
                     title="Next variant in this parent family"
@@ -1883,7 +2510,10 @@ export default function ImageDetailPage() {
                   )}
                   <button
                     type="button"
-                    onClick={() => handleNavigateGalleryResult(prevGalleryImageId)}
+                    onClick={(event) => {
+                      if (!event.isTrusted || event.detail === 0) return;
+                      handleNavigateGalleryResult(prevGalleryImageId);
+                    }}
                     disabled={!prevGalleryImageId}
                     className="inline-flex items-center gap-1 px-2 py-1 text-xs font-mono border rounded-md border-gray-200 text-gray-600 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
@@ -1892,7 +2522,10 @@ export default function ImageDetailPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleNavigateGalleryResult(nextGalleryImageId)}
+                    onClick={(event) => {
+                      if (!event.isTrusted || event.detail === 0) return;
+                      handleNavigateGalleryResult(nextGalleryImageId);
+                    }}
                     disabled={!nextGalleryImageId}
                     className="inline-flex items-center gap-1 px-2 py-1 text-xs font-mono border rounded-md border-gray-200 text-gray-600 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
@@ -2064,9 +2697,11 @@ export default function ImageDetailPage() {
                 </span>
               )}
             </div>
-            <p className="text-xs text-gray-500 mt-1">
-              Uploaded {new Date(image.uploaded).toLocaleString()}
-            </p>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+              <span>Uploaded {new Date(image.uploaded).toLocaleString()}</span>
+              <span className="text-gray-300">•</span>
+              <span>Namespace {image.namespace || '[none]'}</span>
+            </div>
             <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-gray-600">
               <span className="text-gray-500">Image ID</span>
               <span className="font-mono text-gray-800">{image.id}</span>
@@ -2162,13 +2797,17 @@ export default function ImageDetailPage() {
                           </div>
                         </div>
                       )}
-                        <ConceptRadar 
+                          <ConceptRadar 
                           imageId={image.id} 
                           size={320}
                           onImageClick={(result) => {
-                            window.location.href = result.assetType === 'video'
-                              ? `/videos/${result.imageId}`
-                              : `/images/${result.imageId}`;
+                            if (!result?.imageId) return;
+                            router.push(
+                              result.assetType === 'video'
+                                ? `/videos/${result.imageId}`
+                                : `/images/${result.imageId}`,
+                              { scroll: false }
+                            );
                           }}
                           copyVariant={listVariant}
                           onCopySuccess={(msg) => toast.push(msg)}
@@ -2182,10 +2821,9 @@ export default function ImageDetailPage() {
                           type="clip" 
                           limit={8}
                           showStrangers={true}
-                          onImageClick={(result) => {
-                            window.location.href = result.assetType === 'video'
-                              ? `/videos/${result.imageId}`
-                              : `/images/${result.imageId}`;
+                          onImageClick={(clickedImageId) => {
+                            if (!clickedImageId) return;
+                            router.push(`/images/${clickedImageId}`, { scroll: false });
                           }}
                           copyVariant={listVariant}
                           onCopySuccess={(msg) => toast.push(msg)}
@@ -2200,9 +2838,13 @@ export default function ImageDetailPage() {
                       imageId={image.id}
                       className="bg-gray-900/50 border border-amber-900/30 rounded-lg p-4"
                       onImageClick={(result) => {
-                        window.location.href = result.assetType === 'video'
-                          ? `/videos/${result.imageId}`
-                          : `/images/${result.imageId}`;
+                        if (!result?.imageId) return;
+                        router.push(
+                          result.assetType === 'video'
+                            ? `/videos/${result.imageId}`
+                            : `/images/${result.imageId}`,
+                          { scroll: false }
+                        );
                       }}
                       copyVariant={listVariant}
                       onCopySuccess={(msg) => toast.push(msg)}
@@ -2345,8 +2987,29 @@ export default function ImageDetailPage() {
             <div id="tags-section">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs font-mono font-medum text-gray-700">Tags</p>
+                <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                  <label className="flex items-center gap-2 text-gray-600">
+                    <span>AI count</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={12}
+                      value={tagGenerationCount}
+                      onChange={(e) => setTagGenerationCount(Math.min(12, Math.max(1, Number.parseInt(e.target.value || '6', 10) || 6)))}
+                      className="w-16 rounded border border-gray-300 px-2 py-1 text-[11px]"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleGenerateSemanticTags}
+                    disabled={tagGenerationLoading}
+                    className="inline-flex items-center gap-2 rounded border border-gray-200 px-2 py-1 text-[11px] text-gray-700 hover:border-gray-300 disabled:opacity-50"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    {tagGenerationLoading ? 'Generating tags…' : 'Generate semantic tags'}
+                  </button>
                 {hasVariations && (
-                  <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                  <>
                     <button
                       onClick={() => applyTagsToVariations('append')}
                       disabled={bulkTagsAppending || parentTags.length === 0}
@@ -2361,8 +3024,9 @@ export default function ImageDetailPage() {
                     >
                       {bulkTagsReplacing ? 'Replacing…' : 'Replace on variations'}
                     </button>
-                  </div>
+                  </>
                 )}
+                </div>
               </div>
               <input
                 value={tagsInput}
@@ -2468,9 +3132,9 @@ export default function ImageDetailPage() {
             />
 
             <div className="space-y-4">
-              {parentImage && (
+              {resolvedParentImage && (
                 <ParentInfoSection
-                  parentImage={parentImage}
+                  parentImage={resolvedParentImage}
                   parentActionLoading={parentActionLoading}
                   reassignParentId={reassignParentId}
                   setReassignParentId={setReassignParentId}
@@ -2519,12 +3183,11 @@ export default function ImageDetailPage() {
                 setDragOverVariationId={setDragOverVariationId}
                 onDropVariation={handleDropVariation}
                 onMoveVariation={handleMoveVariation}
-                getCloudflareImageUrl={getCloudflareImageUrl}
                 onHandleThumbMouseMove={handleThumbMouseMove}
                 onHandleThumbLeave={handleThumbLeave}
                 onHandleImageDragStart={handleImageDragStart}
                 onHandleCopyUrl={handleCopyUrl}
-                onCopyVariationId={(variationId) => handleCopyText(variationId, 'Image ID copied')}
+                onCopyVariationId={(variationId) => handleCopyText(variationId, 'Asset ID copied')}
                 onOpenVariantSizes={(target) => setVariantModalState({ target })}
                 childDetachingId={childDetachingId}
                 detachingAllChildren={detachingAllChildren}
@@ -2548,18 +3211,22 @@ export default function ImageDetailPage() {
                   adoptFolderFilter={adoptFolderFilter}
                   setAdoptFolderFilter={setAdoptFolderFilter}
                   adoptFolderOptions={adoptFolderOptions}
+                  adoptAssetTypeFilter={adoptAssetTypeFilter}
+                  setAdoptAssetTypeFilter={setAdoptAssetTypeFilter}
+                  adoptAssetTypeOptions={adoptAssetTypeOptions}
                   filteredAdoptableImages={filteredAdoptableImages}
                   pagedAdoptableImages={pagedAdoptableImages}
                   adoptPage={adoptPage}
                   setAdoptPage={setAdoptPage}
                   totalAdoptPages={totalAdoptPages}
                   adoptPageSize={ADOPT_PAGE_SIZE}
-                  getCloudflareImageUrl={getCloudflareImageUrl}
                   onHandleThumbMouseMove={handleThumbMouseMove}
                   onHandleThumbLeave={handleThumbLeave}
                   onHandleImageDragStart={handleImageDragStart}
                   onAssignExistingAsChild={handleAssignExistingAsChild}
+                  onAssignExistingAsChildren={handleAssignExistingAsChildren}
                   assigningId={assigningId}
+                  assigningBulk={assigningBulk}
                 />
 
                 <UploadVariationSection

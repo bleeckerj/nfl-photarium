@@ -72,6 +72,10 @@ export type ImageExtrasRecordV1 = {
    */
   description?: string;
   altText?: string;
+  sourceUrl?: string;
+  sourceUrlNormalized?: string;
+  originalUrl?: string;
+  originalUrlNormalized?: string;
 
   /** Prompt This (generated prompt for recreating the image). */
   promptThis?: PromptThisEntry;
@@ -127,7 +131,7 @@ function maybeBytesFromNumericObject(value: unknown): Uint8Array | null {
   const bytes = new Uint8Array(sorted.length);
   for (const idx of sorted) {
     const raw = obj[String(idx)];
-    if (!Number.isInteger(raw) || raw < 0 || raw > 255) return null;
+    if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 0 || raw > 255) return null;
     bytes[idx] = raw;
   }
   return bytes;
@@ -214,9 +218,11 @@ function summarizeBytes(bytes: Uint8Array): Record<string, JsonLike> {
 function compactLargeNumericBlobs(value: unknown, depth = 0): JsonLike | undefined {
   if (depth > 10) return undefined;
   if (value === null) return null;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'bigint') return value.toString();
   const t = typeof value;
-  if (t === 'string' || t === 'number' || t === 'boolean') return value;
-  if (t === 'bigint') return value.toString();
 
   if (ArrayBuffer.isView(value)) {
     return summarizeBytes(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));

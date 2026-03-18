@@ -76,6 +76,7 @@ Before you start, you'll need:
   - macOS: `brew install ffmpeg`
   - Ubuntu/Debian: `sudo apt install ffmpeg`
   - Windows: [Download from ffmpeg.org](https://ffmpeg.org/download.html)
+  - Verify WebP encoder support: `ffmpeg -encoders | rg webp`
 - **Optional:** OpenAI API key for AI ALT text generation
 - **Optional:** Redis Stack (via Docker or Cloud) for AI Semantic Search Features
 
@@ -367,7 +368,7 @@ npm run lint
 - `npm run diag:duplicates` — Analyze duplicate uploads
 - `npm run ig:auth -- --username iffffound` — Open headed browser for one-time Instagram login
 - `npm run ig:ingest -- --username iffffound --max-pages 10` — Ingest Instagram media metadata with checkpoint resume
-- `npm run ig:url -- --url https://www.instagram.com/reel/<shortcode>/ --push-cloudflare` — Pull one Instagram post/reel and push media to Photarium
+- `npm run ig:url -- --url https://www.instagram.com/reel/<shortcode>/` — Pull one Instagram post/reel and push media to Photarium by default
 
 ### Instagram Ingest (`npm run ig:ingest`)
 
@@ -404,8 +405,10 @@ npm run ig:ingest -- --username iffffound
 Use this when you want one specific Instagram URL (including videos) pushed to Photarium:
 
 ```bash
-npm run ig:url -- --url https://www.instagram.com/reel/<shortcode>/ --push-cloudflare --namespace cf-default
+npm run ig:url -- --url https://www.instagram.com/reel/<shortcode>/ --namespace cf-default
 ```
+
+Use `--no-push-cloudflare` if you want to extract metadata without uploading.
 
 Notes:
 - Reuses your authenticated browser profile from `ig:auth`
@@ -534,7 +537,7 @@ npm run ig:ingest -- --username iffffound --push-cloudflare --request-delay-ms 1
 
 #### Replay Deferred Videos
 
-The script can later replay videos from the NDJSON file:
+The replay command uploads deferred videos to Photarium/Cloudflare by default:
 
 ```bash
 npm run ig:videos -- --username iffffound
@@ -545,6 +548,26 @@ Equivalent direct command:
 ```bash
 node scripts/instagram-ingest.mjs videos-from-ndjson --username iffffound
 ```
+
+You can also replay by explicit file path (no username required):
+
+```bash
+npm run ig:videos -- --input data/instagram/iffffound.ndjson --namespace cf-default
+```
+
+If replay reports `rows_likely_video_but_no_video_url > 0`, use the recovery helper to re-resolve likely-video rows first, then replay in one command:
+
+```bash
+npm run ig:recover-videos -- --input data/instagram/iffffound.ndjson --namespace cf-default
+```
+
+Useful helper options:
+
+- `--headful`: run the resolve step with a visible browser
+- `--limit <n>`: resolve only the first `n` missing shortcodes
+- `--skip-resolve`: replay only
+- `--skip-replay`: resolve only
+- `--dry-run`: print planned commands without running them
 
 #### Checkpoint & Resume Behavior
 

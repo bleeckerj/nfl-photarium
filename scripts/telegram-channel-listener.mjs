@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 
 const DEFAULT_BASE_URL = 'http://localhost:3000';
-const DEFAULT_STATE_FILE = path.resolve(process.cwd(), 'data/telegram-listener-state.json');
+const DEFAULT_STATE_FILE = path.join(os.tmpdir(), 'photarium-telegram-listener-state.json');
 const DEFAULT_CONFIG_FILE = path.resolve(process.cwd(), '.env.telegram-listener');
 const DEFAULT_TIMEOUT_SECONDS = 30;
 const POLL_INTERVAL_MS = 1500;

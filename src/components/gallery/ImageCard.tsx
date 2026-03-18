@@ -242,6 +242,9 @@ export const ImageCard: React.FC<ImageCardProps> = ({
           </div>
           <div className="text-gray-500 text-[0.6rem] mt-1 space-y-0.5">
             <p>{new Date(image.uploaded).toLocaleDateString()}</p>
+            <p className="font-mono text-[0.55rem] text-gray-400">
+              {new Date(image.uploaded).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+            </p>
             {isVideoAsset && (
               <p>🎬 {image.videoStatus || 'pending'}</p>
             )}

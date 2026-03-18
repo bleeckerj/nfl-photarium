@@ -2,7 +2,9 @@ import { useMemo } from 'react';
 
 export type ParentReassignmentImage = {
   id: string;
+  assetType?: 'image' | 'video';
   filename: string;
+  displayName?: string;
   uploaded: string;
   parentId?: string;
   folder?: string;
@@ -32,17 +34,7 @@ export function useParentReassignment({
     return allImages.find((img) => img.id === parentId) || null;
   }, [allImages, currentImage?.parentId]);
 
-  const parentWithChildren = useMemo(() => {
-    const set = new Set<string>();
-    allImages.forEach((img) => {
-      if (img.parentId) {
-        set.add(img.parentId);
-      }
-    });
-    return set;
-  }, [allImages]);
-
-  const parentCandidates = useMemo(() => {
+  const canonicalCandidates = useMemo(() => {
     return allImages.filter((img) => {
       if (img.parentId) return false;
       if (excludeId && img.id === excludeId) return false;
@@ -50,16 +42,21 @@ export function useParentReassignment({
     });
   }, [allImages, excludeId]);
 
+  const parentCandidates = useMemo(
+    () => canonicalCandidates.filter((img) => img.assetType !== 'video'),
+    [canonicalCandidates]
+  );
+
   const adoptableImages = useMemo(() => {
-    return parentCandidates.filter((img) => !parentWithChildren.has(img.id));
-  }, [parentCandidates, parentWithChildren]);
+    return canonicalCandidates;
+  }, [canonicalCandidates]);
 
   const reassignParentOptions = useMemo(
     () => [
       { value: '', label: 'No parent (make canonical)' },
       ...parentCandidates.map((candidate) => ({
         value: candidate.id,
-        label: candidate.filename || candidate.id,
+        label: `${candidate.displayName || candidate.filename || candidate.id} · ${candidate.id}`,
       })),
     ],
     [parentCandidates]

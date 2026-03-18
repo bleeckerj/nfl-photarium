@@ -38,6 +38,7 @@ Options:
   --include-filename           Enable --include-filename in fs:ingest
   --hash-cache-backfill-only   Pass through to fs:ingest
   --assume-uploaded            Pass through to fs:ingest (requires hash-cache-backfill-only)
+  --report-cache               Pass through to fs:ingest
   --dry-run                    Pass through to fs:ingest
   --verbose                    Pass through to fs:ingest
   --skip-discord-refresh       Skip the Discord scripts and only run fs:ingest loop
@@ -65,6 +66,7 @@ PASS_VERBOSE=0
 PASS_DRY_RUN=0
 PASS_HASH_BACKFILL_ONLY=0
 PASS_ASSUME_UPLOADED=0
+PASS_REPORT_CACHE=0
 SKIP_DISCORD_REFRESH=0
 SKIP_INGEST=0
 APPEND_IMAGE_TAG=""
@@ -144,6 +146,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --assume-uploaded)
       PASS_ASSUME_UPLOADED=1
+      shift
+      ;;
+    --report-cache)
+      PASS_REPORT_CACHE=1
       shift
       ;;
     --dry-run)
@@ -292,6 +298,9 @@ run_ingest_all() {
     if [[ "${PASS_ASSUME_UPLOADED}" -eq 1 ]]; then
       cmd+=(--assume-uploaded)
     fi
+    if [[ "${PASS_REPORT_CACHE}" -eq 1 ]]; then
+      cmd+=(--report-cache)
+    fi
     if [[ "${PASS_DRY_RUN}" -eq 1 ]]; then
       cmd+=(--dry-run)
     fi
@@ -329,4 +338,3 @@ if [[ "${SKIP_INGEST}" -eq 0 ]]; then
 else
   echo "[ingest] skipped"
 fi
-

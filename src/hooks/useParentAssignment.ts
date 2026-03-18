@@ -36,9 +36,9 @@ export function useParentAssignment({
     setParentActionLoading(true);
     try {
       await patchParentAssignment(image.id, '');
-      toast.push('Image detached from its parent');
+      toast.push('Asset detached from its parent');
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to detach image';
+      const message = error instanceof Error ? error.message : 'Failed to detach asset';
       toast.push(message);
     } finally {
       setParentActionLoading(false);

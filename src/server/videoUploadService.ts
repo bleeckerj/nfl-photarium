@@ -28,9 +28,11 @@ export type VideoUploadContext = {
   folder?: string;
   tags: string[];
   description?: string;
+  displayName?: string;
   originalUrl?: string;
   sourceUrl?: string;
   namespace?: string;
+  parentId?: string;
   requireSignedUrls?: boolean;
 };
 
@@ -38,7 +40,10 @@ export type VideoUploadSuccess = {
   id: string;
   assetType: 'video';
   filename: string;
+  displayName?: string;
   uploaded: string;
+  parentId?: string;
+  variationSort?: number;
   streamUid: string;
   playbackUrl?: string;
   hlsUrl?: string;
@@ -56,6 +61,41 @@ export type VideoUploadSuccess = {
   originalUrl?: string;
   sourceUrl?: string;
   namespace?: string;
+  mux?: {
+    assetId: string;
+    status: 'queued' | 'ingesting' | 'ready' | 'error';
+    ingestUrl?: string;
+    playbackId?: string;
+    playbackIds?: string[];
+    playbackUrl?: string;
+    exportedAt?: string;
+    syncedAt?: string;
+    error?: string;
+  };
+  animatedWebpImageId?: string;
+  animatedWebpUrl?: string;
+  animatedWebpStatus?: 'pending' | 'ready' | 'error';
+  animatedWebpError?: string;
+  animatedWebpUpdatedAt?: string;
+  animatedWebpBytes?: number;
+  animatedWebpWidth?: number;
+  animatedWebpHeight?: number;
+  animatedWebpVariants?: Array<{
+    imageId: string;
+    url?: string;
+    filename: string;
+    bytes: number;
+    width?: number;
+    height?: number;
+    fps: number;
+    loop: boolean;
+    maxWidth: number;
+    maxHeight: number;
+    maxOutputBytes: number;
+    timeoutMs: number;
+    encoder?: string;
+    createdAt: string;
+  }>;
 };
 
 export type VideoUploadFailureReason =
@@ -74,9 +114,11 @@ const cleanVideoContext = (context: VideoUploadContext): VideoUploadContext => (
   folder: cleanString(context.folder),
   tags: cleanTags(context.tags ?? []),
   description: cleanString(context.description),
+  displayName: cleanString(context.displayName),
   originalUrl: cleanString(context.originalUrl),
   sourceUrl: cleanString(context.sourceUrl),
   namespace: cleanString(context.namespace),
+  parentId: cleanString(context.parentId),
   requireSignedUrls: context.requireSignedUrls === true,
 });
 
@@ -103,14 +145,32 @@ const getVideoDeliveryBase = () =>
       : 'https://videodelivery.net';
   };
 
-const buildPlaybackUrl = (streamUid: string) => `${getVideoDeliveryBase()}/${streamUid}/iframe`;
-const buildHlsUrl = (streamUid: string) => `${getVideoDeliveryBase()}/${streamUid}/manifest/video.m3u8`;
+const inferVideoDeliveryBase = (result: { thumbnail?: string; preview?: string }) => {
+  const candidates = [result.thumbnail, result.preview].filter(Boolean) as string[];
+  for (const candidate of candidates) {
+    try {
+      const parsed = new URL(candidate);
+      if (/\.cloudflarestream\.com$/i.test(parsed.host) || parsed.host === 'videodelivery.net') {
+        return parsed.origin;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return getVideoDeliveryBase();
+};
+
+const buildPlaybackUrl = (streamUid: string, deliveryBase?: string) => `${deliveryBase || getVideoDeliveryBase()}/${streamUid}/iframe`;
+const buildHlsUrl = (streamUid: string, deliveryBase?: string) => `${deliveryBase || getVideoDeliveryBase()}/${streamUid}/manifest/video.m3u8`;
 
 const mapRecordToResponse = (record: VideoAssetRecord): VideoUploadSuccess => ({
   id: record.id,
   assetType: 'video',
   filename: record.filename,
+  displayName: record.displayName ?? record.filename,
   uploaded: record.uploaded,
+  parentId: record.parentId,
+  variationSort: record.variationSort,
   streamUid: record.streamUid,
   playbackUrl: record.playbackUrl,
   hlsUrl: record.hlsUrl,
@@ -128,6 +188,16 @@ const mapRecordToResponse = (record: VideoAssetRecord): VideoUploadSuccess => ({
   originalUrl: record.originalUrl,
   sourceUrl: record.sourceUrl,
   namespace: record.namespace,
+  mux: record.mux,
+  animatedWebpImageId: record.animatedWebpImageId,
+  animatedWebpUrl: record.animatedWebpUrl,
+  animatedWebpStatus: record.animatedWebpStatus,
+  animatedWebpError: record.animatedWebpError,
+  animatedWebpUpdatedAt: record.animatedWebpUpdatedAt,
+  animatedWebpBytes: record.animatedWebpBytes,
+  animatedWebpWidth: record.animatedWebpWidth,
+  animatedWebpHeight: record.animatedWebpHeight,
+  animatedWebpVariants: record.animatedWebpVariants,
 });
 
 const parseNumber = (value: unknown): number | undefined => {
@@ -204,14 +274,17 @@ export async function uploadVideoBuffer(
       requireSignedUrls: cleanedContext.requireSignedUrls,
     });
     const dimensions = resolveVideoDimensions(result);
+    const deliveryBase = inferVideoDeliveryBase(result);
 
     const record = await createVideoAssetRecord({
       assetType: 'video',
       filename: fileName,
+      displayName: cleanedContext.displayName || fileName,
       uploaded: new Date().toISOString(),
+      parentId: cleanedContext.parentId,
       streamUid: result.uid,
-      playbackUrl: buildPlaybackUrl(result.uid),
-      hlsUrl: buildHlsUrl(result.uid),
+      playbackUrl: buildPlaybackUrl(result.uid, deliveryBase),
+      hlsUrl: buildHlsUrl(result.uid, deliveryBase),
       thumbnailUrl: result.thumbnail,
       previewUrl: result.preview,
       durationSeconds: typeof result.duration === 'number' ? result.duration : undefined,
@@ -283,15 +356,18 @@ export async function uploadVideoFromRemoteUrl(
       requireSignedUrls: cleanedContext.requireSignedUrls,
     });
     const dimensions = resolveVideoDimensions(result);
+    const deliveryBase = inferVideoDeliveryBase(result);
 
     const inferredFilename = cleanString(fileName) || cleanSourceUrl.split('/').filter(Boolean).pop() || 'remote-video.mp4';
     const record = await createVideoAssetRecord({
       assetType: 'video',
       filename: inferredFilename,
+      displayName: cleanedContext.displayName || inferredFilename,
       uploaded: new Date().toISOString(),
+      parentId: cleanedContext.parentId,
       streamUid: result.uid,
-      playbackUrl: buildPlaybackUrl(result.uid),
-      hlsUrl: buildHlsUrl(result.uid),
+      playbackUrl: buildPlaybackUrl(result.uid, deliveryBase),
+      hlsUrl: buildHlsUrl(result.uid, deliveryBase),
       thumbnailUrl: result.thumbnail,
       previewUrl: result.preview,
       durationSeconds: typeof result.duration === 'number' ? result.duration : undefined,
