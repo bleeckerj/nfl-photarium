@@ -2069,7 +2069,9 @@ export default function ImageDetailPage() {
       }
       if (childId === image.id) return;
       if (!confirm('Make this variation the parent? The current parent will become a variation.')) return;
+      const swapAssetCount = variationChildren.length + 1;
       setSwappingParentId(childId);
+      toast.push(`Swapping ${swapAssetCount} assets in this family...`);
       try {
         const response = await fetch(`/api/images/${image.id}/swap-parent`, {
           method: 'POST',
@@ -2093,7 +2095,7 @@ export default function ImageDetailPage() {
         setSwappingParentId(null);
       }
     },
-    [image, refreshImageList, toast]
+    [image, refreshImageList, toast, variationChildren.length]
   );
 
   const handleDeleteChild = useCallback(async (childId: string) => {
@@ -3195,6 +3197,7 @@ export default function ImageDetailPage() {
                 onDetachAllChildren={handleDetachAllChildren}
                 onDeleteChild={handleDeleteChild}
                 swappingParentId={swappingParentId}
+                swapParentAssetCount={variationChildren.length + 1}
                 onSwapParent={handleSwapParent}
                 AspectRatioDisplay={AspectRatioDisplay}
                 variationPage={variationPage}

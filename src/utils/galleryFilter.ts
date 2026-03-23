@@ -47,6 +47,15 @@ export interface GalleryFilterOptions {
 }
 
 const normalize = (value?: string) => value?.toLowerCase() ?? '';
+export const SOURCE_QUERY_MIN_DIGITS = 10;
+
+export function isLikelySourceSearchTerm(value: string): boolean {
+  const normalized = normalize(value.trim());
+  if (!normalized) return false;
+  if (normalized.includes('discord.com/channels/')) return true;
+  return /\d{10,}/.test(normalized);
+}
+
 const splitCamelCase = (value?: string) =>
   (value ?? '')
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')

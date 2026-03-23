@@ -63,16 +63,19 @@ describe('POST /api/images/:id/swap-parent', () => {
     const payload = await res.json();
 
     expect(res.status).toBe(200);
-    expect(setAssetParentDirectlyMock.mock.calls).toEqual([
-      ['child-a', '', { forceRefreshImages: true }],
-      ['child-b', 'child-a', { forceRefreshImages: true }],
-      ['root', 'child-a', { forceRefreshImages: true }],
-    ]);
+    expect(setAssetParentDirectlyMock.mock.calls[0]).toEqual(['child-a', '']);
+    expect(setAssetParentDirectlyMock.mock.calls.slice(1)).toEqual(
+      expect.arrayContaining([
+        ['child-b', 'child-a'],
+        ['root', 'child-a'],
+      ])
+    );
     expect(payload).toEqual(
       expect.objectContaining({
         success: true,
         requestedId: 'root',
         newParentId: 'child-a',
+        concurrency: 12,
         updated: ['child-a', 'child-b', 'root'],
         failed: [],
       })

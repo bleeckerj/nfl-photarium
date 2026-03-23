@@ -99,6 +99,7 @@ export interface VariationsSectionProps {
   onDetachAllChildren: () => void | Promise<void>;
   onDeleteChild: (childId: string) => void | Promise<void>;
   swappingParentId: string | null;
+  swapParentAssetCount: number;
   onSwapParent: (childId: string) => void | Promise<void>;
 
   AspectRatioDisplay: React.ComponentType<{ imageId: string; className?: string }>;
@@ -157,6 +158,7 @@ export function VariationsSection(props: VariationsSectionProps) {
     onDetachAllChildren,
     onDeleteChild,
     swappingParentId,
+    swapParentAssetCount,
     onSwapParent,
     AspectRatioDisplay,
     variationPage,
@@ -532,7 +534,9 @@ export function VariationsSection(props: VariationsSectionProps) {
                       className="px-3 py-1 text-xs bg-amber-100 text-amber-800 rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
                       title="Make this variation the parent image"
                     >
-                      {swappingParentId === child.id ? 'Swapping…' : 'Make parent'}
+                      {swappingParentId === child.id
+                        ? `Swapping ${swapParentAssetCount} assets…`
+                        : 'Make parent'}
                     </button>
                   )}
                   {!isChildImage && (

@@ -21,6 +21,14 @@ const {
   isVectorSearchAvailableMock: vi.fn(),
 }));
 
+const {
+  getImageExtrasRecordsMock,
+  listImageExtrasImageIdsMock,
+} = vi.hoisted(() => ({
+  getImageExtrasRecordsMock: vi.fn(),
+  listImageExtrasImageIdsMock: vi.fn(),
+}));
+
 vi.mock('@/server/cloudflareImageCache', () => ({
   getCachedImages: getCachedImagesMock,
 }));
@@ -31,6 +39,11 @@ vi.mock('@/server/vectorSearch', () => ({
   searchByCLIP: searchByCLIPMock,
   getImageVectors: getImageVectorsMock,
   isVectorSearchAvailable: isVectorSearchAvailableMock,
+}));
+
+vi.mock('@/server/imageExtras', () => ({
+  getImageExtrasRecords: getImageExtrasRecordsMock,
+  listImageExtrasImageIds: listImageExtrasImageIdsMock,
 }));
 
 import { POST } from '@/app/api/images/search/route';
@@ -52,6 +65,8 @@ describe('POST /api/images/search canonical IDs', () => {
     searchByHexColorMock.mockResolvedValue([]);
     searchByCLIPMock.mockResolvedValue([]);
     getImageVectorsMock.mockResolvedValue(null);
+    listImageExtrasImageIdsMock.mockResolvedValue([]);
+    getImageExtrasRecordsMock.mockResolvedValue({});
   });
 
   it('returns canonical id aliases when search already returns imageId', async () => {
@@ -94,5 +109,83 @@ describe('POST /api/images/search canonical IDs', () => {
     expect(payload.results[0].id).toBe('canon_123');
     expect(payload.results[0].canonicalImageId).toBe('canon_123');
     expect(payload.results[0].requestedImageId).toBe('Editorial Hero Look');
+  });
+
+  it('finds assets by Discord message id from sourceUrl metadata', async () => {
+    getCachedImagesMock.mockResolvedValue([
+      {
+        id: 'discord_asset_1',
+        filename: 'image-2026-02-27T16-27-37.png',
+        displayName: 'RetroKioskInteraction',
+        tags: ['discord', 'midjourney'],
+      },
+    ]);
+    searchByTextMock.mockResolvedValue([]);
+    listImageExtrasImageIdsMock.mockResolvedValue(['discord_asset_1']);
+    getImageExtrasRecordsMock.mockResolvedValue({
+      discord_asset_1: {
+        schemaVersion: 1,
+        imageId: 'discord_asset_1',
+        createdAt: '2026-03-09T00:10:56.735Z',
+        updatedAt: '2026-03-09T00:10:58.354Z',
+        sourceUrl: 'https://discord.com/channels/724979694667169862/1188501030695092225/1476850850478690358',
+        sourceUrlNormalized: 'https://discord.com/channels/724979694667169862/1188501030695092225/1476850850478690358',
+      },
+    });
+
+    const response = await POST(
+      createJsonRequest('http://localhost/api/images/search', { type: 'text', query: '1476850850478690358' })
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.count).toBe(1);
+    expect(payload.results[0].imageId).toBe('discord_asset_1');
+    expect(payload.results[0].canonicalImageId).toBe('discord_asset_1');
+  });
+
+  it('returns exact Discord source matches even when the active namespace differs', async () => {
+    getCachedImagesMock.mockResolvedValue([
+      {
+        id: 'discord_asset_1',
+        filename: 'image-2026-02-27T16-27-37.png',
+        displayName: 'RetroKioskInteraction',
+        namespace: 'cf-midjourney',
+        tags: ['discord', 'midjourney'],
+      },
+      {
+        id: 'default_asset_1',
+        filename: 'other.png',
+        displayName: 'Other Image',
+        namespace: 'cf-default',
+        tags: ['discord'],
+      },
+    ]);
+    searchByTextMock.mockResolvedValue([
+      { imageId: 'default_asset_1', filename: 'other.png', score: 0.2 },
+    ]);
+    listImageExtrasImageIdsMock.mockResolvedValue(['discord_asset_1']);
+    getImageExtrasRecordsMock.mockResolvedValue({
+      discord_asset_1: {
+        schemaVersion: 1,
+        imageId: 'discord_asset_1',
+        createdAt: '2026-03-09T00:10:56.735Z',
+        updatedAt: '2026-03-09T00:10:58.354Z',
+        sourceUrl: 'https://discord.com/channels/724979694667169862/1188501030695092225/1476850850478690358',
+        sourceUrlNormalized: 'https://discord.com/channels/724979694667169862/1188501030695092225/1476850850478690358',
+      },
+    });
+
+    const response = await POST(
+      createJsonRequest('http://localhost/api/images/search', {
+        type: 'text',
+        query: '1476850850478690358',
+        namespace: 'cf-default',
+      })
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.results[0].imageId).toBe('discord_asset_1');
   });
 });

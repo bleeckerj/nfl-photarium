@@ -19,6 +19,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCachedImages } from '@/server/cloudflareImageCache';
 import { listVideoAssetRecordsWithSync } from '@/server/videoCatalogStorage';
+import { getImageExtrasRecords, listImageExtrasImageIds } from '@/server/imageExtras';
 import {
   searchByText,
   searchByHexColor,
@@ -51,6 +52,8 @@ type SearchAssetMeta = {
   folder?: string;
   namespace?: string;
   tags?: string[];
+  sourceUrl?: string;
+  sourceUrlNormalized?: string;
   videoThumbnailUrl?: string;
   videoPlaybackUrl?: string;
 };
@@ -72,6 +75,11 @@ type SearchResultNormalized = SearchResultRow & {
   requestedImageId?: string;
 };
 
+type SearchScopeAsset = SearchAssetMeta & {
+  sourceUrl?: string;
+  sourceUrlNormalized?: string;
+};
+
 const normalizeText = (value?: string | null) => String(value ?? '').toLowerCase();
 
 const tokenize = (value: string): string[] =>
@@ -81,6 +89,31 @@ const tokenize = (value: string): string[] =>
     .trim()
     .split(/\s+/)
     .filter(Boolean);
+
+const SOURCE_QUERY_MIN_DIGITS = 10;
+
+function isLikelySourceUrlQuery(query: string): boolean {
+  const normalized = String(query || '').trim().toLowerCase();
+  if (!normalized) return false;
+  if (normalized.includes('discord.com/channels/')) return true;
+  return /\d{10,}/.test(normalized);
+}
+
+function matchesSourceQuery(query: string, sourceUrl?: string, sourceUrlNormalized?: string): boolean {
+  const normalizedQuery = String(query || '').trim().toLowerCase();
+  if (!normalizedQuery) return false;
+
+  const haystacks = [sourceUrl, sourceUrlNormalized]
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean);
+  if (haystacks.length === 0) return false;
+
+  if (haystacks.some((value) => value.includes(normalizedQuery))) return true;
+
+  const digitTokens = normalizedQuery.match(/\d+/g)?.filter((token) => token.length >= SOURCE_QUERY_MIN_DIGITS) ?? [];
+  if (digitTokens.length === 0) return false;
+  return haystacks.some((value) => digitTokens.every((token) => value.includes(token)));
+}
 
 const splitCamelCase = (value?: string) =>
   (value ?? '')
@@ -95,6 +128,9 @@ function lexicalNameScore(image: SearchAssetMeta, query: string): number {
   const displayNameSplit = normalizeText(splitCamelCase(image.displayName));
   const filename = normalizeText(image.filename);
   const tags = normalizeText((image.tags ?? []).join(' '));
+  const sourceUrl = normalizeText(image.sourceUrl);
+  const sourceUrlNormalized = normalizeText(image.sourceUrlNormalized);
+  const sourceText = `${sourceUrl} ${sourceUrlNormalized}`.trim();
   const joinedQuery = tokens.join(' ');
 
   const tokenCoverage = (haystack: string) => {
@@ -114,8 +150,9 @@ function lexicalNameScore(image: SearchAssetMeta, query: string): number {
   const displayScore = Math.max(tokenCoverage(displayName), tokenCoverage(displayNameSplit)) + phraseBonus(displayNameSplit);
   const tagScore = tokenCoverage(tags) + phraseBonus(tags);
   const fileScore = tokenCoverage(filename) + phraseBonus(filename);
+  const sourceScore = tokenCoverage(sourceText) + phraseBonus(sourceText);
 
-  return Math.min(1, displayScore * 0.6 + tagScore * 0.25 + fileScore * 0.15);
+  return Math.min(1, displayScore * 0.5 + tagScore * 0.2 + fileScore * 0.1 + sourceScore * 0.2);
 }
 
 function rerankSemanticTextResults(
@@ -174,6 +211,63 @@ function rerankSemanticTextResults(
 
   combined.sort((a, b) => b.score - a.score || b.vRank - a.vRank || b.lScore - a.lScore);
   return combined.slice(0, limit).map((entry) => entry.row);
+}
+
+async function findSourceUrlMatches(
+  query: string,
+  candidateImages: SearchScopeAsset[],
+  limit: number
+): Promise<SearchResultRow[]> {
+  if (!isLikelySourceUrlQuery(query) || candidateImages.length === 0) return [];
+
+  const candidateById = new Map(candidateImages.map((image) => [image.id, image]));
+  const extrasIds = await listImageExtrasImageIds();
+  const candidateIds = extrasIds.filter((id) => candidateById.has(id));
+  const matches: SearchResultRow[] = [];
+  const seen = new Set<string>();
+
+  for (let i = 0; i < candidateIds.length; i += 250) {
+    const batchIds = candidateIds.slice(i, i + 250);
+    const extrasById = await getImageExtrasRecords(batchIds);
+    for (const imageId of batchIds) {
+      const image = candidateById.get(imageId);
+      const extras = extrasById[imageId];
+      if (!image || !extras) continue;
+      if (!matchesSourceQuery(query, extras.sourceUrl, extras.sourceUrlNormalized)) continue;
+      if (seen.has(imageId)) continue;
+      seen.add(imageId);
+      matches.push({
+        imageId,
+        id: imageId,
+        filename: image.filename,
+        displayName: image.displayName,
+        folder: image.folder,
+        score: 1,
+      });
+      if (matches.length >= Math.max(limit * 2, 50)) {
+        return matches;
+      }
+    }
+  }
+
+  return matches;
+}
+
+function prependUniqueResults(
+  preferred: SearchResultNormalized[],
+  existing: SearchResultNormalized[]
+): SearchResultNormalized[] {
+  const seen = new Set<string>();
+  const merged: SearchResultNormalized[] = [];
+
+  for (const row of [...preferred, ...existing]) {
+    const id = row.canonicalImageId || row.imageId || row.id;
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    merged.push(row);
+  }
+
+  return merged;
 }
 
 function normalizeNamespace(raw: string | null | undefined): string | null {
@@ -415,7 +509,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       getCachedImages(),
       listVideoAssetRecordsWithSync(),
     ]);
-    const allImages: SearchAssetMeta[] = [
+    const allImages: SearchScopeAsset[] = [
       ...cachedImages.map((img) => ({ ...img, assetType: 'image' as const })),
       ...videos.map((video) => ({
         id: video.id,
@@ -429,12 +523,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         videoPlaybackUrl: video.playbackUrl,
       })),
     ];
+    const scopedImages =
+      namespace === null
+        ? allImages
+        : allImages.filter((img) => (namespace === '' ? !img.namespace : (img.namespace || '') === namespace));
+    const sourceMatches =
+      type === 'text' && query
+        ? await findSourceUrlMatches(query, allImages, limit)
+        : [];
     if (namespace !== null) {
       results = filterResultsByNamespace(results, allImages, namespace);
     }
     results = normalizeSearchResults(results as SearchResultRow[], allImages);
+    const normalizedSourceMatches = normalizeSearchResults(sourceMatches, allImages);
     if (type === 'text' && query) {
       results = rerankSemanticTextResults(results, allImages, query, limit, namespace);
+      results = prependUniqueResults(normalizedSourceMatches, results);
     }
 
     results = results.slice(0, limit);
@@ -523,7 +627,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       getCachedImages(),
       listVideoAssetRecordsWithSync(),
     ]);
-    const allImages: SearchAssetMeta[] = [
+    const allImages: SearchScopeAsset[] = [
       ...cachedImages.map((img) => ({ ...img, assetType: 'image' as const })),
       ...videos.map((video) => ({
         id: video.id,
@@ -537,12 +641,22 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         videoPlaybackUrl: video.playbackUrl,
       })),
     ];
+    const scopedImages =
+      namespace === null
+        ? allImages
+        : allImages.filter((img) => (namespace === '' ? !img.namespace : (img.namespace || '') === namespace));
+    const sourceMatches =
+      type === 'text' && query
+        ? await findSourceUrlMatches(query, allImages, limit)
+        : [];
     if (namespace !== null) {
       results = filterResultsByNamespace(results, allImages, namespace);
     }
     results = normalizeSearchResults(results as SearchResultRow[], allImages);
+    const normalizedSourceMatches = normalizeSearchResults(sourceMatches, allImages);
     if (type === 'text' && query) {
       results = rerankSemanticTextResults(results, allImages, query, limit, namespace);
+      results = prependUniqueResults(normalizedSourceMatches, results);
     }
 
     results = results.slice(0, limit);

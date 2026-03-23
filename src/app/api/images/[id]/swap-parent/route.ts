@@ -20,6 +20,41 @@ type SwapOutcome = {
   parentId?: string;
 };
 
+const DEFAULT_SWAP_CONCURRENCY = 12;
+
+const normalizeConcurrency = (value: unknown) => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_SWAP_CONCURRENCY;
+  return Math.max(1, Math.min(12, Math.trunc(value)));
+};
+
+const mapWithConcurrency = async <T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>
+): Promise<R[]> => {
+  if (items.length === 0) return [];
+
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  const runWorker = async () => {
+    while (true) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      if (currentIndex >= items.length) {
+        return;
+      }
+      results[currentIndex] = await worker(items[currentIndex]);
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, () => runWorker())
+  );
+
+  return results;
+};
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -43,6 +78,7 @@ export async function POST(
   }
 
   const dryRun = body.dryRun === true;
+  const concurrency = normalizeConcurrency(body.concurrency);
 
   const assets = await listCatalogAssets({
     forceRefreshImages: true,
@@ -93,7 +129,7 @@ export async function POST(
 
   const patchParent = async ({ id, parentId }: { id: string; parentId: string }): Promise<SwapOutcome> => {
     try {
-      await setAssetParentDirectly(id, parentId, { forceRefreshImages: true });
+      await setAssetParentDirectly(id, parentId);
       return { ok: true, id, parentId };
     } catch (error) {
       const parentError = error instanceof ParentAssignmentError ? error : null;
@@ -123,10 +159,8 @@ export async function POST(
   }
 
   const remainingUpdates = updates.filter((update) => update.id !== newParentId);
-  const outcomes = [promotedOutcome];
-  for (const update of remainingUpdates) {
-    outcomes.push(await patchParent(update));
-  }
+  const remainingOutcomes = await mapWithConcurrency(remainingUpdates, concurrency, patchParent);
+  const outcomes = [promotedOutcome, ...remainingOutcomes];
   const failed = outcomes.filter((o) => !o.ok);
 
   return NextResponse.json({
@@ -134,6 +168,7 @@ export async function POST(
     requestedId,
     rootId,
     newParentId,
+    concurrency,
     updated: outcomes.filter((o) => o.ok).map((o) => o.id),
     failed
   }, { status: failed.length === 0 ? 200 : 207 });

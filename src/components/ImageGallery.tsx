@@ -27,6 +27,7 @@ import { GalleryModals } from './gallery/GalleryModals';
 import { AUDIT_LOG_LIMIT, DEFAULT_GRID_SIZE } from './gallery/constants';
 import { normalizeGridSize } from './gallery/gridSizing';
 import { normalizeDateFilterValue, toDateKey } from './gallery/dateFilter';
+import { isLikelySourceSearchTerm } from '@/utils/galleryFilter';
 
 interface CloudflareImage {
   id: string;
@@ -544,6 +545,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [namespaceSelectValue, setNamespaceSelectValue] = useState('');
   const [registryNamespaces, setRegistryNamespaces] = useState<string[]>([]);
   const [videoLimitOverride, setVideoLimitOverride] = useState<number | null>(null);
+  const [includeExtrasForGallery, setIncludeExtrasForGallery] = useState(
+    isLikelySourceSearchTerm(storedPreferencesRef.current.searchTerm ?? '')
+  );
   const [videoMeta, setVideoMeta] = useState<VideoMetaState>(null);
   const [videoResultsNotice, setVideoResultsNotice] = useState<string | null>(null);
   const [colorMetadataMap, setColorMetadataMap] = useState<Record<string, { dominantColors?: string[]; averageColor?: string }>>({});
@@ -764,6 +768,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       if (videoLimitOverride && videoLimitOverride > 0) {
         params.set('videoLimit', String(videoLimitOverride));
       }
+      if (includeExtrasForGallery) {
+        params.set('includeExtras', '1');
+      }
       const query = params.toString();
       const url = query ? `/api/images?${query}` : '/api/images';
       const response = await fetch(url, { signal: controller.signal });
@@ -826,7 +833,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         }
       }
     }
-  }, [namespace, PERF_LOGGING_ENABLED, videoLimitOverride]);
+  }, [namespace, PERF_LOGGING_ENABLED, videoLimitOverride, includeExtrasForGallery]);
 
   useEffect(() => {
     if (loading || initialLoadLoggedRef.current) return;
@@ -1261,6 +1268,15 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
 
   const hiddenFolderSet = useMemo(() => new Set(hiddenFolders), [hiddenFolders]);
   const hiddenTagSet = useMemo(() => new Set(hiddenTags.map(tag => tag.toLowerCase())), [hiddenTags]);
+  const shouldIncludeExtrasForSearch = useMemo(
+    () => isLikelySourceSearchTerm(searchTerm),
+    [searchTerm]
+  );
+
+  useEffect(() => {
+    if (includeExtrasForGallery === shouldIncludeExtrasForSearch) return;
+    setIncludeExtrasForGallery(shouldIncludeExtrasForSearch);
+  }, [includeExtrasForGallery, shouldIncludeExtrasForSearch]);
 
   const uniqueFolders = useMemo(() => {
     const folderNames = images

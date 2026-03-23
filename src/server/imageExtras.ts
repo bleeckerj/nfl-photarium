@@ -61,6 +61,23 @@ export type DngIngestRecord = {
   };
 };
 
+export type FlickrSourceRecord = {
+  photoId: string;
+  ownerNsid?: string;
+  username?: string;
+  permalink?: string;
+  visibility?: string;
+  lastUpdate?: string;
+  takenAt?: string;
+  albumTitles?: string[];
+  tagList?: string[];
+  preferredSize?: string;
+  selectedSourceUrl?: string;
+  originalAvailable?: boolean;
+  originalFormat?: string;
+  downloadedContentHash?: string;
+};
+
 export type ImageExtrasRecordV1 = {
   schemaVersion: 1;
   imageId: string;
@@ -91,6 +108,9 @@ export type ImageExtrasRecordV1 = {
 
   /** DNG ingest bookkeeping for generated preview artifacts. */
   dngIngest?: DngIngestRecord;
+
+  /** Durable Flickr import provenance for backup/sync workflows. */
+  flickrSource?: FlickrSourceRecord;
 
   /**
    * Optional future slots (kept here to document intent; not used yet).

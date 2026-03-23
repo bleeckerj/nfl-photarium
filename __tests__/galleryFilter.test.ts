@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { filterImagesForGallery, GalleryImage } from '@/utils/galleryFilter';
+import { filterImagesForGallery, GalleryImage, isLikelySourceSearchTerm } from '@/utils/galleryFilter';
 
 let uniqueCounter = 0;
 const makeImage = (overrides: Partial<GalleryImage> = {}): GalleryImage => ({
@@ -127,5 +127,11 @@ describe('filterImagesForGallery', () => {
     });
 
     expect(result.map((img) => img.id)).toContain('6');
+  });
+
+  it('detects Discord/source-id style search terms', () => {
+    expect(isLikelySourceSearchTerm('1476850850478690358')).toBe(true);
+    expect(isLikelySourceSearchTerm('https://discord.com/channels/1/2/1476850850478690358')).toBe(true);
+    expect(isLikelySourceSearchTerm('retro kiosk')).toBe(false);
   });
 });

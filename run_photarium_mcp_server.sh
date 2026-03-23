@@ -10,9 +10,30 @@ if [[ ! -d "$MCP_DIR" ]]; then
   exit 1
 fi
 
+resolve_bin() {
+  local name="$1"
+  shift
+  if command -v "$name" >/dev/null 2>&1; then
+    command -v "$name"
+    return 0
+  fi
+  local candidate
+  for candidate in "$@"; do
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  echo "Unable to find $name. Add it to PATH or install it in a standard location." >&2
+  return 1
+}
+
+NODE_BIN="$(resolve_bin node /usr/local/bin/node /opt/homebrew/bin/node /opt/local/bin/node)"
+
 if [[ ! -f "$MCP_DIR/dist/index.js" ]]; then
   echo "Build output missing. Running npm run build..." >&2
-  (cd "$MCP_DIR" && npm run build)
+  NPM_BIN="$(resolve_bin npm /usr/local/bin/npm /opt/homebrew/bin/npm /opt/local/bin/npm)"
+  (cd "$MCP_DIR" && "$NPM_BIN" run build)
 fi
 
 export PHOTARIUM_BASE_URL="${PHOTARIUM_BASE_URL:-http://127.0.0.1:3000}"
@@ -81,7 +102,7 @@ case "$ACTION" in
       stop_listeners
     fi
     prepare_runtime_env
-    exec node "$MCP_DIR/dist/index.js"
+    exec "$NODE_BIN" "$MCP_DIR/dist/index.js"
     ;;
   start)
     if [[ "$PHOTARIUM_HTTP_ENABLED" == "true" ]]; then
@@ -98,7 +119,7 @@ case "$ACTION" in
       fi
     fi
     prepare_runtime_env
-    exec node "$MCP_DIR/dist/index.js"
+    exec "$NODE_BIN" "$MCP_DIR/dist/index.js"
     ;;
   *)
     echo "Usage: $0 [start|stop|restart|status]" >&2

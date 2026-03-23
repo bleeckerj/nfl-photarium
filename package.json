@@ -47,6 +47,8 @@
     "ig:url": "node scripts/instagram-ingest.mjs single-url",
     "ig:videos": "node scripts/instagram-ingest.mjs videos-from-ndjson",
     "ig:recover-videos": "node scripts/instagram-video-recover.mjs",
+    "flickr:auth": "node scripts/flickr-ingest.mjs auth",
+    "flickr:ingest": "node scripts/flickr-ingest.mjs ingest",
     "telegram:listen": "node scripts/telegram-channel-listener.mjs",
     "threads:auth": "node scripts/threads-ingest.mjs auth",
     "threads:url": "node scripts/threads-ingest.mjs single-url"

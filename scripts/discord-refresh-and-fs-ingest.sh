@@ -207,7 +207,7 @@ run_discord_refresh() {
   echo "[discord] using python: ${py_bin}"
   pushd "${DISCORD_REPO}" >/dev/null
   echo "[discord] updating channels_last_ids.json"
-  "${py_bin}" find_last_ids_per_channel.py
+  node "${REPO_ROOT}/scripts/refresh-discord-last-ids.mjs" --discord-repo "${DISCORD_REPO}"
   echo "[discord] downloading latest content from configured channels"
   "${py_bin}" download_images_from_discord_channel.py
   popd >/dev/null
