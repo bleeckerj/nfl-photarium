@@ -1,0 +1,305 @@
+'use client';
+
+import { useCallback, useState } from 'react';
+import type {
+  ImportCandidate,
+  ImportProgressState,
+  UploaderQueueItem,
+} from '@/features/page-import/types';
+
+const PAGE_IMPORT_PREVIEW_LIMIT = 60;
+
+const parseCookieHeaderFromClipboard = (raw: string) => {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const cookieLine = lines.find((line) => /^cookie\s*:/i.test(line));
+  return (cookieLine || trimmed).replace(/^cookie\s*:\s*/i, '').trim();
+};
+
+const toQueueItem = (
+  candidate: ImportCandidate,
+  queueId: string,
+  sessionId: string,
+  includePreview: boolean
+): UploaderQueueItem => ({
+  id: queueId,
+  assetType: candidate.kind,
+  filename: candidate.filename || candidate.url.split('/').pop() || (candidate.kind === 'video' ? 'remote-video' : 'remote-image'),
+  remoteUrl: candidate.url,
+  previewUrl: includePreview ? (candidate.kind === 'video' ? candidate.posterUrl : candidate.previewUrl || candidate.url) : undefined,
+  posterUrl: candidate.posterUrl,
+  isBlobSource: candidate.isBlobSource || candidate.url.startsWith('blob:'),
+  sizeBytes: candidate.metadata?.fileSizeBytes,
+  contentType: candidate.metadata?.contentType ?? candidate.contentType,
+  originalUrl: candidate.url,
+  selected: true,
+  metadata: candidate.metadata,
+  tempAssetKey: candidate.tempAssetKey,
+  importSessionId: sessionId,
+});
+
+type UsePageImportDiscoveryParams = {
+  addQueuedFiles: (items: UploaderQueueItem[]) => void;
+  createQueueId: () => string;
+  ensureImportSession: () => Promise<string>;
+  setSourceUrlIfEmpty: (value: string) => void;
+};
+
+export function usePageImportDiscovery({
+  addQueuedFiles,
+  createQueueId,
+  ensureImportSession,
+  setSourceUrlIfEmpty,
+}: UsePageImportDiscoveryParams) {
+  const [pageImportUrl, setPageImportUrl] = useState('');
+  const [pageImportLoading, setPageImportLoading] = useState(false);
+  const [pageImportError, setPageImportError] = useState<string | null>(null);
+  const [pageImportAllowInsecure, setPageImportAllowInsecure] = useState(false);
+  const [pageImportIncludeUiChrome, setPageImportIncludeUiChrome] = useState(false);
+  const [pageImportIncludeSmallAssets, setPageImportIncludeSmallAssets] = useState(false);
+  const [pageImportScrollMode, setPageImportScrollMode] = useState(true);
+  const [pageImportAutoScroll, setPageImportAutoScroll] = useState(true);
+  const [pageImportMaxScrolls, setPageImportMaxScrolls] = useState('10');
+  const [pageImportScrollDelayMs, setPageImportScrollDelayMs] = useState('1500');
+  const [pageImportMaxPages, setPageImportMaxPages] = useState('1');
+  const [pageImportCookieHeader, setPageImportCookieHeader] = useState('');
+  const [pageImportProgress, setPageImportProgress] = useState<ImportProgressState>(null);
+
+  const handleImportPage = useCallback(
+    async (cookieHeaderOverride?: string) => {
+      if (!pageImportUrl.trim()) return;
+      const cookieHeaderValue = (cookieHeaderOverride ?? pageImportCookieHeader).trim();
+
+      setPageImportLoading(true);
+      setPageImportError(null);
+      setPageImportProgress(null);
+
+      try {
+        const sessionId = await ensureImportSession();
+
+        if (pageImportScrollMode) {
+          const response = await fetch('/api/import/page/scroll/stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              url: pageImportUrl.trim(),
+              autoScrollUntilStable: pageImportAutoScroll,
+              maxScrolls: Number(pageImportMaxScrolls) || 10,
+              scrollDelayMs: Number(pageImportScrollDelayMs) || 1500,
+              maxPages: Number(pageImportMaxPages) || 1,
+              includeUiChrome: pageImportIncludeUiChrome,
+              includeSmallAssets: pageImportIncludeSmallAssets,
+              ...(cookieHeaderValue ? { cookieHeader: cookieHeaderValue } : {}),
+            }),
+          });
+          if (!response.ok || !response.body) {
+            const payload = await response.text();
+            throw new Error(payload || 'Failed to scan page');
+          }
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          let totalAssets = 0;
+          let scrollCount = 0;
+          const pendingQueueItems: UploaderQueueItem[] = [];
+          const seenUrls = new Set<string>();
+
+          const flushPendingQueueItems = () => {
+            if (pendingQueueItems.length === 0) return;
+            const batch = pendingQueueItems.splice(0, pendingQueueItems.length);
+            addQueuedFiles(batch);
+          };
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            let eventType = '';
+            for (const line of lines) {
+              if (line.startsWith('event: ')) {
+                eventType = line.slice(7).trim();
+              } else if (line.startsWith('data: ') && eventType) {
+                const data = JSON.parse(line.slice(6));
+                if (eventType === 'status') {
+                  setPageImportProgress({
+                    message: data.message || 'Processing...',
+                    scrollCount: data.scrollCount || 0,
+                    imageCount: data.imageCount || 0,
+                    pageNum: data.pageNum,
+                  });
+                  scrollCount = data.scrollCount || 0;
+                } else if (eventType === 'image' || eventType === 'video' || eventType === 'media') {
+                  const candidate = data as ImportCandidate;
+                  if (candidate?.url) {
+                    if (seenUrls.has(candidate.url)) {
+                      continue;
+                    }
+                    seenUrls.add(candidate.url);
+                    totalAssets += 1;
+                    pendingQueueItems.push(
+                      toQueueItem(
+                        candidate,
+                        createQueueId(),
+                        sessionId,
+                        totalAssets <= PAGE_IMPORT_PREVIEW_LIMIT
+                      )
+                    );
+                    if (pendingQueueItems.length >= 24) {
+                      flushPendingQueueItems();
+                    }
+                  }
+                } else if (eventType === 'done') {
+                  flushPendingQueueItems();
+                  setPageImportProgress({
+                    message: data.message || 'Complete',
+                    scrollCount: data.scrollCount || scrollCount,
+                    imageCount: data.imageCount || totalAssets,
+                  });
+                } else if (eventType === 'error') {
+                  throw new Error(data.error || 'Unknown error');
+                }
+              }
+            }
+          }
+
+          flushPendingQueueItems();
+          if (totalAssets === 0) {
+            setPageImportError(
+              `No media found after ${scrollCount} scroll${scrollCount !== 1 ? 's' : ''}. The page may require login, use complex lazy-loading, or block automated browsers.`
+            );
+          } else {
+            setSourceUrlIfEmpty(pageImportUrl.trim());
+            setPageImportUrl('');
+          }
+          return;
+        }
+
+        const response = await fetch('/api/import/page', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: pageImportUrl.trim(),
+            minBytes: pageImportIncludeSmallAssets ? 1024 : 8 * 1024,
+            allowInsecure: pageImportAllowInsecure,
+            includeUiChrome: pageImportIncludeUiChrome,
+            includeSmallAssets: pageImportIncludeSmallAssets,
+            ...(cookieHeaderValue ? { cookieHeader: cookieHeaderValue } : {}),
+          }),
+        });
+        const contentType = response.headers.get('content-type') || '';
+        const isJson = contentType.includes('application/json');
+        const data = isJson ? await response.json() : await response.text();
+        if (!response.ok) {
+          if (isJson && typeof data === 'object' && data && 'error' in data) {
+            throw new Error(
+              typeof (data as { error?: string }).error === 'string'
+                ? (data as { error?: string }).error
+                : 'Failed to inspect page'
+            );
+          }
+          throw new Error('Failed to inspect page');
+        }
+        if (!isJson || typeof data !== 'object' || !data) {
+          throw new Error('Failed to inspect page');
+        }
+
+        const media = Array.isArray(data?.media) ? (data.media as ImportCandidate[]) : [];
+        if (media.length === 0) {
+          setPageImportError(
+            'No media found on that page. The assets may be loaded via JavaScript, try enabling "Scroll mode" to load infinite scroll content.'
+          );
+          return;
+        }
+
+        const includePreviews = media.length <= PAGE_IMPORT_PREVIEW_LIMIT;
+        addQueuedFiles(
+          media.map((entry) => toQueueItem(entry, createQueueId(), sessionId, includePreviews))
+        );
+        setSourceUrlIfEmpty(pageImportUrl.trim());
+        setPageImportUrl('');
+      } catch (error) {
+        console.error('Import page failed', error);
+        setPageImportError(error instanceof Error ? error.message : 'Failed to import page');
+      } finally {
+        setPageImportLoading(false);
+      }
+    },
+    [
+      addQueuedFiles,
+      createQueueId,
+      ensureImportSession,
+      pageImportAllowInsecure,
+      pageImportAutoScroll,
+      pageImportCookieHeader,
+      pageImportIncludeSmallAssets,
+      pageImportIncludeUiChrome,
+      pageImportMaxPages,
+      pageImportMaxScrolls,
+      pageImportScrollDelayMs,
+      pageImportScrollMode,
+      pageImportUrl,
+      setSourceUrlIfEmpty,
+    ]
+  );
+
+  const handlePasteCookiesAndScan = useCallback(async () => {
+    if (pageImportLoading) return;
+    if (!pageImportUrl.trim()) {
+      setPageImportError('Enter a page URL first, then paste cookies and scan.');
+      return;
+    }
+    if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) {
+      setPageImportError('Clipboard read is unavailable. Paste the Cookie header manually.');
+      return;
+    }
+
+    try {
+      const clipboardText = parseCookieHeaderFromClipboard(await navigator.clipboard.readText());
+      if (!clipboardText.trim()) {
+        setPageImportError('Clipboard does not contain a Cookie header.');
+        return;
+      }
+      setPageImportCookieHeader(clipboardText.trim());
+      await handleImportPage(clipboardText.trim());
+    } catch (error) {
+      setPageImportError(
+        error instanceof Error ? error.message : 'Failed to read cookies from clipboard'
+      );
+    }
+  }, [handleImportPage, pageImportLoading, pageImportUrl]);
+
+  return {
+    pageImportUrl,
+    setPageImportUrl,
+    pageImportLoading,
+    pageImportError,
+    pageImportAllowInsecure,
+    setPageImportAllowInsecure,
+    pageImportIncludeUiChrome,
+    setPageImportIncludeUiChrome,
+    pageImportIncludeSmallAssets,
+    setPageImportIncludeSmallAssets,
+    pageImportScrollMode,
+    setPageImportScrollMode,
+    pageImportAutoScroll,
+    setPageImportAutoScroll,
+    pageImportMaxScrolls,
+    setPageImportMaxScrolls,
+    pageImportScrollDelayMs,
+    setPageImportScrollDelayMs,
+    pageImportMaxPages,
+    setPageImportMaxPages,
+    pageImportCookieHeader,
+    setPageImportCookieHeader,
+    pageImportProgress,
+    setPageImportProgress,
+    handleImportPage,
+    handlePasteCookiesAndScan,
+  };
+}

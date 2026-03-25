@@ -8,8 +8,13 @@ import JSZip from "jszip";
 import MonoSelect from "./MonoSelect";
 import { normalizeOriginalUrl } from "@/utils/urlNormalization";
 import { setEmbeddingPendingEntry } from "@/utils/embeddingPending";
-import { sanitizeFilename, needsSanitization, MAX_FILENAME_LENGTH } from "@/utils/filename";
 import { inferAssetTypeFromUrl, isImageOnlyImportError } from "@/utils/mediaAssetType";
+import { usePageImportSession } from "@/features/page-import/hooks/usePageImportSession";
+import { usePageImportDiscovery } from "@/features/page-import/hooks/usePageImportDiscovery";
+import { useCandidateMetadataEnrichment } from "@/features/page-import/hooks/useCandidateMetadataEnrichment";
+import { PageImportControls } from "@/features/page-import/components/PageImportControls";
+import { PageImportQueue } from "@/features/page-import/components/PageImportQueue";
+import type { UploaderQueueItem } from "@/features/page-import/types";
 
 interface UploadedImage {
   id: string;
@@ -42,29 +47,7 @@ interface ImageUploaderProps {
   onNamespaceChange?: (value: string) => void;
 }
 
-interface QueuedFile {
-  id: string;
-  assetType?: "image" | "video";
-  file?: File;
-  filename: string;
-  remoteUrl?: string;
-  previewUrl?: string;
-  posterUrl?: string;
-  isBlobSource?: boolean;
-  sizeBytes?: number;
-  contentType?: string;
-  selected?: boolean;
-  originalUrl?: string;
-  sourceUrl?: string;
-  sourcePath?: string;
-  folder?: string;
-  tags?: string;
-  description?: string;
-  captureDate?: string;
-  groupId?: string;
-  groupIndex?: number;
-  processingNote?: string;
-}
+type QueuedFile = UploaderQueueItem;
 
 interface GalleryImageSummary {
   id: string;
@@ -260,11 +243,8 @@ const base64ToFile = (base64: string, filename: string, mimeType: string) => {
 };
 
 const MAX_BYTES = 10 * 1024 * 1024;
-const PAGE_IMPORT_PREVIEW_LIMIT = 60;
 const VIDEO_REMOTE_UPLOAD_CONCURRENCY = 2;
 const QUEUE_RENDER_LIMIT = 250;
-const STREAM_QUEUE_FLUSH_BATCH_SIZE = 24;
-const STREAM_PROGRESS_UPDATE_INTERVAL_MS = 200;
 const NAMESPACE_REQUIRED_UPLOAD_ERROR = 'Select a specific namespace before uploading. "All namespaces" and "(no namespace)" are browse-only for uploads.';
 
 const isZipFile = (file: File) => (
@@ -508,30 +488,22 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
   const [registryNamespaces, setRegistryNamespaces] = useState<string[]>([]);
   const [uploadNamespaceSelectValue, setUploadNamespaceSelectValue] = useState<string>('');
   const [uploadNamespaceDraft, setUploadNamespaceDraft] = useState<string>('');
-  const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
+  const {
+    queuedFiles,
+    setQueuedFiles,
+    updateQueuedFile,
+    addQueuedFiles,
+    applyMetadataPatches,
+    removeQueuedFile,
+    clearQueue,
+    createQueueId,
+    ensureImportSession,
+  } = usePageImportSession();
   const [selectedParentId, setSelectedParentId] = useState<string>('');
   const [parentOptions, setParentOptions] = useState<GalleryImageSummary[]>([]);
   const [importUrl, setImportUrl] = useState('');
   const [importLoading, setImportLoading] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
-  const [pageImportUrl, setPageImportUrl] = useState('');
-  const [pageImportLoading, setPageImportLoading] = useState(false);
-  const [pageImportError, setPageImportError] = useState<string | null>(null);
-  const [pageImportAllowInsecure, setPageImportAllowInsecure] = useState(false);
-  const [pageImportIncludeUiChrome, setPageImportIncludeUiChrome] = useState(false);
-  const [pageImportIncludeSmallAssets, setPageImportIncludeSmallAssets] = useState(false);
-  const [pageImportScrollMode, setPageImportScrollMode] = useState(true);
-  const [pageImportAutoScroll, setPageImportAutoScroll] = useState(true);
-  const [pageImportMaxScrolls, setPageImportMaxScrolls] = useState('10');
-  const [pageImportScrollDelayMs, setPageImportScrollDelayMs] = useState('1500');
-  const [pageImportMaxPages, setPageImportMaxPages] = useState('1');
-  const [pageImportCookieHeader, setPageImportCookieHeader] = useState('');
-  const [pageImportProgress, setPageImportProgress] = useState<{
-    message: string;
-    scrollCount: number;
-    imageCount: number;
-    pageNum?: number;
-  } | null>(null);
   const previewFallbackAttemptedRef = useRef<Set<string>>(new Set());
   const [reducingQueueItems, setReducingQueueItems] = useState<Record<string, boolean>>({});
   const [previewFailures, setPreviewFailures] = useState<Record<string, boolean>>({});
@@ -550,6 +522,45 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
   const embeddingQueueRef = useRef<Array<{ id: string; clip: boolean; color: boolean }>>([]);
   const embeddingWorkerRef = useRef(false);
   const activeUploadOpsRef = useRef(0);
+
+  const setSourceUrlIfEmpty = useCallback((value: string) => {
+    if (!sourceUrl.trim()) {
+      setSourceUrl(value);
+    }
+  }, [sourceUrl]);
+
+  const {
+    pageImportUrl,
+    setPageImportUrl,
+    pageImportLoading,
+    pageImportError,
+    pageImportAllowInsecure,
+    setPageImportAllowInsecure,
+    pageImportIncludeUiChrome,
+    setPageImportIncludeUiChrome,
+    pageImportIncludeSmallAssets,
+    setPageImportIncludeSmallAssets,
+    pageImportScrollMode,
+    setPageImportScrollMode,
+    pageImportAutoScroll,
+    setPageImportAutoScroll,
+    pageImportMaxScrolls,
+    setPageImportMaxScrolls,
+    pageImportScrollDelayMs,
+    setPageImportScrollDelayMs,
+    pageImportMaxPages,
+    setPageImportMaxPages,
+    pageImportCookieHeader,
+    setPageImportCookieHeader,
+    pageImportProgress,
+    handleImportPage,
+    handlePasteCookiesAndScan,
+  } = usePageImportDiscovery({
+    addQueuedFiles,
+    createQueueId,
+    ensureImportSession,
+    setSourceUrlIfEmpty,
+  });
 
   const updateEmbeddingPending = useCallback((
     id: string,
@@ -581,20 +592,6 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     activeUploadOpsRef.current = Math.max(0, activeUploadOpsRef.current - 1);
     setActiveUploadOps(activeUploadOpsRef.current);
     setIsUploading(activeUploadOpsRef.current > 0);
-  }, []);
-
-  const createQueueId = useCallback(
-    () =>
-      typeof crypto !== 'undefined' && 'randomUUID' in crypto
-        ? crypto.randomUUID()
-        : Math.random().toString(36).slice(2),
-    []
-  );
-
-  const updateQueuedFile = useCallback((id: string, updates: Partial<QueuedFile>) => {
-    setQueuedFiles((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, ...updates } : item))
-    );
   }, []);
 
   const handlePreviewLoadError = useCallback(async (item: QueuedFile) => {
@@ -951,6 +948,14 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     [queuedFiles, showAllQueuedItems]
   );
 
+  useCandidateMetadataEnrichment({
+    queuedFiles,
+    visibleIds: visibleQueuedFiles.map((item) => item.id),
+    allowInsecure: pageImportAllowInsecure,
+    cookieHeader: pageImportCookieHeader,
+    applyMetadataPatches,
+  });
+
   // Activity stats for the prominent progress indicator
   const activityStats = useMemo((): ActivityStats => {
     const uploading = uploadedImages.filter(img => img.status === 'uploading').length;
@@ -1060,22 +1065,6 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     const hasKnownOption = uploadNamespaceOptions.some((option) => option.value === nextNamespace);
     setUploadNamespaceSelectValue(hasKnownOption ? nextNamespace : '__custom__');
   }, [namespace, uploadNamespaceOptions]);
-
-  // Keep track of queued files for cleanup on unmount
-  const queuedFilesRef = useRef(queuedFiles);
-  useEffect(() => {
-    queuedFilesRef.current = queuedFiles;
-  }, [queuedFiles]);
-
-  useEffect(() => {
-    return () => {
-      queuedFilesRef.current.forEach((file) => {
-        if (file.previewUrl && file.previewUrl.startsWith('blob:')) {
-          URL.revokeObjectURL(file.previewUrl);
-        }
-      });
-    };
-  }, []);
 
   // Fetch existing folders from images endpoint and merge with local presets
   const fetchFolders = useCallback(async () => {
@@ -1608,7 +1597,9 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
           originalUrl: originalUrlToSend || undefined,
           sourceUrl: sourceUrlToSend || undefined,
           namespace: uploadNamespace,
-          parentId: selectedParentId || undefined
+          parentId: selectedParentId || undefined,
+          sessionId: entry.importSessionId,
+          tempAssetKey: entry.tempAssetKey,
         };
       });
 
@@ -2084,15 +2075,32 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     setQueuedFiles((prev) => prev.map((item) => ({ ...item, filename: nextName })));
   }, [queueRenameValue]);
 
-  // Clear queued files
-  const clearQueue = () => {
-    queuedFiles.forEach((file) => {
-      if (file.previewUrl && file.previewUrl.startsWith('blob:')) {
-        URL.revokeObjectURL(file.previewUrl);
-      }
+  const handleClearQueuedItems = useCallback(() => {
+    clearQueue();
+    setPreviewFailures({});
+    setReducingQueueItems({});
+    setExpandedQueueMetadata({});
+    setShowAllQueuedItems(false);
+  }, [clearQueue]);
+
+  const handleRemoveQueuedItem = useCallback((id: string) => {
+    removeQueuedFile(id);
+    setPreviewFailures((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
     });
-    setQueuedFiles([]);
-  };
+    setReducingQueueItems((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setExpandedQueueMetadata((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }, [removeQueuedFile]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -2272,272 +2280,6 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
       setImportError(err instanceof Error ? err.message : 'Failed to import media');
     } finally {
       setImportLoading(false);
-    }
-  };
-
-  const parseCookieHeaderFromClipboard = (raw: string) => {
-    const trimmed = raw.trim();
-    if (!trimmed) return '';
-    const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    const cookieLine = lines.find((line) => /^cookie\s*:/i.test(line));
-    const candidate = (cookieLine || trimmed).replace(/^cookie\s*:\s*/i, '').trim();
-    return candidate;
-  };
-
-  const handleImportFromPage = async (cookieHeaderOverride?: string) => {
-    if (!pageImportUrl.trim()) return;
-    const cookieHeaderValue = (cookieHeaderOverride ?? pageImportCookieHeader).trim();
-    try {
-      setPageImportLoading(true);
-      setPageImportError(null);
-      setPageImportProgress(null);
-      
-      // For scroll mode, use streaming SSE endpoint for progressive loading
-      if (pageImportScrollMode) {
-        const maxPages = Number(pageImportMaxPages) || 1;
-        const maxScrolls = Number(pageImportMaxScrolls) || 10;
-        const scrollDelayMs = Number(pageImportScrollDelayMs) || 1500;
-        const autoScrollUntilStable = pageImportAutoScroll;
-        
-        const response = await fetch('/api/import/page/scroll/stream', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            url: pageImportUrl.trim(),
-            maxPages,
-            scrollDelayMs,
-            autoScrollUntilStable,
-            includeUiChrome: pageImportIncludeUiChrome,
-            includeSmallAssets: pageImportIncludeSmallAssets,
-            ...(cookieHeaderValue ? { cookieHeader: cookieHeaderValue } : {}),
-            ...(autoScrollUntilStable ? {} : { maxScrolls })
-          })
-        });
-
-        if (!response.ok || !response.body) {
-          throw new Error('Failed to start page scan');
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let totalAssets = 0;
-        let scrollCount = 0;
-        let lastProgressUpdateAt = 0;
-        const pendingQueueItems: QueuedFile[] = [];
-        const existingUrls = new Set(queuedFiles.map(f => f.remoteUrl || f.originalUrl || f.filename));
-        const flushPendingQueueItems = () => {
-          if (pendingQueueItems.length === 0) return;
-          const batch = pendingQueueItems.splice(0, pendingQueueItems.length);
-          setQueuedFiles((prev) => [...prev, ...batch]);
-        };
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
-
-          let eventType = '';
-          for (const line of lines) {
-            if (line.startsWith('event: ')) {
-              eventType = line.slice(7).trim();
-            } else if (line.startsWith('data: ') && eventType) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                
-                if (eventType === 'status') {
-                  const now = Date.now();
-                  if (now - lastProgressUpdateAt >= STREAM_PROGRESS_UPDATE_INTERVAL_MS) {
-                    setPageImportProgress({
-                      message: data.message || 'Processing...',
-                      scrollCount: data.scrollCount || 0,
-                      imageCount: data.imageCount || 0
-                    });
-                    lastProgressUpdateAt = now;
-                  }
-                  scrollCount = data.scrollCount || 0;
-                } else if (eventType === 'image' || eventType === 'video' || eventType === 'media') {
-                  const mediaUrl = typeof data.url === 'string' ? data.url : '';
-                  if (mediaUrl && !existingUrls.has(mediaUrl)) {
-                    existingUrls.add(mediaUrl);
-                    totalAssets++;
-                    const isBlobSource = Boolean(data.isBlob) || mediaUrl.startsWith('blob:');
-                    const inferredAssetType: 'image' | 'video' =
-                      data.kind === 'video' || eventType === 'video' || inferAssetTypeFromUrl(mediaUrl) === 'video'
-                        ? 'video'
-                        : 'image';
-                    const newItem: QueuedFile = {
-                      id: createQueueId(),
-                      assetType: inferredAssetType,
-                      filename: data.filename || mediaUrl.split('/').pop() || (inferredAssetType === 'video' ? 'remote-video' : 'remote-image'),
-                      remoteUrl: mediaUrl,
-                      previewUrl: totalAssets <= PAGE_IMPORT_PREVIEW_LIMIT
-                        ? (inferredAssetType === 'image' ? mediaUrl : (typeof data.posterUrl === 'string' ? data.posterUrl : undefined))
-                        : undefined,
-                      posterUrl: typeof data.posterUrl === 'string' ? data.posterUrl : undefined,
-                      originalUrl: mediaUrl,
-                      isBlobSource,
-                      selected: true
-                    };
-                    pendingQueueItems.push(newItem);
-                    if (pendingQueueItems.length >= STREAM_QUEUE_FLUSH_BATCH_SIZE) {
-                      flushPendingQueueItems();
-                    }
-                  }
-                } else if (eventType === 'done') {
-                  flushPendingQueueItems();
-                  setPageImportProgress({
-                    message: data.message || 'Complete',
-                    scrollCount: data.scrollCount || scrollCount,
-                    imageCount: data.imageCount || totalAssets
-                  });
-                } else if (eventType === 'error') {
-                  throw new Error(data.error || 'Unknown error');
-                }
-              } catch (parseErr) {
-                // Ignore parse errors for incomplete data
-                if (eventType === 'error') {
-                  throw parseErr;
-                }
-              }
-              eventType = '';
-            }
-          }
-        }
-        flushPendingQueueItems();
-
-        if (totalAssets === 0) {
-          setPageImportError(`No media found after ${scrollCount} scroll${scrollCount !== 1 ? 's' : ''}. The page may require login, use complex lazy-loading, or block automated browsers.`);
-        } else {
-        }
-        
-        if (!sourceUrl.trim()) {
-          setSourceUrl(pageImportUrl.trim());
-        }
-        setPageImportUrl('');
-        
-        // Clear progress after a brief delay
-        setTimeout(() => setPageImportProgress(null), 3000);
-        return;
-      }
-      
-      // Non-scroll mode: use original endpoint
-      const response = await fetch('/api/import/page', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url: pageImportUrl.trim(),
-          minBytes: pageImportIncludeSmallAssets ? 1024 : 8 * 1024,
-          allowInsecure: pageImportAllowInsecure,
-          includeUiChrome: pageImportIncludeUiChrome,
-          includeSmallAssets: pageImportIncludeSmallAssets,
-          ...(cookieHeaderValue ? { cookieHeader: cookieHeaderValue } : {}),
-        })
-      });
-      const contentType = response.headers.get('content-type') || '';
-      const isJson = contentType.includes('application/json');
-      const data = isJson ? await response.json() : await response.text();
-      if (!response.ok) {
-        if (isJson && typeof data === 'object' && data && 'error' in data) {
-          const payload = data as {
-            error?: string;
-            details?: {
-              upstreamStatus?: number;
-              upstreamStatusText?: string;
-              finalUrl?: string;
-              code?: string;
-            };
-          };
-          const baseError = payload.error || 'Failed to inspect page';
-          const detailParts: string[] = [];
-          if (typeof payload.details?.upstreamStatus === 'number') {
-            detailParts.push(`Upstream: ${payload.details.upstreamStatus}${payload.details.upstreamStatusText ? ` ${payload.details.upstreamStatusText}` : ''}`);
-          }
-          if (payload.details?.code) {
-            detailParts.push(`Code: ${payload.details.code}`);
-          }
-          if (payload.details?.finalUrl) {
-            detailParts.push(`Final URL: ${payload.details.finalUrl}`);
-          }
-          throw new Error(detailParts.length ? `${baseError} (${detailParts.join(' | ')})` : baseError);
-        }
-        throw new Error('Failed to inspect page');
-      }
-      if (!isJson || typeof data !== 'object' || !data) {
-        throw new Error('Failed to inspect page');
-      }
-      const media = Array.isArray(data?.media) ? data.media : [];
-      const images = Array.isArray(data?.images) ? data.images : [];
-      const videos = Array.isArray(data?.videos) ? data.videos : [];
-      const mergedMedia = media.length > 0 ? media : [
-        ...images.map((image: { url: string; filename?: string; contentLength?: number; contentType?: string }) => ({ ...image, kind: 'image' as const })),
-        ...videos.map((video: { url: string; filename?: string; contentType?: string; isBlob?: boolean; posterUrl?: string }) => ({ ...video, kind: 'video' as const })),
-      ];
-      const includePreviews = mergedMedia.length <= PAGE_IMPORT_PREVIEW_LIMIT;
-      
-      if (mergedMedia.length === 0) {
-        setPageImportError('No media found on that page. The assets may be loaded via JavaScript—try enabling "Scroll mode" to load infinite scroll content.');
-        return;
-      }
-      
-
-      const newItems: QueuedFile[] = mergedMedia.map((entry: { kind?: 'image' | 'video'; url: string; filename?: string; contentLength?: number; contentType?: string; isBlob?: boolean; posterUrl?: string }) => ({
-        id: createQueueId(),
-        assetType: entry.kind === 'video' || inferAssetTypeFromUrl(entry.url) === 'video' ? 'video' : 'image',
-        filename: entry.filename || entry.url.split('/').pop() || (entry.kind === 'video' ? 'remote-video' : 'remote-image'),
-        remoteUrl: entry.url,
-        previewUrl: includePreviews ? (entry.kind === 'video' ? entry.posterUrl : entry.url) : undefined,
-        posterUrl: entry.posterUrl,
-        isBlobSource: Boolean(entry.isBlob) || entry.url.startsWith('blob:'),
-        sizeBytes: typeof entry.contentLength === 'number' ? entry.contentLength : undefined,
-        contentType: typeof entry.contentType === 'string' ? entry.contentType : undefined,
-        originalUrl: entry.url,
-        selected: true
-      }));
-
-      setQueuedFiles((prev) => {
-        const existing = new Set(prev.map((item) => item.remoteUrl || item.originalUrl || item.filename));
-        const filtered = newItems.filter((item) => !existing.has(item.remoteUrl || item.originalUrl || item.filename));
-        return [...prev, ...filtered];
-      });
-      if (!sourceUrl.trim()) {
-        setSourceUrl(pageImportUrl.trim());
-      }
-      setPageImportUrl('');
-    } catch (err) {
-      console.error('Import page failed', err);
-      setPageImportError(err instanceof Error ? err.message : 'Failed to import page');
-    } finally {
-      setPageImportLoading(false);
-    }
-  };
-
-  const handlePasteCookiesAndScan = async () => {
-    if (pageImportLoading) return;
-    if (!pageImportUrl.trim()) {
-      setPageImportError('Enter a page URL first, then paste cookies and scan.');
-      return;
-    }
-    if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) {
-      setPageImportError('Clipboard read is unavailable. Paste the Cookie header manually.');
-      return;
-    }
-
-    try {
-      const clipboardText = await navigator.clipboard.readText();
-      const parsedCookieHeader = parseCookieHeaderFromClipboard(clipboardText);
-      if (!parsedCookieHeader) {
-        setPageImportError('Clipboard does not contain a Cookie header.');
-        return;
-      }
-      setPageImportCookieHeader(parsedCookieHeader);
-      await handleImportFromPage(parsedCookieHeader);
-    } catch (error) {
-      console.error('Paste cookies + scan failed', error);
-      setPageImportError('Could not read clipboard. Allow clipboard permission, then try again.');
     }
   };
 
@@ -3049,680 +2791,130 @@ A long list of filenames is not user friendly and essentially useless for select
         </p>
       </div>
 
-      <div className="mt-4 p-4 border border-dashed rounded-lg bg-white/60">
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-xs font-mono font-medium text-gray-900">Import images from page URL</p>
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <input
-            type="url"
-            value={pageImportUrl}
-            onChange={(e) => setPageImportUrl(e.target.value)}
-            placeholder="https://example.com/gallery"
-            className="flex-1 border border-gray-300 rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-            disabled={pageImportLoading}
-          />
-          <button
-            type="button"
-            onClick={() => {
-              void handleImportFromPage();
-            }}
-            disabled={pageImportLoading || !pageImportUrl.trim()}
-            className="px-4 py-2 text-xs bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
-          >
-            {pageImportLoading && <Loader2 className="h-3 w-3 animate-spin" />}
-            {pageImportLoading ? (pageImportScrollMode ? 'Scrolling…' : 'Scanning…') : 'Scan page'}
-          </button>
-          <button
-            type="button"
-            onClick={handlePasteCookiesAndScan}
-            disabled={pageImportLoading || !pageImportUrl.trim()}
-            className="px-4 py-2 text-xs bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50"
-            title="Reads clipboard, extracts Cookie header, and starts scan"
-          >
-            Paste cookies + scan
-          </button>
-        </div>
-        
-        {/* Progress indicator for scroll mode */}
-        {pageImportLoading && pageImportScrollMode && pageImportProgress && (
-          <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-            <div className="flex items-center gap-3">
-              <div className="flex-shrink-0">
-                <Loader2 className="h-5 w-5 text-blue-600 animate-spin" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium text-blue-900">{pageImportProgress.message}</p>
-                <div className="flex items-center gap-4 mt-1">
-                  {pageImportProgress.pageNum && Number(pageImportMaxPages) > 1 && (
-                    <span className="text-[11px] text-blue-700">
-                      📄 Page {pageImportProgress.pageNum}
-                    </span>
-                  )}
-                  <span className="text-[11px] text-blue-700">
-                    {pageImportProgress.scrollCount} scroll{pageImportProgress.scrollCount !== 1 ? 's' : ''}
-                  </span>
-                  <span className="text-[11px] text-blue-700">
-                    {pageImportProgress.imageCount} asset{pageImportProgress.imageCount !== 1 ? 's' : ''} found
-                  </span>
-                </div>
-              </div>
-            </div>
-            {pageImportProgress.imageCount > 0 && (
-              <p className="text-[10px] text-blue-600 mt-2">
-                Images are being added to your queue as they&apos;re discovered…
-              </p>
-            )}
-          </div>
-        )}
-        
-        {/* Done indicator (brief) */}
-        {!pageImportLoading && pageImportProgress && (
-          <div className="mt-3 p-2 bg-green-50 border border-green-200 rounded-lg flex items-center gap-2">
-            <CheckCircle className="h-4 w-4 text-green-600" />
-            <span className="text-xs text-green-800">
-              {pageImportProgress.message} — {pageImportProgress.imageCount} asset{pageImportProgress.imageCount !== 1 ? 's' : ''} added
-            </span>
-          </div>
-        )}
-        
-        <div className="mt-2 flex flex-wrap items-center gap-4">
-          <label className="flex items-center gap-2 text-[11px] text-gray-600">
-            <input
-              type="checkbox"
-              checked={pageImportIncludeSmallAssets}
-              onChange={(e) => setPageImportIncludeSmallAssets(e.target.checked)}
-              className="h-3 w-3"
-              disabled={pageImportLoading}
-            />
-            Include small assets
-          </label>
-          <label className="flex items-center gap-2 text-[11px] text-gray-600">
-            <input
-              type="checkbox"
-              checked={pageImportIncludeUiChrome}
-              onChange={(e) => setPageImportIncludeUiChrome(e.target.checked)}
-              className="h-3 w-3"
-              disabled={pageImportLoading}
-            />
-            Include UI chrome / navigation images
-          </label>
-          <label className="flex items-center gap-2 text-[11px] text-gray-600">
-            <input
-              type="checkbox"
-              checked={pageImportScrollMode}
-              onChange={(e) => setPageImportScrollMode(e.target.checked)}
-              className="h-3 w-3"
-              disabled={pageImportLoading}
-            />
-            Scroll mode (for infinite scroll pages)
-          </label>
-          {pageImportScrollMode && (
-            <>
-              <label className="flex items-center gap-2 text-[11px] text-gray-600">
-                <input
-                  type="checkbox"
-                  checked={pageImportAutoScroll}
-                  onChange={(e) => setPageImportAutoScroll(e.target.checked)}
-                  className="h-3 w-3"
-                  disabled={pageImportLoading}
-                />
-                Auto-scroll until no new assets
-              </label>
-              {!pageImportAutoScroll && (
-                <label className="flex items-center gap-2 text-[11px] text-gray-600">
-                  Max scrolls
-                  <input
-                    type="number"
-                    min="1"
-                    max="50"
-                    value={pageImportMaxScrolls}
-                    onChange={(e) => setPageImportMaxScrolls(e.target.value)}
-                    className="w-16 border border-gray-300 rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
-                    disabled={pageImportLoading}
-                  />
-                </label>
-              )}
-              <label className="flex items-center gap-2 text-[11px] text-gray-600">
-                Scroll delay (ms)
-                <input
-                  type="number"
-                  min="500"
-                  max="5000"
-                  step="100"
-                  value={pageImportScrollDelayMs}
-                  onChange={(e) => setPageImportScrollDelayMs(e.target.value)}
-                  className="w-20 border border-gray-300 rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
-                  disabled={pageImportLoading}
-                />
-              </label>
-              <label className="flex items-center gap-2 text-[11px] text-gray-600">
-                Max pages
-                <input
-                  type="number"
-                  min="1"
-                  max="20"
-                  value={pageImportMaxPages}
-                  onChange={(e) => setPageImportMaxPages(e.target.value)}
-                  className="w-16 border border-gray-300 rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
-                  disabled={pageImportLoading}
-                />
-              </label>
-            </>
-          )}
-        </div>
-        <label className="mt-2 flex items-center gap-2 text-[11px] text-gray-600">
-          <input
-            type="checkbox"
-            checked={pageImportAllowInsecure}
-            onChange={(e) => setPageImportAllowInsecure(e.target.checked)}
-            className="h-3 w-3"
-            disabled={pageImportLoading}
-          />
-          Allow insecure TLS (expired/self-signed certs). Requires IMPORT_ALLOW_INSECURE_TLS=true on the server.
-        </label>
-        <label className="mt-2 block text-[11px] text-gray-600">
-          Optional Cookie header (for authenticated scraping on sites that block anonymous automation)
-          <textarea
-            value={pageImportCookieHeader}
-            onChange={(e) => setPageImportCookieHeader(e.target.value)}
-            placeholder="sessionid=...; other_cookie=..."
-            className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1 text-[11px] font-mono focus:outline-none focus:ring-1 focus:ring-blue-400"
-            rows={2}
-            disabled={pageImportLoading}
-          />
-        </label>
-        <details className="mt-2 text-[11px] text-gray-600">
-          <summary className="cursor-pointer select-none text-gray-700">
-            How to get the request Cookie header
-          </summary>
-          <ol className="mt-2 list-decimal space-y-1 pl-4">
-            <li>Open the target page in your regular browser where you are already logged in.</li>
-            <li>Open DevTools, then go to the Network tab.</li>
-            <li>Refresh the page and click the main page request (usually type Document).</li>
-            <li>In Request Headers, copy the full <span className="font-mono">Cookie</span> header value.</li>
-            <li>Paste it into this field, or use <span className="font-mono">Paste cookies + scan</span>.</li>
-          </ol>
-          <p className="mt-2 text-[11px] text-gray-500">
-            If this still fails on protected sites, use CLI browser ingest (<span className="font-mono">npm run page:browser-ingest -- --namespace your-ns --url https://target-page</span>) to extract from a live logged-in browser session.
-          </p>
-        </details>
-        {pageImportError && <p className="text-xs text-red-600 mt-1">{pageImportError}</p>}
-        <p className="text-[11px] text-gray-500 mt-1">
-          {pageImportScrollMode 
-            ? 'Uses a headless browser to trigger lazy/infinite loading and follow pagination links. Auto-scroll stops when no new assets are found (with a safety cap). Requires puppeteer.'
-            : 'Scans the page HTML for image/video URLs. Fast but may miss JavaScript-loaded content.'}
-        </p>
-        <p className="text-[11px] text-gray-500 mt-1">
-          Small-assets and UI-chrome options are off by default because they can surface logos, badges, nav icons, and other decorative site assets.
-        </p>
-      </div>
+      <PageImportControls
+        pageImportUrl={pageImportUrl}
+        setPageImportUrl={setPageImportUrl}
+        pageImportLoading={pageImportLoading}
+        pageImportScrollMode={pageImportScrollMode}
+        pageImportAutoScroll={pageImportAutoScroll}
+        setPageImportAutoScroll={setPageImportAutoScroll}
+        pageImportIncludeSmallAssets={pageImportIncludeSmallAssets}
+        setPageImportIncludeSmallAssets={setPageImportIncludeSmallAssets}
+        pageImportIncludeUiChrome={pageImportIncludeUiChrome}
+        setPageImportIncludeUiChrome={setPageImportIncludeUiChrome}
+        setPageImportScrollMode={setPageImportScrollMode}
+        pageImportMaxScrolls={pageImportMaxScrolls}
+        setPageImportMaxScrolls={setPageImportMaxScrolls}
+        pageImportScrollDelayMs={pageImportScrollDelayMs}
+        setPageImportScrollDelayMs={setPageImportScrollDelayMs}
+        pageImportMaxPages={pageImportMaxPages}
+        setPageImportMaxPages={setPageImportMaxPages}
+        pageImportAllowInsecure={pageImportAllowInsecure}
+        setPageImportAllowInsecure={setPageImportAllowInsecure}
+        pageImportCookieHeader={pageImportCookieHeader}
+        setPageImportCookieHeader={setPageImportCookieHeader}
+        pageImportError={pageImportError}
+        pageImportProgress={pageImportProgress}
+        handleImportPage={handleImportPage}
+        handlePasteCookiesAndScan={handlePasteCookiesAndScan}
+      />
 
-      {/* Queued Files Section */}
       {queuedFiles.length > 0 && (
-        <div className="mt-6">
-          <div className="flex items-center justify-between mb-4">
-            <p className="text-xs font-mono font-medium text-gray-900">Queued Files ({queuedFiles.length})</p>
-            <div className="flex space-x-2">
-              {queuedFiles.some(f => needsSanitization(f.filename)) && (
-                <button type="button"
-                  onClick={() => {
-                    setQueuedFiles(prev => prev.map(f => 
-                      needsSanitization(f.filename) 
-                        ? { ...f, filename: sanitizeFilename(f.filename) }
-                        : f
-                    ));
-                  }}
-                  className="px-3 py-1 text-xs text-amber-700 hover:text-amber-800 border border-amber-300 bg-amber-50 rounded-md hover:bg-amber-100"
-                  disabled={isUploading}
-                  title="Sanitize all long or problematic filenames"
-                >
-                  Sanitize All Names
-                </button>
-              )}
-              <button type="button"
-                onClick={handleAiRefineSelectedNames}
-                className="px-3 py-1 text-xs text-fuchsia-700 hover:text-fuchsia-800 border border-fuchsia-300 bg-fuchsia-50 rounded-md hover:bg-fuchsia-100 disabled:opacity-50"
-                disabled={isUploading || aiRefiningNames || selectedQueuedCount === 0}
-                title="Use AI vision to generate CamelCase shortnames for selected queue items"
-              >
-                {aiRefiningNames ? 'Refining…' : 'AI Refine Selected Names'}
-              </button>
-              <button type="button"
-                onClick={clearQueue}
-                className="px-3 py-1 text-xs text-gray-600 hover:text-red-600 border border-gray-300 rounded-md hover:border-red-300"
-                disabled={isUploading}
-              >
-                Clear Queue
-              </button>
-              <button type="button"
-                onClick={handleManualUpload}
-                disabled={isUploading || selectedQueuedCount === 0 || uploadBlockedByNamespace}
-                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
-                title={uploadBlockedByNamespace ? NAMESPACE_REQUIRED_UPLOAD_ERROR : undefined}
-              >
-                <Upload className="h-4 w-4" />
-                <span>
-                  Upload {selectedQueuedCount} File{selectedQueuedCount !== 1 ? "s" : ""}
-                </span>
-              </button>
-            </div>
-          </div>
-          {uploadBlockedByNamespace && (
-            <div className="mb-3 flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-              <AlertCircle className="h-4 w-4 shrink-0" />
-              <span>Select a namespace to enable upload.</span>
-            </div>
-          )}
-          <div className="mb-3 flex flex-col gap-2 rounded-lg border border-gray-200 bg-gray-50 p-3 md:flex-row md:items-center">
-            <label className="flex-1 text-[11px] text-gray-700">
-              Queue name override
+        <div className="mt-4 flex flex-col gap-2 rounded-lg border border-blue-200 bg-white/70 p-3 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-[11px] text-gray-600">
+              FPS
               <input
-                type="text"
-                value={queueRenameValue}
-                onChange={(e) => setQueueRenameValue(e.target.value)}
-                placeholder="Set one filename/display name for every queued file"
-                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-                disabled={isUploading}
+                type="number"
+                min="0.1"
+                step="0.5"
+                value={animateFps}
+                onChange={(e) => {
+                  setAnimateFpsTouched(true);
+                  setAnimateFps(e.target.value);
+                }}
+                className="w-20 rounded-md border border-gray-300 px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
               />
             </label>
+            <label className="flex items-center gap-2 text-[11px] text-gray-600">
+              Loop
+              <input
+                type="checkbox"
+                checked={animateLoop}
+                onChange={(e) => setAnimateLoop(e.target.checked)}
+                className="h-3 w-3"
+              />
+            </label>
+            <label className="flex items-center gap-2 text-[11px] text-gray-600">
+              Output name
+              <input
+                type="text"
+                value={animateFilename}
+                onChange={(e) => setAnimateFilename(e.target.value)}
+                placeholder="animated-webp"
+                className="w-40 rounded-md border border-gray-300 px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
+              />
+            </label>
+          </div>
+          <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={applyQueueNameToAll}
-              disabled={isUploading || queuedFiles.length === 0 || queueRenameValue.trim().length === 0}
-              className="px-3 py-2 text-xs text-blue-700 border border-blue-300 bg-blue-50 rounded-md hover:bg-blue-100 disabled:opacity-50"
+              onClick={handleCreateAnimation}
+              disabled={animateLoading || selectedQueuedCount < 2}
+              className="rounded-md bg-emerald-600 px-3 py-2 text-xs text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Apply to all queued files
+              {animateLoading ? 'Building...' : 'Create animated WebP'}
             </button>
-          </div>
-          {queuedFiles.length > QUEUE_RENDER_LIMIT && !showAllQueuedItems && (
-            <div className="mb-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
-              Rendering first {QUEUE_RENDER_LIMIT} queue items for performance.
-              <button
-                type="button"
-                onClick={() => setShowAllQueuedItems(true)}
-                className="ml-2 underline hover:text-amber-900"
-              >
-                Show all
-              </button>
-            </div>
-          )}
-          {queuedFiles.length > QUEUE_RENDER_LIMIT && showAllQueuedItems && (
-            <div className="mb-3 rounded border border-gray-200 bg-gray-50 px-3 py-2 text-[11px] text-gray-700">
-              Showing all {queuedFiles.length} queue items.
-              <button
-                type="button"
-                onClick={() => setShowAllQueuedItems(false)}
-                className="ml-2 underline hover:text-gray-900"
-              >
-                Show first {QUEUE_RENDER_LIMIT}
-              </button>
-            </div>
-          )}
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between mb-3 border border-blue-200 rounded-lg p-3 bg-white/70">
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="text-[11px] text-gray-600 flex items-center gap-2">
-                FPS
-                <input
-                  type="number"
-                  min="0.1"
-                  step="0.5"
-                  value={animateFps}
-                  onChange={(e) => {
-                    setAnimateFpsTouched(true);
-                    setAnimateFps(e.target.value);
-                  }}
-                  className="w-20 border border-gray-300 rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
-                />
-              </label>
-              <label className="text-[11px] text-gray-600 flex items-center gap-2">
-                Loop
-                <input
-                  type="checkbox"
-                  checked={animateLoop}
-                  onChange={(e) => setAnimateLoop(e.target.checked)}
-                  className="h-3 w-3"
-                />
-              </label>
-              <label className="text-[11px] text-gray-600 flex items-center gap-2">
-                Output name
-                <input
-                  type="text"
-                  value={animateFilename}
-                  onChange={(e) => setAnimateFilename(e.target.value)}
-                  placeholder="animated-webp"
-                  className="w-40 border border-gray-300 rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
-                />
-              </label>
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={handleCreateAnimation}
-                disabled={animateLoading || selectedQueuedCount < 2}
-                className="px-3 py-2 text-xs bg-emerald-600 text-white rounded-md hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {animateLoading ? 'Building…' : 'Create animated WebP'}
-              </button>
-              {animateError && <p className="text-[11px] text-red-600">{animateError}</p>}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3">
-            {visibleQueuedFiles.map((item) => {
-              const hasCustomFolder = item.folder !== undefined;
-              const hasCustomTags = item.tags !== undefined;
-              const hasCustomDescription = item.description !== undefined;
-              const hasCustomOriginalUrl = item.originalUrl !== undefined;
-              const hasCustomSourceUrl = item.sourceUrl !== undefined;
-              const previewUrl = item.previewUrl || item.remoteUrl;
-              const effectiveAssetType = item.assetType ?? (item.file ? inferAssetTypeFromFile(item.file) : inferAssetTypeFromUrl(item.remoteUrl));
-              const previewFailed = Boolean(previewFailures[item.id]);
-              const displaySizeBytes = item.file?.size ?? item.sizeBytes;
-              const overMaxBytes = typeof displaySizeBytes === 'number' && displaySizeBytes > MAX_BYTES;
-              const previewFolder = selectedFolder.trim()
-                ? selectedFolder.trim()
-                : newFolder.trim()
-                  ? newFolder.trim().toLowerCase().replace(/\s+/g, "-")
-                  : "";
-              const effectiveFolder = hasCustomFolder ? item.folder || "" : previewFolder;
-              const effectiveTags = resolveTagInput(tags, hasCustomTags ? item.tags : undefined);
-              const effectiveDescription = hasCustomDescription ? item.description || "" : description;
-              const effectiveOriginalUrl = hasCustomOriginalUrl ? item.originalUrl || "" : originalUrl;
-              const effectiveSourceUrl = hasCustomSourceUrl ? item.sourceUrl || "" : sourceUrl;
-              const metadataExpanded = Boolean(expandedQueueMetadata[item.id]);
-              const metadataBytes = buildMetadataEstimate(item, {
-                folder: effectiveFolder,
-                tags: effectiveTags,
-                description: effectiveDescription,
-                originalUrl: effectiveOriginalUrl,
-                sourceUrl: effectiveSourceUrl
-              });
-              const metadataOverLimit = metadataBytes >= 1024;
-
-              return (
-              <div key={item.id} className="p-3 bg-blue-50 border border-blue-200 rounded-lg w-full">
-                <div className="flex items-start gap-3">
-                  {previewUrl && !previewFailed ? (
-                    effectiveAssetType === 'video' ? (
-                      <div className="relative h-28 w-28 rounded border border-blue-200 bg-black overflow-hidden">
-                        {(item.posterUrl || (!item.file ? previewUrl : undefined)) ? (
-                          <img
-                            src={item.posterUrl || previewUrl}
-                            alt={item.filename}
-                            className="h-full w-full object-cover"
-                            onError={() => { void handlePreviewLoadError(item); }}
-                            referrerPolicy="no-referrer"
-                          />
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center text-[10px] text-gray-300">
-                            VIDEO
-                          </div>
-                        )}
-                        <div className="absolute bottom-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white">
-                          VIDEO
-                        </div>
-                      </div>
-                    ) : (
-                      <img
-                        src={previewUrl}
-                        alt={item.filename}
-                        className="h-28 w-28 rounded border border-blue-200 object-cover bg-white"
-                        onError={() => { void handlePreviewLoadError(item); }}
-                        referrerPolicy="no-referrer"
-                      />
-                    )
-                  ) : (
-                    <div className="h-28 w-28 rounded border border-blue-200 bg-white flex items-center justify-center text-[10px] text-gray-400">
-                      {item.file ? "Local file" : "No preview (source blocked?)"}
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1">
-                      <input
-                        type="text"
-                        value={item.filename}
-                        onChange={(e) => updateQueuedFile(item.id, { filename: e.target.value })}
-                        className="flex-1 min-w-0 text-xs font-mono font-medium text-gray-900 bg-transparent border-b border-transparent hover:border-blue-300 focus:border-blue-500 focus:outline-none truncate"
-                        title="Click to edit filename"
-                        disabled={isUploading}
-                      />
-                      {needsSanitization(item.filename) && (
-                        <button
-                          type="button"
-                          onClick={() => updateQueuedFile(item.id, { filename: sanitizeFilename(item.filename) })}
-                          className="px-1.5 py-0.5 text-[10px] bg-amber-100 hover:bg-amber-200 text-amber-700 rounded border border-amber-300 whitespace-nowrap"
-                          title="Clean up and truncate filename"
-                          disabled={isUploading}
-                        >
-                          Sanitize
-                        </button>
-                      )}
-                    </div>
-                    <p className="text-xs text-gray-500">
-                      {formatBytesMB(displaySizeBytes)}
-                      <span className="ml-2 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] uppercase text-gray-600">
-                        {effectiveAssetType}
-                      </span>
-                      {item.filename.length > MAX_FILENAME_LENGTH && (
-                        <span className="ml-2 text-amber-600">⚠ Long filename ({item.filename.length} chars)</span>
-                      )}
-                    </p>
-                    {effectiveAssetType === 'video' && item.isBlobSource && (
-                      <p className="text-[11px] text-amber-700">
-                        Blob source detected. Upload will attempt browser capture first.
-                      </p>
-                    )}
-                    {(item.tags || item.description) && (
-                      <div className="text-[11px] text-gray-600 space-y-0.5">
-                        {item.tags && (
-                          <p className="truncate" title={item.tags}>
-                            Tags (prefill): {item.tags}
-                          </p>
-                        )}
-                        {item.description && (
-                          <p className="truncate" title={item.description}>
-                            Description (prefill): {item.description}
-                          </p>
-                        )}
-                      </div>
-                    )}
-                    {item.processingNote && (
-                      <p className="text-[11px] text-emerald-700">{item.processingNote}</p>
-                    )}
-                    {overMaxBytes && (
-                      <div className="mt-1 flex flex-wrap items-center gap-2">
-                        <p className="text-[11px] text-amber-700">
-                          File exceeds 10MB. Suggest converting to JPEG/WebP, then reducing dimensions.
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => reduceQueuedFileSize(item.id)}
-                          disabled={Boolean(reducingQueueItems[item.id]) || isUploading}
-                          className="px-2 py-1 text-[11px] bg-amber-100 hover:bg-amber-200 text-amber-800 rounded border border-amber-300 disabled:opacity-50"
-                        >
-                          {reducingQueueItems[item.id] ? 'Reducing…' : 'Reduce size'}
-                        </button>
-                      </div>
-                    )}
-                    {effectiveOriginalUrl && (
-                      <p className="text-[11px] text-gray-600 truncate" title={effectiveOriginalUrl}>
-                        🔗 {effectiveOriginalUrl}
-                      </p>
-                    )}
-                  </div>
-                  <label className="flex items-center gap-1 text-[11px] text-gray-600">
-                    <input
-                      type="checkbox"
-                      checked={item.selected !== false}
-                      onChange={(e) => updateQueuedFile(item.id, { selected: e.target.checked })}
-                      className="h-3 w-3"
-                      disabled={isUploading}
-                    />
-                    Include
-                  </label>
-                </div>
-                <div className="mt-2 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setExpandedQueueMetadata((prev) => ({
-                        ...prev,
-                        [item.id]: !metadataExpanded
-                      }))
-                    }
-                    className="text-[11px] text-blue-600 hover:text-blue-800"
-                  >
-                    {metadataExpanded ? "Hide metadata" : "Show metadata"}
-                  </button>
-                  <button type="button"
-                    onClick={() => {
-                      if (item.previewUrl && item.previewUrl.startsWith('blob:')) {
-                        URL.revokeObjectURL(item.previewUrl);
-                      }
-                      setQueuedFiles((prev) => prev.filter((entry) => entry.id !== item.id));
-                    }}
-                    className="text-xs text-red-600 hover:text-red-800"
-                    disabled={isUploading}
-                  >
-                    Remove
-                  </button>
-                </div>
-                {metadataExpanded && (
-                  <div className="mt-2 border-t border-blue-200 pt-2 space-y-2">
-                    <div className="space-y-1">
-                      <p className="text-[11px] text-gray-600 truncate" title={effectiveFolder || "—"}>
-                        Folder: {effectiveFolder || "—"}
-                      </p>
-                      <p className="text-[11px] text-gray-600 truncate" title={effectiveTags || "—"}>
-                        Tags: {effectiveTags || "—"}
-                      </p>
-                      <p className="text-[11px] text-gray-600 truncate" title={effectiveDescription || "—"}>
-                        Description: {effectiveDescription || "—"}
-                      </p>
-                      <p className="text-[11px] text-gray-600 truncate" title={effectiveOriginalUrl || "—"}>
-                        Original URL: {effectiveOriginalUrl || "—"}
-                      </p>
-                      <p className="text-[11px] text-gray-600 truncate" title={effectiveSourceUrl || "—"}>
-                        Source URL: {effectiveSourceUrl || "—"}
-                      </p>
-                      <p className="text-[11px] text-gray-600 truncate" title={namespace || "—"}>
-                        Namespace: {namespace || "—"}
-                      </p>
-                      {item.captureDate && (
-                        <p className="text-[11px] text-gray-600 truncate" title={item.captureDate}>
-                          Capture date: {item.captureDate}
-                        </p>
-                      )}
-                      {selectedParentId && (
-                        <p className="text-[11px] text-gray-600 truncate" title={selectedParentId}>
-                          Parent ID: {selectedParentId}
-                        </p>
-                      )}
-                      <p className={clsx("text-[11px]", metadataOverLimit ? "text-red-600" : "text-gray-600")}>
-                        Estimated metadata size: {metadataBytes} bytes
-                      </p>
-                      <p className="text-[10px] text-gray-500">
-                        Estimate excludes content hash and EXIF fields added server-side.
-                      </p>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="block text-[11px] text-gray-700">
-                        Override folder
-                        <input
-                          type="text"
-                          value={item.folder ?? ""}
-                          onChange={(e) => updateQueuedFile(item.id, { folder: e.target.value })}
-                          placeholder={previewFolder || "No folder"}
-                          className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => updateQueuedFile(item.id, { folder: undefined })}
-                          className="mt-1 text-[10px] text-blue-600 hover:text-blue-800"
-                        >
-                          Use global folder
-                        </button>
-                      </label>
-                      <label className="block text-[11px] text-gray-700">
-                        Override tags
-                        <input
-                          type="text"
-                          value={item.tags ?? ""}
-                          onChange={(e) => updateQueuedFile(item.id, { tags: e.target.value })}
-                          placeholder={tags || "No tags"}
-                          className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => updateQueuedFile(item.id, { tags: undefined })}
-                          className="mt-1 text-[10px] text-blue-600 hover:text-blue-800"
-                        >
-                          Use global tags
-                        </button>
-                      </label>
-                      <label className="block text-[11px] text-gray-700">
-                        Override description
-                        <input
-                          type="text"
-                          value={item.description ?? ""}
-                          onChange={(e) => updateQueuedFile(item.id, { description: e.target.value })}
-                          placeholder={description || "No description"}
-                          className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => updateQueuedFile(item.id, { description: undefined })}
-                          className="mt-1 text-[10px] text-blue-600 hover:text-blue-800"
-                        >
-                          Use global description
-                        </button>
-                      </label>
-                      <label className="block text-[11px] text-gray-700">
-                        Override original URL
-                        <input
-                          type="text"
-                          value={item.originalUrl ?? ""}
-                          onChange={(e) => updateQueuedFile(item.id, { originalUrl: e.target.value })}
-                          placeholder={originalUrl || "No original URL"}
-                          className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => updateQueuedFile(item.id, { originalUrl: undefined })}
-                          className="mt-1 text-[10px] text-blue-600 hover:text-blue-800"
-                        >
-                          Use global original URL
-                        </button>
-                      </label>
-                      <label className="block text-[11px] text-gray-700">
-                        Override source URL
-                        <input
-                          type="text"
-                          value={item.sourceUrl ?? ""}
-                          onChange={(e) => updateQueuedFile(item.id, { sourceUrl: e.target.value })}
-                          placeholder={sourceUrl || "No source URL"}
-                          className="mt-1 w-full border border-gray-300 rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-400"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => updateQueuedFile(item.id, { sourceUrl: undefined })}
-                          className="mt-1 text-[10px] text-blue-600 hover:text-blue-800"
-                        >
-                          Use global source URL
-                        </button>
-                      </label>
-                      <p className="text-[10px] text-gray-500">
-                        Leave a field blank to omit it for this file.
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )})}
+            {animateError && <p className="text-[11px] text-red-600">{animateError}</p>}
           </div>
         </div>
       )}
+
+      <PageImportQueue
+        queuedFiles={queuedFiles}
+        visibleQueuedFiles={visibleQueuedFiles}
+        selectedQueuedCount={selectedQueuedCount}
+        isUploading={isUploading}
+        uploadBlockedByNamespace={uploadBlockedByNamespace}
+        aiRefiningNames={aiRefiningNames}
+        queueRenameValue={queueRenameValue}
+        setQueueRenameValue={setQueueRenameValue}
+        showAllQueuedItems={showAllQueuedItems}
+        setShowAllQueuedItems={setShowAllQueuedItems}
+        previewFailures={previewFailures}
+        reducingQueueItems={reducingQueueItems}
+        expandedQueueMetadata={expandedQueueMetadata}
+        selectedFolder={selectedFolder}
+        newFolder={newFolder}
+        tags={tags}
+        description={description}
+        originalUrl={originalUrl}
+        sourceUrl={sourceUrl}
+        updateQueuedFile={updateQueuedFile}
+        resolveTagInput={resolveTagInput}
+        buildMetadataEstimate={buildMetadataEstimate}
+        onPreviewLoadError={(item) => {
+          void handlePreviewLoadError(item);
+        }}
+        onReduceSize={(id) => {
+          void reduceQueuedFileSize(id);
+        }}
+        onRemove={handleRemoveQueuedItem}
+        onToggleMetadata={(id) =>
+          setExpandedQueueMetadata((prev) => ({
+            ...prev,
+            [id]: !prev[id],
+          }))
+        }
+        onClearQueue={handleClearQueuedItems}
+        onAiRefineSelectedNames={() => {
+          void handleAiRefineSelectedNames();
+        }}
+        onManualUpload={() => {
+          void handleManualUpload();
+        }}
+        onApplyQueueNameToAll={applyQueueNameToAll}
+      />
 
       {uploadedImages.length > 0 && (
         <div className="mt-6">

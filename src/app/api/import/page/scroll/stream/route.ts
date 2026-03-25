@@ -26,6 +26,7 @@ import {
   cookieHeaderToPuppeteerCookies,
   normalizeCookieHeader,
 } from '@/server/pageImportCookies';
+import { toImportCandidate } from '@/server/import-metadata/candidates';
 
 // Puppeteer types - we use any since it's an optional dependency
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -122,6 +123,53 @@ interface VideoInfo {
 }
 
 type MediaInfo = ImageInfo | VideoInfo;
+
+const serializeMediaCandidate = (mediaInfo: MediaInfo) => {
+  if (mediaInfo.kind === 'video') {
+    const candidate = toImportCandidate({
+      kind: 'video',
+      url: mediaInfo.url,
+      filename: mediaInfo.filename,
+      previewUrl: mediaInfo.posterUrl,
+      posterUrl: mediaInfo.posterUrl,
+      isBlobSource: mediaInfo.isBlob,
+      metadata: {
+        contentType: mediaInfo.isBlob ? undefined : 'video/unknown',
+      },
+    });
+    return {
+      ...candidate,
+      isBlob: mediaInfo.isBlob,
+      posterUrl: mediaInfo.posterUrl,
+    };
+  }
+
+  const candidate = toImportCandidate({
+    kind: 'image',
+    url: mediaInfo.url,
+    filename: mediaInfo.filename,
+    metadata: {
+      dimensions:
+        mediaInfo.naturalWidth && mediaInfo.naturalHeight
+          ? { width: mediaInfo.naturalWidth, height: mediaInfo.naturalHeight }
+          : undefined,
+      fileSizeBytes: mediaInfo.contentLength,
+      sources: {
+        dimensions:
+          mediaInfo.naturalWidth && mediaInfo.naturalHeight ? 'browser' : undefined,
+        fileSize: typeof mediaInfo.contentLength === 'number' ? 'network' : undefined,
+      },
+    },
+  });
+  return {
+    ...candidate,
+    naturalWidth: mediaInfo.naturalWidth,
+    naturalHeight: mediaInfo.naturalHeight,
+    contentLength: mediaInfo.contentLength,
+    inMainContent: mediaInfo.inMainContent,
+    inUiChrome: mediaInfo.inUiChrome,
+  };
+};
 
 const pickBestFromSrcset = (srcset: string): string => {
   if (!srcset) return '';
@@ -682,11 +730,12 @@ export async function POST(request: NextRequest) {
               if (!sentMedia.has(dedupeKey)) {
                 sentMedia.add(dedupeKey);
                 totalMediaSent++;
-                send('media', mediaInfo);
+                const serialized = serializeMediaCandidate(mediaInfo);
+                send('media', serialized);
                 if (mediaInfo.kind === 'image') {
-                  send('image', mediaInfo);
+                  send('image', serialized);
                 } else {
-                  send('video', mediaInfo);
+                  send('video', serialized);
                 }
               }
             } catch {
@@ -731,8 +780,9 @@ export async function POST(request: NextRequest) {
             if (!sentMedia.has(dedupeKey)) {
               sentMedia.add(dedupeKey);
               totalMediaSent++;
-              send('media', mediaInfo);
-              send('image', mediaInfo);
+              const serialized = serializeMediaCandidate(mediaInfo);
+              send('media', serialized);
+              send('image', serialized);
             }
           }
           

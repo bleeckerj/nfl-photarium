@@ -7,9 +7,11 @@ const ORIGINAL_ENV = { ...process.env };
 const {
   uploadImageBufferMock,
   validateParentForNewChildMock,
+  resolveUploadSourceMock,
 } = vi.hoisted(() => ({
   uploadImageBufferMock: vi.fn(),
   validateParentForNewChildMock: vi.fn(),
+  resolveUploadSourceMock: vi.fn(),
 }));
 
 vi.mock('@/server/uploadService', async () => {
@@ -22,6 +24,10 @@ vi.mock('@/server/uploadService', async () => {
 
 vi.mock('@/server/parentValidation', () => ({
   validateParentForNewChild: validateParentForNewChildMock,
+}));
+
+vi.mock('@/server/import-metadata/uploadSourceResolver', () => ({
+  resolveUploadSource: resolveUploadSourceMock,
 }));
 
 const createRequest = (body: Record<string, unknown>) =>
@@ -49,6 +55,11 @@ describe('POST /api/import/page/upload', () => {
         variants: ['https://imagedelivery.net/hash/img-1/public'],
       },
     });
+    resolveUploadSourceMock.mockResolvedValue({
+      buffer: Buffer.from(new Uint8Array(2048)),
+      contentType: 'image/png',
+      filename: 'folder_applications.png',
+    });
   });
 
   afterAll(() => {
@@ -56,13 +67,6 @@ describe('POST /api/import/page/upload', () => {
   });
 
   it('rejects remote images smaller than 4KB by default', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(new Uint8Array(2048), {
-        status: 200,
-        headers: { 'content-type': 'image/png' },
-      })
-    );
-
     const response = await POST(createRequest({
       items: [
         {
@@ -86,16 +90,6 @@ describe('POST /api/import/page/upload', () => {
   });
 
   it('accepts remote images between 1KB and 4KB when small assets are enabled', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(new Uint8Array(2048), {
-        status: 200,
-        headers: {
-          'content-type': 'image/png',
-          'content-disposition': 'inline; filename=\"folder_applications.png\"',
-        },
-      })
-    );
-
     const response = await POST(createRequest({
       includeSmallAssets: true,
       items: [
@@ -119,6 +113,42 @@ describe('POST /api/import/page/upload', () => {
     expect(uploadImageBufferMock).toHaveBeenCalledWith(
       expect.objectContaining({
         fileSize: 2048,
+      })
+    );
+  });
+
+  it('reuses a temp asset source when sessionId and tempAssetKey are provided', async () => {
+    resolveUploadSourceMock.mockResolvedValue({
+      buffer: Buffer.from(new Uint8Array(4096)),
+      contentType: 'image/png',
+      filename: 'cached-image.png',
+    });
+
+    const response = await POST(createRequest({
+      items: [
+        {
+          clientId: 'c1',
+          url: 'https://example.com/cached-image.png',
+          namespace: 'test-ns',
+          sessionId: 'session-1',
+          tempAssetKey: 'asset-1',
+        },
+      ],
+    }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.failures).toEqual([]);
+    expect(resolveUploadSourceMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'session-1',
+        tempAssetKey: 'asset-1',
+      })
+    );
+    expect(uploadImageBufferMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fileName: 'cached-image.png',
+        fileSize: 4096,
       })
     );
   });

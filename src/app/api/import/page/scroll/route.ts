@@ -35,6 +35,7 @@ import {
   cookieHeaderToPuppeteerCookies,
   normalizeCookieHeader,
 } from '@/server/pageImportCookies';
+import { toImportCandidate } from '@/server/import-metadata/candidates';
 
 // Puppeteer types - we use any since it's an optional dependency
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -563,6 +564,47 @@ export async function POST(request: NextRequest) {
 
     console.log(`[import/page/scroll] Returning ${limitedImages.length} images and ${limitedVideos.length} videos`);
 
+    const normalizedImages = limitedImages.map((img) => {
+      const candidate = toImportCandidate({
+        kind: 'image',
+        url: img.url,
+        filename: img.filename,
+        metadata: {
+          dimensions:
+            img.naturalWidth && img.naturalHeight
+              ? { width: img.naturalWidth, height: img.naturalHeight }
+              : undefined,
+          sources: {
+            dimensions:
+              img.naturalWidth && img.naturalHeight ? 'browser' : undefined,
+          },
+        },
+      });
+      return {
+        ...candidate,
+        naturalWidth: img.naturalWidth,
+        naturalHeight: img.naturalHeight,
+      };
+    });
+
+    const normalizedVideos = limitedVideos.map((video) => {
+      const candidate = toImportCandidate({
+        kind: 'video',
+        url: video.url,
+        filename: video.filename,
+        previewUrl: video.posterUrl,
+        posterUrl: video.posterUrl,
+        isBlobSource: video.isBlob,
+        metadata: {
+          contentType: undefined,
+        },
+      });
+      return {
+        ...candidate,
+        isBlob: video.isBlob,
+      };
+    });
+
     return NextResponse.json({
       sourceUrl: pageUrl,
       minBytes,
@@ -572,25 +614,9 @@ export async function POST(request: NextRequest) {
       scrollCount,
       mode: 'scroll',
       archiveDiagnostics,
-      images: limitedImages.map(img => ({
-        kind: 'image' as const,
-        url: img.url,
-        filename: img.filename,
-        naturalWidth: img.naturalWidth,
-        naturalHeight: img.naturalHeight,
-      })),
-      videos: limitedVideos,
-      media: [
-        ...limitedImages.map((img) => ({
-          kind: 'image' as const,
-          url: img.url,
-          filename: img.filename,
-          naturalWidth: img.naturalWidth,
-          naturalHeight: img.naturalHeight,
-          isBlob: false,
-        })),
-        ...limitedVideos,
-      ],
+      images: normalizedImages,
+      videos: normalizedVideos,
+      media: [...normalizedImages, ...normalizedVideos],
     });
   } catch (error) {
     console.error('Scroll import error:', error);

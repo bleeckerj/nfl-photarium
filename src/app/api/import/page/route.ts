@@ -12,6 +12,7 @@ import {
   readArchiveResponseDiagnostics,
 } from '@/server/archiveDiagnostics';
 import { normalizeCookieHeader } from '@/server/pageImportCookies';
+import { toImportCandidate } from '@/server/import-metadata/candidates';
 
 const DEFAULT_MIN_BYTES = 8 * 1024;
 
@@ -493,10 +494,44 @@ export async function POST(request: NextRequest) {
       contentType: candidate.url.startsWith('blob:') ? undefined : 'video/unknown',
     }));
 
-    const media = [
-      ...images.map((image) => ({ kind: 'image' as const, ...image, isBlob: false })),
-      ...videos,
-    ];
+    const normalizedImages = images.map((image) => {
+      const candidate = toImportCandidate({
+        kind: 'image',
+        url: image.url,
+        filename: image.filename || getFilenameFromUrl(image.url),
+        metadata: {
+          fileSizeBytes: image.contentLength,
+          contentType: image.contentType,
+          sources: {
+            fileSize: typeof image.contentLength === 'number' ? 'head' : undefined,
+          },
+        },
+      });
+      return {
+        ...candidate,
+        contentType: image.contentType,
+        contentLength: image.contentLength,
+      };
+    });
+
+    const normalizedVideos = videos.map((video) => {
+      const candidate = toImportCandidate({
+        kind: 'video',
+        url: video.url,
+        filename: video.filename || getFilenameFromUrl(video.url),
+        isBlobSource: video.isBlob,
+        metadata: {
+          contentType: video.contentType,
+        },
+      });
+      return {
+        ...candidate,
+        isBlob: video.isBlob,
+        contentType: video.contentType,
+      };
+    });
+
+    const media = [...normalizedImages, ...normalizedVideos];
 
     return NextResponse.json({
       sourceUrl: pageUrl,
@@ -506,8 +541,8 @@ export async function POST(request: NextRequest) {
       includeUiChrome,
       includeSmallAssets,
       archiveDiagnostics,
-      images,
-      videos,
+      images: normalizedImages,
+      videos: normalizedVideos,
       media,
     });
   } catch (error) {
