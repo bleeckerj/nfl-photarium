@@ -1,8 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { findDuplicatesByOriginalUrlMock, findDuplicatesByContentHashMock } = vi.hoisted(() => ({
+const {
+  findDuplicatesByOriginalUrlMock,
+  findDuplicatesByContentHashMock,
+  getCachedImagesMock,
+} = vi.hoisted(() => ({
   findDuplicatesByOriginalUrlMock: vi.fn(),
   findDuplicatesByContentHashMock: vi.fn(),
+  getCachedImagesMock: vi.fn(),
 }));
 
 vi.mock('@/server/duplicateDetector', () => ({
@@ -10,10 +15,15 @@ vi.mock('@/server/duplicateDetector', () => ({
   findDuplicatesByContentHash: findDuplicatesByContentHashMock,
 }));
 
+vi.mock('@/server/cloudflareImageCache', () => ({
+  getCachedImages: getCachedImagesMock,
+}));
+
 import {
   evaluateUploadDeduplicationPolicy,
   logContentHashDuplicate,
   logCrossNamespaceContentHashWarning,
+  logDuplicateFamilySelection,
   logOriginalUrlReuseWarning,
 } from '@/server/uploadDuplicatePolicy';
 import type { CachedCloudflareImage } from '@/server/cloudflareImageCache';
@@ -30,9 +40,10 @@ const makeImage = (overrides?: Record<string, unknown>) =>
 describe('uploadDuplicatePolicy', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getCachedImagesMock.mockResolvedValue([]);
   });
 
-  it('returns URL warning and hash duplicates when both match', async () => {
+  it('returns URL warning and hash duplicates with default reject behavior', async () => {
     const urlMatch = makeImage({ id: 'url-1', folder: 'url-folder' });
     const hashMatch = makeImage({ id: 'hash-1', folder: 'hash-folder', namespace: 'nfl' });
 
@@ -51,6 +62,7 @@ describe('uploadDuplicatePolicy', () => {
     );
     expect(findDuplicatesByContentHashMock).toHaveBeenCalledWith('a'.repeat(64), 'nfl');
 
+    expect(result.duplicateAction).toBe('reject');
     expect(result.originalUrlWarning).toEqual(
       expect.objectContaining({
         normalizedOriginalUrl: 'https://example.com/dynamic-image',
@@ -60,43 +72,86 @@ describe('uploadDuplicatePolicy', () => {
     );
     expect(result.contentHashDuplicates).toEqual([hashMatch]);
     expect(result.crossNamespaceContentHashMatches).toEqual([]);
+    expect(result.duplicateFamilySelection).toBeUndefined();
   });
 
-  it('skips URL lookup when normalizedOriginalUrl is missing and returns cross-namespace warnings', async () => {
-    const crossNamespaceMatch = makeImage({ id: 'other-ns-hash', namespace: 'archive' });
-    findDuplicatesByContentHashMock
-      .mockResolvedValueOnce([]) // scoped lookup in target namespace
-      .mockResolvedValueOnce([crossNamespaceMatch]); // global lookup for warning-only cross-namespace matches
+  it('creates a family selection when family mode finds one canonical duplicate root', async () => {
+    const root = makeImage({ id: 'root-1', namespace: 'nfl', uploaded: '2026-01-02T00:00:00.000Z' });
+    findDuplicatesByContentHashMock.mockResolvedValueOnce([root]);
+    getCachedImagesMock.mockResolvedValueOnce([root]);
 
     const result = await evaluateUploadDeduplicationPolicy({
       contentHash: 'b'.repeat(64),
       namespace: 'nfl',
+      duplicateAction: 'family',
     });
 
-    expect(findDuplicatesByOriginalUrlMock).not.toHaveBeenCalled();
-    expect(findDuplicatesByContentHashMock).toHaveBeenNthCalledWith(1, 'b'.repeat(64), 'nfl');
-    expect(findDuplicatesByContentHashMock).toHaveBeenNthCalledWith(2, 'b'.repeat(64));
-    expect(result.originalUrlWarning).toBeUndefined();
-    expect(result.contentHashDuplicates).toEqual([]);
-    expect(result.crossNamespaceContentHashMatches).toEqual([crossNamespaceMatch]);
+    expect(result.duplicateFamilySelection).toEqual({
+      requestedAction: 'family',
+      matchedDuplicateIds: ['root-1'],
+      canonicalParentId: 'root-1',
+      storedAsVariant: true,
+      provenance: 'duplicate-family-override',
+    });
   });
 
-  it('does not hard-block duplicates when namespace is missing', async () => {
-    const globalMatch = makeImage({ id: 'hash-anywhere', namespace: 'other-ns' });
-    findDuplicatesByContentHashMock.mockResolvedValueOnce([globalMatch]);
+  it('collapses duplicate children under the same canonical parent', async () => {
+    const root = makeImage({ id: 'root-1', namespace: 'nfl', uploaded: '2026-01-01T00:00:00.000Z' });
+    const childA = makeImage({ id: 'child-a', namespace: 'nfl', parentId: 'root-1', uploaded: '2026-01-02T00:00:00.000Z' });
+    const childB = makeImage({ id: 'child-b', namespace: 'nfl', parentId: 'root-1', uploaded: '2026-01-03T00:00:00.000Z' });
+
+    findDuplicatesByContentHashMock.mockResolvedValueOnce([childA, childB]);
+    getCachedImagesMock.mockResolvedValueOnce([root, childA, childB]);
+
+    const result = await evaluateUploadDeduplicationPolicy({
+      contentHash: 'c'.repeat(64),
+      namespace: 'nfl',
+      duplicateAction: 'family',
+    });
+
+    expect(result.duplicateFamilySelection?.canonicalParentId).toBe('root-1');
+    expect(result.duplicateFamilySelection?.matchedDuplicateIds).toEqual(['child-a', 'child-b']);
+  });
+
+  it('chooses the oldest canonical root when multiple families match', async () => {
+    const olderRoot = makeImage({ id: 'root-old', namespace: 'nfl', uploaded: '2026-01-01T00:00:00.000Z' });
+    const newerRoot = makeImage({ id: 'root-new', namespace: 'nfl', uploaded: '2026-01-05T00:00:00.000Z' });
+    const olderChild = makeImage({ id: 'child-old', namespace: 'nfl', parentId: 'root-old', uploaded: '2026-01-06T00:00:00.000Z' });
+
+    findDuplicatesByContentHashMock.mockResolvedValueOnce([olderChild, newerRoot]);
+    getCachedImagesMock.mockResolvedValueOnce([olderRoot, newerRoot, olderChild]);
 
     const result = await evaluateUploadDeduplicationPolicy({
       contentHash: 'd'.repeat(64),
-      namespace: undefined,
+      namespace: 'nfl',
+      duplicateAction: 'family',
     });
 
-    expect(findDuplicatesByContentHashMock).toHaveBeenCalledWith('d'.repeat(64));
+    expect(result.duplicateFamilySelection?.canonicalParentId).toBe('root-old');
+  });
+
+  it('keeps cross-namespace hash matches as warnings only', async () => {
+    const crossNamespaceMatch = makeImage({ id: 'other-ns-hash', namespace: 'archive' });
+    findDuplicatesByContentHashMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([crossNamespaceMatch]);
+
+    const result = await evaluateUploadDeduplicationPolicy({
+      contentHash: 'e'.repeat(64),
+      namespace: 'nfl',
+      duplicateAction: 'family',
+    });
+
+    expect(findDuplicatesByContentHashMock).toHaveBeenNthCalledWith(1, 'e'.repeat(64), 'nfl');
+    expect(findDuplicatesByContentHashMock).toHaveBeenNthCalledWith(2, 'e'.repeat(64));
     expect(result.contentHashDuplicates).toEqual([]);
-    expect(result.crossNamespaceContentHashMatches).toEqual([globalMatch]);
+    expect(result.crossNamespaceContentHashMatches).toEqual([crossNamespaceMatch]);
+    expect(result.duplicateFamilySelection).toBeUndefined();
   });
 
   it('logs warning and duplicate summaries with scope', () => {
     const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const consoleInfoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
 
     logOriginalUrlReuseWarning({
       logScope: 'upload/external',
@@ -111,15 +166,27 @@ describe('uploadDuplicatePolicy', () => {
 
     logContentHashDuplicate({
       logScope: 'upload',
-      contentHash: 'c'.repeat(64),
+      contentHash: 'f'.repeat(64),
       duplicates: [makeImage({ id: 'hash-2', folder: 'archive' })],
     });
 
     logCrossNamespaceContentHashWarning({
       logScope: 'upload',
-      contentHash: 'e'.repeat(64),
+      contentHash: 'g'.repeat(64),
       targetNamespace: 'nfl',
       matches: [makeImage({ id: 'cross-1', folder: 'archive', namespace: 'archive' })],
+    });
+
+    logDuplicateFamilySelection({
+      logScope: 'upload',
+      contentHash: 'h'.repeat(64),
+      selection: {
+        requestedAction: 'family',
+        matchedDuplicateIds: ['hash-2'],
+        canonicalParentId: 'parent-1',
+        storedAsVariant: true,
+        provenance: 'duplicate-family-override',
+      },
     });
 
     expect(consoleWarnSpy).toHaveBeenCalledWith(
@@ -133,7 +200,7 @@ describe('uploadDuplicatePolicy', () => {
     expect(consoleWarnSpy).toHaveBeenCalledWith(
       '[upload] Duplicate content hash detected',
       expect.objectContaining({
-        contentHash: 'c'.repeat(64),
+        contentHash: 'f'.repeat(64),
         duplicateIds: ['hash-2'],
         folders: ['archive'],
       })
@@ -142,9 +209,18 @@ describe('uploadDuplicatePolicy', () => {
     expect(consoleWarnSpy).toHaveBeenCalledWith(
       '[upload] Content hash exists in other namespaces (warning only)',
       expect.objectContaining({
-        contentHash: 'e'.repeat(64),
+        contentHash: 'g'.repeat(64),
         targetNamespace: 'nfl',
         duplicateIds: ['cross-1'],
+      })
+    );
+
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      '[upload] Duplicate content admitted as family variant',
+      expect.objectContaining({
+        contentHash: 'h'.repeat(64),
+        canonicalParentId: 'parent-1',
+        matchedDuplicateIds: ['hash-2'],
       })
     );
   });

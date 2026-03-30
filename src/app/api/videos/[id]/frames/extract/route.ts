@@ -8,6 +8,7 @@ import {
   resolveFrameSelector,
   validateExtractFrameCount,
 } from '@/server/videoFrameService';
+import { buildVideoFrameErrorResponse } from '@/server/videoFrameRouteErrors';
 import { resolveVideoDownloadUrl } from '@/server/videoDownloadUrl';
 
 type ExtractBody = {
@@ -113,9 +114,7 @@ export async function POST(
     });
   } catch (error) {
     console.error('[video frames extract] failed', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to extract video frames' },
-      { status: 500 }
-    );
+    const response = buildVideoFrameErrorResponse(error, 'Failed to extract video frames');
+    return NextResponse.json(response.body, { status: response.status });
   }
 }

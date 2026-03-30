@@ -33,6 +33,8 @@ Options:
                                (default: 2)
   --throttle-ms <n>            Delay between upload requests
                                (default: 2000)
+  --on-duplicate <mode>        Pass duplicate handling to fs:ingest: reject|family
+                               (default: family)
   --no-ai-metadata             Disable --ai-metadata in fs:ingest
   --include-path-tags          Enable --include-path-tags in fs:ingest
   --include-filename           Enable --include-filename in fs:ingest
@@ -59,6 +61,7 @@ TAGS="discord,nfl-discord"
 TAG_COUNT="3"
 CONCURRENCY="2"
 THROTTLE_MS="2000"
+ON_DUPLICATE="family"
 USE_AI_METADATA=1
 INCLUDE_PATH_TAGS=0
 INCLUDE_FILENAME=0
@@ -126,6 +129,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --throttle-ms)
       THROTTLE_MS="$2"
+      shift 2
+      ;;
+    --on-duplicate)
+      ON_DUPLICATE="$2"
       shift 2
       ;;
     --no-ai-metadata)
@@ -277,6 +284,7 @@ run_ingest_all() {
       --tag-count "${TAG_COUNT}"
       --concurrency "${CONCURRENCY}"
       --throttle-ms "${THROTTLE_MS}"
+      --on-duplicate "${ON_DUPLICATE}"
       --description-prefix "${ingest_description_prefix}"
     )
 

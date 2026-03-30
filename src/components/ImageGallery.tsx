@@ -1393,10 +1393,18 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                   }
                 | undefined;
               if (!meta) return img;
+              const hasRedisMetadata =
+                Array.isArray(meta.dominantColors) ||
+                typeof meta.averageColor === 'string' ||
+                Boolean(meta.hasClipEmbedding) ||
+                Boolean(meta.hasColorEmbedding);
+              if (!hasRedisMetadata) {
+                return img;
+              }
               return {
                 ...img,
-                hasClipEmbedding: Boolean(meta.hasClipEmbedding),
-                hasColorEmbedding: Boolean(meta.hasColorEmbedding),
+                hasClipEmbedding: img.hasClipEmbedding || Boolean(meta.hasClipEmbedding),
+                hasColorEmbedding: img.hasColorEmbedding || Boolean(meta.hasColorEmbedding),
                 dominantColors: meta.dominantColors ?? img.dominantColors,
                 averageColor: meta.averageColor ?? img.averageColor,
               };

@@ -3,9 +3,12 @@ import sharp from 'sharp';
 import { transformApiImageToCached, upsertCachedImage } from '@/server/cloudflareImageCache';
 import type { toDuplicateSummary } from '@/server/duplicateDetector';
 import {
+  type DuplicateFamilySelection,
+  type UploadDuplicateAction,
   evaluateUploadDeduplicationPolicy,
   logContentHashDuplicate,
   logCrossNamespaceContentHashWarning,
+  logDuplicateFamilySelection,
   logOriginalUrlReuseWarning,
 } from '@/server/uploadDuplicatePolicy';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
@@ -48,6 +51,7 @@ export type UploadContext = {
   sourcePath?: string;
   namespace?: string;
   parentId?: string;
+  duplicateAction?: UploadDuplicateAction;
 };
 
 export type UploadSuccess = {
@@ -67,6 +71,7 @@ export type UploadSuccess = {
   webpVariantId?: string;
   autoEmbeddings?: AutoEmbeddingsStatus;
   uploadNormalization?: UploadNormalizationMetadata;
+  duplicateHandling?: DuplicateFamilySelection;
 };
 
 export type UploadFailure = {
@@ -445,7 +450,8 @@ export async function uploadImageBuffer({
     sourceUrl,
     sourcePath,
     namespace,
-    parentId
+    parentId,
+    duplicateAction,
   } = context;
   const isSnagx = fileName.toLowerCase().endsWith('.snagx');
   const normalizedNamespace = typeof namespace === 'string' && namespace.trim()
@@ -538,6 +544,8 @@ export async function uploadImageBuffer({
     contentHash,
     normalizedOriginalUrl,
     namespace: normalizedNamespace,
+    duplicateAction,
+    requestedParentId: parentId,
   });
   if (deduplication.originalUrlWarning) {
     logOriginalUrlReuseWarning({
@@ -554,11 +562,20 @@ export async function uploadImageBuffer({
       matches: deduplication.crossNamespaceContentHashMatches,
     });
   }
+  if (deduplication.duplicateFamilySelection) {
+    logDuplicateFamilySelection({
+      logScope: 'upload',
+      contentHash,
+      selection: deduplication.duplicateFamilySelection,
+    });
+  }
+
+  const resolvedParentId = deduplication.duplicateFamilySelection?.canonicalParentId ?? parentId;
 
   const exifSummary = await extractExifSummary(workingOriginalBuffer);
   const comfyExtraction = await extractComfyWorkflowMetadata(workingOriginalBuffer, { mimeType: workingFileType });
 
-  if (deduplication.contentHashDuplicates.length) {
+  if (deduplication.contentHashDuplicates.length && !deduplication.duplicateFamilySelection) {
     logContentHashDuplicate({
       logScope: 'upload',
       contentHash,
@@ -591,7 +608,8 @@ export async function uploadImageBuffer({
     sourcePath: sourcePath,
     namespace: normalizedNamespace,
     contentHash,
-    variationParentId: parentId,
+    variationParentId: resolvedParentId,
+    duplicateFamilyOverride: deduplication.duplicateFamilySelection ? true : undefined,
     uploadNormalization: prepared.data.uploadNormalization,
     exif: exifSummary,
     generatedBy: comfyExtraction.detected ? 'comfyui' : undefined,
@@ -710,7 +728,7 @@ export async function uploadImageBuffer({
         ...metadataPayload,
         filename: webpName,
         displayName: webpName,
-        variationParentId: parentId,
+        variationParentId: resolvedParentId,
         linkedAssetId: imageData.id,
       };
       const { metadata: limitedWebpMetadata, dropped, size, limitBytes } = enforceCloudflareMetadataLimit(webpMetadataPayload);
@@ -813,11 +831,12 @@ export async function uploadImageBuffer({
       originalUrl: originalUrl,
       sourceUrl: sourceUrl,
       namespace: normalizedNamespace,
-      parentId: parentId,
+      parentId: resolvedParentId,
       linkedAssetId: webpVariantId,
       webpVariantId,
       autoEmbeddings,
       uploadNormalization: prepared.data.uploadNormalization,
+      duplicateHandling: deduplication.duplicateFamilySelection,
     }
   };
 }

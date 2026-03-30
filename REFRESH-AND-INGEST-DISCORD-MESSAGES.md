@@ -27,6 +27,7 @@ This runs:
   - `find_last_ids_per_channel.py`
   - `download_images_from_discord_channel.py`
 - **Ingest step**: calls `npm run fs:ingest` per channel folder
+- Default duplicate handling for this Discord runner is `--on-duplicate family`
 
 ## **Manual control**
 
@@ -85,6 +86,7 @@ npm run fs:ingest:discord-refresh-all -- --verbose
 - `--include-path-tags`
 - `--include-filename`
 - `--no-ai-metadata`
+- `--on-duplicate <reject|family>`
 - `--report-cache`
 
 ## **Checkpoint health check**
@@ -111,6 +113,7 @@ npm run fs:ingest:discord-refresh-all -- \
   --autotrader-namespace cf-autotrader \
   --tags discord,nfl-discord,midjourney \
   --description-prefix "Discord media refresh" \
+  --on-duplicate family \
   --concurrency 4 \
   --throttle-ms 1500
   --report-cache

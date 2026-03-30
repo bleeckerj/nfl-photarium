@@ -21,6 +21,8 @@ type PageImportControlsProps = {
   setPageImportScrollDelayMs: (value: string) => void;
   pageImportMaxPages: string;
   setPageImportMaxPages: (value: string) => void;
+  pageImportMaxAssets: string;
+  setPageImportMaxAssets: (value: string) => void;
   pageImportAllowInsecure: boolean;
   setPageImportAllowInsecure: (value: boolean) => void;
   pageImportCookieHeader: string;
@@ -28,6 +30,7 @@ type PageImportControlsProps = {
   pageImportError: string | null;
   pageImportProgress: ImportProgressState;
   handleImportPage: () => Promise<void>;
+  handleStopImportPage: () => void;
   handlePasteCookiesAndScan: () => Promise<void>;
 };
 
@@ -50,6 +53,8 @@ export function PageImportControls(props: PageImportControlsProps) {
     setPageImportScrollDelayMs,
     pageImportMaxPages,
     setPageImportMaxPages,
+    pageImportMaxAssets,
+    setPageImportMaxAssets,
     pageImportAllowInsecure,
     setPageImportAllowInsecure,
     pageImportCookieHeader,
@@ -57,6 +62,7 @@ export function PageImportControls(props: PageImportControlsProps) {
     pageImportError,
     pageImportProgress,
     handleImportPage,
+    handleStopImportPage,
     handlePasteCookiesAndScan,
   } = props;
 
@@ -75,13 +81,21 @@ export function PageImportControls(props: PageImportControlsProps) {
           <button
             type="button"
             onClick={() => {
+              if (pageImportLoading && pageImportScrollMode) {
+                handleStopImportPage();
+                return;
+              }
               void handleImportPage();
             }}
-            className="inline-flex items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={pageImportLoading || !pageImportUrl.trim()}
+            className={`inline-flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 ${
+              pageImportLoading && pageImportScrollMode
+                ? 'bg-amber-600 hover:bg-amber-700'
+                : 'bg-blue-600 hover:bg-blue-700'
+            }`}
+            disabled={pageImportLoading ? !pageImportScrollMode : !pageImportUrl.trim()}
           >
             {pageImportLoading && <Loader2 className="h-3 w-3 animate-spin" />}
-            {pageImportLoading ? (pageImportScrollMode ? 'Scrolling...' : 'Scanning...') : 'Scan page'}
+            {pageImportLoading ? (pageImportScrollMode ? 'Stop scan' : 'Scanning...') : 'Scan page'}
           </button>
           <button
             type="button"
@@ -159,8 +173,8 @@ export function PageImportControls(props: PageImportControlsProps) {
         </div>
 
         {pageImportScrollMode && (
-          <div className="mt-3 grid gap-2 md:grid-cols-4">
-            <label className="flex items-center gap-2 text-xs text-gray-700 md:col-span-4">
+          <div className="mt-3 grid gap-2 md:grid-cols-5">
+            <label className="flex items-center gap-2 text-xs text-gray-700 md:col-span-5">
               <input
                 type="checkbox"
                 checked={pageImportAutoScroll}
@@ -194,6 +208,15 @@ export function PageImportControls(props: PageImportControlsProps) {
               <input
                 value={pageImportMaxPages}
                 onChange={(e) => setPageImportMaxPages(e.target.value)}
+                disabled={pageImportLoading}
+                className="rounded border border-blue-200 px-2 py-1"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-gray-700">
+              Max assets
+              <input
+                value={pageImportMaxAssets}
+                onChange={(e) => setPageImportMaxAssets(e.target.value)}
                 disabled={pageImportLoading}
                 className="rounded border border-blue-200 px-2 py-1"
               />

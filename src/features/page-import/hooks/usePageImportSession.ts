@@ -5,6 +5,7 @@ import type {
   ImportSessionState,
   UploaderQueueItem,
 } from '@/features/page-import/types';
+import { setAllQueuedItemsSelected } from '@/features/page-import/utils/queueSelection';
 
 type MetadataPatch = {
   id: string;
@@ -160,6 +161,10 @@ export function usePageImportSession() {
     });
   }, []);
 
+  const unselectAllQueuedFiles = useCallback(() => {
+    setQueuedFiles((prev) => setAllQueuedItemsSelected(prev, false));
+  }, []);
+
   useEffect(() => {
     return () => {
       const items = [...queuedFilesRef.current];
@@ -181,6 +186,7 @@ export function usePageImportSession() {
     applyMetadataPatches,
     removeQueuedFile,
     clearQueue,
+    unselectAllQueuedFiles,
     createQueueId,
     importSession,
     ensureImportSession,

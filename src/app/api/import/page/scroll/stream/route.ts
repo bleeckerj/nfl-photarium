@@ -32,7 +32,13 @@ import { toImportCandidate } from '@/server/import-metadata/candidates';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let puppeteer: any = null;
 
+const getPuppeteerTestOverride = () =>
+  (globalThis as typeof globalThis & { __PHOTARIUM_TEST_PUPPETEER__?: unknown })
+    .__PHOTARIUM_TEST_PUPPETEER__;
+
 const loadPuppeteer = async () => {
+  const override = getPuppeteerTestOverride();
+  if (override) return override;
   if (puppeteer) return puppeteer;
   try {
     puppeteer = await (Function('return import("puppeteer")')());
@@ -46,6 +52,8 @@ const DEFAULT_MAX_SCROLLS = 10;
 const AUTO_SCROLL_SAFETY_CAP = 200;
 const DEFAULT_SCROLL_DELAY_MS = 1500;
 const DEFAULT_TIMEOUT_MS = 30000;
+const DEFAULT_MAX_ASSETS = 250;
+const MAX_MAX_ASSETS = 2000;
 const NO_NEW_IMAGE_STOP_THRESHOLD = 3;
 
 const isValidUrl = (value: string) => {
@@ -303,6 +311,9 @@ export async function POST(request: NextRequest) {
   const maxPages = Number.isFinite(body?.maxPages)
     ? Math.max(1, Math.min(20, Number(body.maxPages)))
     : 1; // Default to single page unless specified
+  const maxAssets = Number.isFinite(body?.maxAssets)
+    ? Math.max(1, Math.min(MAX_MAX_ASSETS, Number(body.maxAssets)))
+    : DEFAULT_MAX_ASSETS;
   const scrollDelayMs = Number.isFinite(body?.scrollDelayMs)
     ? Math.max(500, Math.min(5000, Number(body.scrollDelayMs)))
     : DEFAULT_SCROLL_DELAY_MS;
@@ -328,6 +339,7 @@ export async function POST(request: NextRequest) {
   const stream = new ReadableStream({
     async start(controller) {
       const send = (event: string, data: unknown) => {
+        if (request.signal.aborted) return;
         controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
       };
 
@@ -338,7 +350,43 @@ export async function POST(request: NextRequest) {
         return;
       }
 
-      let browser;
+      let browser:
+        | {
+            close: () => Promise<void>;
+            newPage: () => Promise<{
+              evaluate: <T>(pageFunction: () => T | Promise<T>) => Promise<T>;
+              goto: (url: string, options: { waitUntil: string; timeout: number }) => Promise<{ status?: () => number } | null>;
+              on: (
+                event: string,
+                listener: (response: {
+                  request: () => { resourceType?: () => string };
+                  url: () => string;
+                  headers: () => Record<string, string>;
+                  status: () => number;
+                }) => void
+              ) => void;
+              setCookie: (...cookies: unknown[]) => Promise<void>;
+              setUserAgent: (userAgent: string) => Promise<void>;
+              setViewport: (viewport: { width: number; height: number }) => Promise<void>;
+              title: () => Promise<string>;
+              url: () => string;
+              waitForNetworkIdle: (options: { timeout: number }) => Promise<void>;
+            }>;
+          }
+        | undefined;
+      let stopReason: 'aborted' | 'max-assets' | null = null;
+      let totalMediaSent = 0;
+      const closeBrowser = async () => {
+        if (!browser) return;
+        const activeBrowser = browser;
+        browser = undefined;
+        await activeBrowser.close();
+      };
+      const handleAbort = () => {
+        stopReason = 'aborted';
+        void closeBrowser().catch(() => undefined);
+      };
+      request.signal.addEventListener('abort', handleAbort, { once: true });
       try {
         send('status', { message: 'Launching browser...', scrollCount: 0, imageCount: 0, pageNum: 1 });
 
@@ -369,7 +417,6 @@ export async function POST(request: NextRequest) {
         const seenMedia = new Set<string>();
         const sentMedia = new Set<string>();
         const networkImageCandidates = new Map<string, { trusted: boolean; contentLength?: number }>();
-        let totalMediaSent = 0;
         let totalScrollCount = 0;
         let currentPageNum = 1;
         let currentUrl = pageUrl;
@@ -379,6 +426,17 @@ export async function POST(request: NextRequest) {
         const isMcMasterHost = targetHost === 'mcmaster.com' || targetHost.endsWith('.mcmaster.com');
         let sawProdPage403 = false;
         let sawProtectionPayload = false;
+        const shouldStop = () => {
+          if (request.signal.aborted || stopReason === 'aborted') {
+            stopReason = 'aborted';
+            return true;
+          }
+          if (totalMediaSent >= maxAssets) {
+            stopReason = 'max-assets';
+            return true;
+          }
+          return false;
+        };
 
         const queueNetworkImage = (
           rawUrl: string,
@@ -514,7 +572,9 @@ export async function POST(request: NextRequest) {
 
         // Helper to extract and process media (images + videos)
         const extractAndSendNewImages = async () => {
+          if (shouldStop()) return 0;
           const pageLocation = await page.evaluate(() => window.location.href);
+          if (shouldStop()) return 0;
           const allMedia = await page.evaluate(() => {
             const imgs = Array.from(document.querySelectorAll('img'));
             const sources = Array.from(document.querySelectorAll('source'));
@@ -676,6 +736,7 @@ export async function POST(request: NextRequest) {
           let newCount = 0;
           
           for (const img of allMedia) {
+            if (shouldStop()) break;
             // Prioritize data-srcset over srcset (lazy loaders put high-res versions there)
             // Then check srcset, then data-src, then src
             const srcsetUrl = pickBestFromSrcset(img.dataSrcset) || pickBestFromSrcset(img.srcset);
@@ -728,6 +789,7 @@ export async function POST(request: NextRequest) {
 
               // Only send if not already sent
               if (!sentMedia.has(dedupeKey)) {
+                if (shouldStop()) break;
                 sentMedia.add(dedupeKey);
                 totalMediaSent++;
                 const serialized = serializeMediaCandidate(mediaInfo);
@@ -744,6 +806,7 @@ export async function POST(request: NextRequest) {
           }
 
           for (const [networkUrl, metadata] of networkImageCandidates.entries()) {
+            if (shouldStop()) break;
             const dedupeKey = `image:${networkUrl}`;
             if (seenMedia.has(dedupeKey)) continue;
 
@@ -778,6 +841,7 @@ export async function POST(request: NextRequest) {
             seenMedia.add(dedupeKey);
             newCount++;
             if (!sentMedia.has(dedupeKey)) {
+              if (shouldStop()) break;
               sentMedia.add(dedupeKey);
               totalMediaSent++;
               const serialized = serializeMediaCandidate(mediaInfo);
@@ -820,6 +884,7 @@ export async function POST(request: NextRequest) {
 
         // Process pages
         while (currentPageNum <= maxPages) {
+          if (shouldStop()) break;
           visitedPages.add(currentUrl);
           
           send('status', { 
@@ -833,8 +898,10 @@ export async function POST(request: NextRequest) {
             waitUntil: 'networkidle2',
             timeout: timeoutMs,
           });
+          if (shouldStop()) break;
 
           await new Promise(resolve => setTimeout(resolve, 1000));
+          if (shouldStop()) break;
           const archiveDiagnostics = await getArchivePageDiagnostics(currentUrl, page, navigationResponse?.status?.());
           logArchiveDiagnostics('import/page/scroll/stream', archiveDiagnostics, {
             phase: 'page-load',
@@ -856,6 +923,7 @@ export async function POST(request: NextRequest) {
             pageNum: currentPageNum
           });
           await triggerLazyLoad();
+          if (shouldStop()) break;
 
           // Initial extraction for this page
           send('status', { 
@@ -865,12 +933,14 @@ export async function POST(request: NextRequest) {
             pageNum: currentPageNum
           });
           await extractAndSendNewImages();
+          if (shouldStop()) break;
 
           // Scroll within this page
           let pageScrollCount = 0;
           let noNewImagesCount = 0;
           
           while (pageScrollCount < maxScrolls && noNewImagesCount < NO_NEW_IMAGE_STOP_THRESHOLD) {
+            if (shouldStop()) break;
             const scrollStep = await page.evaluate(() => {
               const root = (document.scrollingElement as HTMLElement | null) || document.documentElement;
               const windowDelta = Math.max(0, root.scrollHeight - window.innerHeight);
@@ -909,6 +979,7 @@ export async function POST(request: NextRequest) {
               const after = window.scrollY;
               return { target: 'window', moved: after > before + 1, atEnd: maxY - after < 2 };
             });
+            if (shouldStop()) break;
             pageScrollCount++;
             totalScrollCount++;
             const scrollTargetLabel = scrollStep.target === 'container' ? 'container' : 'page';
@@ -923,15 +994,18 @@ export async function POST(request: NextRequest) {
             });
 
             await new Promise(resolve => setTimeout(resolve, scrollDelayMs));
+            if (shouldStop()) break;
 
             try {
               await page.waitForNetworkIdle({ timeout: 2000 });
             } catch {
               // Continue anyway
             }
+            if (shouldStop()) break;
 
             const prevSent = totalMediaSent;
             const newUrlCount = await extractAndSendNewImages();
+            if (shouldStop()) break;
             
             if (newUrlCount === 0) {
               noNewImagesCount++;
@@ -952,10 +1026,12 @@ export async function POST(request: NextRequest) {
           if (pageScrollCount >= maxScrolls && noNewImagesCount < NO_NEW_IMAGE_STOP_THRESHOLD) {
             stoppedByScrollCap = true;
           }
+          if (shouldStop()) break;
 
           // Check for next page (only if maxPages > 1)
           if (maxPages > 1 && currentPageNum < maxPages) {
             const nextUrl = await findNextPageUrl();
+            if (shouldStop()) break;
             if (nextUrl && !visitedPages.has(nextUrl)) {
               currentUrl = nextUrl;
               currentPageNum++;
@@ -974,12 +1050,18 @@ export async function POST(request: NextRequest) {
           }
         }
 
+        if (stopReason === 'aborted') {
+          return;
+        }
+
         const pageInfo = maxPages > 1 ? ` across ${currentPageNum} page${currentPageNum !== 1 ? 's' : ''}` : '';
-        const stopReason = stoppedByScrollCap
-          ? (autoScrollUntilStable
-              ? `Reached auto-scroll safety cap (${maxScrolls} scrolls)`
-              : `Reached max scrolls (${maxScrolls})`)
-          : `Stopped after ${NO_NEW_IMAGE_STOP_THRESHOLD} rounds with no new images`;
+        const completionReason = stopReason === 'max-assets'
+          ? `Reached max assets (${maxAssets})`
+          : stoppedByScrollCap
+            ? (autoScrollUntilStable
+                ? `Reached auto-scroll safety cap (${maxScrolls} scrolls)`
+                : `Reached max scrolls (${maxScrolls})`)
+            : `Stopped after ${NO_NEW_IMAGE_STOP_THRESHOLD} rounds with no new images`;
 
         if (sawProdPage403 && sawProtectionPayload && totalMediaSent === 0) {
           send('error', {
@@ -993,16 +1075,18 @@ export async function POST(request: NextRequest) {
           scrollCount: totalScrollCount,
           pageCount: currentPageNum,
           imageCount: totalMediaSent,
-          message: `Completed${pageInfo} with ${totalScrollCount} scrolls (${stopReason})`
+          message: `Completed${pageInfo} with ${totalScrollCount} scrolls (${completionReason})`
         });
 
       } catch (error) {
+        if (request.signal.aborted || stopReason === 'aborted') {
+          return;
+        }
         const message = error instanceof Error ? error.message : 'Unknown error';
         send('error', { error: `Browser error: ${message}` });
       } finally {
-        if (browser) {
-          await browser.close();
-        }
+        request.signal.removeEventListener('abort', handleAbort);
+        await closeBrowser().catch(() => undefined);
         controller.close();
       }
     }

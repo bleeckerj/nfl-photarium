@@ -15,6 +15,7 @@ import { useCandidateMetadataEnrichment } from "@/features/page-import/hooks/use
 import { PageImportControls } from "@/features/page-import/components/PageImportControls";
 import { PageImportQueue } from "@/features/page-import/components/PageImportQueue";
 import type { UploaderQueueItem } from "@/features/page-import/types";
+import { unselectAttemptedQueuedItems } from "@/features/page-import/utils/queueSelection";
 
 interface UploadedImage {
   id: string;
@@ -496,6 +497,7 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     applyMetadataPatches,
     removeQueuedFile,
     clearQueue,
+    unselectAllQueuedFiles,
     createQueueId,
     ensureImportSession,
   } = usePageImportSession();
@@ -550,10 +552,13 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     setPageImportScrollDelayMs,
     pageImportMaxPages,
     setPageImportMaxPages,
+    pageImportMaxAssets,
+    setPageImportMaxAssets,
     pageImportCookieHeader,
     setPageImportCookieHeader,
     pageImportProgress,
     handleImportPage,
+    handleStopImportPage,
     handlePasteCookiesAndScan,
   } = usePageImportDiscovery({
     addQueuedFiles,
@@ -1971,13 +1976,7 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     }
 
     const attemptedIds = new Set(selectedItems.map((item) => item.id));
-    setQueuedFiles((prev) =>
-      prev.map((item) =>
-        attemptedIds.has(item.id)
-          ? { ...item, selected: false }
-          : item
-      )
-    );
+    setQueuedFiles((prev) => unselectAttemptedQueuedItems(prev, attemptedIds));
   };
 
   const handleAiRefineSelectedNames = useCallback(async () => {
@@ -2082,6 +2081,10 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     setExpandedQueueMetadata({});
     setShowAllQueuedItems(false);
   }, [clearQueue]);
+
+  const handleUnselectAllQueuedItems = useCallback(() => {
+    unselectAllQueuedFiles();
+  }, [unselectAllQueuedFiles]);
 
   const handleRemoveQueuedItem = useCallback((id: string) => {
     removeQueuedFile(id);
@@ -2809,6 +2812,8 @@ A long list of filenames is not user friendly and essentially useless for select
         setPageImportScrollDelayMs={setPageImportScrollDelayMs}
         pageImportMaxPages={pageImportMaxPages}
         setPageImportMaxPages={setPageImportMaxPages}
+        pageImportMaxAssets={pageImportMaxAssets}
+        setPageImportMaxAssets={setPageImportMaxAssets}
         pageImportAllowInsecure={pageImportAllowInsecure}
         setPageImportAllowInsecure={setPageImportAllowInsecure}
         pageImportCookieHeader={pageImportCookieHeader}
@@ -2816,6 +2821,7 @@ A long list of filenames is not user friendly and essentially useless for select
         pageImportError={pageImportError}
         pageImportProgress={pageImportProgress}
         handleImportPage={handleImportPage}
+        handleStopImportPage={handleStopImportPage}
         handlePasteCookiesAndScan={handlePasteCookiesAndScan}
       />
 
@@ -2907,6 +2913,7 @@ A long list of filenames is not user friendly and essentially useless for select
           }))
         }
         onClearQueue={handleClearQueuedItems}
+        onUnselectAll={handleUnselectAllQueuedItems}
         onAiRefineSelectedNames={() => {
           void handleAiRefineSelectedNames();
         }}

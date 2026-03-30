@@ -6,6 +6,7 @@ import {
   getVideoFrameLimits,
   probeVideoSource,
 } from '@/server/videoFrameService';
+import { buildVideoFrameErrorResponse } from '@/server/videoFrameRouteErrors';
 import { resolveVideoDownloadUrl } from '@/server/videoDownloadUrl';
 
 const buildSourceUrl = (id: string, frameNumber: number) =>
@@ -71,9 +72,7 @@ export async function GET(
     });
   } catch (error) {
     console.error('[video frames meta] failed', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to load frame metadata' },
-      { status: 500 }
-    );
+    const response = buildVideoFrameErrorResponse(error, 'Failed to load frame metadata');
+    return NextResponse.json(response.body, { status: response.status });
   }
 }

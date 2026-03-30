@@ -40,6 +40,7 @@
     "fs:ingest": "node scripts/fs-ingest.mjs",
     "media:ingest": "node scripts/dng-ingest.mjs",
     "dng:ingest": "npm run media:ingest --",
+    "snagit:ingest": "node scripts/snagit-ingest.mjs",
     "fs:ingest:discord-refresh-all": "bash scripts/discord-refresh-and-fs-ingest.sh",
     "fs:ingest:discord-refresh-incremental": "npm run fs:ingest:discord-refresh-all -- --skip-discord-refresh --no-ai-metadata --concurrency 8 --throttle-ms 0 --report-cache",
     "ig:auth": "node scripts/instagram-ingest.mjs auth",

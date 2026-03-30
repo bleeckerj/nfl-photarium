@@ -7,6 +7,7 @@ import {
   evaluateUploadDeduplicationPolicy,
   logContentHashDuplicate,
   logCrossNamespaceContentHashWarning,
+  logDuplicateFamilySelection,
   logOriginalUrlReuseWarning,
 } from '@/server/uploadDuplicatePolicy';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
@@ -233,6 +234,7 @@ export async function POST(request: NextRequest) {
     const sourceUrl = formData.get('sourceUrl') as string;
     const namespace = formData.get('namespace') as string;
     const parentIdRaw = formData.get('parentId');
+    const duplicateAction = formData.get('duplicateAction');
     const workflowJsonField = parseOptionalWorkflowJson(formData.get('comfyWorkflowJson'));
 
     if (!promptField.ok) {
@@ -357,6 +359,8 @@ export async function POST(request: NextRequest) {
       contentHash,
       normalizedOriginalUrl,
       namespace: effectiveNamespace,
+      duplicateAction,
+      requestedParentId: resolvedParentId,
     });
     if (deduplication.originalUrlWarning) {
       logOriginalUrlReuseWarning({
@@ -373,8 +377,17 @@ export async function POST(request: NextRequest) {
         matches: deduplication.crossNamespaceContentHashMatches,
       });
     }
+    if (deduplication.duplicateFamilySelection) {
+      logDuplicateFamilySelection({
+        logScope: 'upload/external',
+        contentHash,
+        selection: deduplication.duplicateFamilySelection,
+      });
+    }
 
-    if (deduplication.contentHashDuplicates.length) {
+    const effectiveParentId = deduplication.duplicateFamilySelection?.canonicalParentId ?? resolvedParentId;
+
+    if (deduplication.contentHashDuplicates.length && !deduplication.duplicateFamilySelection) {
       logContentHashDuplicate({
         logScope: 'upload/external',
         contentHash,
@@ -408,7 +421,8 @@ export async function POST(request: NextRequest) {
       sourceUrlNormalized: normalizedSourceUrl,
       namespace: effectiveNamespace,
       contentHash,
-      variationParentId: resolvedParentId,
+      variationParentId: effectiveParentId,
+      duplicateFamilyOverride: deduplication.duplicateFamilySelection ? true : undefined,
       uploadNormalization: prepared.data.uploadNormalization,
       exif: exifSummary,
       generatedBy: comfyExtraction.detected ? 'comfyui' : undefined,
@@ -562,7 +576,7 @@ export async function POST(request: NextRequest) {
           ...metadataPayload,
           filename: webpName,
           displayName: cleanDisplayName || webpName,
-          variationParentId: resolvedParentId,
+          variationParentId: effectiveParentId,
           linkedAssetId: imageData.id,
         };
         const { metadata: limitedWebpMetadata, dropped, size, limitBytes } = enforceCloudflareMetadataLimit(webpMetadata);
@@ -663,11 +677,12 @@ export async function POST(request: NextRequest) {
       originalUrl: cleanOriginalUrl,
       sourceUrl: cleanSourceUrl,
       namespace: effectiveNamespace,
-      parentId: resolvedParentId,
+      parentId: effectiveParentId,
       linkedAssetId: webpVariantId,
       webpVariantId,
       autoEmbeddings,
       uploadNormalization: prepared.data.uploadNormalization,
+      duplicateHandling: deduplication.duplicateFamilySelection,
       ...(promptSave ? { promptSave } : {}),
     }));
 

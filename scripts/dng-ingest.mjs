@@ -863,6 +863,7 @@ async function uploadPreview({
   displayName,
   sourcePath,
   originalFileUrl,
+  duplicateAction,
 }) {
   const form = new FormData();
   form.append("file", new Blob([previewBuffer], { type: previewMime || "image/jpeg" }), previewFilename);
@@ -873,6 +874,7 @@ async function uploadPreview({
   if (displayName) form.append("displayName", displayName);
   if (sourcePath) form.append("sourceUrl", sourcePath);
   if (originalFileUrl) form.append("originalUrl", originalFileUrl);
+  if (duplicateAction) form.append("duplicateAction", duplicateAction);
 
   const res = await fetch(`${apiBase}/api/upload/external`, {
     method: "POST",
@@ -897,6 +899,7 @@ async function uploadImageBuffer({
   displayName,
   sourcePath,
   originalFileUrl,
+  duplicateAction,
 }) {
   const form = new FormData();
   form.append("file", new Blob([bytes], { type: mime }), uploadFilename);
@@ -907,6 +910,7 @@ async function uploadImageBuffer({
   if (displayName) form.append("displayName", displayName);
   if (sourcePath) form.append("sourceUrl", sourcePath);
   if (originalFileUrl) form.append("originalUrl", originalFileUrl);
+  if (duplicateAction) form.append("duplicateAction", duplicateAction);
 
   const res = await fetch(`${apiBase}/api/upload/external`, {
     method: "POST",

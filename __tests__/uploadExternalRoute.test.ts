@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vites
 import { NextRequest } from 'next/server';
 import sharp from 'sharp';
 import { POST } from '@/app/api/upload/external/route';
+import * as cloudflareImageCache from '@/server/cloudflareImageCache';
 import * as duplicateDetector from '@/server/duplicateDetector';
 
 const TEST_URL = 'http://localhost/api/upload/external';
@@ -324,6 +325,91 @@ describe('POST /api/upload/external', () => {
     expect(payload.duplicates?.[0]?.id).toBe('existing-hash-1');
     expect(mockFetch).not.toHaveBeenCalled();
     expect(duplicateDetector.findDuplicatesByContentHash).toHaveBeenCalled();
+  });
+
+  it('uploads as a child variant when duplicateAction=family resolves an existing parent', async () => {
+    process.env.CLOUDFLARE_ACCOUNT_ID = 'acct';
+    process.env.CLOUDFLARE_API_TOKEN = 'token';
+
+    vi.spyOn(duplicateDetector, 'findDuplicatesByOriginalUrl').mockResolvedValue([]);
+    vi.spyOn(duplicateDetector, 'findDuplicatesByContentHash').mockResolvedValue([
+      {
+        id: 'child-match',
+        filename: 'existing-child.png',
+        uploaded: '2026-01-10T00:00:00.000Z',
+        folder: 'hash-folder',
+        parentId: 'parent-root',
+        variants: ['https://imagedelivery.net/hash/existing-child/public'],
+      } as never,
+    ]);
+    vi.spyOn(cloudflareImageCache, 'getCachedImages').mockResolvedValue([
+      {
+        id: 'parent-root',
+        filename: 'existing-parent.png',
+        uploaded: '2026-01-01T00:00:00.000Z',
+        folder: 'hash-folder',
+        variants: ['https://imagedelivery.net/hash/parent-root/public'],
+      } as never,
+      {
+        id: 'child-match',
+        filename: 'existing-child.png',
+        uploaded: '2026-01-10T00:00:00.000Z',
+        folder: 'hash-folder',
+        parentId: 'parent-root',
+        variants: ['https://imagedelivery.net/hash/existing-child/public'],
+      } as never,
+    ]);
+
+    let uploadedMetadata: Record<string, unknown> | undefined;
+    const mockFetch = vi.spyOn(globalThis, 'fetch').mockImplementation((url, init) => {
+      if (typeof url === 'string' && url.endsWith('/images/v1') && init?.method === 'POST') {
+        const body = init.body as FormData;
+        const metadataRaw = body.get('metadata');
+        uploadedMetadata = metadataRaw ? JSON.parse(String(metadataRaw)) : undefined;
+
+        return Promise.resolve(new Response(
+          JSON.stringify({
+            result: {
+              id: 'new-variant',
+              filename: 'photo.png',
+              uploaded: '2026-02-01T00:00:00.000Z',
+              variants: ['https://imagedelivery.net/hash/new-variant/public'],
+              images: [],
+            },
+          }),
+          { status: 200 }
+        ));
+      }
+
+      return Promise.resolve(new Response(
+        JSON.stringify({ result: { images: [] } }),
+        { status: 200 }
+      ));
+    });
+
+    const file = new File([`duplicate-family-${Date.now()}-${Math.random()}`], 'photo.png', { type: 'image/png' });
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('originalUrl', 'https://example.com/another-endpoint');
+    formData.append('namespace', 'ns-a');
+    formData.append('duplicateAction', 'family');
+
+    const response = await POST(createRequest(formData));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.id).toBe('new-variant');
+    expect(payload.parentId).toBe('parent-root');
+    expect(payload.duplicateHandling).toEqual({
+      requestedAction: 'family',
+      matchedDuplicateIds: ['child-match'],
+      canonicalParentId: 'parent-root',
+      storedAsVariant: true,
+      provenance: 'duplicate-family-override',
+    });
+    expect(uploadedMetadata?.variationParentId).toBe('parent-root');
+    expect(uploadedMetadata?.duplicateFamilyOverride).toBe(true);
+    expect(mockFetch).toHaveBeenCalled();
   });
 
   it('rejects uploads without an explicit namespace', async () => {

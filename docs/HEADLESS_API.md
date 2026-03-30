@@ -245,6 +245,7 @@ Content-Type: multipart/form-data
 | `sourceUrl` | ❌ | Page URL reference |
 | `namespace` | ❌ | Namespace (defaults to `IMAGE_NAMESPACE` env var) |
 | `parentId` | ❌ | Parent image ID for variants |
+| `duplicateAction` | ❌ | `reject` (default) or `family` to admit same-namespace content-hash duplicates as child variants of an existing canonical parent |
 
 **Response:**
 
@@ -277,7 +278,7 @@ Content-Type: multipart/form-data
 
 **Form Fields:** Same as internal upload, plus `.snagx` file support.
 
-**Duplicate Detection:** Returns 409 when `contentHash` (SHA-256 of uploaded image bytes) matches an existing image in the same namespace. `originalUrl` is stored as metadata and may log a warning if reused, but it does not block upload.
+**Duplicate Detection:** Returns 409 when `contentHash` (SHA-256 of uploaded image bytes) matches an existing image in the same namespace. `originalUrl` is stored as metadata and may log a warning if reused, but it does not block upload. If `duplicateAction=family` is supplied and no explicit `parentId` is supplied, the upload is admitted as a child variant under the oldest matched canonical parent instead of returning 409.
 
 **Error Response (400):**
 
@@ -299,6 +300,13 @@ curl -X POST http://localhost:3000/api/upload/external \
   -F "tags=tag1,tag2" \
   -F "namespace=app-a"
 ```
+
+**Duplicate Family Override Response Fields:**
+
+- `duplicateHandling.requestedAction`
+- `duplicateHandling.matchedDuplicateIds`
+- `duplicateHandling.canonicalParentId`
+- `duplicateHandling.storedAsVariant`
 
 ---
 

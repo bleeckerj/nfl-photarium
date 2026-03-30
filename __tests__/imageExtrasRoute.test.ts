@@ -59,4 +59,34 @@ describe('PATCH /api/images/:id/extras', () => {
       })
     );
   });
+
+  it('accepts snagitSource payloads', async () => {
+    const request = createPatchRequest({
+      snagitSource: {
+        sourceType: 'snagx',
+        originalFileName: 'Capture 2026-03-25.snagx',
+        originalExtension: '.snagx',
+        captureDate: '2026-03-25T10:11:12Z',
+        metadata: {
+          CaptureDate: '2026-03-25T10:11:12Z',
+          Application: 'Snagit',
+        },
+        extractedFilename: 'Capture_2026-03-25.png',
+      },
+    });
+
+    const response = await PATCH(request, { params: Promise.resolve({ id: 'img_1' }) });
+    expect(response.status).toBe(200);
+    expect(patchImageExtrasRecordMock).toHaveBeenCalledWith(
+      'img_1',
+      expect.objectContaining({
+        snagitSource: expect.objectContaining({
+          sourceType: 'snagx',
+          originalFileName: 'Capture 2026-03-25.snagx',
+          captureDate: '2026-03-25T10:11:12Z',
+          extractedFilename: 'Capture_2026-03-25.png',
+        }),
+      })
+    );
+  });
 });

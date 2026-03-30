@@ -34,6 +34,7 @@ type PageImportQueueProps = {
   onRemove: (id: string) => void;
   onToggleMetadata: (id: string) => void;
   onClearQueue: () => void;
+  onUnselectAll: () => void;
   onAiRefineSelectedNames: () => void;
   onManualUpload: () => void;
   onApplyQueueNameToAll: () => void;
@@ -70,6 +71,7 @@ export function PageImportQueue(props: PageImportQueueProps) {
     onRemove,
     onToggleMetadata,
     onClearQueue,
+    onUnselectAll,
     onAiRefineSelectedNames,
     onManualUpload,
     onApplyQueueNameToAll,
@@ -99,6 +101,14 @@ export function PageImportQueue(props: PageImportQueueProps) {
             className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
           >
             Upload {selectedQueuedCount} File{selectedQueuedCount !== 1 ? 's' : ''}
+          </button>
+          <button
+            type="button"
+            onClick={onUnselectAll}
+            disabled={isUploading || selectedQueuedCount === 0}
+            className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+          >
+            Unselect all
           </button>
           <button
             type="button"

@@ -295,7 +295,7 @@ async function fetchBufferForAsset(assetUrl, referer) {
   return { bytes, contentType };
 }
 
-async function pushImageToCloudflare({ apiBase, imageUrl, uploadTags, shortcode, permalink, namespace }) {
+async function pushImageToCloudflare({ apiBase, imageUrl, uploadTags, shortcode, permalink, namespace, duplicateAction }) {
   const { bytes, contentType } = await fetchBufferForAsset(imageUrl, permalink);
   const ext = contentTypeToExt(contentType || 'image/jpeg');
   const safeShortcode = shortcode || `threads_${Date.now()}`;
@@ -310,6 +310,7 @@ async function pushImageToCloudflare({ apiBase, imageUrl, uploadTags, shortcode,
   form.append('originalUrl', imageUrl);
   form.append('namespace', namespace);
   form.append('description', permalink);
+  if (duplicateAction) form.append('duplicateAction', duplicateAction);
 
   const endpoint = `${apiBase}/api/upload/external`;
   const res = await fetch(endpoint, { method: 'POST', body: form });

@@ -47,6 +47,7 @@ Videos:
 - `--tag-count <n>`: AI tag target count
 - `--concurrency <n>`: worker parallelism
 - `--throttle-ms <n>`: global min interval between upload attempts
+- `--on-duplicate <mode>`: image duplicate handling (`reject` or `family`)
 - `--limit <n>`: stop after first N matching files
 - `--dry-run`: print plan, no upload
 - `--verbose`: detailed logs
@@ -135,6 +136,7 @@ npm run fs:ingest -- \
   --ai-metadata \
   --tag-count 3 \
   --throttle-ms 2000 \
+  --on-duplicate family \
   --concurrency 2 \
   --verbose
 ```
@@ -208,6 +210,8 @@ Common log outcomes:
 - `ok`: successful upload
 - `fail`: non-duplicate upload failure
 
+When `--on-duplicate family` is used, same-namespace content-hash duplicates are uploaded as child variants under the oldest matched canonical parent instead of producing `skip(duplicate)`.
+
 Arg errors are strict:
 - unknown options fail (namespace typos are called out)
 - missing option values fail
@@ -238,6 +242,8 @@ It can:
 2. Run `download_images_from_discord_channel.py`
 3. Run `fs:ingest` for each channel subdirectory under Discord images root
 
+The Discord wrapper defaults to `--on-duplicate family`.
+
 Example:
 
 ```bash
@@ -246,6 +252,7 @@ npm run fs:ingest:discord-refresh-all -- \
   --checkpoint-file "/Users/julian/Code/cloud-flare-image-handler/data/fs-ingest-checkpoints/discord-shared-cf-default.json" \
   --tags "discord,nfl-discord" \
   --append-image-tag "discord-archive" \
+  --on-duplicate family \
   --verbose
 ```
 
@@ -259,4 +266,3 @@ npm run fs:ingest:discord-refresh-all -- \
   --hash-cache-backfill-only \
   --assume-uploaded
 ```
-

@@ -133,33 +133,23 @@ export type AssignAssetParentResult = {
   reparentedChildIds?: string[];
 };
 
-export async function setAssetParentDirectly(
+type DirectParentAssignmentPlan = {
+  target: CatalogAsset;
+  nextParentId: string;
+};
+
+const planDirectParentAssignment = (
+  assets: CatalogAsset[],
   targetIdRaw: string,
-  parentIdRaw?: string | null,
-  options?: { forceRefreshImages?: boolean }
-): Promise<AssignAssetParentResult> {
+  parentIdRaw?: string | null
+): DirectParentAssignmentPlan => {
   const targetId = normalizeId(targetIdRaw);
   if (!targetId) {
     throw new ParentAssignmentError(400, 'Asset ID is required.');
   }
 
   const nextParentId = normalizeId(parentIdRaw);
-  let usedForceRefresh = options?.forceRefreshImages === true;
-  let assets = await listCatalogAssets({
-    forceRefreshImages: usedForceRefresh,
-    includeVideos: process.env.ENABLE_VIDEO_ASSETS === '1',
-  });
-  let target = assets.find((asset) => asset.id === targetId);
-
-  if (!target && !usedForceRefresh) {
-    usedForceRefresh = true;
-    assets = await listCatalogAssets({
-      forceRefreshImages: true,
-      includeVideos: process.env.ENABLE_VIDEO_ASSETS === '1',
-    });
-    target = assets.find((asset) => asset.id === targetId);
-  }
-
+  const target = assets.find((asset) => asset.id === targetId);
   if (!target) {
     throw new ParentAssignmentError(404, 'Target asset was not found.');
   }
@@ -171,19 +161,21 @@ export async function setAssetParentDirectly(
 
     const parentExists = assets.some((asset) => asset.id === nextParentId);
     if (!parentExists) {
-      if (!usedForceRefresh) {
-        assets = await listCatalogAssets({
-          forceRefreshImages: true,
-          includeVideos: process.env.ENABLE_VIDEO_ASSETS === '1',
-        });
-        usedForceRefresh = true;
-      }
-
-      if (!assets.some((asset) => asset.id === nextParentId)) {
-        throw new ParentAssignmentError(404, 'Parent asset was not found.');
-      }
+      throw new ParentAssignmentError(404, 'Parent asset was not found.');
     }
   }
+
+  return {
+    target,
+    nextParentId,
+  };
+};
+
+const applyDirectParentAssignment = async ({
+  target,
+  nextParentId,
+}: DirectParentAssignmentPlan): Promise<AssignAssetParentResult> => {
+  const targetId = target.id;
 
   if (target.assetType === 'image') {
     await patchCloudflareImageParent(targetId, nextParentId);
@@ -213,6 +205,49 @@ export async function setAssetParentDirectly(
     parentId: nextParentId || undefined,
     canonicalParentId: nextParentId || undefined,
   };
+};
+
+export async function setAssetParentDirectlyWithAssets(
+  targetIdRaw: string,
+  parentIdRaw: string | null | undefined,
+  assets: CatalogAsset[]
+): Promise<AssignAssetParentResult> {
+  return applyDirectParentAssignment(
+    planDirectParentAssignment(assets, targetIdRaw, parentIdRaw)
+  );
+}
+
+export async function setAssetParentDirectly(
+  targetIdRaw: string,
+  parentIdRaw?: string | null,
+  options?: { forceRefreshImages?: boolean }
+): Promise<AssignAssetParentResult> {
+  let usedForceRefresh = options?.forceRefreshImages === true;
+  let assets = await listCatalogAssets({
+    forceRefreshImages: usedForceRefresh,
+    includeVideos: process.env.ENABLE_VIDEO_ASSETS === '1',
+  });
+
+  try {
+    return await setAssetParentDirectlyWithAssets(targetIdRaw, parentIdRaw, assets);
+  } catch (error) {
+    const shouldRetryWithFreshCatalog =
+      !usedForceRefresh &&
+      error instanceof ParentAssignmentError &&
+      (error.status === 404 || error.status === 400);
+
+    if (!shouldRetryWithFreshCatalog) {
+      throw error;
+    }
+
+    usedForceRefresh = true;
+    assets = await listCatalogAssets({
+      forceRefreshImages: true,
+      includeVideos: process.env.ENABLE_VIDEO_ASSETS === '1',
+    });
+
+    return setAssetParentDirectlyWithAssets(targetIdRaw, parentIdRaw, assets);
+  }
 }
 
 const reparentDirectChildren = async (

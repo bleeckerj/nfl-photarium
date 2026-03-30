@@ -72,7 +72,7 @@ Before you start, you'll need:
 - **A Cloudflare account** (free tier available)
   - [Create a free account →](https://dash.cloudflare.com/sign-up)
   - [Enable Cloudflare Images →](https://dash.cloudflare.com/?to=/:account/images/getting-started) (100k images/month, free)
-- **ffmpeg** — Required for creating animated WebP images
+- **ffmpeg / ffprobe** — Required for animated WebP generation and video frame probing/extraction
   - macOS: `brew install ffmpeg`
   - Ubuntu/Debian: `sudo apt install ffmpeg`
   - Windows: [Download from ffmpeg.org](https://ffmpeg.org/download.html)

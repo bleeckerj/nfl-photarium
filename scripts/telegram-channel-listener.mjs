@@ -285,6 +285,7 @@ async function uploadToPhotarium(config, image, metadata) {
   if (metadata.displayName) form.append('displayName', metadata.displayName);
   if (metadata.sourceUrl) form.append('sourceUrl', metadata.sourceUrl);
   if (metadata.originalUrl) form.append('originalUrl', metadata.originalUrl);
+  if (metadata.duplicateAction) form.append('duplicateAction', metadata.duplicateAction);
 
   const response = await fetch(config.externalUploadUrl, { method: 'POST', body: form });
   const payload = await safeJson(response);

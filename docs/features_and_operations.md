@@ -136,6 +136,7 @@ Combine multiple images into a single animated WebP file:
 
 **Prerequisites:**
 - ffmpeg must be installed (`brew install ffmpeg` on macOS)
+- ffprobe must also be available on PATH (it is typically included with ffmpeg packages)
 
 **Steps:**
 

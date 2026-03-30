@@ -9,6 +9,11 @@ import { fetchCloudflareImage, getCloudflareCredentials } from '@/server/cloudfl
 import { cleanupImageArtifacts } from '@/server/imageArtifactCleanup';
 import { deleteStreamVideo } from '@/server/cloudflareStreamClient';
 import {
+  batchGetAspectMetadata,
+  batchGetColorMetadata,
+  isVectorSearchAvailable,
+} from '@/server/vectorSearch';
+import {
   deleteVideoAssetRecord,
   getVideoAssetRecord,
 } from '@/server/videoCatalogStorage';
@@ -89,6 +94,38 @@ const enrichImageSize = async (image: CachedCloudflareImage): Promise<CachedClou
 };
 
 const mark = (value: number) => Number(value.toFixed(1));
+
+const enrichWithVectorMetadata = async (
+  image: CachedCloudflareImage
+): Promise<CachedCloudflareImage> => {
+  const redisAvailable = await isVectorSearchAvailable();
+  if (!redisAvailable) {
+    return image;
+  }
+
+  const [colorMetadata, aspectMetadata] = await Promise.all([
+    batchGetColorMetadata([image.id]),
+    batchGetAspectMetadata([image.id]),
+  ]);
+
+  const color = colorMetadata.get(image.id);
+  const aspect = aspectMetadata.get(image.id);
+  if (!color && !aspect) {
+    return image;
+  }
+
+  return {
+    ...image,
+    hasClipEmbedding: color?.hasClipEmbedding ?? image.hasClipEmbedding,
+    hasColorEmbedding: color?.hasColorEmbedding ?? image.hasColorEmbedding,
+    dominantColors: color?.dominantColors ?? image.dominantColors,
+    averageColor: color?.averageColor ?? image.averageColor,
+    aspectRatio: aspect?.aspectRatio ?? image.aspectRatio,
+    dimensions: aspect?.width && aspect?.height
+      ? { width: aspect.width, height: aspect.height }
+      : image.dimensions,
+  };
+};
 
 export async function DELETE(
   request: NextRequest,
@@ -191,11 +228,22 @@ export async function GET(
     const cached = await getCachedImage(imageId);
     timings.cache_lookup = mark(performance.now() - cacheStartedAt);
     if (cached) {
+      let responseImage = cached;
+      try {
+        const vectorStartedAt = performance.now();
+        responseImage = await enrichWithVectorMetadata(cached);
+        timings.vector_enrich = mark(performance.now() - vectorStartedAt);
+        if (responseImage !== cached) {
+          upsertCachedImage(responseImage);
+        }
+      } catch (error) {
+        console.warn('[SingleImage] Vector metadata enrichment failed:', { imageId, error });
+      }
       diagnostics.source = 'cache';
-      diagnostics.had_known_size = typeof readKnownSize(cached) === 'number';
-      if (typeof readKnownSize(cached) !== 'number') {
-        void enrichImageSize(cached).then((enriched) => {
-          if ((cached.size ?? null) !== (enriched.size ?? null)) {
+      diagnostics.had_known_size = typeof readKnownSize(responseImage) === 'number';
+      if (typeof readKnownSize(responseImage) !== 'number') {
+        void enrichImageSize(responseImage).then((enriched) => {
+          if ((responseImage.size ?? null) !== (enriched.size ?? null)) {
             upsertCachedImage(enriched);
           }
         }).catch((error) => {
@@ -204,7 +252,7 @@ export async function GET(
       }
       timings.total = mark(performance.now() - startedAt);
       const response = NextResponse.json({
-        image: { ...cached, fileSizeBytes: cached.size ?? null },
+        image: { ...responseImage, fileSizeBytes: responseImage.size ?? null },
         timings,
         diagnostics,
       });
@@ -222,11 +270,19 @@ export async function GET(
     timings.cloudflare_fetch = mark(performance.now() - cloudflareStartedAt);
     diagnostics.source = 'cloudflare';
     const transformed = transformApiImageToCached(image);
+    let responseImage = transformed;
+    try {
+      const vectorStartedAt = performance.now();
+      responseImage = await enrichWithVectorMetadata(transformed);
+      timings.vector_enrich = mark(performance.now() - vectorStartedAt);
+    } catch (error) {
+      console.warn('[SingleImage] Vector metadata enrichment failed:', { imageId, error });
+    }
     diagnostics.had_known_size = typeof readKnownSize(transformed) === 'number';
-    upsertCachedImage(transformed);
-    if (typeof readKnownSize(transformed) !== 'number') {
-      void enrichImageSize(transformed).then((enriched) => {
-        if ((transformed.size ?? null) !== (enriched.size ?? null)) {
+    upsertCachedImage(responseImage);
+    if (typeof readKnownSize(responseImage) !== 'number') {
+      void enrichImageSize(responseImage).then((enriched) => {
+        if ((responseImage.size ?? null) !== (enriched.size ?? null)) {
           upsertCachedImage(enriched);
         }
       }).catch((error) => {
@@ -236,7 +292,7 @@ export async function GET(
 
     timings.total = mark(performance.now() - startedAt);
     const response = NextResponse.json({
-      image: { ...transformed, fileSizeBytes: transformed.size ?? null },
+      image: { ...responseImage, fileSizeBytes: responseImage.size ?? null },
       timings,
       diagnostics,
     });

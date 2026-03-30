@@ -172,6 +172,7 @@ export async function POST(request: NextRequest) {
     const sourcePath = formData.get('sourcePath') as string;
     const namespace = formData.get('namespace') as string;
     const parentIdRaw = formData.get('parentId');
+    const duplicateActionRaw = formData.get('duplicateAction');
 
     if (!promptField.ok) {
       return NextResponse.json(
@@ -230,7 +231,8 @@ export async function POST(request: NextRequest) {
       sourceUrl: cleanSourceUrl,
       sourcePath: cleanSourcePath,
       namespace: effectiveNamespace,
-      parentId: resolvedParentId
+      parentId: resolvedParentId,
+      duplicateAction: typeof duplicateActionRaw === 'string' ? duplicateActionRaw : undefined,
     };
 
     if (isArchiveFile(file)) {

@@ -85,6 +85,24 @@ describe('video frame routes', () => {
     expect(payload.previews[0].previewUrl).toContain('/api/videos/video-1/frames/preview?frame=');
   });
 
+  it('meta returns 503 with tooling hints when ffprobe is unavailable', async () => {
+    probeVideoSourceMock.mockRejectedValueOnce(
+      new Error('ffprobe is not installed or not available on PATH.')
+    );
+
+    const response = await GET_META(
+      new NextRequest('http://localhost/api/videos/video-1/frames/meta'),
+      params
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(payload.error).toMatch(/ffprobe is not installed/i);
+    expect(payload.hints).toEqual(
+      expect.arrayContaining([expect.stringMatching(/install ffmpeg/i)])
+    );
+  });
+
   it('preview returns the requested frame image', async () => {
     const response = await GET_PREVIEW(
       new NextRequest('http://localhost/api/videos/video-1/frames/preview?frame=25'),
@@ -156,5 +174,29 @@ describe('video frame routes', () => {
     expect(response.headers.get('x-video-frame-numbers')).toBe('1,100');
     expect(body.equals(Buffer.from('zip-bytes'))).toBe(true);
     expect(buildFrameArchiveMock).toHaveBeenCalled();
+  });
+
+  it('extract returns 503 with tooling hints when ffmpeg is unavailable', async () => {
+    extractFrameBufferMock.mockRejectedValueOnce(
+      new Error('ffmpeg is not installed or not available on PATH.')
+    );
+
+    const response = await POST_EXTRACT(
+      new NextRequest(
+        new Request('http://localhost/api/videos/video-1/frames/extract', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ selector: '7' }),
+        })
+      ),
+      params
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(payload.error).toMatch(/ffmpeg is not installed/i);
+    expect(payload.hints).toEqual(
+      expect.arrayContaining([expect.stringMatching(/install ffmpeg/i)])
+    );
   });
 });

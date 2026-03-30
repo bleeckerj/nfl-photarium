@@ -34,6 +34,7 @@ export interface CachedCloudflareImage {
   comfyMetadataDetected?: boolean;
   comfyMetadataSource?: string;
   parentId?: string;
+  duplicateFamilyOverride?: boolean;
   linkedAssetId?: string;
   variationSort?: number;
   
@@ -193,6 +194,7 @@ const buildMetadataOverride = (image: CachedCloudflareImage): CloudflareMetadata
   assign('comfyMetadataDetected', image.comfyMetadataDetected);
   assign('comfyMetadataSource', image.comfyMetadataSource);
   assign('variationParentId', image.parentId);
+  assign('duplicateFamilyOverride', image.duplicateFamilyOverride);
   assign('linkedAssetId', image.linkedAssetId);
   assign('variationSort', image.variationSort);
   assign('size', image.size);
@@ -274,6 +276,7 @@ const transformImage = (image: CloudflareImageApiResponse): CachedCloudflareImag
     mergedMeta.comfyMetadataSource && mergedMeta.comfyMetadataSource !== 'undefined'
       ? String(mergedMeta.comfyMetadataSource)
       : undefined;
+  const duplicateFamilyOverride = mergedMeta.duplicateFamilyOverride === true;
   const cleanVariationSort = (() => {
     if (typeof mergedMeta.variationSort === 'number' && Number.isFinite(mergedMeta.variationSort)) {
       return mergedMeta.variationSort;
@@ -334,6 +337,7 @@ const transformImage = (image: CloudflareImageApiResponse): CachedCloudflareImag
     generatedBy: cleanGeneratedBy,
     comfyMetadataDetected,
     comfyMetadataSource,
+    duplicateFamilyOverride: duplicateFamilyOverride || undefined,
     variationSort: cleanVariationSort,
     parentId,
     linkedAssetId
@@ -593,11 +597,37 @@ const rebuildState = (images: CachedCloudflareImage[], timestamp?: number) => {
   cacheState.initialized = true;
 };
 
+const mergeCachedImageRecord = (
+  existing: CachedCloudflareImage | undefined,
+  incoming: CachedCloudflareImage
+): CachedCloudflareImage => {
+  if (!existing) {
+    return incoming;
+  }
+
+  return {
+    ...existing,
+    ...incoming,
+    // Preserve known size/type when metadata-only refreshes omit these fields.
+    size: incoming.size ?? existing.size,
+    contentType: incoming.contentType ?? existing.contentType,
+    aspectRatio: incoming.aspectRatio ?? existing.aspectRatio,
+    dimensions: incoming.dimensions ?? existing.dimensions,
+    hasClipEmbedding: incoming.hasClipEmbedding ?? existing.hasClipEmbedding,
+    hasColorEmbedding: incoming.hasColorEmbedding ?? existing.hasColorEmbedding,
+    dominantColors: incoming.dominantColors ?? existing.dominantColors,
+    averageColor: incoming.averageColor ?? existing.averageColor,
+  };
+};
+
 /**
  * Fetch fresh data from Cloudflare and update both caches
  */
 const fetchAndUpdateCaches = async (): Promise<CachedCloudflareImage[]> => {
-  const images = await fetchAllImages();
+  const previousMap = new Map(cacheState.map);
+  const images = (await fetchAllImages()).map((image) =>
+    mergeCachedImageRecord(previousMap.get(image.id), image)
+  );
   const timestamp = Date.now();
   
   // Update in-memory cache
@@ -853,21 +883,7 @@ export const upsertCachedImage = (image: CachedCloudflareImage) => {
     return;
   }
   const existing = cacheState.map.get(image.id);
-  const mergedImage: CachedCloudflareImage = existing
-    ? {
-        ...existing,
-        ...image,
-        // Preserve known size/type when metadata-only updates omit these fields.
-        size: image.size ?? existing.size,
-        contentType: image.contentType ?? existing.contentType,
-        aspectRatio: image.aspectRatio ?? existing.aspectRatio,
-        dimensions: image.dimensions ?? existing.dimensions,
-        hasClipEmbedding: image.hasClipEmbedding ?? existing.hasClipEmbedding,
-        hasColorEmbedding: image.hasColorEmbedding ?? existing.hasColorEmbedding,
-        dominantColors: image.dominantColors ?? existing.dominantColors,
-        averageColor: image.averageColor ?? existing.averageColor,
-      }
-    : image;
+  const mergedImage = mergeCachedImageRecord(existing, image);
 
   cacheState.map.set(mergedImage.id, mergedImage);
   const index = cacheState.images.findIndex(item => item.id === image.id);

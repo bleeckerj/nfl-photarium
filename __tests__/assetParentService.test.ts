@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { CatalogAsset } from '@/server/assetCatalog';
 
 const {
   getCachedImagesMock,
@@ -34,7 +35,10 @@ vi.mock('@/server/videoCatalogStorage', () => ({
   getVideoAssetRecord: getVideoAssetRecordMock,
 }));
 
-import { assignAssetParent } from '@/server/assetParentService';
+import {
+  assignAssetParent,
+  setAssetParentDirectlyWithAssets,
+} from '@/server/assetParentService';
 
 describe('assignAssetParent', () => {
   beforeEach(() => {
@@ -179,5 +183,123 @@ describe('assignAssetParent', () => {
     );
     expect(result.parentId).toBe('video-root');
     expect(result.canonicalParentId).toBe('video-root');
+  });
+});
+
+describe('setAssetParentDirectlyWithAssets', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.ENABLE_VIDEO_ASSETS = '1';
+
+    getCloudflareCredentialsMock.mockReturnValue({
+      accountId: 'acct-1',
+      apiToken: 'token-1',
+    });
+
+    getCachedImagesMock.mockResolvedValue([
+      {
+        id: 'image-child',
+        filename: 'child.webp',
+        uploaded: '2026-03-01T00:00:00.000Z',
+        variants: [],
+        tags: [],
+      },
+    ]);
+
+    updateVideoAssetRecordMock.mockImplementation(async (id: string, patch: Record<string, unknown>) => ({
+      id,
+      ...patch,
+    }));
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ success: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      )
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('updates an image parent without reloading the catalog', async () => {
+    const assets: CatalogAsset[] = [
+      {
+        id: 'image-parent',
+        assetType: 'image',
+        filename: 'parent.png',
+        uploaded: '2026-03-01T00:00:00.000Z',
+      },
+      {
+        id: 'image-child',
+        assetType: 'image',
+        filename: 'child.webp',
+        uploaded: '2026-03-01T00:00:00.000Z',
+      },
+    ];
+
+    const result = await setAssetParentDirectlyWithAssets('image-child', 'image-parent', assets);
+
+    expect(listCatalogAssetsMock).not.toHaveBeenCalled();
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining('/images/v1/image-child'),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: expect.stringContaining('image-parent'),
+      })
+    );
+    expect(upsertCachedImageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'image-child',
+        parentId: 'image-parent',
+      })
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        targetId: 'image-child',
+        targetAssetType: 'image',
+        parentId: 'image-parent',
+      })
+    );
+  });
+
+  it('rejects self-parenting from the supplied asset list', async () => {
+    const assets: CatalogAsset[] = [
+      {
+        id: 'image-child',
+        assetType: 'image',
+        filename: 'child.webp',
+        uploaded: '2026-03-01T00:00:00.000Z',
+      },
+    ];
+
+    await expect(
+      setAssetParentDirectlyWithAssets('image-child', 'image-child', assets)
+    ).rejects.toThrow(/cannot be its own parent/i);
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(listCatalogAssetsMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a missing parent from the supplied asset list', async () => {
+    const assets: CatalogAsset[] = [
+      {
+        id: 'image-child',
+        assetType: 'image',
+        filename: 'child.webp',
+        uploaded: '2026-03-01T00:00:00.000Z',
+      },
+    ];
+
+    await expect(
+      setAssetParentDirectlyWithAssets('image-child', 'missing-parent', assets)
+    ).rejects.toThrow(/parent asset was not found/i);
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(listCatalogAssetsMock).not.toHaveBeenCalled();
   });
 });

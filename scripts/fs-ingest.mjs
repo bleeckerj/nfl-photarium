@@ -5,6 +5,7 @@ import path from "node:path";
 import os from "node:os";
 import process from "node:process";
 import { createHash } from "node:crypto";
+import { pathToFileURL } from "node:url";
 
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".avif"]);
 const VIDEO_EXTENSIONS = new Set([".mp4", ".webm", ".mov", ".m4v", ".ogv", ".ogg"]);
@@ -55,6 +56,7 @@ Options:
   --tag-count <n>             AI tag count target (default: 4)
   --concurrency <n>           Parallel uploads (default: 2)
   --throttle-ms <n>          Minimum delay between upload requests (global, default: 0)
+  --on-duplicate <mode>      Duplicate handling for image uploads: reject|family (default: reject)
   --limit <n>                 Stop after N matching files
   --dry-run                   Print planned uploads without uploading
   --verbose                   More logging
@@ -94,6 +96,7 @@ function parseArgs(argv) {
     tagCount: 4,
     concurrency: 2,
     throttleMs: 0,
+    onDuplicate: "reject",
     limit: 0,
     dryRun: false,
     verbose: false,
@@ -171,6 +174,10 @@ function parseArgs(argv) {
       if (!requireValue(arg, next)) continue;
       opts.throttleMs = Number.parseInt(next, 10);
       i += 1;
+    } else if (arg === "--on-duplicate") {
+      if (!requireValue(arg, next)) continue;
+      opts.onDuplicate = next.trim().toLowerCase();
+      i += 1;
     } else if (arg === "--limit") {
       if (!requireValue(arg, next)) continue;
       opts.limit = Number.parseInt(next, 10);
@@ -204,6 +211,10 @@ function parseArgs(argv) {
   if (!Number.isFinite(opts.concurrency) || opts.concurrency < 1) opts.concurrency = 2;
   if (!Number.isFinite(opts.throttleMs) || opts.throttleMs < 0) opts.throttleMs = 0;
   if (!Number.isFinite(opts.limit) || opts.limit < 0) opts.limit = 0;
+  if (!["reject", "family"].includes(opts.onDuplicate)) {
+    errors.push(`Invalid value for --on-duplicate: ${opts.onDuplicate} (expected reject or family)`);
+    opts.onDuplicate = "reject";
+  }
   return { ...opts, errors };
 }
 
@@ -394,7 +405,7 @@ async function suggestAiMetadata({
   };
 }
 
-async function uploadImage({
+export async function uploadImage({
   apiBase,
   filePath,
   namespace,
@@ -403,6 +414,7 @@ async function uploadImage({
   description,
   displayName,
   sourcePath,
+  duplicateAction,
 }) {
   const filename = path.basename(filePath);
   const ext = path.extname(filePath).toLowerCase();
@@ -416,6 +428,7 @@ async function uploadImage({
   if (description) form.append("description", description);
   if (displayName) form.append("displayName", displayName);
   form.append("sourceUrl", sourcePath);
+  if (duplicateAction === "family") form.append("duplicateAction", duplicateAction);
 
   const res = await fetch(`${apiBase}/api/upload/external`, {
     method: "POST",
@@ -807,7 +820,7 @@ async function main() {
   console.log(`[scan] root=${opts.root}`);
   console.log(`[scan] found=${counts.total} images=${counts.images} videos=${counts.videos}`);
   console.log(
-    `[config] namespace=${opts.namespace} apiBase=${opts.apiBase} concurrency=${opts.concurrency} throttleMs=${opts.throttleMs} dryRun=${opts.dryRun ? "1" : "0"} hashBackfillOnly=${opts.hashCacheBackfillOnly ? "1" : "0"} assumeUploaded=${opts.assumeUploaded ? "1" : "0"}`
+    `[config] namespace=${opts.namespace} apiBase=${opts.apiBase} concurrency=${opts.concurrency} throttleMs=${opts.throttleMs} onDuplicate=${opts.onDuplicate} dryRun=${opts.dryRun ? "1" : "0"} hashBackfillOnly=${opts.hashCacheBackfillOnly ? "1" : "0"} assumeUploaded=${opts.assumeUploaded ? "1" : "0"}`
   );
   console.log(`[checkpoint] ${checkpointPath}`);
 
@@ -1001,6 +1014,7 @@ async function main() {
           description,
           displayName,
           sourcePath,
+          duplicateAction: opts.onDuplicate,
         })
       : await uploadVideo({
           apiBase: opts.apiBase,
@@ -1097,7 +1111,13 @@ async function main() {
   );
 }
 
-main().catch((error) => {
-  console.error(`[error] ${error instanceof Error ? error.message : String(error)}`);
-  process.exitCode = 1;
-});
+const isDirectRun = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isDirectRun) {
+  main().catch((error) => {
+    console.error(`[error] ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+  });
+}
+
+export { parseArgs };

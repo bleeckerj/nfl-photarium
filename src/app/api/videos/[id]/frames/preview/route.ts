@@ -5,6 +5,7 @@ import {
   frameNumberToTime,
   probeVideoSource,
 } from '@/server/videoFrameService';
+import { buildVideoFrameErrorResponse } from '@/server/videoFrameRouteErrors';
 import { resolveVideoDownloadUrl } from '@/server/videoDownloadUrl';
 
 export async function GET(
@@ -61,9 +62,7 @@ export async function GET(
     });
   } catch (error) {
     console.error('[video frames preview] failed', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to render frame preview' },
-      { status: 500 }
-    );
+    const response = buildVideoFrameErrorResponse(error, 'Failed to render frame preview');
+    return NextResponse.json(response.body, { status: response.status });
   }
 }

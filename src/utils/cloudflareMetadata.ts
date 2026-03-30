@@ -19,6 +19,7 @@ export type CloudflareMetadata = {
   displayName?: string;
   filename?: string;
   variationParentId?: string;
+  duplicateFamilyOverride?: boolean;
   linkedAssetId?: string;
   exif?: Record<string, string | number>;
   generatedBy?: string;
@@ -58,6 +59,7 @@ export const CLOUDFLARE_METADATA_FIELDS = [
   'altTag',
   'displayName',
   'variationParentId',
+  'duplicateFamilyOverride',
   'linkedAssetId',
   'exif',
   'generatedBy',
@@ -184,6 +186,7 @@ export function enforceCloudflareMetadataLimit(
     'type',
     'size',
     'variationParentId',
+    'duplicateFamilyOverride',
     'linkedAssetId',
     'variationSort',
     'description',

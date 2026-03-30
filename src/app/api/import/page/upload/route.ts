@@ -67,6 +67,7 @@ type UploadItem = {
   sourceUrl?: string;
   namespace?: string;
   parentId?: string;
+  duplicateAction?: string;
   cookieHeader?: string;
   sessionId?: string;
   tempAssetKey?: string;
@@ -261,7 +262,8 @@ export async function POST(request: NextRequest) {
             originalUrl: originalUrl || item.url,
             sourceUrl: sourceUrl,
             namespace: effectiveNamespace,
-            parentId: resolvedParentId
+            parentId: resolvedParentId,
+            duplicateAction: typeof item.duplicateAction === 'string' ? item.duplicateAction : undefined,
           }
         });
 

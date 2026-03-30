@@ -1,7 +1,18 @@
-import type { CachedCloudflareImage } from '@/server/cloudflareImageCache';
+import { getCachedImages, type CachedCloudflareImage } from '@/server/cloudflareImageCache';
 import { findDuplicatesByContentHash, findDuplicatesByOriginalUrl } from '@/server/duplicateDetector';
 
 type DuplicateLocation = Array<string | null>;
+
+export const DUPLICATE_UPLOAD_ACTIONS = ['reject', 'family'] as const;
+export type UploadDuplicateAction = (typeof DUPLICATE_UPLOAD_ACTIONS)[number];
+
+export type DuplicateFamilySelection = {
+  requestedAction: 'family';
+  matchedDuplicateIds: string[];
+  canonicalParentId: string;
+  storedAsVariant: true;
+  provenance: 'duplicate-family-override';
+};
 
 export type OriginalUrlReuseWarning = {
   normalizedOriginalUrl: string;
@@ -14,6 +25,8 @@ export type UploadDeduplicationResult = {
   originalUrlWarning?: OriginalUrlReuseWarning;
   contentHashDuplicates: CachedCloudflareImage[];
   crossNamespaceContentHashMatches: CachedCloudflareImage[];
+  duplicateAction: UploadDuplicateAction;
+  duplicateFamilySelection?: DuplicateFamilySelection;
 };
 
 const summarizeDuplicateMatches = (matches: CachedCloudflareImage[]) => ({
@@ -30,12 +43,76 @@ const buildOriginalUrlReuseWarning = (
   ...summarizeDuplicateMatches(matches),
 });
 
+const normalizeId = (value?: string | null) => (typeof value === 'string' ? value.trim() : '');
+
+const normalizeUploadedAt = (value?: string) => {
+  const parsed = value ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
+};
+
+const resolveCanonicalRoot = (
+  image: CachedCloudflareImage,
+  byId: Map<string, CachedCloudflareImage>
+): CachedCloudflareImage => {
+  const visited = new Set<string>();
+  let current = image;
+
+  while (normalizeId(current.parentId)) {
+    if (visited.has(current.id)) break;
+    visited.add(current.id);
+
+    const next = byId.get(normalizeId(current.parentId));
+    if (!next) break;
+    current = next;
+  }
+
+  return current;
+};
+
+async function resolveDuplicateFamilySelection(
+  duplicates: CachedCloudflareImage[]
+): Promise<DuplicateFamilySelection | undefined> {
+  if (!duplicates.length) return undefined;
+
+  const images = await getCachedImages();
+  const imagesById = new Map(images.map((image) => [image.id, image]));
+  const canonicalRoots = new Map<string, CachedCloudflareImage>();
+
+  for (const duplicate of duplicates) {
+    const root = resolveCanonicalRoot(duplicate, imagesById);
+    canonicalRoots.set(root.id, root);
+  }
+
+  const selectedParent = Array.from(canonicalRoots.values()).sort((a, b) => {
+    const uploadedDelta = normalizeUploadedAt(a.uploaded) - normalizeUploadedAt(b.uploaded);
+    if (uploadedDelta !== 0) return uploadedDelta;
+    return a.id.localeCompare(b.id);
+  })[0];
+
+  if (!selectedParent) return undefined;
+
+  return {
+    requestedAction: 'family',
+    matchedDuplicateIds: duplicates.map((match) => match.id),
+    canonicalParentId: selectedParent.id,
+    storedAsVariant: true,
+    provenance: 'duplicate-family-override',
+  };
+}
+
+export function normalizeUploadDuplicateAction(value?: unknown): UploadDuplicateAction {
+  return typeof value === 'string' && value.trim().toLowerCase() === 'family' ? 'family' : 'reject';
+}
+
 export async function evaluateUploadDeduplicationPolicy(params: {
   contentHash: string;
   normalizedOriginalUrl?: string;
   namespace?: string;
+  duplicateAction?: unknown;
+  requestedParentId?: string;
 }): Promise<UploadDeduplicationResult> {
   const { contentHash, normalizedOriginalUrl } = params;
+  const duplicateAction = normalizeUploadDuplicateAction(params.duplicateAction);
   const trimmedNamespace = typeof params.namespace === 'string' ? params.namespace.trim() : '';
   const targetNamespace =
     trimmedNamespace &&
@@ -48,13 +125,10 @@ export async function evaluateUploadDeduplicationPolicy(params: {
   const originalUrlMatches = normalizedOriginalUrl
     ? await findDuplicatesByOriginalUrl(normalizedOriginalUrl, targetNamespace)
     : [];
-  // Hard-block duplicates only within the target namespace.
-  // If namespace is missing, do not block based on global hash matches.
   const contentHashDuplicates = targetNamespace
     ? await findDuplicatesByContentHash(contentHash, targetNamespace)
     : [];
 
-  // Optional warning path for cross-namespace collisions.
   let crossNamespaceContentHashMatches: CachedCloudflareImage[] = [];
   if (contentHashDuplicates.length === 0) {
     const globalHashMatches = await findDuplicatesByContentHash(contentHash);
@@ -63,12 +137,20 @@ export async function evaluateUploadDeduplicationPolicy(params: {
       : globalHashMatches;
   }
 
+  const requestedParentId = normalizeId(params.requestedParentId);
+  const duplicateFamilySelection =
+    duplicateAction === 'family' && !requestedParentId && contentHashDuplicates.length > 0
+      ? await resolveDuplicateFamilySelection(contentHashDuplicates)
+      : undefined;
+
   return {
     originalUrlWarning: originalUrlMatches.length
       ? buildOriginalUrlReuseWarning(normalizedOriginalUrl!, originalUrlMatches)
       : undefined,
     contentHashDuplicates,
     crossNamespaceContentHashMatches,
+    duplicateAction,
+    duplicateFamilySelection,
   };
 }
 
@@ -109,7 +191,7 @@ export function logCrossNamespaceContentHashWarning(params: {
   const { logScope, contentHash, targetNamespace, matches } = params;
   const summary = summarizeDuplicateMatches(matches);
   const namespaces = Array.from(
-    new Set(matches.map((match) => (match.namespace && match.namespace.trim()) ? match.namespace.trim() : null))
+    new Set(matches.map((match) => (match.namespace && match.namespace.trim() ? match.namespace.trim() : null)))
   );
   console.warn(`[${logScope}] Content hash exists in other namespaces (warning only)`, {
     contentHash,
@@ -117,5 +199,21 @@ export function logCrossNamespaceContentHashWarning(params: {
     namespaces,
     duplicateIds: summary.duplicateIds,
     folders: summary.duplicateFolders,
+  });
+}
+
+export function logDuplicateFamilySelection(params: {
+  logScope: string;
+  contentHash: string;
+  selection: DuplicateFamilySelection;
+}): void {
+  const { logScope, contentHash, selection } = params;
+  console.info(`[${logScope}] Duplicate content admitted as family variant`, {
+    contentHash,
+    requestedAction: selection.requestedAction,
+    matchedDuplicateIds: selection.matchedDuplicateIds,
+    canonicalParentId: selection.canonicalParentId,
+    storedAsVariant: selection.storedAsVariant,
+    provenance: selection.provenance,
   });
 }

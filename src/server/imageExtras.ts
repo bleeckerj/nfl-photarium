@@ -78,6 +78,15 @@ export type FlickrSourceRecord = {
   downloadedContentHash?: string;
 };
 
+export type SnagitSourceRecord = {
+  sourceType: 'snagx' | 'image' | 'video';
+  originalFileName: string;
+  originalExtension?: string;
+  captureDate?: string;
+  metadata?: Record<string, unknown>;
+  extractedFilename?: string;
+};
+
 export type ImageExtrasRecordV1 = {
   schemaVersion: 1;
   imageId: string;
@@ -111,6 +120,9 @@ export type ImageExtrasRecordV1 = {
 
   /** Durable Flickr import provenance for backup/sync workflows. */
   flickrSource?: FlickrSourceRecord;
+
+  /** Durable Snagit import provenance for archive workflows. */
+  snagitSource?: SnagitSourceRecord;
 
   /**
    * Optional future slots (kept here to document intent; not used yet).

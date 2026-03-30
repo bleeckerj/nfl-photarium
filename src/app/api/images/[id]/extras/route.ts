@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cleanString } from '@/utils/cloudflareMetadata';
 import { getImageExtrasRecord, patchImageExtrasRecord } from '@/server/imageExtras';
-import type { DngIngestRecord, FlickrSourceRecord, ImageExifRecord, RawSourceReference } from '@/server/imageExtras';
+import type { DngIngestRecord, FlickrSourceRecord, ImageExifRecord, RawSourceReference, SnagitSourceRecord } from '@/server/imageExtras';
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -56,6 +56,7 @@ export async function PATCH(
       exif?: ImageExifRecord;
       dngIngest?: DngIngestRecord;
       flickrSource?: FlickrSourceRecord;
+      snagitSource?: SnagitSourceRecord;
     } = {};
 
     if (Object.prototype.hasOwnProperty.call(body ?? {}, 'description')) {
@@ -145,6 +146,15 @@ export async function PATCH(
         patch.flickrSource = undefined;
       } else if (isPlainObject(raw)) {
         patch.flickrSource = raw as FlickrSourceRecord;
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body ?? {}, 'snagitSource')) {
+      const raw = body?.snagitSource;
+      if (raw === null) {
+        patch.snagitSource = undefined;
+      } else if (isPlainObject(raw)) {
+        patch.snagitSource = raw as SnagitSourceRecord;
       }
     }
 

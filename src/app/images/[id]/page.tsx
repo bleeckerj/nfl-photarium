@@ -235,6 +235,49 @@ const mergeUniqueImagesById = (base: CloudflareImage[], incoming: CloudflareImag
   return Array.from(merged.values());
 };
 
+const sortFamilyMembers = (items: CloudflareImage[]) => {
+  const hasSort = items.some((item) => Number.isFinite(item.variationSort));
+  if (!hasSort) {
+    return [...items].sort((a, b) => {
+      const aUploaded = Date.parse(a.uploaded);
+      const bUploaded = Date.parse(b.uploaded);
+      const aTime = Number.isFinite(aUploaded) ? aUploaded : 0;
+      const bTime = Number.isFinite(bUploaded) ? bUploaded : 0;
+      if (aTime !== bTime) {
+        return aTime - bTime;
+      }
+      return a.id.localeCompare(b.id);
+    });
+  }
+
+  const fallbackIndex = new Map(
+    [...items]
+      .sort((a, b) => {
+        const aUploaded = Date.parse(a.uploaded);
+        const bUploaded = Date.parse(b.uploaded);
+        const aTime = Number.isFinite(aUploaded) ? aUploaded : 0;
+        const bTime = Number.isFinite(bUploaded) ? bUploaded : 0;
+        if (aTime !== bTime) {
+          return aTime - bTime;
+        }
+        return a.id.localeCompare(b.id);
+      })
+      .map((item, index) => [item.id, index])
+  );
+
+  return [...items].sort((a, b) => {
+    const aSort = Number.isFinite(a.variationSort) ? (a.variationSort as number) : null;
+    const bSort = Number.isFinite(b.variationSort) ? (b.variationSort as number) : null;
+    if (aSort === null && bSort === null) {
+      return (fallbackIndex.get(a.id) ?? 0) - (fallbackIndex.get(b.id) ?? 0);
+    }
+    if (aSort === null) return 1;
+    if (bSort === null) return -1;
+    if (aSort !== bSort) return aSort - bSort;
+    return (fallbackIndex.get(a.id) ?? 0) - (fallbackIndex.get(b.id) ?? 0);
+  });
+};
+
 const DETAIL_PERF_LOGGING_ENABLED = process.env.NODE_ENV !== 'production';
 
 const getNow = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -272,6 +315,7 @@ export default function ImageDetailPage() {
 
   const [image, setImage] = useState<CloudflareImage | null>(null);
   const [loading, setLoading] = useState(true);
+  const [familyLoaded, setFamilyLoaded] = useState(false);
   const toast = useToast();
   const [galleryResultIds, setGalleryResultIds] = useState<string[]>([]);
   const [galleryResultAssetTypes, setGalleryResultAssetTypes] = useState<Record<string, 'image' | 'video'>>({});
@@ -494,6 +538,8 @@ export default function ImageDetailPage() {
   }, [image?.id, image?.parentId]);
 
   useEffect(() => {
+    setLoading(true);
+    setFamilyLoaded(false);
     setImage(null);
     setAllImages([]);
     setUniqueFolders([]);
@@ -635,6 +681,7 @@ export default function ImageDetailPage() {
           candidatePoolLoadedRef.current = true;
         }
       }
+      setFamilyLoaded(true);
       logDetailPerf('refreshImageList:fetch', startedAt, {
         imageServerTiming: imageResponse.headers.get('server-timing'),
         familyServerTiming: familyResponse.headers.get('server-timing'),
@@ -758,6 +805,10 @@ export default function ImageDetailPage() {
         });
       } catch (error) {
         console.error('Failed to fetch family context', error);
+      } finally {
+        if (mounted) {
+          setFamilyLoaded(true);
+        }
       }
     })();
     return () => {
@@ -927,21 +978,7 @@ export default function ImageDetailPage() {
     if (!variationCandidates.length) {
       return [];
     }
-    const baseIndex = new Map(variationCandidates.map((child, index) => [child.id, index]));
-    const hasSort = variationCandidates.some((child) => Number.isFinite(child.variationSort));
-    const baseOrdered = hasSort
-      ? [...variationCandidates].sort((a, b) => {
-          const aSort = Number.isFinite(a.variationSort) ? (a.variationSort as number) : null;
-          const bSort = Number.isFinite(b.variationSort) ? (b.variationSort as number) : null;
-          if (aSort === null && bSort === null) {
-            return (baseIndex.get(a.id) ?? 0) - (baseIndex.get(b.id) ?? 0);
-          }
-          if (aSort === null) return 1;
-          if (bSort === null) return -1;
-          if (aSort !== bSort) return aSort - bSort;
-          return (baseIndex.get(a.id) ?? 0) - (baseIndex.get(b.id) ?? 0);
-        })
-      : variationCandidates;
+    const baseOrdered = sortFamilyMembers(variationCandidates);
 
     if (!variationOrderOverride || variationOrderOverride.length === 0) {
       return baseOrdered;
@@ -1180,32 +1217,23 @@ export default function ImageDetailPage() {
     [allImages, galleryNavSuffix, galleryResultAssetTypes]
   );
 
-  const handleNavigateGalleryResult = useCallback((targetId: string | null) => {
+  const commitNavigation = useCallback((href: string, targetId?: string | null) => {
+    lastUserNavIntentRef.current = Date.now();
+    if (targetId) {
+      pinnedImageIdRef.current = targetId;
+    }
+    setLoading(true);
+    router.push(href, { scroll: false });
+  }, [router]);
+  const commitAssetNavigation = useCallback((targetId: string | null) => {
     if (!targetId) return;
-    router.push(buildAssetHref(targetId), { scroll: false });
-  }, [buildAssetHref, router]);
+    commitNavigation(buildAssetHref(targetId), targetId);
+  }, [buildAssetHref, commitNavigation]);
   const familyVariantSequence = useMemo(() => {
     if (!image?.parentId) return [];
     const familyVariants = allImages.filter((img) => img.parentId === image.parentId);
     if (!familyVariants.length) return [];
-
-    const baseIndex = new Map(familyVariants.map((child, index) => [child.id, index]));
-    const hasSort = familyVariants.some((child) => Number.isFinite(child.variationSort));
-    if (!hasSort) {
-      return familyVariants;
-    }
-
-    return [...familyVariants].sort((a, b) => {
-      const aSort = Number.isFinite(a.variationSort) ? (a.variationSort as number) : null;
-      const bSort = Number.isFinite(b.variationSort) ? (b.variationSort as number) : null;
-      if (aSort === null && bSort === null) {
-        return (baseIndex.get(a.id) ?? 0) - (baseIndex.get(b.id) ?? 0);
-      }
-      if (aSort === null) return 1;
-      if (bSort === null) return -1;
-      if (aSort !== bSort) return aSort - bSort;
-      return (baseIndex.get(a.id) ?? 0) - (baseIndex.get(b.id) ?? 0);
-    });
+    return sortFamilyMembers(familyVariants);
   }, [allImages, image?.parentId]);
   const familyVariantIndex = useMemo(() => {
     if (!image?.id) return -1;
@@ -2468,7 +2496,7 @@ export default function ImageDetailPage() {
               ← Back to gallery
             </button>
             <div className="flex flex-wrap items-center justify-end gap-2">
-              {Boolean(image.parentId) && familyVariantSequence.length > 0 && (
+              {Boolean(image.parentId) && familyLoaded && familyVariantSequence.length > 0 && (
                 <div className="flex items-center gap-2">
                   {familyVariantIndex >= 0 && (
                     <span className="text-[11px] font-mono text-gray-500">
@@ -2477,10 +2505,7 @@ export default function ImageDetailPage() {
                   )}
                   <button
                     type="button"
-                    onClick={(event) => {
-                      if (!event.isTrusted || event.detail === 0) return;
-                      handleNavigateGalleryResult(prevFamilyVariantId);
-                    }}
+                    onClick={() => commitAssetNavigation(prevFamilyVariantId)}
                     disabled={!prevFamilyVariantId}
                     className="inline-flex items-center gap-1 px-2 py-1 text-xs font-mono border rounded-md border-amber-200 text-amber-700 hover:border-amber-300 disabled:opacity-40 disabled:cursor-not-allowed"
                     title="Previous variant in this parent family"
@@ -2490,10 +2515,7 @@ export default function ImageDetailPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={(event) => {
-                      if (!event.isTrusted || event.detail === 0) return;
-                      handleNavigateGalleryResult(nextFamilyVariantId);
-                    }}
+                    onClick={() => commitAssetNavigation(nextFamilyVariantId)}
                     disabled={!nextFamilyVariantId}
                     className="inline-flex items-center gap-1 px-2 py-1 text-xs font-mono border rounded-md border-amber-200 text-amber-700 hover:border-amber-300 disabled:opacity-40 disabled:cursor-not-allowed"
                     title="Next variant in this parent family"
@@ -2512,10 +2534,7 @@ export default function ImageDetailPage() {
                   )}
                   <button
                     type="button"
-                    onClick={(event) => {
-                      if (!event.isTrusted || event.detail === 0) return;
-                      handleNavigateGalleryResult(prevGalleryImageId);
-                    }}
+                    onClick={() => commitAssetNavigation(prevGalleryImageId)}
                     disabled={!prevGalleryImageId}
                     className="inline-flex items-center gap-1 px-2 py-1 text-xs font-mono border rounded-md border-gray-200 text-gray-600 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
@@ -2524,10 +2543,7 @@ export default function ImageDetailPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={(event) => {
-                      if (!event.isTrusted || event.detail === 0) return;
-                      handleNavigateGalleryResult(nextGalleryImageId);
-                    }}
+                    onClick={() => commitAssetNavigation(nextGalleryImageId)}
                     disabled={!nextGalleryImageId}
                     className="inline-flex items-center gap-1 px-2 py-1 text-xs font-mono border rounded-md border-gray-200 text-gray-600 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed"
                   >
@@ -2804,11 +2820,11 @@ export default function ImageDetailPage() {
                           size={320}
                           onImageClick={(result) => {
                             if (!result?.imageId) return;
-                            router.push(
+                            commitNavigation(
                               result.assetType === 'video'
                                 ? `/videos/${result.imageId}`
                                 : `/images/${result.imageId}`,
-                              { scroll: false }
+                              result.imageId
                             );
                           }}
                           copyVariant={listVariant}
@@ -2825,7 +2841,7 @@ export default function ImageDetailPage() {
                           showStrangers={true}
                           onImageClick={(clickedImageId) => {
                             if (!clickedImageId) return;
-                            router.push(`/images/${clickedImageId}`, { scroll: false });
+                            commitNavigation(`/images/${clickedImageId}`, clickedImageId);
                           }}
                           copyVariant={listVariant}
                           onCopySuccess={(msg) => toast.push(msg)}
@@ -2841,11 +2857,11 @@ export default function ImageDetailPage() {
                       className="bg-gray-900/50 border border-amber-900/30 rounded-lg p-4"
                       onImageClick={(result) => {
                         if (!result?.imageId) return;
-                        router.push(
+                        commitNavigation(
                           result.assetType === 'video'
                             ? `/videos/${result.imageId}`
                             : `/images/${result.imageId}`,
-                          { scroll: false }
+                          result.imageId
                         );
                       }}
                       copyVariant={listVariant}

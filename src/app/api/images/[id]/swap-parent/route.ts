@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { listCatalogAssets } from '@/server/assetCatalog';
 import {
   ParentAssignmentError,
-  setAssetParentDirectly,
+  setAssetParentDirectlyWithAssets,
 } from '@/server/assetParentService';
 import { listImageFamilyIds } from '@/server/imageFamily';
+import type { CatalogAsset } from '@/server/assetCatalog';
 
 type SwapParentRequestBody = {
   newParentId?: string;
@@ -21,6 +22,15 @@ type SwapOutcome = {
 };
 
 const DEFAULT_SWAP_CONCURRENCY = 12;
+
+class SwapValidationError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
 
 const normalizeConcurrency = (value: unknown) => {
   if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_SWAP_CONCURRENCY;
@@ -55,10 +65,56 @@ const mapWithConcurrency = async <T, R>(
   return results;
 };
 
+const buildSwapPlan = (
+  assets: CatalogAsset[],
+  requestedId: string,
+  newParentId: string
+) => {
+  const target = assets.find((asset) => asset.id === requestedId);
+  if (!target) {
+    throw new SwapValidationError(404, 'Image not found');
+  }
+  if (target.assetType !== 'image') {
+    throw new SwapValidationError(400, 'Only images can be family parents.');
+  }
+  if (target.parentId) {
+    throw new SwapValidationError(
+      400,
+      'Only root images can be swapped. Open the parent image to swap variants.'
+    );
+  }
+
+  const newParent = assets.find((asset) => asset.id === newParentId);
+  if (!newParent) {
+    throw new SwapValidationError(404, 'New parent not found');
+  }
+  if (newParent.assetType !== 'image') {
+    throw new SwapValidationError(
+      400,
+      'New parent must be an image. Videos can only be variations.'
+    );
+  }
+
+  const { rootId, memberIds } = listImageFamilyIds(assets, requestedId);
+  if (!memberIds.includes(newParentId)) {
+    throw new SwapValidationError(400, 'New parent must be in the same family');
+  }
+
+  return {
+    rootId,
+    memberIds,
+    updates: memberIds.map((id) => ({
+      id,
+      parentId: id === newParentId ? '' : newParentId,
+    })),
+  };
+};
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const requestStartedAt = Date.now();
   const { id: requestedId } = await params;
 
   if (!requestedId) {
@@ -80,41 +136,37 @@ export async function POST(
   const dryRun = body.dryRun === true;
   const concurrency = normalizeConcurrency(body.concurrency);
 
-  const assets = await listCatalogAssets({
-    forceRefreshImages: true,
+  const catalogLoadStartedAt = Date.now();
+  let usedForceRefresh = false;
+  let assets = await listCatalogAssets({
+    forceRefreshImages: false,
     includeVideos: process.env.ENABLE_VIDEO_ASSETS === '1',
   });
-  const target = assets.find((asset) => asset.id === requestedId);
-  if (!target) {
-    return NextResponse.json({ error: 'Image not found' }, { status: 404 });
-  }
-  if (target.assetType !== 'image') {
-    return NextResponse.json({ error: 'Only images can be family parents.' }, { status: 400 });
-  }
+  let plan;
+  try {
+    plan = buildSwapPlan(assets, requestedId, newParentId);
+  } catch (error) {
+    if (!(error instanceof SwapValidationError)) {
+      throw error;
+    }
 
-  const newParent = assets.find((asset) => asset.id === newParentId);
-  if (!newParent) {
-    return NextResponse.json({ error: 'New parent not found' }, { status: 404 });
-  }
-  if (newParent.assetType !== 'image') {
-    return NextResponse.json(
-      { error: 'New parent must be an image. Videos can only be variations.' },
-      { status: 400 }
-    );
-  }
+    usedForceRefresh = true;
+    assets = await listCatalogAssets({
+      forceRefreshImages: true,
+      includeVideos: process.env.ENABLE_VIDEO_ASSETS === '1',
+    });
 
-  const { rootId, memberIds } = listImageFamilyIds(assets, requestedId);
-  if (!memberIds.includes(newParentId)) {
-    return NextResponse.json(
-      { error: 'New parent must be in the same family' },
-      { status: 400 }
-    );
+    try {
+      plan = buildSwapPlan(assets, requestedId, newParentId);
+    } catch (retryError) {
+      if (retryError instanceof SwapValidationError) {
+        return NextResponse.json({ error: retryError.message }, { status: retryError.status });
+      }
+      throw retryError;
+    }
   }
-
-  const updates = memberIds.map((id) => ({
-    id,
-    parentId: id === newParentId ? '' : newParentId
-  }));
+  const catalogLoadMs = Date.now() - catalogLoadStartedAt;
+  const { rootId, memberIds, updates } = plan;
 
   if (dryRun) {
     return NextResponse.json({
@@ -129,7 +181,7 @@ export async function POST(
 
   const patchParent = async ({ id, parentId }: { id: string; parentId: string }): Promise<SwapOutcome> => {
     try {
-      await setAssetParentDirectly(id, parentId);
+      await setAssetParentDirectlyWithAssets(id, parentId, assets);
       return { ok: true, id, parentId };
     } catch (error) {
       const parentError = error instanceof ParentAssignmentError ? error : null;
@@ -143,8 +195,20 @@ export async function POST(
     }
   };
 
+  const updateStartedAt = Date.now();
   const promotedOutcome = await patchParent({ id: newParentId, parentId: '' });
   if (!promotedOutcome.ok) {
+    console.info('[swap-parent] promotion failed', {
+      requestedId,
+      rootId,
+      newParentId,
+      familySize: memberIds.length,
+      catalogLoadMs,
+      updateMs: Date.now() - updateStartedAt,
+      totalMs: Date.now() - requestStartedAt,
+      usedForceRefresh,
+      status: promotedOutcome.status ?? 500,
+    });
     return NextResponse.json(
       {
         success: false,
@@ -162,6 +226,20 @@ export async function POST(
   const remainingOutcomes = await mapWithConcurrency(remainingUpdates, concurrency, patchParent);
   const outcomes = [promotedOutcome, ...remainingOutcomes];
   const failed = outcomes.filter((o) => !o.ok);
+  const updateMs = Date.now() - updateStartedAt;
+
+  console.info('[swap-parent] completed', {
+    requestedId,
+    rootId,
+    newParentId,
+    familySize: memberIds.length,
+    catalogLoadMs,
+    updateMs,
+    totalMs: Date.now() - requestStartedAt,
+    usedForceRefresh,
+    concurrency,
+    failedCount: failed.length,
+  });
 
   return NextResponse.json({
     success: failed.length === 0,

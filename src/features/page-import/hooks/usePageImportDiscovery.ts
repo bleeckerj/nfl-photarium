@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   ImportCandidate,
   ImportProgressState,
@@ -8,6 +8,7 @@ import type {
 } from '@/features/page-import/types';
 
 const PAGE_IMPORT_PREVIEW_LIMIT = 60;
+const DEFAULT_PAGE_IMPORT_MAX_ASSETS = '250';
 
 const parseCookieHeaderFromClipboard = (raw: string) => {
   const trimmed = raw.trim();
@@ -63,8 +64,36 @@ export function usePageImportDiscovery({
   const [pageImportMaxScrolls, setPageImportMaxScrolls] = useState('10');
   const [pageImportScrollDelayMs, setPageImportScrollDelayMs] = useState('1500');
   const [pageImportMaxPages, setPageImportMaxPages] = useState('1');
+  const [pageImportMaxAssets, setPageImportMaxAssets] = useState(DEFAULT_PAGE_IMPORT_MAX_ASSETS);
   const [pageImportCookieHeader, setPageImportCookieHeader] = useState('');
   const [pageImportProgress, setPageImportProgress] = useState<ImportProgressState>(null);
+  const scrollAbortControllerRef = useRef<AbortController | null>(null);
+  const pageImportProgressRef = useRef<ImportProgressState>(null);
+
+  useEffect(() => {
+    pageImportProgressRef.current = pageImportProgress;
+  }, [pageImportProgress]);
+
+  const handleStopImportPage = useCallback(() => {
+    const controller = scrollAbortControllerRef.current;
+    if (!controller) return;
+
+    scrollAbortControllerRef.current = null;
+    controller.abort();
+
+    const current = pageImportProgressRef.current;
+    const scrollCount = current?.scrollCount ?? 0;
+    const imageCount = current?.imageCount ?? 0;
+
+    setPageImportError(null);
+    setPageImportLoading(false);
+    setPageImportProgress({
+      message: `Scan stopped after ${scrollCount} scroll${scrollCount !== 1 ? 's' : ''}, ${imageCount} asset${imageCount !== 1 ? 's' : ''} found`,
+      scrollCount,
+      imageCount,
+      pageNum: current?.pageNum,
+    });
+  }, []);
 
   const handleImportPage = useCallback(
     async (cookieHeaderOverride?: string) => {
@@ -79,15 +108,19 @@ export function usePageImportDiscovery({
         const sessionId = await ensureImportSession();
 
         if (pageImportScrollMode) {
+          const abortController = new AbortController();
+          scrollAbortControllerRef.current = abortController;
           const response = await fetch('/api/import/page/scroll/stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            signal: abortController.signal,
             body: JSON.stringify({
               url: pageImportUrl.trim(),
               autoScrollUntilStable: pageImportAutoScroll,
               maxScrolls: Number(pageImportMaxScrolls) || 10,
               scrollDelayMs: Number(pageImportScrollDelayMs) || 1500,
               maxPages: Number(pageImportMaxPages) || 1,
+              maxAssets: Number(pageImportMaxAssets) || Number(DEFAULT_PAGE_IMPORT_MAX_ASSETS),
               includeUiChrome: pageImportIncludeUiChrome,
               includeSmallAssets: pageImportIncludeSmallAssets,
               ...(cookieHeaderValue ? { cookieHeader: cookieHeaderValue } : {}),
@@ -112,63 +145,72 @@ export function usePageImportDiscovery({
             addQueuedFiles(batch);
           };
 
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              if (abortController.signal.aborted) break;
 
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split('\n');
+              buffer = lines.pop() || '';
 
-            let eventType = '';
-            for (const line of lines) {
-              if (line.startsWith('event: ')) {
-                eventType = line.slice(7).trim();
-              } else if (line.startsWith('data: ') && eventType) {
-                const data = JSON.parse(line.slice(6));
-                if (eventType === 'status') {
-                  setPageImportProgress({
-                    message: data.message || 'Processing...',
-                    scrollCount: data.scrollCount || 0,
-                    imageCount: data.imageCount || 0,
-                    pageNum: data.pageNum,
-                  });
-                  scrollCount = data.scrollCount || 0;
-                } else if (eventType === 'image' || eventType === 'video' || eventType === 'media') {
-                  const candidate = data as ImportCandidate;
-                  if (candidate?.url) {
-                    if (seenUrls.has(candidate.url)) {
-                      continue;
+              let eventType = '';
+              for (const line of lines) {
+                if (line.startsWith('event: ')) {
+                  eventType = line.slice(7).trim();
+                } else if (line.startsWith('data: ') && eventType) {
+                  const data = JSON.parse(line.slice(6));
+                  if (eventType === 'status') {
+                    setPageImportProgress({
+                      message: data.message || 'Processing...',
+                      scrollCount: data.scrollCount || 0,
+                      imageCount: data.imageCount || 0,
+                      pageNum: data.pageNum,
+                    });
+                    scrollCount = data.scrollCount || 0;
+                  } else if (eventType === 'image' || eventType === 'video' || eventType === 'media') {
+                    const candidate = data as ImportCandidate;
+                    if (candidate?.url) {
+                      if (seenUrls.has(candidate.url)) {
+                        continue;
+                      }
+                      seenUrls.add(candidate.url);
+                      totalAssets += 1;
+                      pendingQueueItems.push(
+                        toQueueItem(
+                          candidate,
+                          createQueueId(),
+                          sessionId,
+                          totalAssets <= PAGE_IMPORT_PREVIEW_LIMIT
+                        )
+                      );
+                      if (pendingQueueItems.length >= 24) {
+                        flushPendingQueueItems();
+                      }
                     }
-                    seenUrls.add(candidate.url);
-                    totalAssets += 1;
-                    pendingQueueItems.push(
-                      toQueueItem(
-                        candidate,
-                        createQueueId(),
-                        sessionId,
-                        totalAssets <= PAGE_IMPORT_PREVIEW_LIMIT
-                      )
-                    );
-                    if (pendingQueueItems.length >= 24) {
-                      flushPendingQueueItems();
-                    }
+                  } else if (eventType === 'done') {
+                    flushPendingQueueItems();
+                    setPageImportProgress({
+                      message: data.message || 'Complete',
+                      scrollCount: data.scrollCount || scrollCount,
+                      imageCount: data.imageCount || totalAssets,
+                    });
+                  } else if (eventType === 'error') {
+                    throw new Error(data.error || 'Unknown error');
                   }
-                } else if (eventType === 'done') {
-                  flushPendingQueueItems();
-                  setPageImportProgress({
-                    message: data.message || 'Complete',
-                    scrollCount: data.scrollCount || scrollCount,
-                    imageCount: data.imageCount || totalAssets,
-                  });
-                } else if (eventType === 'error') {
-                  throw new Error(data.error || 'Unknown error');
                 }
               }
             }
+          } finally {
+            flushPendingQueueItems();
+            reader.releaseLock();
           }
 
-          flushPendingQueueItems();
+          if (abortController.signal.aborted) {
+            return;
+          }
+
           if (totalAssets === 0) {
             setPageImportError(
               `No media found after ${scrollCount} scroll${scrollCount !== 1 ? 's' : ''}. The page may require login, use complex lazy-loading, or block automated browsers.`
@@ -224,9 +266,16 @@ export function usePageImportDiscovery({
         setSourceUrlIfEmpty(pageImportUrl.trim());
         setPageImportUrl('');
       } catch (error) {
+        const aborted =
+          error instanceof Error &&
+          (error.name === 'AbortError' || error.message.toLowerCase().includes('abort'));
+        if (aborted) {
+          return;
+        }
         console.error('Import page failed', error);
         setPageImportError(error instanceof Error ? error.message : 'Failed to import page');
       } finally {
+        scrollAbortControllerRef.current = null;
         setPageImportLoading(false);
       }
     },
@@ -239,6 +288,7 @@ export function usePageImportDiscovery({
       pageImportCookieHeader,
       pageImportIncludeSmallAssets,
       pageImportIncludeUiChrome,
+      pageImportMaxAssets,
       pageImportMaxPages,
       pageImportMaxScrolls,
       pageImportScrollDelayMs,
@@ -295,11 +345,14 @@ export function usePageImportDiscovery({
     setPageImportScrollDelayMs,
     pageImportMaxPages,
     setPageImportMaxPages,
+    pageImportMaxAssets,
+    setPageImportMaxAssets,
     pageImportCookieHeader,
     setPageImportCookieHeader,
     pageImportProgress,
     setPageImportProgress,
     handleImportPage,
+    handleStopImportPage,
     handlePasteCookiesAndScan,
   };
 }
