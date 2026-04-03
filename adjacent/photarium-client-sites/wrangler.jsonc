@@ -1,0 +1,29 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "photarium-client-sites",
+  "main": "./src/worker/index.ts",
+  "compatibility_date": "2026-04-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "photarium-client-sites",
+      "database_id": "replace-in-cloudflare-dashboard"
+    }
+  ],
+  "vectorize": [
+    {
+      "binding": "PROJECT_ASSET_INDEX",
+      "index_name": "photarium-client-sites-assets"
+    }
+  ],
+  "vars": {
+    "PUBLIC_SITE_NAME": "Photarium Client Sites"
+  }
+}
+

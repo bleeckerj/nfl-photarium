@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "WebWorker"],
+    "types": ["./worker-configuration.d.ts", "@cloudflare/workers-types"],
+    "baseUrl": ".",
+    "paths": {
+      "@worker/*": ["src/worker/*"]
+    }
+  },
+  "include": ["src/worker/**/*.ts", "test/**/*.ts"]
+}
+

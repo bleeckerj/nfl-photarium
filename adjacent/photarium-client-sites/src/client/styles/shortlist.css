@@ -1,0 +1,139 @@
+.shortlist-drawer {
+  position: sticky;
+  bottom: 12px;
+  width: min(420px, 100%);
+  margin: var(--space-m) 0 0 auto;
+}
+
+.shortlist-tray {
+  display: grid;
+  gap: var(--space-s);
+  padding: var(--space-m);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-l);
+  background: var(--surface);
+  box-shadow: var(--shadow-edge);
+}
+
+.shortlist-tray__summary {
+  display: grid;
+  gap: var(--space-2xs);
+}
+
+.shortlist-tray__title,
+.shortlist-tray__form-title {
+  margin: 0;
+}
+
+.shortlist-tray__title {
+  font-size: 0.92rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.shortlist-tray__count,
+.shortlist-tray__copy,
+.shortlist-tray__empty {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.shortlist-tray__count {
+  font-family: ui-monospace, 'SFMono-Regular', 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.shortlist-tray__preview {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+}
+
+.shortlist-tray__preview-image {
+  width: 32px;
+  height: 32px;
+  margin-left: -6px;
+  border: 1px solid var(--surface);
+  border-radius: var(--radius-s);
+  object-fit: cover;
+}
+
+.shortlist-tray__preview-image:first-child {
+  margin-left: 0;
+}
+
+.shortlist-tray__toggle {
+  justify-self: start;
+}
+
+.shortlist-tray__details {
+  display: grid;
+  gap: var(--space-s);
+  padding-top: var(--space-xs);
+  border-top: 1px solid var(--line);
+}
+
+.shortlist-list {
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.shortlist-item {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  gap: var(--space-xs);
+  align-items: center;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+}
+
+.shortlist-item__image {
+  width: 56px;
+  height: 42px;
+  object-fit: cover;
+  border-radius: var(--radius-s);
+}
+
+.shortlist-item__body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.shortlist-item__body strong,
+.shortlist-item__body span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shortlist-item__body span {
+  font-family: ui-monospace, 'SFMono-Regular', 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.62rem;
+  color: var(--muted);
+}
+
+.shortlist-form {
+  display: grid;
+  gap: var(--space-s);
+}
+
+.shortlist-status {
+  min-height: 1.1rem;
+  margin: 0;
+  font-size: 0.76rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+@media (max-width: 900px) {
+  .shortlist-drawer {
+    width: 100%;
+    margin-left: 0;
+  }
+}

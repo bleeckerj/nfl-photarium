@@ -1,0 +1,13 @@
+{
+  "name": "photarium-adjacent",
+  "private": true,
+  "description": "Convenience command boundary for adjacent Photarium projects.",
+  "scripts": {
+    "dev": "npm --prefix ./photarium-client-sites run dev",
+    "build": "npm --prefix ./photarium-client-sites run build",
+    "seed:demo": "npm --prefix ./photarium-client-sites run seed:demo",
+    "test": "npm --prefix ./photarium-client-sites run test",
+    "typecheck": "npm --prefix ./photarium-client-sites run typecheck",
+    "types:worker": "npm --prefix ./photarium-client-sites run types:worker"
+  }
+}

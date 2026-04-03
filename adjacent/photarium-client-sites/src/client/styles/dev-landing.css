@@ -1,0 +1,54 @@
+.dev-panel {
+  display: grid;
+  gap: var(--space-m);
+  padding: var(--space-m);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-m);
+  background: var(--surface);
+}
+
+.dev-panel__intro,
+.dev-panel__note {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.dev-panel__details {
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.dev-panel__row {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--space-m);
+  padding-top: var(--space-xs);
+  border-top: 1px solid var(--line);
+  font-family: ui-monospace, 'SFMono-Regular', 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.dev-panel__row:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.dev-panel__label {
+  color: var(--muted);
+}
+
+.dev-panel__value {
+  color: var(--ink);
+  text-align: right;
+  word-break: break-word;
+}
+
+.dev-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}

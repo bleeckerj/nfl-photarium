@@ -1,0 +1,5 @@
+LOCAL_DEV_MODE=true
+ADMIN_API_TOKEN=local-dev-admin-token
+ACCESS_LINK_HASH_SECRET=local-dev-access-secret
+SESSION_SIGNING_SECRET=local-dev-session-secret
+IMAGES_ACCOUNT_HASH=replace-with-cloudflare-images-account-hash

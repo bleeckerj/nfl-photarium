@@ -1,0 +1,30 @@
+{
+  "name": "photarium-client-sites",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Adjacent Cloudflare Worker app for temporary client-facing Photarium selection sites.",
+  "scripts": {
+    "build": "npm run build:client && npm run typecheck",
+    "build:client": "vite build",
+    "dev": "node ./scripts/dev/dev-server.mjs",
+    "dev:worker": "wrangler dev --port 8788",
+    "demo": "node ./scripts/dev/demo.mjs",
+    "seed:demo": "node ./scripts/seed-local-demo.mjs",
+    "stop": "node ./scripts/dev/stop-managed-worker.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.worker.json --noEmit",
+    "types:worker": "wrangler types"
+  },
+  "dependencies": {
+    "hono": "^4.8.5",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260328.0",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vitest": "^2.1.9",
+    "wrangler": "^4.39.0"
+  }
+}
