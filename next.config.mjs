@@ -18,6 +18,7 @@ const nextConfig = {
           ...ignoredList,
           '**/data/**',
           '**/drop-off/**',
+          '**/adjacent/**',
           '**/.codex/**',
           '**/*.checkpoint.json',
         ],

@@ -235,19 +235,26 @@ Arg errors are strict:
 
 This repo includes:
 - `scripts/discord-refresh-and-fs-ingest.sh`
-- npm alias: `npm run fs:ingest:discord-refresh-all -- <args>`
+- npm alias: `npm run fs:ingest:discord-ingest-latest -- <args>`
+- npm alias: `npm run fs:ingest:discord-refresh-incremental`
+- npm alias: `npm run fs:ingest:discord-reingest-local`
 
 It can:
 1. Run `find_last_ids_per_channel.py`
 2. Run `download_images_from_discord_channel.py`
 3. Run `fs:ingest` for each channel subdirectory under Discord images root
 
+Shortcut behavior:
+- `fs:ingest:discord-ingest-latest` is the canonical command for "download latest Discord content, then ingest it."
+- `fs:ingest:discord-refresh-incremental` performs a real Discord refresh first, then ingests with fast defaults (`--no-ai-metadata --concurrency 8 --throttle-ms 0 --report-cache`).
+- `fs:ingest:discord-reingest-local` skips the Discord downloader and only reprocesses the already-downloaded local export tree with those same fast defaults.
+
 The Discord wrapper defaults to `--on-duplicate family`.
 
 Example:
 
 ```bash
-npm run fs:ingest:discord-refresh-all -- \
+npm run fs:ingest:discord-ingest-latest -- \
   --namespace cf-default \
   --checkpoint-file "/Users/julian/Code/cloud-flare-image-handler/data/fs-ingest-checkpoints/discord-shared-cf-default.json" \
   --tags "discord,nfl-discord" \
@@ -259,7 +266,7 @@ npm run fs:ingest:discord-refresh-all -- \
 Backfill-only across all channel subdirs:
 
 ```bash
-npm run fs:ingest:discord-refresh-all -- \
+npm run fs:ingest:discord-ingest-latest -- \
   --skip-discord-refresh \
   --namespace cf-default \
   --checkpoint-file "/Users/julian/Code/cloud-flare-image-handler/data/fs-ingest-checkpoints/discord-shared-cf-default.json" \
