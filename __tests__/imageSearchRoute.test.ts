@@ -8,6 +8,12 @@ const {
 }));
 
 const {
+  listVideoAssetRecordsWithSyncMock,
+} = vi.hoisted(() => ({
+  listVideoAssetRecordsWithSyncMock: vi.fn(),
+}));
+
+const {
   searchByTextMock,
   searchByHexColorMock,
   searchByCLIPMock,
@@ -31,6 +37,10 @@ const {
 
 vi.mock('@/server/cloudflareImageCache', () => ({
   getCachedImages: getCachedImagesMock,
+}));
+
+vi.mock('@/server/videoCatalogStorage', () => ({
+  listVideoAssetRecordsWithSync: listVideoAssetRecordsWithSyncMock,
 }));
 
 vi.mock('@/server/vectorSearch', () => ({
@@ -65,6 +75,7 @@ describe('POST /api/images/search canonical IDs', () => {
     searchByHexColorMock.mockResolvedValue([]);
     searchByCLIPMock.mockResolvedValue([]);
     getImageVectorsMock.mockResolvedValue(null);
+    listVideoAssetRecordsWithSyncMock.mockResolvedValue([]);
     listImageExtrasImageIdsMock.mockResolvedValue([]);
     getImageExtrasRecordsMock.mockResolvedValue({});
   });
@@ -187,5 +198,28 @@ describe('POST /api/images/search canonical IDs', () => {
 
     expect(response.status).toBe(200);
     expect(payload.results[0].imageId).toBe('discord_asset_1');
+  });
+
+  it('assigns a numeric score to lexical-only reranked text results', async () => {
+    getCachedImagesMock.mockResolvedValue([
+      {
+        id: 'brutalist_1',
+        filename: 'frame-01.jpg',
+        displayName: 'Brutalist Concrete Study',
+        tags: ['architecture'],
+      },
+    ]);
+    searchByTextMock.mockResolvedValue([]);
+
+    const response = await POST(
+      createJsonRequest('http://localhost/api/images/search', { type: 'text', query: 'brutalist' })
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.count).toBe(1);
+    expect(payload.results[0].imageId).toBe('brutalist_1');
+    expect(typeof payload.results[0].score).toBe('number');
+    expect(Number.isFinite(payload.results[0].score)).toBe(true);
   });
 });

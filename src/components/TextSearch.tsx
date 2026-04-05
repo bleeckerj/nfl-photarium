@@ -21,7 +21,7 @@ import ColorWheel from './ColorWheel';
 
 interface SearchResult {
   imageId: string;
-  score: number;
+  score?: number;
   filename?: string;
   folder?: string;
   assetType?: 'image' | 'video';
@@ -198,6 +198,12 @@ export function TextSearch({ className = '', onImageClick, initialQuery = '', na
     if (score < 0.35) return 'bg-lime-500';
     if (score < 0.40) return 'bg-yellow-500';
     return 'bg-orange-500';
+  };
+
+  const getResultScore = (result: SearchResult): number | null => {
+    return typeof result.score === 'number' && Number.isFinite(result.score)
+      ? result.score
+      : null;
   };
 
   return (
@@ -377,40 +383,49 @@ export function TextSearch({ className = '', onImageClick, initialQuery = '', na
           </div>
 
           <div className="grid grid-cols-4 gap-2">
-            {results.slice(0, visibleCount).map((result, index) => (
-              <div
-                key={result.imageId}
-                className="relative aspect-square rounded-lg overflow-hidden bg-gray-800 border-2 border-gray-700 cursor-pointer hover:border-purple-500 hover:scale-105 transition-all duration-150"
-                style={{ minWidth: '70px', minHeight: '70px' }}
-                onClick={() => onImageClick?.(result)}
-                onMouseEnter={(e) => handleMouseEnter(e, result)}
-                onMouseLeave={handleMouseLeave}
-                title={`${result.filename || result.imageId}\nScore: ${result.score.toFixed(3)} (${getScoreLabel(result.score)})`}
-              >
-                <Image
-                  src={result.assetType === 'video' && result.videoThumbnailUrl
-                    ? result.videoThumbnailUrl
-                    : getCloudflareImageUrl(result.imageId, 'medium')}
-                  alt={result.filename || 'Search result'}
-                  fill
-                  className="object-cover"
-                  sizes="100px"
-                />
-                
-                {/* Score bar */}
-                <div className="absolute bottom-0 left-0 right-0 h-1">
-                  <div 
-                    className={`h-full ${getScoreColor(result.score)}`}
-                    style={{ width: `${Math.max(10, (1 - result.score) * 100)}%` }}
-                  />
-                </div>
+            {results.slice(0, visibleCount).map((result, index) => {
+              const score = getResultScore(result);
+              const scoreText = score === null
+                ? 'Score unavailable'
+                : `Score: ${score.toFixed(3)} (${getScoreLabel(score)})`;
 
-                {/* Rank badge */}
-                <div className="absolute top-1 left-1 w-4 h-4 rounded-full bg-purple-900/80 flex items-center justify-center">
-                  <span className="text-[9px] text-gray-300">{index + 1}</span>
+              return (
+                <div
+                  key={result.imageId}
+                  className="relative aspect-square rounded-lg overflow-hidden bg-gray-800 border-2 border-gray-700 cursor-pointer hover:border-purple-500 hover:scale-105 transition-all duration-150"
+                  style={{ minWidth: '70px', minHeight: '70px' }}
+                  onClick={() => onImageClick?.(result)}
+                  onMouseEnter={(e) => handleMouseEnter(e, result)}
+                  onMouseLeave={handleMouseLeave}
+                  title={`${result.filename || result.imageId}\n${scoreText}`}
+                >
+                  <Image
+                    src={result.assetType === 'video' && result.videoThumbnailUrl
+                      ? result.videoThumbnailUrl
+                      : getCloudflareImageUrl(result.imageId, 'medium')}
+                    alt={result.filename || 'Search result'}
+                    fill
+                    className="object-cover"
+                    sizes="100px"
+                  />
+
+                  {/* Score bar */}
+                  {score !== null && (
+                    <div className="absolute bottom-0 left-0 right-0 h-1">
+                      <div
+                        className={`h-full ${getScoreColor(score)}`}
+                        style={{ width: `${Math.max(10, (1 - score) * 100)}%` }}
+                      />
+                    </div>
+                  )}
+
+                  {/* Rank badge */}
+                  <div className="absolute top-1 left-1 w-4 h-4 rounded-full bg-purple-900/80 flex items-center justify-center">
+                    <span className="text-[9px] text-gray-300">{index + 1}</span>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {/* Load More button */}

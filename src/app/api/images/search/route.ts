@@ -24,7 +24,6 @@ import {
   searchByText,
   searchByHexColor,
   searchByCLIP,
-  searchByColor,
   getImageVectors,
   isVectorSearchAvailable,
 } from '@/server/vectorSearch';
@@ -191,7 +190,7 @@ function rerankSemanticTextResults(
   const combined = Array.from(candidateIds).map((id) => {
     const vRank = vectorRankById.get(id) ?? 0;
     const lScore = lexical.get(id) ?? 0;
-    const score = vRank * 0.82 + lScore * 0.18;
+    const combinedRelevance = vRank * 0.82 + lScore * 0.18;
     const base = vectorRowById.get(id);
     const image = byId.get(id);
 
@@ -206,7 +205,14 @@ function rerankSemanticTextResults(
         folder: image?.folder,
       };
 
-    return { row, score, vRank, lScore };
+    const normalizedScore =
+      typeof row.score === 'number' && Number.isFinite(row.score)
+        ? row.score
+        : Math.max(0, 1 - combinedRelevance);
+
+    row.score = normalizedScore;
+
+    return { row, score: combinedRelevance, vRank, lScore };
   });
 
   combined.sort((a, b) => b.score - a.score || b.vRank - a.vRank || b.lScore - a.lScore);
@@ -523,10 +529,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         videoPlaybackUrl: video.playbackUrl,
       })),
     ];
-    const scopedImages =
-      namespace === null
-        ? allImages
-        : allImages.filter((img) => (namespace === '' ? !img.namespace : (img.namespace || '') === namespace));
     const sourceMatches =
       type === 'text' && query
         ? await findSourceUrlMatches(query, allImages, limit)
@@ -641,10 +643,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         videoPlaybackUrl: video.playbackUrl,
       })),
     ];
-    const scopedImages =
-      namespace === null
-        ? allImages
-        : allImages.filter((img) => (namespace === '' ? !img.namespace : (img.namespace || '') === namespace));
     const sourceMatches =
       type === 'text' && query
         ? await findSourceUrlMatches(query, allImages, limit)
