@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Photarium — Self-Hosted Image Management</title>
+    <title>Photarium — Self-Hosted Visual Asset Workflow</title>
     <style>
         @font-face {
             font-family: 'Warbler Display';
@@ -48,9 +48,12 @@
 
         :root {
             --bg: #f9f7f4;
+            --surface: #ffffff;
+            --surface-alt: #f3efe9;
             --text-dark: #1a1a1a;
             --text-light: #666;
             --accent: #8b7355;
+            --accent-soft: #ebe1d4;
             --border: #e8e4e0;
         }
 
@@ -72,35 +75,37 @@
             opacity: 0.7;
         }
 
-        /* Header / Navigation */
         header {
             border-bottom: 1px solid var(--border);
-            background: white;
+            background: rgba(255, 255, 255, 0.94);
             position: sticky;
             top: 0;
             z-index: 100;
+            backdrop-filter: blur(12px);
         }
 
         nav {
             max-width: 1200px;
             margin: 0 auto;
-            padding: 1.5rem 2rem;
+            padding: 1.25rem 2rem;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            gap: 1.5rem;
         }
 
         .logo {
             font-family: 'Warbler Display', serif;
             font-size: 1.5rem;
-            font-weight: 700;
             letter-spacing: -0.02em;
         }
 
         .nav-links {
             display: flex;
-            gap: 2rem;
+            gap: 1.5rem;
             list-style: none;
+            flex-wrap: wrap;
+            justify-content: flex-end;
         }
 
         .nav-links a {
@@ -108,44 +113,68 @@
             color: var(--text-dark);
         }
 
-        .nav-links a:hover {
-            color: var(--accent);
-        }
-
-        /* Hero */
         .hero {
             max-width: 1200px;
             margin: 0 auto;
-            padding: 6rem 2rem;
-            text-align: center;
+            padding: 5.5rem 2rem 4rem;
+        }
+
+        .hero-inner {
+            display: grid;
+            grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+            gap: 2.5rem;
+            align-items: center;
+        }
+
+        .eyebrow {
+            display: inline-block;
+            margin-bottom: 1rem;
+            padding: 0.35rem 0.7rem;
+            border-radius: 999px;
+            background: var(--accent-soft);
+            color: var(--accent);
+            font-size: 0.8rem;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
         }
 
         .hero h1 {
             font-family: 'Warbler Display', serif;
-            font-size: 3.5rem;
-            font-weight: 700;
-            line-height: 1.1;
-            margin-bottom: 1rem;
-            letter-spacing: -0.02em;
+            font-size: 4rem;
+            font-weight: 400;
+            line-height: 1.02;
+            letter-spacing: -0.03em;
+            margin-bottom: 1.25rem;
+            max-width: 11ch;
         }
 
         .hero p {
-            font-size: 1.25rem;
+            font-size: 1.18rem;
             color: var(--text-light);
-            max-width: 600px;
-            margin: 0 auto 2rem;
-            line-height: 1.5;
+            max-width: 36rem;
+            margin-bottom: 1.75rem;
+        }
+
+        .hero-copy ul {
+            list-style: none;
+            display: grid;
+            gap: 0.6rem;
+            margin-bottom: 2rem;
+        }
+
+        .hero-copy li {
+            color: var(--text-dark);
+            font-size: 1rem;
         }
 
         .cta-buttons {
             display: flex;
             gap: 1rem;
-            justify-content: center;
-            margin-bottom: 3rem;
+            flex-wrap: wrap;
         }
 
         .btn {
-            padding: 0.875rem 2rem;
+            padding: 0.875rem 1.4rem;
             border-radius: 4px;
             font-weight: 600;
             transition: all 0.2s;
@@ -170,163 +199,232 @@
         }
 
         .btn-secondary:hover {
-            background: var(--border);
+            background: var(--accent-soft);
+        }
+
+        .hero-visual {
+            display: grid;
+            gap: 1rem;
         }
 
         .hero-image {
-            max-width: 100%;
+            width: 100%;
             height: auto;
-            border-radius: 8px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08);
+            border-radius: 10px;
+            box-shadow: 0 14px 50px rgba(0, 0, 0, 0.08);
         }
 
-        /* Features */
-        .features {
-            background: white;
+        .panel {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1.25rem;
+        }
+
+        .panel strong {
+            display: block;
+            font-family: 'Warbler Banner', serif;
+            font-size: 1rem;
+            margin-bottom: 0.35rem;
+        }
+
+        .section {
+            padding: 4rem 2rem;
+        }
+
+        .section.alt {
+            background: var(--surface);
             border-top: 1px solid var(--border);
             border-bottom: 1px solid var(--border);
-            padding: 4rem 2rem;
         }
 
-        .features-container {
+        .section-inner {
             max-width: 1200px;
             margin: 0 auto;
         }
 
-        .features h2 {
+        .section h2 {
             font-family: 'Warbler Display', serif;
-            font-size: 2rem;
-            margin-bottom: 3rem;
-            text-align: center;
+            font-size: 2.2rem;
+            font-weight: 400;
+            margin-bottom: 0.8rem;
+            letter-spacing: -0.02em;
         }
 
-        .features-grid {
+        .section-intro {
+            max-width: 44rem;
+            color: var(--text-light);
+            margin-bottom: 2rem;
+            font-size: 1.02rem;
+        }
+
+        .use-cases {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 2rem;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 1rem;
         }
 
-        .feature {
-            padding: 1.5rem;
+        .use-case {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1.25rem;
         }
 
-        .feature h3 {
+        .use-case h3,
+        .feature h3,
+        .advanced-item h3,
+        .resource h3,
+        .step h3 {
             font-family: 'Warbler Banner', serif;
             font-size: 1.1rem;
-            margin-bottom: 0.5rem;
-            font-weight: 600;
+            margin-bottom: 0.45rem;
+            font-weight: 400;
         }
 
-        .feature p {
+        .use-case p,
+        .feature p,
+        .advanced-item p,
+        .resource p,
+        .step p,
+        .security p {
             color: var(--text-light);
-            font-size: 0.95rem;
+            font-size: 0.96rem;
         }
 
-        /* Getting Started */
-        .getting-started {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 4rem 2rem;
+        .features-grid,
+        .advanced-grid,
+        .resources-grid,
+        .steps {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.25rem;
         }
 
-        .getting-started h2 {
-            font-family: 'Warbler Display', serif;
-            font-size: 2rem;
-            margin-bottom: 2rem;
+        .feature,
+        .advanced-item,
+        .resource {
+            padding: 1.35rem;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: var(--surface);
+        }
+
+        .feature ul,
+        .advanced-item ul {
+            list-style: none;
+            display: grid;
+            gap: 0.45rem;
+            margin-top: 0.8rem;
+        }
+
+        .feature li,
+        .advanced-item li {
+            color: var(--text-dark);
+            font-size: 0.94rem;
+        }
+
+        .security {
+            background: #fff8ef;
+            border: 1px solid #e7d7be;
+            border-left: 4px solid var(--accent);
+            border-radius: 10px;
+            padding: 1.35rem;
+            margin-top: 2rem;
+        }
+
+        .security h3 {
+            font-family: 'Warbler Banner', serif;
+            font-size: 1.08rem;
+            font-weight: 400;
+            margin-bottom: 0.5rem;
         }
 
         .steps {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 2rem;
-            margin-bottom: 2rem;
+            margin-top: 2rem;
         }
 
         .step {
             border-left: 3px solid var(--accent);
-            padding-left: 1.5rem;
+            padding-left: 1rem;
         }
 
         .step-number {
             font-family: 'Warbler Display', serif;
-            font-size: 2.5rem;
+            font-size: 2.2rem;
             color: var(--accent);
             line-height: 1;
-            margin-bottom: 0.5rem;
-        }
-
-        .step h3 {
-            font-family: 'Warbler Banner', serif;
-            font-size: 1.1rem;
-            margin-bottom: 0.5rem;
-        }
-
-        .step p {
-            color: var(--text-light);
-            font-size: 0.95rem;
+            margin-bottom: 0.4rem;
         }
 
         code {
             background: #f0ebe6;
-            padding: 0.25rem 0.5rem;
+            padding: 0.25rem 0.45rem;
             border-radius: 3px;
             font-family: 'Monaco', 'Courier New', monospace;
             font-size: 0.9rem;
         }
 
         .highlight {
-            background: #fff9f0;
-            padding: 1.5rem;
-            border-radius: 4px;
-            border-left: 3px solid var(--accent);
             margin-top: 2rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1.3rem;
         }
 
-        .highlight a {
-            font-weight: 600;
-        }
-
-        /* Footer */
         footer {
-            background: white;
+            background: var(--surface);
             border-top: 1px solid var(--border);
             padding: 2rem;
             text-align: center;
             color: var(--text-light);
-            font-size: 0.9rem;
+            font-size: 0.92rem;
         }
 
-        footer a {
-            color: var(--accent);
+        footer p + p {
+            margin-top: 0.35rem;
         }
 
-        /* Responsive */
-        @media (max-width: 768px) {
+        @media (max-width: 900px) {
+            .hero-inner {
+                grid-template-columns: 1fr;
+            }
+
             .hero h1 {
-                font-size: 2.5rem;
+                font-size: 3rem;
+                max-width: none;
+            }
+        }
+
+        @media (max-width: 768px) {
+            nav {
+                padding: 1rem 1.25rem;
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .hero,
+            .section {
+                padding-left: 1.25rem;
+                padding-right: 1.25rem;
+            }
+
+            .hero {
+                padding-top: 4rem;
             }
 
             .hero p {
                 font-size: 1rem;
             }
 
-            .nav-links {
-                gap: 1rem;
-                font-size: 0.9rem;
-            }
-
             .cta-buttons {
                 flex-direction: column;
-                align-items: center;
+                align-items: stretch;
             }
 
             .btn {
-                width: 100%;
-                max-width: 250px;
-            }
-
-            .features-grid {
-                grid-template-columns: 1fr;
+                text-align: center;
             }
         }
     </style>
@@ -337,6 +435,7 @@
             <div class="logo">Photarium</div>
             <ul class="nav-links">
                 <li><a href="#features">Features</a></li>
+                <li><a href="#advanced">Advanced</a></li>
                 <li><a href="#getting-started">Get Started</a></li>
                 <li><a href="https://github.com/bleeckerj/nfl-photarium">GitHub</a></li>
                 <li><a href="https://github.com/bleeckerj/nfl-photarium#documentation">Docs</a></li>
@@ -346,107 +445,236 @@
 
     <main>
         <section class="hero">
-            <h1>Self-Hosted Image Management</h1>
-            <p>Upload, organize, and distribute images via Cloudflare's global CDN. No vendor lock-in. Your infrastructure.</p>
-            <div class="cta-buttons">
-                <a href="https://github.com/bleeckerj/nfl-photarium" class="btn btn-primary">Get Started</a>
-                <a href="https://github.com/bleeckerj/nfl-photarium#features" class="btn btn-secondary">Learn More</a>
+            <div class="hero-inner">
+                <div class="hero-copy">
+                    <span class="eyebrow">Local-first visual asset workflow</span>
+                    <h1>Cloudflare Images with a real working surface.</h1>
+                    <p>
+                        Photarium is a self-hosted visual asset workflow for small studios, researchers, content teams,
+                        and self-hosters who want to ingest, curate, search, enrich, and publish image-heavy libraries
+                        without outsourcing storage or delivery to a generic DAM.
+                    </p>
+                    <ul>
+                        <li>Upload and organize with folders, tags, metadata, variants, and namespaces.</li>
+                        <li>Add AI-assisted discovery when you want semantic search, color search, and enrichment.</li>
+                        <li>Layer on advanced workflows for page scans, video handling, media ingest, and client delivery.</li>
+                    </ul>
+                    <div class="cta-buttons">
+                        <a href="https://github.com/bleeckerj/nfl-photarium#quick-start" class="btn btn-primary">Quick Start</a>
+                        <a href="https://github.com/bleeckerj/nfl-photarium/blob/main/docs/features_and_operations.md" class="btn btn-secondary">Read the Docs</a>
+                    </div>
+                </div>
+
+                <div class="hero-visual">
+                    <img src="https://imagedelivery.net/gaLGizR3kCgx5yRLtiRIOw/3e6c9eae-a4bb-45f2-da37-f99ac9be3900/w=1200?format=webp" alt="Photarium interface" class="hero-image">
+                    <div class="panel">
+                        <strong>Current scope</strong>
+                        <p>
+                            Photarium started as image management and now spans curation, ingestion, search, media handling,
+                            and adjacent client-page publishing while staying grounded in a simple self-hosted setup.
+                        </p>
+                    </div>
+                </div>
             </div>
-            <img src="https://imagedelivery.net/gaLGizR3kCgx5yRLtiRIOw/3e6c9eae-a4bb-45f2-da37-f99ac9be3900/w=1200?format=webp" alt="Photarium interface" class="hero-image">
         </section>
 
-        <section class="features" id="features">
-            <div class="features-container">
-                <h2>Designed for Teams</h2>
+        <section class="section">
+            <div class="section-inner">
+                <h2>Best For</h2>
+                <p class="section-intro">
+                    The current public story is local-first and operator-oriented. Photarium works best when you want your own
+                    internal visual library with practical tools around it rather than a glossy all-in-one hosted platform.
+                </p>
+                <div class="use-cases">
+                    <div class="use-case">
+                        <h3>Small studios</h3>
+                        <p>Keep working libraries of references, deliverables, generated assets, and variants in one place.</p>
+                    </div>
+                    <div class="use-case">
+                        <h3>Researchers</h3>
+                        <p>Build and search curated media sets with metadata, semantic helpers, and import-heavy workflows.</p>
+                    </div>
+                    <div class="use-case">
+                        <h3>Content teams</h3>
+                        <p>Handle web assets, campaign images, and reusable media without giving up direct CDN delivery.</p>
+                    </div>
+                    <div class="use-case">
+                        <h3>Self-hosters</h3>
+                        <p>Run the system locally or behind trusted internal access and keep the stack understandable.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="section alt" id="features">
+            <div class="section-inner">
+                <h2>Feature Areas</h2>
+                <p class="section-intro">
+                    The core product remains easy to evaluate: Cloudflare-backed asset management first, optional AI/search second,
+                    and more specialized workflows layered on top instead of replacing the basics.
+                </p>
                 <div class="features-grid">
-                    <div class="feature">
-                        <h3>Upload & Organize</h3>
-                        <p>Drag-and-drop interface with folders, tags, and bulk operations.</p>
-                    </div>
-                    <div class="feature">
-                        <h3>Search & Filter</h3>
-                        <p>Find images by name, folder, tag, or date range instantly.</p>
-                    </div>
-                    <div class="feature">
-                        <h3>Dual View Modes</h3>
-                        <p>Grid view for browsing, list view for bulk operations and metadata.</p>
-                    </div>
-                    <div class="feature">
-                        <h3>Smart Pagination</h3>
-                        <p>Date-aware page controls with sticky filters and quick navigation.</p>
-                    </div>
-                    <div class="feature">
-                        <h3>AI-Generated ALT Text</h3>
-                        <p>Auto-generate accessible descriptions with GPT-4o mini integration.</p>
-                    </div>
-                    <div class="feature">
-                        <h3>Image Variants</h3>
-                        <p>Automatic responsive sizing: thumbnail, medium, large, public.</p>
-                    </div>
-                    <div class="feature">
-                        <h3>External API</h3>
-                        <p>Upload programmatically from Astro, Node scripts, or any HTTP client.</p>
-                    </div>
-                    <div class="feature">
-                        <h3>Namespace Isolation</h3>
-                        <p>Logical separation for multi-tenant or multi-app deployments.</p>
-                    </div>
-                    <div class="feature">
-                        <h3>CDN Delivery</h3>
-                        <p>Lightning-fast global distribution via Cloudflare's trusted network.</p>
-                    </div>
+                    <article class="feature">
+                        <h3>Core asset management</h3>
+                        <p>The stable, daily-use surface for keeping a visual library tidy and usable.</p>
+                        <ul>
+                            <li>Drag-and-drop uploads and queue-based curation</li>
+                            <li>Folders, tags, metadata editing, variants, and EXIF-aware detail views</li>
+                            <li>Namespaces for project or client isolation</li>
+                        </ul>
+                    </article>
+                    <article class="feature">
+                        <h3>AI-assisted search and enrichment</h3>
+                        <p>Optional Redis- and API-backed workflows for discovery and machine-written metadata.</p>
+                        <ul>
+                            <li>Semantic search, color search, similar and antipode discovery</li>
+                            <li>ALT text, descriptions, prompts, haiku, and embedding-backed helpers</li>
+                            <li>Extras storage beyond Cloudflare metadata size limits</li>
+                        </ul>
+                    </article>
+                    <article class="feature">
+                        <h3>Ingest and import workflows</h3>
+                        <p>Bring media in from more than just a file picker when a library already exists somewhere else.</p>
+                        <ul>
+                            <li>Direct URL imports and page scans, including browser-backed scroll capture</li>
+                            <li>ZIP intake, filesystem recursion, and helper scripts for source-specific ingestion</li>
+                            <li>Image and video handling inside one catalog surface</li>
+                        </ul>
+                    </article>
+                    <article class="feature">
+                        <h3>Publishing and client delivery</h3>
+                        <p>Push curated subsets outward without turning the internal app into a public-facing monolith.</p>
+                        <ul>
+                            <li>Headless API for uploads and metadata updates</li>
+                            <li>Cloudflare delivery URLs and share-oriented workflows</li>
+                            <li>Client pages published into the adjacent Cloudflare Worker-based public app</li>
+                        </ul>
+                    </article>
+                </div>
+
+                <div class="security">
+                    <h3>Security posture</h3>
+                    <p>
+                        Photarium is still designed for local or secured internal use. The external upload route does not ship with
+                        built-in authentication, so you should not expose the app directly to the public internet without adding auth
+                        middleware or trusted network protection.
+                    </p>
                 </div>
             </div>
         </section>
 
-        <section class="getting-started" id="getting-started">
-            <h2>Get Started in Minutes</h2>
-            <div class="steps">
-                <div class="step">
-                    <div class="step-number">1</div>
-                    <h3>Create Cloudflare Account</h3>
-                    <p><a href="https://dash.cloudflare.com/sign-up">Sign up free</a>, then <a href="https://dash.cloudflare.com/?to=/:account/images/getting-started">enable Cloudflare Images</a>.</p>
-                </div>
-                <div class="step">
-                    <div class="step-number">2</div>
-                    <h3>Clone & Install</h3>
-                    <p><code>git clone https://github.com/bleeckerj/nfl-photarium.git</code> and <code>npm install</code>.</p>
-                </div>
-                <div class="step">
-                    <div class="step-number">3</div>
-                    <h3>Add Credentials</h3>
-                    <p>Copy <code>.env.example</code> to <code>.env.local</code> and add your Cloudflare details.</p>
-                </div>
-                <div class="step">
-                    <div class="step-number">4</div>
-                    <h3>Run Locally</h3>
-                    <p><code>npm run dev</code> and open <code>http://localhost:3000</code>.</p>
-                </div>
-                <div class="step">
-                    <div class="step-number">5</div>
-                    <h3>Deploy Anywhere</h3>
-                    <p>Deploy to Vercel, Railway, Render, or any Node.js host.</p>
-                </div>
-                <div class="step">
-                    <div class="step-number">6</div>
-                    <h3>Start Managing</h3>
-                    <p>Upload images, organize with folders and tags, copy CDN URLs.</p>
+        <section class="section" id="advanced">
+            <div class="section-inner">
+                <h2>Advanced Workflows</h2>
+                <p class="section-intro">
+                    These capabilities are real and already in the repo, but they belong in a clearly labeled advanced layer rather
+                    than the primary pitch for a first-time evaluator.
+                </p>
+                <div class="advanced-grid">
+                    <article class="advanced-item">
+                        <h3>Page scan and authenticated import</h3>
+                        <p>Scan pages for media, use browser-backed scroll mode when needed, and review queued candidates before upload.</p>
+                    </article>
+                    <article class="advanced-item">
+                        <h3>Video-aware media handling</h3>
+                        <p>Ingest video, inspect metadata, extract frames, and generate animated WebP artifacts alongside still images.</p>
+                    </article>
+                    <article class="advanced-item">
+                        <h3>Filesystem and social-source helpers</h3>
+                        <p>Use recursive ingest and source-specific helper scripts for local archives and adjacent social/media workflows.</p>
+                    </article>
+                    <article class="advanced-item">
+                        <h3>Client pages and client-sites publishing</h3>
+                        <p>Create explicit client-facing selects in Photarium and publish them to the adjacent public Cloudflare Worker app.</p>
+                    </article>
+                    <article class="advanced-item">
+                        <h3>Comfy workflow metadata</h3>
+                        <p>Detect embedded ComfyUI workflow data, store it as extras, and surface workflow context in asset detail views.</p>
+                    </article>
+                    <article class="advanced-item">
+                        <h3>Operational tooling</h3>
+                        <p>Backfill namespaces and embeddings, audit duplicates or broken assets, and maintain richer internal metadata stores.</p>
+                    </article>
                 </div>
             </div>
+        </section>
 
-            <div class="highlight">
-                <strong>100k free images per month</strong> with Cloudflare's free tier. Perfect for small teams, creators, and side projects.
+        <section class="section alt" id="getting-started">
+            <div class="section-inner">
+                <h2>Get Started in Minutes</h2>
+                <p class="section-intro">
+                    The simplest evaluation path is still short: connect Cloudflare Images, add a few environment variables, and run it locally.
+                </p>
+                <div class="steps">
+                    <div class="step">
+                        <div class="step-number">1</div>
+                        <h3>Create a Cloudflare account</h3>
+                        <p><a href="https://dash.cloudflare.com/sign-up">Sign up free</a> and enable <a href="https://dash.cloudflare.com/?to=/:account/images/getting-started">Cloudflare Images</a>.</p>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">2</div>
+                        <h3>Clone and install</h3>
+                        <p><code>git clone https://github.com/bleeckerj/nfl-photarium.git</code> and <code>npm install</code>.</p>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">3</div>
+                        <h3>Add core environment values</h3>
+                        <p>Copy <code>.env.example</code> to <code>.env.local</code> and set Cloudflare account id, token, and account hash.</p>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">4</div>
+                        <h3>Run it locally</h3>
+                        <p>Start with <code>npm run dev</code> and open <code>http://localhost:3000</code>.</p>
+                    </div>
+                    <div class="step">
+                        <div class="step-number">5</div>
+                        <h3>Layer on optional systems</h3>
+                        <p>Add Redis for semantic discovery and OpenAI-backed helpers only if you need the AI/search layer.</p>
+                    </div>
+                </div>
+
+                <div class="highlight">
+                    <strong>Cloudflare's free tier still makes this easy to test.</strong>
+                    <p>Start with the core workflow first, then decide whether the AI/search and advanced workflow layers are worth enabling.</p>
+                </div>
             </div>
+        </section>
 
-            <div class="highlight">
-                <a href="https://github.com/bleeckerj/nfl-photarium">View full documentation and examples on GitHub →</a>
+        <section class="section">
+            <div class="section-inner">
+                <h2>Resources</h2>
+                <p class="section-intro">
+                    The repo is the source of truth. Use the Pages site as a concise overview, then jump into the docs that match the workflow you care about.
+                </p>
+                <div class="resources-grid">
+                    <article class="resource">
+                        <h3>README / Quick Start</h3>
+                        <p>Start with the repo homepage for setup, requirements, and the high-level feature map.</p>
+                        <a href="https://github.com/bleeckerj/nfl-photarium#quick-start">Open Quick Start</a>
+                    </article>
+                    <article class="resource">
+                        <h3>Features &amp; Operations</h3>
+                        <p>The main operational guide for upload modes, search, embeddings, metadata, and maintenance scripts.</p>
+                        <a href="https://github.com/bleeckerj/nfl-photarium/blob/main/docs/features_and_operations.md">Open Features Guide</a>
+                    </article>
+                    <article class="resource">
+                        <h3>Headless API</h3>
+                        <p>Reference for uploads, metadata updates, search routes, media workflows, and other API surfaces.</p>
+                        <a href="https://github.com/bleeckerj/nfl-photarium/blob/main/docs/HEADLESS_API.md">Open API Reference</a>
+                    </article>
+                    <article class="resource">
+                        <h3>Client-sites publishing</h3>
+                        <p>Details for contract-based publishing into the adjacent public-facing Cloudflare Worker app.</p>
+                        <a href="https://github.com/bleeckerj/nfl-photarium/blob/main/docs/client-sites-publishing.md">Open Publishing Docs</a>
+                    </article>
+                </div>
             </div>
         </section>
     </main>
 
     <footer>
-        <p>Photarium is open source and self-hosted. <a href="https://github.com/bleeckerj/nfl-photarium">View on GitHub</a></p>
-        <p>Built with Next.js, Tailwind CSS, and Cloudflare Images</p>
+        <p>Photarium is open source, self-hosted, and intentionally local-first.</p>
+        <p>Built with Next.js, Cloudflare Images, optional Redis-backed discovery, and adjacent Cloudflare Worker publishing workflows.</p>
     </footer>
 </body>
 </html>

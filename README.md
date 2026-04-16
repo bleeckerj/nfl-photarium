@@ -4,63 +4,83 @@
 
 # Photarium
 
-**Self-hosted image management** for teams and creators.  
-Upload, organize, and distribute images via Cloudflare's global CDN.
+**Self-hosted visual asset workflow** on top of Cloudflare Images.  
+Upload, organize, search, enrich, and publish image-heavy working libraries without handing off storage or delivery to a third-party DAM.
 
-[Quick Start](#quick-start) · [API Docs](./EXTERNAL_UPLOAD_API.md) · [Configuration](./docs/namespace.md) · [Website](https://bleeckerj.github.io/nfl-photarium/) · [GitHub](https://github.com/bleeckerj/nfl-photarium)
+[Quick Start](#quick-start) · [Features & Operations](./docs/features_and_operations.md) · [Headless API](./docs/HEADLESS_API.md) · [Namespaces](./docs/namespace.md) · [Client Sites Publishing](./docs/client-sites-publishing.md) · [FAQ](./docs/faq.md) · [Website](https://bleeckerj.github.io/nfl-photarium/)
 
 ---
 
 ## What is Photarium?
 
-> **⚠️ SECURITY WARNING**: Photarium is currently designed for **local usage only** (running on your own machine or a secured internal network).
-> The external upload API endpoint (`/api/upload/external`) currently has **NO authentication** and accepts uploads from any source.
-> Do not deploy this to a public URL (like Vercel, Netlify, or a public VPS) without first adding authentication middleware or securing access at the network level.
-> *Securing this API might be a high-priority item on our roadmap? If there were a roadmap, really? But at the moment I run this entirely locally, at or very close to localhost and the only person who might hack me has four paws, so I'm not super concerned..but you should be if you intend to run this anywhere you are not certain has some security in front of that endpoint.*
+> **⚠️ SECURITY WARNING**: Photarium is still a **local-first / internal-network-first** tool.
+> The external upload endpoint (`/api/upload/external`) currently has **no built-in authentication**.
+> Do not expose this app directly to the public internet unless you add auth middleware or put trusted network protection in front of it.
 
-Photarium is a lightweight, self-hosted web application that turns Cloudflare Images into a complete asset management system. Perfect for:
+Photarium is a self-hosted asset workbench for small studios, researchers, content teams, and self-hosters who want Cloudflare Images plus a practical working surface for ingestion, curation, AI-assisted discovery, and lightweight publishing.
 
-- **Email campaigns** — Organize and share images across your marketing team
-- **Website management** — Version control and quick distribution of web assets  
-- **Content creators** — Rapid upload, tagging, and URL generation
-- **Multi-app deployments** — Namespace isolation for different projects on one Cloudflare account
+Use it when you need to:
 
-No vendor lock-in. Run it on your own infrastructure.
+- keep an internal image library organized with folders, tags, metadata, variants, and namespaces
+- import media from local folders, direct URLs, scanned web pages, or helper scripts
+- enrich assets with alt text, descriptions, prompts, haiku, and extracted workflow metadata
+- deliver selected assets outward via CDN URLs, the headless API, or temporary client-facing pages
+
+Run it on your own infrastructure. Keep the source images and delivery path under your control.
+
+### What's New / Expanded Workflows
+
+- **Page import and scan workflows** — Pull media from a URL, run browser-backed scans, queue candidates, then curate before upload.
+- **Video-aware handling** — Ingest videos, extract frames, generate animated WebP previews, and work with image/video libraries side by side.
+- **Filesystem and social ingest helpers** — Bulk-import local archives and use Instagram, Flickr, Threads, Telegram, and Discord-adjacent workflows when needed.
+- **Client delivery workflows** — Assemble explicit client pages in Photarium and publish them to the adjacent Cloudflare Worker-based client-sites app.
+- **Comfy workflow metadata** — Detect, store, index, and inspect ComfyUI workflow metadata alongside visual assets.
 
 ---
 
-## Features
+## Feature Overview
 
-- **Upload & Organize** — Drag-and-drop interface with folder and tag support
-- **Search & Filter** — Find images by name, folder, tag, or date range
-- **Dual View Modes** — Grid view for visual browsing, list view for bulk operations
-- **Smart Pagination** — Date-aware page controls with sticky filters
-- **AI-Generated ALT Text** — Auto-generate accessible descriptions (via GPT-4o mini)
-- **Image Variants** — Automatic responsive sizing (thumbnail, medium, large, public)
-- **External API** — Programmatic upload from Astro, Node scripts, or any HTTP client
-- **Namespace Support** — Logical isolation for multi-tenant or multi-app setups
-- **CDN Delivery** — Lightning-fast global distribution via Cloudflare's network
-- **Dark-mode Ready** — Responsive design, works on desktop and mobile
+### Core Asset Workflow
+
+- **Upload, queue, and organize** — Drag-and-drop uploads, folders, tags, metadata editing, and gallery-first browsing.
+- **Stable asset delivery** — Cloudflare variants, CDN URLs, share links, and a headless upload/update surface.
+- **Namespace-aware curation** — Separate projects or clients inside one Cloudflare Images account.
+- **Operational control** — Duplicate detection, pagination, gallery filtering, EXIF handling, and backup/audit helpers.
+
+### AI-Assisted Search & Enrichment
+
+- **Semantic discovery** — Text-to-image search, similar-image search, antipode search, and color-based search when Redis/vector features are enabled.
+- **Machine-assisted metadata** — Generate alt text, descriptions, Prompt This text, concept/haiku outputs, and batch embeddings.
+- **Rich extras storage** — Keep larger descriptive metadata outside Cloudflare's metadata size limits while preserving filterable fields.
+
+### Advanced Workflows
+
+- **Page and URL import** — Scan pages for assets, handle authenticated scans with cookies, and review candidates before upload.
+- **Media ingest** — ZIP intake, filesystem recursion, social-source helpers, and mixed image/video ingestion.
+- **Video and motion workflows** — Extract frames, preview video metadata, and convert sequences or videos into animated WebP artifacts.
+- **Client publishing** — Build curated client pages locally and publish them to the adjacent `photarium-client-sites` worker.
+- **Comfy metadata indexing** — Detect and inspect embedded workflow JSON and workflow intent data for generated assets.
 
 ### Deep Control & Variants
 
 ![Image Detail View](docs/images/2026-01-08_18-26-58_900px.webp)
 
-Every image includes a powerful detail view for granular control:
+Every asset detail view is built for curation rather than just upload-and-forget:
 
 - **Metadata Management**: Edit title, folder, description, and tags while preserving original EXIF data.
 - **Variant Assignment**: Designate specific images as variants (e.g., "Thumbnail," "Social Share") of a parent image. This keeps your library clean by grouping related assets under a single "master" image while serving optimized versions for specific contexts.
-- **Accessibility**: Generate and edit ALT text to ensure your assets are accessible everywhere.
+- **Accessibility & AI**: Generate and edit ALT text, descriptions, prompts, and other supplemental metadata.
+- **Workflow context**: Inspect related assets, semantic neighbors, and ComfyUI-derived workflow information where available.
 
 ### Organized Gallery Management
 
 ![Photarium Gallery View](docs/images/2026-01-08_18-32-51_900px.webp)
 
-The main gallery offers a clean, efficient way to browse and organize thousands of assets:
+The gallery stays useful as the library gets messy:
 
 - **Smart Filtering**: Drill down by matching folders, tags, or specific time ranges.
 - **Sticky Controls**: Filter/Sort bar stays pinned to the top, so you never lose context while scrolling deep lists.
-- **Quick Actions**: Hover over any image for instant access to copy URL, edit metadata, or download.
+- **Quick Actions**: Hover over any asset for instant access to copy URLs, edit metadata, inspect details, or download.
 
 ---
 
@@ -77,8 +97,8 @@ Before you start, you'll need:
   - Ubuntu/Debian: `sudo apt install ffmpeg`
   - Windows: [Download from ffmpeg.org](https://ffmpeg.org/download.html)
   - Verify WebP encoder support: `ffmpeg -encoders | rg webp`
-- **Optional:** OpenAI API key for AI ALT text generation
-- **Optional:** Redis Stack (via Docker or Cloud) for AI Semantic Search Features
+- **Optional:** OpenAI API key for AI-assisted ALT text, descriptions, prompts, haiku, and metadata refinement
+- **Optional:** Redis Stack (via Docker or Cloud) for semantic search, color search, similar/antipode search, and embedding-backed workflows
 
 See [docs/image-extras.md](docs/image-extras.md) for how Photarium stores rich per-image metadata outside Cloudflare metadata limits.
 
@@ -87,16 +107,16 @@ See [docs/image-extras.md](docs/image-extras.md) for how Photarium stores rich p
 ## Deployment Options
 
 ### 🚀 Simplified Mode (No Database)
-Deploy anywhere (Vercel, Railway, etc.) without managing a database.
-- **Features**: Upload, Gallery, Folders, Tags, basic filtering.
-- **Limitations**: No "semantic search" (finding images by describing them) or color search.
+Deploy the core asset workflow without managing Redis.
+- **Features**: Upload, gallery, folders, tags, variants, metadata editing, page import basics, namespaces, and the core API.
+- **Limitations**: No embedding-backed search, color search, similar/antipode workflows, or vector indexing.
 - **Setup**: Just omit the `REDIS_URL` environment variable.
 
 ### 🧠 Full AI Mode (with Redis)
-Unlock the full power of Photarium by connecting a Redis Stack instance.
-- **Features**: Everything above + **Semantic Search**, **Color Search**, and **"Find Similar"**.
+Unlock the full AI/discovery layer by connecting Redis Stack.
+- **Features**: Everything above plus **semantic search**, **color search**, **similar/antipode**, embedding status, and richer discovery workflows.
 - **Setup**: 
-  1. spin up a Redis Stack instance (see [Deployment Guide](./DEPLOYMENT.md)).
+  1. Spin up a Redis Stack instance (see [Deployment Guide](./DEPLOYMENT.md)).
   2. Set `CACHE_STORAGE_TYPE=redis` and `REDIS_URL`.
 
 ---
@@ -596,11 +616,12 @@ Checkpoint fields include `pagesFetched`, `recordsWritten`, `nextMaxId`, and `up
 
 ## Documentation
 
-- **[FAQ](./docs/faq.md)** — Common questions about search, Redis, and namespaces
-- **[Namespaces](./docs/namespace.md)** — Multi-tenant and multi-app setups
-- **[External API](./EXTERNAL_UPLOAD_API.md)** — Full API reference and examples
-- **[Image Variants](./docs/variants.md)** — Responsive image sizing
-- **[Remote Hash Cache](./docs/remote-hash-cache.md)** — Distributed duplicate detection
+- **[Features & Operations](./docs/features_and_operations.md)** — Primary feature map and operational guide
+- **[Headless API](./docs/HEADLESS_API.md)** — Route-level API reference for uploads, search, metadata, and media flows
+- **[Client Sites Publishing](./docs/client-sites-publishing.md)** — Contract-based publishing into the adjacent public client-sites worker
+- **[Namespaces](./docs/namespace.md)** — Project isolation, namespace storage, and migration behavior
+- **[FAQ](./docs/faq.md)** — Common questions about search behavior, Redis, and namespace usage
+- **[Image Extras](./docs/image-extras.md)** — How larger metadata is stored outside Cloudflare's metadata limits
 
 ---
 
