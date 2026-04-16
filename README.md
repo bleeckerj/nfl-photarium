@@ -392,7 +392,7 @@ npm run lint
 
 ### Instagram Ingest (`npm run ig:ingest`)
 
-`ig:ingest` crawls Instagram profile media via an authenticated browser session and writes each media item as one NDJSON record. It is primarily intended for ingesting your own Instagram media for backup, posterity, and reuse inside Photarium. It supports:
+`ig:ingest` crawls Instagram profile media via an authenticated browser session and writes each media item as one NDJSON record. It is intended for ingesting your own Instagram media so you can backup your photos/posts for posterity and management/tagging inside Photarium. It supports:
 
 - checkpointed pagination (resume from last `next_max_id`)
 - optional local image downloads
