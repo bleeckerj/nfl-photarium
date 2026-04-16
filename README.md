@@ -386,13 +386,13 @@ npm run lint
 - `npm run refresh:hash-cache` — Rebuild the duplicate detection cache
 - `npm run audit:broken` — Find broken image URLs
 - `npm run diag:duplicates` — Analyze duplicate uploads
-- `npm run ig:auth -- --username iffffound` — Open headed browser for one-time Instagram login
-- `npm run ig:ingest -- --username iffffound --max-pages 10` — Ingest Instagram media metadata with checkpoint resume
+- `npm run ig:auth -- --username darthjulian` — Open headed browser for one-time Instagram login
+- `npm run ig:ingest -- --username darthjulian --max-pages 10` — Ingest Instagram media metadata with checkpoint resume
 - `npm run ig:url -- --url https://www.instagram.com/reel/<shortcode>/` — Pull one Instagram post/reel and push media to Photarium by default
 
 ### Instagram Ingest (`npm run ig:ingest`)
 
-`ig:ingest` crawls Instagram profile media via an authenticated browser session and writes each media item as one NDJSON record. It supports:
+`ig:ingest` crawls Instagram profile media via an authenticated browser session and writes each media item as one NDJSON record. It is primarily intended for ingesting your own Instagram media for backup, posterity, and reuse inside Photarium. It supports:
 
 - checkpointed pagination (resume from last `next_max_id`)
 - optional local image downloads
@@ -405,13 +405,13 @@ This workflow is implemented in `scripts/instagram-ingest.mjs`.
 1. Authenticate once with a persistent browser profile:
 
 ```bash
-npm run ig:auth -- --username iffffound
+npm run ig:auth -- --username darthjulian
 ```
 
 2. Run ingest:
 
 ```bash
-npm run ig:ingest -- --username iffffound
+npm run ig:ingest -- --username darthjulian
 ```
 
 3. Inspect output:
@@ -457,7 +457,7 @@ Use `--` so npm passes arguments to the script.
 
 | Option | Default | Purpose |
 |-------|---------|---------|
-| `--username <name>` | `iffffound` | Instagram username to ingest |
+| `--username <name>` | `darthjulian` | Instagram username to ingest |
 | `--profile-dir <path>` | `.cache/instagram-profile` | Persistent Chromium profile directory |
 | `--count <n>` | `12` | Items requested per page |
 | `--max-pages <n>` | `0` | Stop after N pages (`0` = unbounded) |
@@ -492,37 +492,37 @@ Each line includes fields like:
 Baseline ingest:
 
 ```bash
-npm run ig:ingest -- --username iffffound
+npm run ig:ingest -- --username darthjulian
 ```
 
 Quiet mode:
 
 ```bash
-npm run ig:ingest -- --username iffffound --quiet
+npm run ig:ingest -- --username darthjulian --quiet
 ```
 
 Fetch only a fixed amount for testing:
 
 ```bash
-npm run ig:ingest -- --username iffffound --max-pages 3 --count 12
+npm run ig:ingest -- --username darthjulian --max-pages 3 --count 12
 ```
 
 Download images while ingesting:
 
 ```bash
-npm run ig:ingest -- --username iffffound --download-dir data/instagram/iffffound-images
+npm run ig:ingest -- --username darthjulian --download-dir data/instagram/darthjulian-images
 ```
 
 Start fresh from newest items (ignore checkpoint):
 
 ```bash
-npm run ig:ingest -- --username iffffound --no-resume
+npm run ig:ingest -- --username darthjulian --no-resume
 ```
 
 Use visible browser for debugging auth/session issues:
 
 ```bash
-npm run ig:ingest -- --username iffffound --headful
+npm run ig:ingest -- --username darthjulian --headful
 ```
 
 #### Pushing To Cloudflare-Backed API During Ingest
@@ -530,7 +530,7 @@ npm run ig:ingest -- --username iffffound --headful
 Enable push:
 
 ```bash
-npm run ig:ingest -- --username iffffound --push-cloudflare
+npm run ig:ingest -- --username darthjulian --push-cloudflare
 ```
 
 When enabled, images are sent to:
@@ -546,13 +546,13 @@ Videos are sent to:
 If video ingest should be deferred:
 
 ```bash
-npm run ig:ingest -- --username iffffound --push-cloudflare --skip-video-push
+npm run ig:ingest -- --username darthjulian --push-cloudflare --skip-video-push
 ```
 
 Tune per-asset pacing to reduce throttling:
 
 ```bash
-npm run ig:ingest -- --username iffffound --push-cloudflare --request-delay-ms 1500
+npm run ig:ingest -- --username darthjulian --push-cloudflare --request-delay-ms 1500
 ```
 
 #### Replay Deferred Videos
@@ -560,25 +560,25 @@ npm run ig:ingest -- --username iffffound --push-cloudflare --request-delay-ms 1
 The replay command uploads deferred videos to Photarium/Cloudflare by default:
 
 ```bash
-npm run ig:videos -- --username iffffound
+npm run ig:videos -- --username darthjulian
 ```
 
 Equivalent direct command:
 
 ```bash
-node scripts/instagram-ingest.mjs videos-from-ndjson --username iffffound
+node scripts/instagram-ingest.mjs videos-from-ndjson --username darthjulian
 ```
 
 You can also replay by explicit file path (no username required):
 
 ```bash
-npm run ig:videos -- --input data/instagram/iffffound.ndjson --namespace cf-default
+npm run ig:videos -- --input data/instagram/darthjulian.ndjson --namespace cf-default
 ```
 
 If replay reports `rows_likely_video_but_no_video_url > 0`, use the recovery helper to re-resolve likely-video rows first, then replay in one command:
 
 ```bash
-npm run ig:recover-videos -- --input data/instagram/iffffound.ndjson --namespace cf-default
+npm run ig:recover-videos -- --input data/instagram/darthjulian.ndjson --namespace cf-default
 ```
 
 Useful helper options:
