@@ -8,7 +8,7 @@ import { ProjectAssetService } from '../../assets/service';
 import { logInfo } from '../../observability/logger';
 
 export const handlePublishProject = async (context: Context<{ Bindings: Env }>): Promise<Response> => {
-  if (!isAuthorizedAdminRequest(context.req.raw, context.env.ADMIN_API_TOKEN)) {
+  if (!isAuthorizedAdminRequest(context.req.raw, context.env)) {
     return jsonError(401, 'Unauthorized');
   }
 

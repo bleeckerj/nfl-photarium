@@ -6,7 +6,7 @@ import { ProjectAssetRepository } from '../../assets/repository';
 import { ProjectAssetService } from '../../assets/service';
 
 export const handleAddAssets = async (context: Context<{ Bindings: Env }>): Promise<Response> => {
-  if (!isAuthorizedAdminRequest(context.req.raw, context.env.ADMIN_API_TOKEN)) {
+  if (!isAuthorizedAdminRequest(context.req.raw, context.env)) {
     return jsonError(401, 'Unauthorized');
   }
 

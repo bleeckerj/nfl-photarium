@@ -1,10 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import sharp from 'sharp';
-import { spawn } from 'child_process';
-import { tmpdir } from 'os';
-import { join } from 'path';
-import { writeFile, readFile, unlink, mkdir } from 'fs/promises';
-import { randomUUID } from 'crypto';
 import { uploadImageBuffer } from '@/server/uploadService';
 import { validateParentForNewChild } from '@/server/parentValidation';
 
@@ -70,23 +65,6 @@ const buildFrameFetchError = (sourceUrl: string, response: Response) => {
   const host = getHostFromUrl(sourceUrl);
   const statusText = response.statusText || 'Unknown';
   return `Failed to fetch frame from ${host} (HTTP ${response.status} ${statusText})`;
-};
-
-const MAX_FFMPEG_STDERR_CHARS = 256 * 1024;
-
-const appendWithLimit = (
-  current: string,
-  chunk: string,
-  limit: number
-): { next: string; truncated: boolean } => {
-  if (current.length >= limit) {
-    return { next: current, truncated: true };
-  }
-  const remaining = limit - current.length;
-  if (chunk.length <= remaining) {
-    return { next: current + chunk, truncated: false };
-  }
-  return { next: current + chunk.slice(0, remaining), truncated: true };
 };
 
 export async function POST(request: NextRequest) {
@@ -231,76 +209,37 @@ export async function POST(request: NextRequest) {
     const heights = metas.map((meta) => meta.height || 0).filter(Boolean);
     const maxWidth = Math.max(...widths, 1);
     const maxHeight = Math.max(...heights, 1);
+    const delayMs = Math.max(1, Math.round(1000 / fps));
 
     const preparedFrames = await Promise.all(
-      frames.map(async (frame) => {
-        // Convert each frame to PNG (ffmpeg works best with PNG input)
-        const pngBuffer = await sharp(frame.buffer)
+      frames.map(async (frame) =>
+        sharp(frame.buffer)
           .resize(maxWidth, maxHeight, {
             fit: 'contain',
             background: { r: 255, g: 255, b: 255, alpha: 0 }
           })
-          .png()
-          .toBuffer();
-        return pngBuffer;
-      })
+          .ensureAlpha()
+          .raw()
+          .toBuffer()
+      )
     );
 
-    // Create temp directory for frames
-    const tempId = randomUUID();
-    const tempDir = join(tmpdir(), `animate-${tempId}`);
-    await mkdir(tempDir, { recursive: true });
-    
-    // Write frames to temp files
-    const framePaths: string[] = [];
-    for (let i = 0; i < preparedFrames.length; i++) {
-      const framePath = join(tempDir, `frame-${String(i).padStart(4, '0')}.png`);
-      await writeFile(framePath, preparedFrames[i]);
-      framePaths.push(framePath);
-    }
-    
-    const outputPath = join(tempDir, 'output.webp');
-    
-    // Use ffmpeg to create animated WebP
-    const ffmpegArgs = [
-      '-framerate', String(fps),
-      '-i', join(tempDir, 'frame-%04d.png'),
-      '-loop', loop ? '0' : '1',
-      '-c:v', 'libwebp',
-      '-lossless', '0',
-      '-q:v', '80',
-      '-y',
-      outputPath
-    ];
-    
-    await new Promise<void>((resolve, reject) => {
-      const ffmpeg = spawn('ffmpeg', ffmpegArgs);
-      let stderr = '';
-      let stderrTruncated = false;
-      ffmpeg.stderr.on('data', (data) => {
-        const appended = appendWithLimit(stderr, data.toString(), MAX_FFMPEG_STDERR_CHARS);
-        stderr = appended.next;
-        if (appended.truncated) {
-          stderrTruncated = true;
-        }
-      });
-      ffmpeg.on('close', (code) => {
-        if (code === 0) resolve();
-        else {
-          const suffix = stderrTruncated ? ' [stderr truncated]' : '';
-          reject(new Error(`ffmpeg exited with code ${code}: ${stderr}${suffix}`));
-        }
-      });
-      ffmpeg.on('error', reject);
-    });
-    
-    const animatedBuffer = await readFile(outputPath);
-    
-    // Cleanup temp files
-    for (const framePath of framePaths) {
-      await unlink(framePath).catch(() => {});
-    }
-    await unlink(outputPath).catch(() => {});
+    const stacked = Buffer.concat(preparedFrames);
+    const animatedBuffer = await sharp(stacked, {
+      raw: {
+        width: maxWidth,
+        height: maxHeight * preparedFrames.length,
+        channels: 4,
+        pageHeight: maxHeight
+      }
+    })
+      .webp({
+        quality: 80,
+        effort: 4,
+        loop: loop ? 0 : 1,
+        delay: Array(preparedFrames.length).fill(delayMs)
+      })
+      .toBuffer();
 
     const outputName = filenameRaw
       ? normalizeFilename(filenameRaw.replace(/\.webp$/i, '')) + '.webp'

@@ -35,7 +35,7 @@ Expected payload:
 ```json
 {
   "targetBaseUrl": "https://photos.example.com",
-  "adminApiToken": "internal-admin-token",
+  "publishSecret": "shared-publish-secret",
   "project": {
     "title": "Client Review",
     "expiresAt": "2026-05-01T00:00:00.000Z",
@@ -46,6 +46,10 @@ Expected payload:
   }
 }
 ```
+
+For local development targets such as `http://127.0.0.1:8788`, the publish secret
+can be omitted. The adjacent worker allows localhost admin publish calls when
+`LOCAL_DEV_MODE=true`.
 
 ## Design Notes
 

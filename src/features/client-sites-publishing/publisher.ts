@@ -1,5 +1,10 @@
 import { buildPublishedProjectManifest } from './manifestBuilder';
 import type { ClientSitePublishRequest } from './types';
+import {
+  buildPublishHeaders,
+  normalizePublishTargetBaseUrl,
+  resolvePublishSecret,
+} from './publishAuth';
 
 interface RemoteProjectCreateResponse {
   project: {
@@ -12,18 +17,9 @@ interface RemoteProjectCreateResponse {
   accessKey: string;
 }
 
-const toAdminHeaders = (adminApiToken: string): HeadersInit => ({
-  Authorization: `Bearer ${adminApiToken}`,
-  'Content-Type': 'application/json',
-});
-
-const normalizeTargetBaseUrl = (input: string): string => {
-  const url = new URL(input);
-  return url.origin;
-};
-
 export const publishClientSiteProject = async (request: ClientSitePublishRequest) => {
-  const targetBaseUrl = normalizeTargetBaseUrl(request.targetBaseUrl);
+  const targetBaseUrl = normalizePublishTargetBaseUrl(request.targetBaseUrl);
+  const publishSecret = resolvePublishSecret(request);
   let remoteProjectId = request.project.remoteProjectId;
   let publicSlug = request.project.publicSlug;
   let accessKey: string | undefined;
@@ -31,7 +27,7 @@ export const publishClientSiteProject = async (request: ClientSitePublishRequest
   if (!remoteProjectId || !publicSlug) {
     const createResponse = await fetch(`${targetBaseUrl}/api/admin/projects`, {
       method: 'POST',
-      headers: toAdminHeaders(request.adminApiToken),
+      headers: buildPublishHeaders(publishSecret),
       body: JSON.stringify({
         title: request.project.title,
         expiresAt: request.project.expiresAt ?? null,
@@ -68,7 +64,7 @@ export const publishClientSiteProject = async (request: ClientSitePublishRequest
 
   const publishResponse = await fetch(`${targetBaseUrl}/api/admin/projects/${remoteProjectId}/publish`, {
     method: 'POST',
-    headers: toAdminHeaders(request.adminApiToken),
+    headers: buildPublishHeaders(publishSecret),
     body: JSON.stringify(manifest),
   });
 
@@ -89,4 +85,3 @@ export const publishClientSiteProject = async (request: ClientSitePublishRequest
     publishResult,
   };
 };
-

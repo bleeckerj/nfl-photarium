@@ -5,7 +5,7 @@
   "private": true,
   "description": "An elegant image management platform powered by Cloudflare Images",
   "scripts": {
-    "dev": "AUTO_EMBED_ON_UPLOAD=1 AUTO_EMBED_ON_UPLOAD_LOCAL_PROVIDER=1 AUTO_EMBED_CONCURRENCY=1 next dev",
+    "dev": "AUTO_EMBED_ON_UPLOAD=1 AUTO_EMBED_ON_UPLOAD_LOCAL_PROVIDER=1 AUTO_EMBED_CONCURRENCY=1 next dev --webpack",
     "dev:nocache": "CLOUDFLARE_CACHE_DISABLED=1 npm run dev",
     "dev:full": "./scripts/start-dev.sh",
     "dev:full:nocache": "CLOUDFLARE_CACHE_DISABLED=1 npm run dev:full",

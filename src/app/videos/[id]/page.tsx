@@ -24,6 +24,7 @@ import {
   buildVideoDetailShareUrl,
   generateQrDataUrl,
 } from '@/services/shareLinkService';
+import { hasFreshGalleryReturnState } from '@/components/gallery/returnState';
 
 import { useVariationUpload } from '@/hooks/useVariationUpload';
 import { usePersistentShareBaseUrl } from '@/hooks/usePersistentShareBaseUrl';
@@ -284,10 +285,17 @@ export default function VideoDetailPage() {
 
   const galleryPageParam = search.get('gpage');
   const galleryNamespaceParam = search.get('gns') ?? '';
+  const [preferSessionReturn, setPreferSessionReturn] = useState(false);
+
+  useEffect(() => {
+    setPreferSessionReturn(hasFreshGalleryReturnState(galleryNamespaceParam));
+  }, [galleryNamespaceParam]);
+
   const backHref = useMemo(() => {
+    if (preferSessionReturn) return '/';
     if (!galleryPageParam) return '/';
     return `/?gpage=${encodeURIComponent(galleryPageParam)}&gns=${encodeURIComponent(galleryNamespaceParam)}`;
-  }, [galleryNamespaceParam, galleryPageParam]);
+  }, [galleryNamespaceParam, galleryPageParam, preferSessionReturn]);
 
   const [video, setVideo] = useState<VideoRecord | null>(null);
   const [allAssets, setAllAssets] = useState<AssetRecord[]>([]);

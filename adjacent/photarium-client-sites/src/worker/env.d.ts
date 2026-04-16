@@ -1,6 +1,7 @@
 interface Env {
   LOCAL_DEV_MODE: string;
-  ADMIN_API_TOKEN: string;
+  CLIENT_SITES_PUBLISH_SECRET?: string;
+  ADMIN_API_TOKEN?: string;
   ACCESS_LINK_HASH_SECRET: string;
   SESSION_SIGNING_SECRET: string;
   IMAGES_ACCOUNT_HASH: string;

@@ -26,8 +26,11 @@ interface UseGalleryFiltersOptions {
     showDuplicatesOnly: boolean;
     showBrokenOnly: boolean;
     showComfyOnly?: boolean;
+    embeddingFilter?: EmbeddingFilter;
     aspectRatioFilters?: AspectRatioClass[];
     dateFilter: DateFilter | null;
+    hiddenFolders?: string[];
+    hiddenTags?: string[];
     pageSize?: number;
     currentPage?: number;
   };
@@ -123,7 +126,9 @@ export function useGalleryFilters({
   const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(initialPreferences.showDuplicatesOnly);
   const [showBrokenOnly, setShowBrokenOnly] = useState(initialPreferences.showBrokenOnly);
   const [showComfyOnly, setShowComfyOnly] = useState(Boolean(initialPreferences.showComfyOnly));
-  const [embeddingFilter, setEmbeddingFilter] = useState<EmbeddingFilter>('none');
+  const [embeddingFilter, setEmbeddingFilter] = useState<EmbeddingFilter>(
+    initialPreferences.embeddingFilter ?? 'none'
+  );
   const [aspectRatioFilters, setAspectRatioFilters] = useState<AspectRatioClass[]>(
     initialPreferences.aspectRatioFilters ?? []
   );
@@ -132,8 +137,12 @@ export function useGalleryFilters({
   const [pageSize, setPageSize] = useState(initialPreferences.pageSize ?? DEFAULT_PAGE_SIZE);
   
   // Hidden folders/tags
-  const [hiddenFolders, setHiddenFolders] = useState<string[]>(() => loadHiddenFolders());
-  const [hiddenTags, setHiddenTags] = useState<string[]>(() => loadHiddenTags());
+  const [hiddenFolders, setHiddenFolders] = useState<string[]>(
+    () => initialPreferences.hiddenFolders ?? loadHiddenFolders()
+  );
+  const [hiddenTags, setHiddenTags] = useState<string[]>(
+    () => initialPreferences.hiddenTags ?? loadHiddenTags()
+  );
   const didInitFilterPageRef = useRef(false);
 
   // Persist hidden folders/tags

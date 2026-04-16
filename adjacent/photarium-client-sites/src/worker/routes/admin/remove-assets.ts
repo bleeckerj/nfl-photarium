@@ -13,7 +13,7 @@ export const handleRemoveAssets = async (context: Context<{ Bindings: Env }>): P
   const projectId = context.req.param('id');
   if (!projectId) return jsonError(400, 'Project id is required');
 
-  if (!isAuthorizedAdminRequest(context.req.raw, context.env.ADMIN_API_TOKEN)) {
+  if (!isAuthorizedAdminRequest(context.req.raw, context.env)) {
     return jsonError(401, 'Unauthorized');
   }
 

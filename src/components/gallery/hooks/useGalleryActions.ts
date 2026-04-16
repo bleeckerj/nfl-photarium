@@ -6,11 +6,22 @@
 
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import type { CloudflareImage } from '../types';
 import { truncateMiddle } from '../utils';
 import { setEmbeddingPendingEntry } from '@/utils/embeddingPending';
 import { requestSemanticTags } from '@/services/imageAltDescriptionService';
+
+const GALLERY_EDIT_DRAFT_KEY = 'galleryEditDraftV1';
+const GALLERY_EDIT_DRAFT_TTL_MS = 6 * 60 * 60 * 1000;
+
+type GalleryEditDraft = {
+  imageId: string;
+  savedAt: number;
+  editFolderSelect: string;
+  newEditFolder: string;
+  editTags: string;
+};
 
 interface UseGalleryActionsOptions {
   images: CloudflareImage[];
@@ -109,6 +120,7 @@ export function useGalleryActions({
   namespace,
   toast,
 }: UseGalleryActionsOptions): UseGalleryActionsReturn {
+  const restoredDraftRef = useRef(false);
   // ALT generation loading state
   const [altLoadingMap, setAltLoadingMap] = useState<Record<string, boolean>>({});
   const [displayNameLoadingMap, setDisplayNameLoadingMap] = useState<Record<string, boolean>>({});
@@ -125,6 +137,89 @@ export function useGalleryActions({
   const [bulkEmbeddingGenerating, setBulkEmbeddingGenerating] = useState(false);
   const [bulkAnimateLoading, setBulkAnimateLoading] = useState(false);
   const [bulkAnimateError, setBulkAnimateError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (restoredDraftRef.current) return;
+    if (editingImage) {
+      restoredDraftRef.current = true;
+      return;
+    }
+
+    try {
+      const raw = window.sessionStorage.getItem(GALLERY_EDIT_DRAFT_KEY);
+      if (!raw) {
+        restoredDraftRef.current = true;
+        return;
+      }
+
+      const parsed = JSON.parse(raw) as Partial<GalleryEditDraft>;
+      const savedAt = typeof parsed.savedAt === 'number' ? parsed.savedAt : 0;
+      const isFresh = savedAt > 0 && Date.now() - savedAt < GALLERY_EDIT_DRAFT_TTL_MS;
+      const imageId = typeof parsed.imageId === 'string' ? parsed.imageId : '';
+      if (!isFresh || !imageId) {
+        window.sessionStorage.removeItem(GALLERY_EDIT_DRAFT_KEY);
+        restoredDraftRef.current = true;
+        return;
+      }
+
+      const imageExists = images.some((image) => image.id === imageId);
+      if (!imageExists) {
+        return;
+      }
+
+      setEditingImage(imageId);
+      setEditFolderSelect(typeof parsed.editFolderSelect === 'string' ? parsed.editFolderSelect : '');
+      setNewEditFolder(typeof parsed.newEditFolder === 'string' ? parsed.newEditFolder : '');
+      setEditTags(typeof parsed.editTags === 'string' ? parsed.editTags : '');
+      restoredDraftRef.current = true;
+    } catch {
+      window.sessionStorage.removeItem(GALLERY_EDIT_DRAFT_KEY);
+      restoredDraftRef.current = true;
+    }
+  }, [editingImage, images]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const hasDraft =
+      Boolean(editingImage) &&
+      Boolean(editFolderSelect || newEditFolder || editTags);
+
+    try {
+      if (!hasDraft || !editingImage) {
+        window.sessionStorage.removeItem(GALLERY_EDIT_DRAFT_KEY);
+        return;
+      }
+
+      const draft: GalleryEditDraft = {
+        imageId: editingImage,
+        savedAt: Date.now(),
+        editFolderSelect,
+        newEditFolder,
+        editTags,
+      };
+      window.sessionStorage.setItem(GALLERY_EDIT_DRAFT_KEY, JSON.stringify(draft));
+    } catch {
+      // Ignore storage access failures.
+    }
+  }, [editFolderSelect, editTags, editingImage, newEditFolder]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const hasDraft =
+      Boolean(editingImage) &&
+      Boolean(editFolderSelect || newEditFolder || editTags);
+    if (!hasDraft) return;
+
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload, true);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload, true);
+  }, [editFolderSelect, editTags, editingImage, newEditFolder]);
 
   // Delete single image
   const deleteImage = useCallback(async (imageId: string) => {
@@ -239,6 +334,13 @@ export function useGalleryActions({
     setEditFolderSelect('');
     setNewEditFolder('');
     setEditTags('');
+    if (typeof window !== 'undefined') {
+      try {
+        window.sessionStorage.removeItem(GALLERY_EDIT_DRAFT_KEY);
+      } catch {
+        // Ignore storage access failures.
+      }
+    }
   }, []);
 
   const saveEdit = useCallback(async (imageId: string) => {

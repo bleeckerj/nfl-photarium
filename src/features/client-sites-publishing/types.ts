@@ -98,7 +98,8 @@ export interface ClientSiteManifestRequest {
 
 export interface ClientSitePublishRequest {
   targetBaseUrl: string;
-  adminApiToken: string;
+  publishSecret?: string;
+  adminApiToken?: string;
   project: {
     remoteProjectId?: string;
     publicSlug?: string;
@@ -113,4 +114,3 @@ export interface ClientSitePublishRequest {
   visibleTagPolicy?: ClientSiteVisibleTagPolicy;
   downloadPresetPolicy?: ClientSiteDownloadPresetPolicy;
 }
-

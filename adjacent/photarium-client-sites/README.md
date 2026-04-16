@@ -26,7 +26,8 @@ npm run dev
 npm run demo
 ```
 
-`wrangler dev` expects `.dev.vars` for local-only secrets and tokens.
+`wrangler dev` expects `.dev.vars` for local-only secrets. In explicit local dev mode,
+localhost admin publish routes can run without a configured publish secret.
 
 `npm run dev` starts a managed local worker on the first free port starting at `8788` and writes runtime metadata under `.wrangler/`.
 
@@ -56,7 +57,7 @@ This app is designed for Cloudflare Workers with:
 
 Set secrets before deployment:
 
-- `ADMIN_API_TOKEN`
+- `CLIENT_SITES_PUBLISH_SECRET`
 - `ACCESS_LINK_HASH_SECRET`
 - `SESSION_SIGNING_SECRET`
 - `IMAGES_ACCOUNT_HASH`

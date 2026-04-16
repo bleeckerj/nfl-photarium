@@ -6,22 +6,23 @@ const nextConfig = {
   webpack: (config, { dev }) => {
     if (dev) {
       const existingIgnored = config.watchOptions?.ignored;
-      const ignoredList = Array.isArray(existingIgnored)
+      const ignoredList = (Array.isArray(existingIgnored)
         ? existingIgnored
-        : existingIgnored
+        : existingIgnored != null
           ? [existingIgnored]
-          : [];
+          : []
+      ).filter((entry) => typeof entry === 'string' && entry.trim().length > 0);
       config.watchOptions = {
         ...config.watchOptions,
         // Ignore runtime data/state files that can change frequently during local workflows.
-        ignored: [
+        ignored: Array.from(new Set([
           ...ignoredList,
           '**/data/**',
           '**/drop-off/**',
           '**/adjacent/**',
           '**/.codex/**',
           '**/*.checkpoint.json',
-        ],
+        ])),
       };
     }
     return config;

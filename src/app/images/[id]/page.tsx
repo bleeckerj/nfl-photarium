@@ -53,6 +53,10 @@ import { patchParentAssignment as patchParentAssignmentService } from '@/service
 import { usePersistentShareBaseUrl } from '@/hooks/usePersistentShareBaseUrl';
 import { requestSemanticTags } from '@/services/imageAltDescriptionService';
 import { patchImageMetadata } from '@/services/imageMetadataService';
+import {
+  getFreshGalleryReturnState,
+  hasFreshGalleryReturnState,
+} from '@/components/gallery/returnState';
 
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 
@@ -119,18 +123,9 @@ interface CloudflareImage {
 }
 
 const DEFAULT_LIST_VARIANT = 'full';
-const GALLERY_RETURN_STATE_KEY = 'galleryReturnStateV1';
-const GALLERY_RETURN_TTL_MS = 10 * 60 * 1000;
 const IMAGE_DETAIL_DRAFT_KEY_PREFIX = 'imageDetailDraftV1:';
 const IMAGE_DETAIL_DRAFT_TTL_MS = 6 * 60 * 60 * 1000;
 const VARIANT_DIMENSIONS = new Map(IMAGE_VARIANTS.map(variant => [variant.name, variant.width]));
-
-type GalleryReturnState = {
-  namespace?: string;
-  savedAt?: number;
-  resultIds?: string[];
-  resultAssets?: Array<{ id: string; assetType?: 'image' | 'video' }>;
-};
 
 type BulkUpdateFailure = {
   id: string;
@@ -323,6 +318,10 @@ export default function ImageDetailPage() {
   const pinnedImageIdRef = useRef<string | null>(id ?? null);
 
   const handleBackToGallery = useCallback(() => {
+    if (hasFreshGalleryReturnState(galleryNamespaceParam)) {
+      router.push('/', { scroll: false });
+      return;
+    }
     if (galleryPageParam) {
       router.push(`/?gpage=${encodeURIComponent(galleryPageParam)}&gns=${encodeURIComponent(galleryNamespaceParam)}`, { scroll: false });
       return;
@@ -561,36 +560,19 @@ export default function ImageDetailPage() {
   }, []);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const raw = window.sessionStorage.getItem(GALLERY_RETURN_STATE_KEY);
-      if (!raw) {
-        setGalleryResultIds([]);
-        setGalleryResultAssetTypes({});
-        return;
-      }
-      const parsed = JSON.parse(raw) as GalleryReturnState;
-      const savedAt = typeof parsed?.savedAt === 'number' ? parsed.savedAt : 0;
-      const freshEnough = !savedAt || Date.now() - savedAt < GALLERY_RETURN_TTL_MS;
-      const savedNamespace = typeof parsed?.namespace === 'string' ? parsed.namespace : '';
-      if (!freshEnough || savedNamespace !== galleryNamespaceParam || !Array.isArray(parsed?.resultIds)) {
-        setGalleryResultIds([]);
-        setGalleryResultAssetTypes({});
-        return;
-      }
-      setGalleryResultIds(
-        parsed.resultIds.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
-      );
-      const nextAssetTypes: Record<string, 'image' | 'video'> = {};
-      parsed.resultAssets?.forEach((entry) => {
-        if (!entry || typeof entry.id !== 'string' || !entry.id) return;
-        nextAssetTypes[entry.id] = entry.assetType === 'video' ? 'video' : 'image';
-      });
-      setGalleryResultAssetTypes(nextAssetTypes);
-    } catch {
+    const parsed = getFreshGalleryReturnState(galleryNamespaceParam);
+    if (!parsed) {
       setGalleryResultIds([]);
       setGalleryResultAssetTypes({});
+      return;
     }
+
+    setGalleryResultIds(parsed.resultIds);
+    const nextAssetTypes: Record<string, 'image' | 'video'> = {};
+    parsed.resultAssets.forEach((entry) => {
+      nextAssetTypes[entry.id] = entry.assetType === 'video' ? 'video' : 'image';
+    });
+    setGalleryResultAssetTypes(nextAssetTypes);
   }, [galleryNamespaceParam, id]);
 
   useEffect(() => {

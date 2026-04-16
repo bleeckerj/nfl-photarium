@@ -6,7 +6,7 @@ import MonoSelect from './MonoSelect';
 import GalleryCommandBar from './GalleryCommandBar';
 import FolderManagerButton from './FolderManagerButton';
 import { GalleryFilters } from './gallery/GalleryFilters';
-import { type DateFilter, type GridSize } from './gallery/types';
+import { type DateFilter, type EmbeddingFilter, type GridSize } from './gallery/types';
 import { getMultipleImageUrls, IMAGE_VARIANTS } from '@/utils/imageUtils';
 import { setDragPayloadForImage } from '@/utils/imageDrag';
 import { copyToClipboard, formatCopyPayload } from '@/utils/clipboard';
@@ -27,6 +27,14 @@ import { GalleryModals } from './gallery/GalleryModals';
 import { AUDIT_LOG_LIMIT, DEFAULT_GRID_SIZE } from './gallery/constants';
 import { normalizeGridSize } from './gallery/gridSizing';
 import { normalizeDateFilterValue, toDateKey } from './gallery/dateFilter';
+import {
+  clearGalleryReturnState,
+  getFreshGalleryReturnState,
+  GALLERY_RETURN_SNAPSHOT_KEY,
+  GALLERY_RETURN_TTL_MS,
+  saveGalleryReturnState as persistGalleryReturnState,
+  type NormalizedGalleryReturnState,
+} from './gallery/returnState';
 import { isLikelySourceSearchTerm } from '@/utils/galleryFilter';
 
 interface CloudflareImage {
@@ -80,21 +88,8 @@ export interface ImageGalleryRef {
 
 const DEFAULT_PAGE_SIZE = 30;
 const PAGE_SIZE_OPTIONS = [12, 24, 30, 48, 60, 90, 120];
-const GALLERY_RETURN_STATE_KEY = 'galleryReturnStateV1';
-const GALLERY_RETURN_SNAPSHOT_KEY = 'galleryReturnSnapshotV1';
-const GALLERY_RETURN_TTL_MS = 10 * 60 * 1000;
 const VARIANT_DIMENSIONS = new Map(IMAGE_VARIANTS.map(variant => [variant.name, variant.width]));
 const VIDEO_LIMIT_STEP = 150;
-
-type GalleryReturnState = {
-  currentPage?: number;
-  scrollY?: number;
-  namespace?: string;
-  savedAt?: number;
-  selectedImageId?: string;
-  resultIds?: string[];
-  resultAssets?: Array<{ id: string; assetType?: 'image' | 'video' }>;
-};
 
 type GalleryWarmCacheState = {
   namespace: string;
@@ -107,6 +102,32 @@ type GalleryReturnSnapshotState = {
   savedAt?: number;
   currentPage?: number;
   images?: CloudflareImage[];
+};
+
+type StoredGalleryPreferences = {
+  variant: string;
+  onlyCanonical: boolean;
+  respectAspectRatio: boolean;
+  onlyWithVariants: boolean;
+  showComfyOnly: boolean;
+  embeddingFilter: EmbeddingFilter;
+  selectedFolder: string;
+  selectedTag: string;
+  searchTerm: string;
+  viewMode: 'grid' | 'list';
+  gridSize: GridSize;
+  filtersCollapsed: boolean;
+  bulkFolderInput: string;
+  bulkFolderMode: 'existing' | 'new';
+  showDuplicatesOnly: boolean;
+  showBrokenOnly: boolean;
+  aspectRatioFilters: Array<'horizontal' | 'vertical' | 'square'>;
+  hiddenFolders: string[];
+  hiddenTags: string[];
+  showCli: boolean;
+  pageSize: number;
+  dateFilter: DateFilter | null;
+  currentPage: number;
 };
 
 type VideoMetaState = {
@@ -187,186 +208,159 @@ const bulkReducer = (state: BulkState, action: BulkAction): BulkState => {
   }
 };
 
+const getDefaultStoredPreferences = (): StoredGalleryPreferences => ({
+  variant: 'full',
+  onlyCanonical: false,
+  respectAspectRatio: false,
+  onlyWithVariants: false,
+  showComfyOnly: false,
+  embeddingFilter: 'none',
+  selectedFolder: 'all',
+  selectedTag: '',
+  searchTerm: '',
+  viewMode: 'grid',
+  gridSize: DEFAULT_GRID_SIZE,
+  filtersCollapsed: false,
+  bulkFolderInput: '',
+  bulkFolderMode: 'existing',
+  showDuplicatesOnly: false,
+  showBrokenOnly: false,
+  aspectRatioFilters: [],
+  hiddenFolders: [],
+  hiddenTags: [],
+  showCli: true,
+  pageSize: DEFAULT_PAGE_SIZE,
+  dateFilter: null,
+  currentPage: 1,
+});
+
+const getStoredPreferences = (
+  namespace: string | undefined,
+  initialGalleryReturnState: NormalizedGalleryReturnState | null
+): StoredGalleryPreferences => {
+  if (typeof window === 'undefined') {
+    return getDefaultStoredPreferences();
+  }
+
+  const next = getDefaultStoredPreferences();
+
+  try {
+    const stored = window.localStorage.getItem('galleryPreferences');
+    if (stored) {
+      const parsed = JSON.parse(stored) as {
+        variant?: string;
+        onlyCanonical?: boolean;
+        respectAspectRatio?: boolean;
+        onlyWithVariants?: boolean;
+        showComfyOnly?: boolean;
+        selectedFolder?: string;
+        selectedTag?: string;
+        searchTerm?: string;
+        viewMode?: 'grid' | 'list';
+        gridSize?: GridSize;
+        filtersCollapsed?: boolean;
+        bulkFolderInput?: string;
+        bulkFolderMode?: 'existing' | 'new';
+        showDuplicatesOnly?: boolean;
+        showBrokenOnly?: boolean;
+        aspectRatioFilters?: ('horizontal' | 'vertical' | 'square')[];
+        showCli?: boolean;
+        pageSize?: number;
+        dateFilter?: { startDate?: string; endDate?: string } | { year?: number; month?: number } | null;
+        currentPage?: number;
+      };
+
+      const rawPageSize = typeof parsed.pageSize === 'number' ? parsed.pageSize : DEFAULT_PAGE_SIZE;
+      const normalizedPageSize = PAGE_SIZE_OPTIONS.includes(rawPageSize)
+        ? rawPageSize
+        : DEFAULT_PAGE_SIZE;
+      const storedVariant = typeof parsed.variant === 'string' ? parsed.variant : 'full';
+
+      next.variant = storedVariant === 'public' || storedVariant === 'original' ? 'full' : storedVariant;
+      next.onlyCanonical = Boolean(parsed.onlyCanonical);
+      next.respectAspectRatio = Boolean(parsed.respectAspectRatio);
+      next.onlyWithVariants = Boolean(parsed.onlyWithVariants);
+      next.showComfyOnly = Boolean(parsed.showComfyOnly);
+      next.selectedFolder = parsed.selectedFolder ?? 'all';
+      next.selectedTag = parsed.selectedTag ?? '';
+      next.searchTerm = parsed.searchTerm ?? '';
+      next.viewMode = parsed.viewMode === 'list' ? 'list' : 'grid';
+      next.gridSize = normalizeGridSize(parsed.gridSize, DEFAULT_GRID_SIZE);
+      next.filtersCollapsed = Boolean(parsed.filtersCollapsed);
+      next.bulkFolderInput = typeof parsed.bulkFolderInput === 'string' ? parsed.bulkFolderInput : '';
+      next.bulkFolderMode = parsed.bulkFolderMode === 'new' ? 'new' : 'existing';
+      next.showDuplicatesOnly = Boolean(parsed.showDuplicatesOnly);
+      next.showBrokenOnly = Boolean(parsed.showBrokenOnly);
+      next.aspectRatioFilters = Array.isArray(parsed.aspectRatioFilters)
+        ? parsed.aspectRatioFilters.filter((value) => value === 'horizontal' || value === 'vertical' || value === 'square')
+        : [];
+      next.showCli = parsed.showCli !== false;
+      next.pageSize = normalizedPageSize;
+      next.dateFilter = normalizeDateFilterValue(parsed.dateFilter);
+      next.currentPage =
+        typeof parsed.currentPage === 'number' && parsed.currentPage > 0
+          ? Math.floor(parsed.currentPage)
+          : 1;
+    }
+  } catch (error) {
+    console.warn('Failed to parse gallery preferences', error);
+  }
+
+  if (initialGalleryReturnState?.filters) {
+    next.searchTerm = initialGalleryReturnState.filters.searchTerm;
+    next.selectedFolder = initialGalleryReturnState.filters.selectedFolder;
+    next.selectedTag = initialGalleryReturnState.filters.selectedTag;
+    next.onlyCanonical = initialGalleryReturnState.filters.onlyCanonical;
+    next.onlyWithVariants = initialGalleryReturnState.filters.onlyWithVariants;
+    next.showDuplicatesOnly = initialGalleryReturnState.filters.showDuplicatesOnly;
+    next.showBrokenOnly = initialGalleryReturnState.filters.showBrokenOnly;
+    next.showComfyOnly = initialGalleryReturnState.filters.showComfyOnly;
+    next.embeddingFilter = initialGalleryReturnState.filters.embeddingFilter;
+    next.aspectRatioFilters = initialGalleryReturnState.filters.aspectRatioFilters;
+    next.dateFilter = initialGalleryReturnState.filters.dateFilter;
+    next.hiddenFolders = initialGalleryReturnState.filters.hiddenFolders;
+    next.hiddenTags = initialGalleryReturnState.filters.hiddenTags;
+    next.pageSize = initialGalleryReturnState.filters.pageSize;
+    next.currentPage = initialGalleryReturnState.filters.currentPage;
+    return next;
+  }
+
+  if (initialGalleryReturnState?.currentPage) {
+    next.currentPage = initialGalleryReturnState.currentPage;
+    return next;
+  }
+
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const gns = params.get('gns') ?? '';
+    const gpage = params.get('gpage');
+    const activeNamespace = namespace ?? '';
+    if (gns === activeNamespace && gpage) {
+      const parsedPage = Number.parseInt(gpage, 10);
+      if (Number.isFinite(parsedPage) && parsedPage > 0) {
+        next.currentPage = parsedPage;
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  return next;
+};
+
 
 
 const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   ({ refreshTrigger, namespace, onNamespaceChange }, ref) => {
-  const getStoredPreferences = () => {
-    if (typeof window === 'undefined') {
-      return {
-        variant: 'public',
-        onlyCanonical: false,
-        respectAspectRatio: false,
-        onlyWithVariants: false,
-        showComfyOnly: false,
-        selectedFolder: 'all',
-        selectedTag: '',
-        searchTerm: '',
-        viewMode: 'grid' as 'grid' | 'list',
-        gridSize: DEFAULT_GRID_SIZE as GridSize,
-        filtersCollapsed: false,
-        bulkFolderInput: '',
-        bulkFolderMode: 'existing' as 'existing' | 'new',
-        showDuplicatesOnly: false,
-        showBrokenOnly: false,
-        aspectRatioFilters: [],
-        showCli: true,
-        pageSize: DEFAULT_PAGE_SIZE,
-        dateFilter: null as DateFilter | null,
-        currentPage: 1
-      };
-    }
-    try {
-      const stored = window.localStorage.getItem('galleryPreferences');
-      if (stored) {
-        const parsed = JSON.parse(stored) as {
-          variant?: string;
-          onlyCanonical?: boolean;
-          respectAspectRatio?: boolean;
-          onlyWithVariants?: boolean;
-          showComfyOnly?: boolean;
-          selectedFolder?: string;
-          selectedTag?: string;
-          searchTerm?: string;
-          viewMode?: 'grid' | 'list';
-          gridSize?: GridSize;
-          filtersCollapsed?: boolean;
-          bulkFolderInput?: string;
-          bulkFolderMode?: 'existing' | 'new';
-          showDuplicatesOnly?: boolean;
-          showBrokenOnly?: boolean;
-          aspectRatioFilters?: ('horizontal' | 'vertical' | 'square')[];
-          showCli?: boolean;
-          pageSize?: number;
-          dateFilter?: { startDate?: string; endDate?: string } | { year?: number; month?: number } | null;
-          currentPage?: number;
-        };
-        const rawPageSize = typeof parsed.pageSize === 'number' ? parsed.pageSize : DEFAULT_PAGE_SIZE;
-        const normalizedPageSize = PAGE_SIZE_OPTIONS.includes(rawPageSize)
-          ? rawPageSize
-          : DEFAULT_PAGE_SIZE;
-        const storedVariant = typeof parsed.variant === 'string' ? parsed.variant : 'full';
-        const normalizedVariant = storedVariant === 'public' || storedVariant === 'original'
-          ? 'full'
-          : storedVariant;
-        const normalizedDateFilter = normalizeDateFilterValue(parsed.dateFilter);
-        const normalizedGridSize = normalizeGridSize(parsed.gridSize, DEFAULT_GRID_SIZE);
-        let normalizedCurrentPage = typeof parsed.currentPage === 'number' && parsed.currentPage > 0
-          ? Math.floor(parsed.currentPage)
-          : 1;
-
-        // If coming back from detail, prefer URL param (most deterministic), then sessionStorage.
-        try {
-          const params = new URLSearchParams(window.location.search);
-          const gns = params.get('gns') ?? '';
-          const gpage = params.get('gpage');
-          const activeNamespace = namespace ?? '';
-          if (gns === activeNamespace && gpage) {
-            const parsedPage = Number.parseInt(gpage, 10);
-            if (Number.isFinite(parsedPage) && parsedPage > 0) {
-              normalizedCurrentPage = parsedPage;
-            }
-          }
-        } catch {
-          // ignore
-        }
-
-        try {
-          const rawReturn = window.sessionStorage.getItem(GALLERY_RETURN_STATE_KEY);
-          if (rawReturn) {
-            const returnParsed = JSON.parse(rawReturn) as { currentPage?: number; namespace?: string; savedAt?: number };
-            const savedNamespace = typeof returnParsed?.namespace === 'string' ? returnParsed.namespace : '';
-            const activeNamespace = namespace ?? '';
-            const savedAt = typeof returnParsed?.savedAt === 'number' ? returnParsed.savedAt : 0;
-            const freshEnough = !savedAt || Date.now() - savedAt < GALLERY_RETURN_TTL_MS;
-            if (freshEnough && savedNamespace === activeNamespace && typeof returnParsed?.currentPage === 'number' && returnParsed.currentPage > 0) {
-              normalizedCurrentPage = Math.floor(returnParsed.currentPage);
-            }
-          }
-        } catch {
-          // ignore
-        }
-
-        // If we're returning from a detail view, use the saved page immediately to avoid a visible jump.
-        try {
-          const rawReturn = window.sessionStorage.getItem(GALLERY_RETURN_STATE_KEY);
-          if (rawReturn) {
-            const returnParsed = JSON.parse(rawReturn) as {
-              currentPage?: number;
-              namespace?: string;
-              savedAt?: number;
-            };
-            const savedNamespace = typeof returnParsed?.namespace === 'string' ? returnParsed.namespace : '';
-            const activeNamespace = namespace ?? '';
-            const savedAt = typeof returnParsed?.savedAt === 'number' ? returnParsed.savedAt : 0;
-            const freshEnough = !savedAt || Date.now() - savedAt < GALLERY_RETURN_TTL_MS;
-            if (
-              freshEnough &&
-              savedNamespace === activeNamespace &&
-              typeof returnParsed?.currentPage === 'number' &&
-              returnParsed.currentPage > 0
-            ) {
-              normalizedCurrentPage = Math.floor(returnParsed.currentPage);
-            }
-          }
-        } catch {
-          // ignore
-        }
-        return {
-          variant: normalizedVariant,
-          onlyCanonical: Boolean(parsed.onlyCanonical),
-          respectAspectRatio: Boolean(parsed.respectAspectRatio),
-          onlyWithVariants: Boolean(parsed.onlyWithVariants),
-          showComfyOnly: Boolean(parsed.showComfyOnly),
-          selectedFolder: parsed.selectedFolder ?? 'all',
-          selectedTag: parsed.selectedTag ?? '',
-          searchTerm: parsed.searchTerm ?? '',
-          viewMode: (parsed.viewMode === 'list' ? 'list' : 'grid') as 'grid' | 'list',
-          gridSize: normalizedGridSize,
-          filtersCollapsed: Boolean(parsed.filtersCollapsed),
-          bulkFolderInput: typeof parsed.bulkFolderInput === 'string' ? parsed.bulkFolderInput : '',
-          bulkFolderMode: (parsed.bulkFolderMode === 'new' ? 'new' : 'existing') as 'existing' | 'new',
-          showDuplicatesOnly: Boolean(parsed.showDuplicatesOnly),
-          showBrokenOnly: Boolean(parsed.showBrokenOnly),
-          aspectRatioFilters: Array.isArray(parsed.aspectRatioFilters)
-            ? parsed.aspectRatioFilters.filter((value) => value === 'horizontal' || value === 'vertical' || value === 'square')
-            : [],
-          showCli: parsed.showCli !== false,
-          pageSize: normalizedPageSize,
-          dateFilter: normalizedDateFilter,
-          currentPage: normalizedCurrentPage
-        };
-      }
-    } catch (error) {
-      console.warn('Failed to parse gallery preferences', error);
-    }
-    return {
-      variant: 'full',
-      onlyCanonical: false,
-      respectAspectRatio: false,
-      onlyWithVariants: false,
-      showComfyOnly: false,
-      selectedFolder: 'all',
-      selectedTag: '',
-      searchTerm: '',
-      viewMode: 'grid',
-      gridSize: DEFAULT_GRID_SIZE as GridSize,
-      filtersCollapsed: false,
-      bulkFolderInput: '',
-      bulkFolderMode: 'existing',
-      showDuplicatesOnly: false,
-      showBrokenOnly: false,
-      aspectRatioFilters: [],
-      showCli: true,
-      pageSize: DEFAULT_PAGE_SIZE,
-      dateFilter: null as DateFilter | null,
-      currentPage: 1
-    };
-  };
-
-  const storedPreferencesRef = useRef(getStoredPreferences());
+  const initialGalleryReturnStateRef = useRef<NormalizedGalleryReturnState | null>(
+    getFreshGalleryReturnState()
+  );
+  const storedPreferencesRef = useRef(
+    getStoredPreferences(namespace, initialGalleryReturnStateRef.current)
+  );
 
   const initialReturningFromDetail = (() => {
+    if (initialGalleryReturnStateRef.current) return true;
     if (typeof window === 'undefined') return false;
     try {
       const params = new URLSearchParams(window.location.search);
@@ -374,16 +368,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     } catch {
       // ignore
     }
-    try {
-      const rawReturn = window.sessionStorage.getItem(GALLERY_RETURN_STATE_KEY);
-      if (!rawReturn) return false;
-      const parsed = JSON.parse(rawReturn) as GalleryReturnState;
-      const savedAt = typeof parsed?.savedAt === 'number' ? parsed.savedAt : 0;
-      const freshEnough = !savedAt || Date.now() - savedAt < GALLERY_RETURN_TTL_MS;
-      return freshEnough && typeof parsed?.currentPage === 'number' && parsed.currentPage > 0;
-    } catch {
-      return false;
-    }
+    return false;
   })();
 
   const initialWarmImages = (() => {
@@ -572,22 +557,20 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     setNamespaceSelectValue(next || '');
   }, [namespace]);
 
-  useEffect(() => {
-    let active = true;
-    fetch('/api/namespaces')
-      .then((response) => response.json())
-      .then((data) => {
-        if (!active) return;
-        const payload = Array.isArray(data?.namespaces) ? data.namespaces : [];
-        setRegistryNamespaces(payload.filter((entry: unknown) => typeof entry === 'string'));
-      })
-      .catch((error) => {
-        console.warn('Failed to load namespace registry', error);
-      });
-    return () => {
-      active = false;
-    };
+  const fetchNamespaces = useCallback(async (cache: RequestCache = 'default') => {
+    try {
+      const response = await fetch('/api/namespaces', { cache });
+      const data = await response.json();
+      const payload = Array.isArray(data?.namespaces) ? data.namespaces : [];
+      setRegistryNamespaces(payload.filter((entry: unknown): entry is string => typeof entry === 'string'));
+    } catch (error) {
+      console.warn('Failed to load namespace registry', error);
+    }
   }, []);
+
+  useEffect(() => {
+    void fetchNamespaces('no-store');
+  }, [fetchNamespaces]);
 
   const namespaceOptions = useMemo(() => {
     const rawSeen = new Set(images.map((image) => image.namespace).filter((ns): ns is string => Boolean(ns)));
@@ -664,34 +647,20 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     if (typeof window === 'undefined') return;
     if (didRestoreReturnStateRef.current) return;
     if (loading) return;
+    const parsed = initialGalleryReturnStateRef.current;
+    if (!parsed) return;
+    const activeNamespace = namespace ?? '';
+    if (parsed.namespace !== activeNamespace) return;
 
-    try {
-      const raw = window.sessionStorage.getItem(GALLERY_RETURN_STATE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as {
-        scrollY?: number;
-        namespace?: string;
-      };
-      if (!parsed || typeof parsed !== 'object') return;
+    didRestoreReturnStateRef.current = true;
+    clearGalleryReturnState();
+    window.sessionStorage.removeItem(GALLERY_RETURN_SNAPSHOT_KEY);
 
-      const savedNamespace = typeof parsed.namespace === 'string' ? parsed.namespace : '';
-      const activeNamespace = namespace ?? '';
-      if (savedNamespace !== activeNamespace) return;
-
-      didRestoreReturnStateRef.current = true;
-      window.sessionStorage.removeItem(GALLERY_RETURN_STATE_KEY);
-      window.sessionStorage.removeItem(GALLERY_RETURN_SNAPSHOT_KEY);
-
-      const targetScrollY = typeof parsed.scrollY === 'number' ? parsed.scrollY : 0;
-
+    window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
-        window.requestAnimationFrame(() => {
-          window.scrollTo({ top: targetScrollY, behavior: 'auto' });
-        });
+        window.scrollTo({ top: parsed.scrollY, behavior: 'auto' });
       });
-    } catch {
-      // ignore
-    }
+    });
   }, [loading, namespace]);
 
   // If we arrived via `/?gpage=...&gns=...`, clean up the URL once mounted.
@@ -738,8 +707,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
 
   const fetchImages = useCallback(async ({
     silent = false,
-    forceRefresh = false
-  }: { silent?: boolean; forceRefresh?: boolean } = {}) => {
+    forceRefresh = false,
+    syncNamespaces = false,
+  }: { silent?: boolean; forceRefresh?: boolean; syncNamespaces?: boolean } = {}) => {
     const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -821,6 +791,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             `[GalleryPerf] /api/images ${Math.round(elapsedMs)}ms (silent=${silent}, refresh=${forceRefresh}, count=${uniqueImages.length}) server_timing=${serverTiming} stages=${stageTiming}`
           );
         }
+        if (syncNamespaces || forceRefresh) {
+          void fetchNamespaces('no-store');
+        }
       }
     } catch (error) {
       if ((error as Error).name === 'AbortError') return;
@@ -833,7 +806,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         }
       }
     }
-  }, [namespace, PERF_LOGGING_ENABLED, videoLimitOverride, includeExtrasForGallery]);
+  }, [namespace, PERF_LOGGING_ENABLED, videoLimitOverride, includeExtrasForGallery, fetchNamespaces]);
 
   useEffect(() => {
     if (loading || initialLoadLoggedRef.current) return;
@@ -851,26 +824,40 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
 
   // Expose the refresh function via ref
   useImperativeHandle(ref, () => ({
-    refreshImages: () => fetchImages({ silent: true }) // Silent refresh for better UX
+    refreshImages: () => fetchImages({ silent: true, syncNamespaces: true }) // Silent refresh for better UX
   }));
 
   // Refresh when refreshTrigger changes
   useEffect(() => {
     if (refreshTrigger && refreshTrigger > 0) {
-      fetchImages({ silent: true }); // Silent refresh
+      fetchImages({ silent: true, syncNamespaces: true }); // Silent refresh
     }
   }, [refreshTrigger, fetchImages]);
 
   const prevNamespaceRef = useRef(namespace);
+  const pendingReturnNamespaceRef = useRef(
+    Boolean(
+      initialGalleryReturnStateRef.current &&
+      initialGalleryReturnStateRef.current.namespace !== (namespace ?? '')
+    )
+  );
 
   useEffect(() => {
     // Reset filters when namespace changes to avoid "empty" views due to stale filters
     if (prevNamespaceRef.current !== namespace) {
-      setSelectedFolder('all');
-      setSelectedTag('');
-      setSearchTerm('');
-      setOnlyCanonical(false); // Disable "Parents Only" as it might hide orphaned variants in the new namespace
-      setAspectRatioFilters([]);
+      const restoreNamespace = initialGalleryReturnStateRef.current?.namespace ?? '';
+      const shouldPreserveRestoredFilters =
+        pendingReturnNamespaceRef.current && restoreNamespace === (namespace ?? '');
+
+      if (!shouldPreserveRestoredFilters) {
+        setSelectedFolder('all');
+        setSelectedTag('');
+        setSearchTerm('');
+        setOnlyCanonical(false); // Disable "Parents Only" as it might hide orphaned variants in the new namespace
+        setAspectRatioFilters([]);
+      } else {
+        pendingReturnNamespaceRef.current = false;
+      }
       setPromptThisMap({});
       setVideoLimitOverride(null);
       setVideoMeta(null);
@@ -1254,10 +1241,13 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       respectAspectRatio: storedPreferencesRef.current.respectAspectRatio,
       onlyWithVariants: storedPreferencesRef.current.onlyWithVariants,
       showComfyOnly: storedPreferencesRef.current.showComfyOnly ?? false,
+      embeddingFilter: storedPreferencesRef.current.embeddingFilter ?? 'none',
       showDuplicatesOnly: storedPreferencesRef.current.showDuplicatesOnly ?? false,
       showBrokenOnly: storedPreferencesRef.current.showBrokenOnly ?? false,
       aspectRatioFilters: storedPreferencesRef.current.aspectRatioFilters ?? [],
       dateFilter: storedPreferencesRef.current.dateFilter ?? null,
+      hiddenFolders: storedPreferencesRef.current.hiddenFolders ?? [],
+      hiddenTags: storedPreferencesRef.current.hiddenTags ?? [],
       pageSize: storedPreferencesRef.current.pageSize ?? DEFAULT_PAGE_SIZE,
       currentPage: storedPreferencesRef.current.currentPage ?? 1,
     },
@@ -1294,21 +1284,34 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     try {
       const resultIds = filteredImages.map((img) => img.id);
       const savedAt = Date.now();
-      window.sessionStorage.setItem(
-        GALLERY_RETURN_STATE_KEY,
-        JSON.stringify({
+      persistGalleryReturnState({
+        scrollY: window.scrollY,
+        namespace: namespace ?? '',
+        savedAt,
+        selectedImageId: imageId,
+        resultIds,
+        resultAssets: filteredImages.map((img) => ({
+          id: img.id,
+          assetType: img.assetType === 'video' ? 'video' : 'image',
+        })),
+        filters: {
+          searchTerm,
+          selectedFolder,
+          selectedTag,
+          onlyCanonical,
+          onlyWithVariants,
+          showDuplicatesOnly,
+          showBrokenOnly,
+          showComfyOnly,
+          embeddingFilter,
+          aspectRatioFilters,
+          dateFilter,
+          hiddenFolders,
+          hiddenTags,
+          pageSize,
           currentPage,
-          scrollY: window.scrollY,
-          namespace: namespace ?? '',
-          savedAt,
-          selectedImageId: imageId,
-          resultIds,
-          resultAssets: filteredImages.map((img) => ({
-            id: img.id,
-            assetType: img.assetType === 'video' ? 'video' : 'image',
-          })),
-        })
-      );
+        },
+      });
       window.sessionStorage.setItem(
         GALLERY_RETURN_SNAPSHOT_KEY,
         JSON.stringify({
@@ -1321,7 +1324,26 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     } catch {
       // ignore
     }
-  }, [currentPage, filteredImages, namespace, pageImages]);
+  }, [
+    aspectRatioFilters,
+    currentPage,
+    dateFilter,
+    embeddingFilter,
+    filteredImages,
+    hiddenFolders,
+    hiddenTags,
+    namespace,
+    onlyCanonical,
+    onlyWithVariants,
+    pageImages,
+    pageSize,
+    searchTerm,
+    selectedFolder,
+    selectedTag,
+    showBrokenOnly,
+    showComfyOnly,
+    showDuplicatesOnly,
+  ]);
 
   const galleryReturnHrefSuffix = useMemo(() => {
     const page = currentPage;

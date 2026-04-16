@@ -223,7 +223,7 @@ run_discord_refresh() {
 run_ingest_all() {
   local channel_count=0
   local success_count=0
-  local skipped_count=0
+  local failed_count=0
   local dir_name
   local ingest_namespace
   local channel_name
@@ -319,13 +319,13 @@ run_ingest_all() {
     if "${cmd[@]}"; then
       success_count=$((success_count + 1))
     else
-      skipped_count=$((skipped_count + 1))
+      failed_count=$((failed_count + 1))
       echo "[ingest][warn] failed for ${dir_name}; continuing" >&2
     fi
   done
   shopt -u nullglob
 
-  echo "[ingest][done] total=${channel_count} success=${success_count} failed=${skipped_count}"
+  echo "[ingest][done] channelsTotal=${channel_count} channelsSucceeded=${success_count} channelsFailed=${failed_count}"
 }
 
 echo "[config] discordRepo=${DISCORD_REPO}"
