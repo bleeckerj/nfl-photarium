@@ -9,7 +9,7 @@ All `/api/*` routes live within the Next.js app. If you expose it externally, pr
 ## Search images
 
 ```
-GET /api/images?search=<query>&folder=<folder>&tag=<tag>&onlyCanonical=true
+GET /api/images?search=<query>&folder=<folder>&tag=<tag>&onlyCanonical=true&mediaFilter=animated
 ```
 
 Parameters:
@@ -21,6 +21,7 @@ Parameters:
 | `tag`            | string  | Exact tag                                                                  |
 | `onlyCanonical`  | boolean | `true` to only return parent (non-variant) images                          |
 | `namespace`      | string  | Optional namespace filter (defaults to `IMAGE_NAMESPACE`, use `__all__` for all) |
+| `mediaFilter`    | string  | Optional exclusive media filter. `animated` returns videos plus explicit animated-WebP image derivatives |
 
 
 Response:

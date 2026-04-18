@@ -6,6 +6,7 @@ import {
   upsertCachedImage
 } from '@/server/cloudflareImageCache';
 import { fetchCloudflareImage, getCloudflareCredentials } from '@/server/cloudflareClient';
+import { probeAnimatedImageFromOriginalBlob } from '@/server/animatedImageProbe';
 import { cleanupImageArtifacts } from '@/server/imageArtifactCleanup';
 import { deleteStreamVideo } from '@/server/cloudflareStreamClient';
 import {
@@ -91,6 +92,39 @@ const enrichImageSize = async (image: CachedCloudflareImage): Promise<CachedClou
   const discoveredSize = await fetchSizeFromVariant(variantUrl);
   if (discoveredSize === undefined) return image;
   return { ...image, size: discoveredSize };
+};
+
+const hasAnimatedTag = (tags: string[] | undefined) =>
+  Array.isArray(tags) && tags.some((tag) => tag.trim().toLowerCase() === 'animated-webp');
+
+const shouldProbeAnimatedState = (image: CachedCloudflareImage) => {
+  if (image.isAnimated === true) return false;
+  if (hasAnimatedTag(image.tags)) return false;
+  if (typeof image.contentType === 'string' && image.contentType.trim().toLowerCase() === 'image/webp') {
+    return true;
+  }
+  return image.filename.trim().toLowerCase().endsWith('.webp');
+};
+
+const enrichAnimatedState = async (image: CachedCloudflareImage): Promise<CachedCloudflareImage> => {
+  if (!shouldProbeAnimatedState(image)) {
+    return image;
+  }
+
+  try {
+    const probe = await probeAnimatedImageFromOriginalBlob(image.id);
+    if (!probe.isAnimated && !probe.contentType) {
+      return image;
+    }
+    return {
+      ...image,
+      isAnimated: probe.isAnimated || image.isAnimated,
+      contentType: probe.contentType ?? image.contentType,
+    };
+  } catch (error) {
+    console.warn('[SingleImage] Animated probe failed:', { imageId: image.id, error });
+    return image;
+  }
 };
 
 const mark = (value: number) => Number(value.toFixed(1));
@@ -229,9 +263,15 @@ export async function GET(
     timings.cache_lookup = mark(performance.now() - cacheStartedAt);
     if (cached) {
       let responseImage = cached;
+      const animatedProbeStartedAt = performance.now();
+      responseImage = await enrichAnimatedState(responseImage);
+      timings.animated_probe = mark(performance.now() - animatedProbeStartedAt);
+      if (responseImage !== cached) {
+        upsertCachedImage(responseImage);
+      }
       try {
         const vectorStartedAt = performance.now();
-        responseImage = await enrichWithVectorMetadata(cached);
+        responseImage = await enrichWithVectorMetadata(responseImage);
         timings.vector_enrich = mark(performance.now() - vectorStartedAt);
         if (responseImage !== cached) {
           upsertCachedImage(responseImage);
@@ -270,10 +310,10 @@ export async function GET(
     timings.cloudflare_fetch = mark(performance.now() - cloudflareStartedAt);
     diagnostics.source = 'cloudflare';
     const transformed = transformApiImageToCached(image);
-    let responseImage = transformed;
+    let responseImage = await enrichAnimatedState(transformed);
     try {
       const vectorStartedAt = performance.now();
-      responseImage = await enrichWithVectorMetadata(transformed);
+      responseImage = await enrichWithVectorMetadata(responseImage);
       timings.vector_enrich = mark(performance.now() - vectorStartedAt);
     } catch (error) {
       console.warn('[SingleImage] Vector metadata enrichment failed:', { imageId, error });

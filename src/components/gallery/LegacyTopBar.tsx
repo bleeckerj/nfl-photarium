@@ -14,10 +14,6 @@ interface LegacyTopBarProps {
   namespace?: string;
   showPagination: boolean;
   currentPageRangeLabel: string | null;
-  prevPageRangeLabel: string | null;
-  nextPageRangeLabel: string | null;
-  pageIndex: number;
-  totalPages: number;
   sortedImages: LegacyTopBarImage[];
   dateFilter: DateFilter | null;
   onDateFilterChange: (filter: DateFilter | null) => void;
@@ -46,12 +42,6 @@ interface LegacyTopBarProps {
   onOpenBulkEdit: () => void;
   onGenerateEmbeddings: () => void;
   onDeleteSelected: () => void;
-  onFirstPage: () => void;
-  onJumpBackTen: () => void;
-  onPrevPage: () => void;
-  onNextPage: () => void;
-  onJumpForwardTen: () => void;
-  onLastPage: () => void;
   backupControls?: ReactNode;
 }
 
@@ -62,10 +52,6 @@ export default function LegacyTopBar({
   namespace,
   showPagination,
   currentPageRangeLabel,
-  prevPageRangeLabel,
-  nextPageRangeLabel,
-  pageIndex,
-  totalPages,
   sortedImages,
   dateFilter,
   onDateFilterChange,
@@ -94,12 +80,6 @@ export default function LegacyTopBar({
   onOpenBulkEdit,
   onGenerateEmbeddings,
   onDeleteSelected,
-  onFirstPage,
-  onJumpBackTen,
-  onPrevPage,
-  onNextPage,
-  onJumpForwardTen,
-  onLastPage,
   backupControls,
 }: LegacyTopBarProps) {
   return (
@@ -124,61 +104,6 @@ export default function LegacyTopBar({
             currentFilter={dateFilter}
             onFilterChange={onDateFilterChange}
           />
-          {showPagination && (
-            <>
-            <button
-              onClick={onFirstPage}
-              disabled={pageIndex === 1}
-              className="px-3 py-1 border rounded-md disabled:opacity-40"
-              title="First page"
-            >
-              First
-            </button>
-            <button
-              onClick={onJumpBackTen}
-              disabled={pageIndex === 1}
-              className="px-3 py-1 border rounded-md disabled:opacity-40"
-              title="Back 10 pages"
-            >
-              -10
-            </button>
-            <button
-              onClick={onPrevPage}
-              disabled={pageIndex === 1}
-              className="px-3 py-1 border rounded-md disabled:opacity-40"
-              title={prevPageRangeLabel ? `Previous (${prevPageRangeLabel})` : 'Previous page'}
-            >
-              Prev
-            </button>
-            <span>
-              Page {pageIndex} / {totalPages}
-            </span>
-            <button
-              onClick={onNextPage}
-              disabled={pageIndex === totalPages}
-              className="px-3 py-1 border rounded-md disabled:opacity-40"
-              title={nextPageRangeLabel ? `Next (${nextPageRangeLabel})` : 'Next page'}
-            >
-              Next
-            </button>
-            <button
-              onClick={onJumpForwardTen}
-              disabled={pageIndex === totalPages}
-              className="px-3 py-1 border rounded-md disabled:opacity-40"
-              title="Forward 10 pages"
-            >
-              +10
-            </button>
-            <button
-              onClick={onLastPage}
-              disabled={pageIndex === totalPages}
-              className="px-3 py-1 border rounded-md disabled:opacity-40"
-              title="Last page"
-            >
-              Last
-            </button>
-            </>
-          )}
         </div>
       </div>
 

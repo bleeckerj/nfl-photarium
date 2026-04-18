@@ -57,6 +57,7 @@ export const DEFAULT_PREFERENCES = {
   onlyCanonical: false,
   respectAspectRatio: false,
   onlyWithVariants: false,
+  showMotionAssetsOnly: false,
   showComfyOnly: false,
   selectedFolder: 'all',
   selectedTag: '',

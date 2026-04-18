@@ -337,6 +337,11 @@ function parseInstagramMediaUrl(instagramUrl) {
     const parsed = new URL(instagramUrl);
     const parts = parsed.pathname.split("/").filter(Boolean);
     if (parts.length < 2) return null;
+    const rawImgIndex = parsed.searchParams.get("img_index");
+    const imgIndex =
+      rawImgIndex && /^\d+$/.test(rawImgIndex) && Number.parseInt(rawImgIndex, 10) > 0
+        ? Number.parseInt(rawImgIndex, 10)
+        : null;
 
     for (let i = 0; i < parts.length - 1; i += 1) {
       const kind = parts[i]?.toLowerCase();
@@ -344,11 +349,14 @@ function parseInstagramMediaUrl(instagramUrl) {
       const shortcode = parts[i + 1] || null;
       if (!shortcode) return null;
       const profileUsername = i > 0 ? parts[i - 1] || null : null;
+      const canonical = new URL(`https://www.instagram.com/${kind}/${shortcode}/`);
+      if (imgIndex != null) canonical.searchParams.set("img_index", String(imgIndex));
       return {
         kind,
         shortcode,
         profileUsername,
-        canonicalUrl: `https://www.instagram.com/${kind}/${shortcode}/`,
+        imgIndex,
+        canonicalUrl: canonical.toString(),
       };
     }
 
@@ -406,7 +414,28 @@ function scoreVideoUrlForUpload(videoUrl) {
   }
 }
 
-function normalizeVideoUrlKey(videoUrl) {
+function decodeInstagramEfg(videoUrl) {
+  try {
+    const parsed = new URL(videoUrl);
+    const encoded = parsed.searchParams.get("efg");
+    if (!encoded) return "";
+    let normalized = encoded.replace(/-/g, "+").replace(/_/g, "/");
+    while (normalized.length % 4 !== 0) normalized += "=";
+    return Buffer.from(normalized, "base64").toString("utf8");
+  } catch {
+    return "";
+  }
+}
+
+function isLikelyAudioOnlyInstagramVideoUrl(videoUrl) {
+  const decoded = decodeInstagramEfg(videoUrl).toLowerCase();
+  if (!decoded) return false;
+  const vencodeTagMatch = decoded.match(/"vencode_tag"\s*:\s*"([^"]+)"/);
+  const vencodeTag = (vencodeTagMatch?.[1] || "").toLowerCase();
+  return /(^|[._-])audio([._-]|$)/.test(vencodeTag);
+}
+
+function sanitizeVideoUrlForUpload(videoUrl) {
   try {
     const parsed = new URL(videoUrl);
     parsed.hash = "";
@@ -414,25 +443,36 @@ function normalizeVideoUrlKey(videoUrl) {
     parsed.searchParams.delete("byteend");
     parsed.searchParams.delete("range");
     parsed.searchParams.sort();
-    return `${parsed.origin}${parsed.pathname}?${parsed.searchParams.toString()}`;
+    return parsed.toString();
   } catch {
     return videoUrl;
   }
 }
 
+function normalizeVideoUrlKey(videoUrl) {
+  return sanitizeVideoUrlForUpload(videoUrl);
+}
+
 function reduceVideoUrlsForUpload(videoUrls) {
   if (!Array.isArray(videoUrls) || videoUrls.length <= 1) {
-    return Array.isArray(videoUrls) ? videoUrls : [];
+    return Array.isArray(videoUrls)
+      ? videoUrls
+          .filter((videoUrl) => typeof videoUrl === "string" && videoUrl.startsWith("http"))
+          .map((videoUrl) => sanitizeVideoUrlForUpload(videoUrl))
+          .filter((videoUrl) => !isLikelyAudioOnlyInstagramVideoUrl(videoUrl))
+      : [];
   }
 
   const bestByKey = new Map();
   for (const videoUrl of videoUrls) {
     if (typeof videoUrl !== "string" || !videoUrl.startsWith("http")) continue;
-    const key = normalizeVideoUrlKey(videoUrl);
-    const score = scoreVideoUrlForUpload(videoUrl);
+    const sanitizedUrl = sanitizeVideoUrlForUpload(videoUrl);
+    if (isLikelyAudioOnlyInstagramVideoUrl(sanitizedUrl)) continue;
+    const key = normalizeVideoUrlKey(sanitizedUrl);
+    const score = scoreVideoUrlForUpload(sanitizedUrl);
     const current = bestByKey.get(key);
     if (!current || score > current.score) {
-      bestByKey.set(key, { videoUrl, score });
+      bestByKey.set(key, { videoUrl: sanitizedUrl, score });
     }
   }
 
@@ -521,9 +561,10 @@ async function pushVideoToCloudflare({
   namespace,
   log,
 }) {
+  const sanitizedVideoUrl = sanitizeVideoUrlForUpload(videoUrl);
   const endpoint = `${apiBase}/api/import/page/upload-video`;
   const safeShortcode = shortcode || `ig_video_${Date.now()}`;
-  const { bytes, contentType } = await fetchImageBuffer(videoUrl);
+  const { bytes, contentType } = await fetchImageBuffer(sanitizedVideoUrl);
   log.trace(
     `cloudflare_video_source_fetched shortcode=${safeShortcode} bytes=${bytes.byteLength} content_type=${contentType || "unknown"}`,
   );
@@ -535,7 +576,7 @@ async function pushVideoToCloudflare({
   form.append("file", fileBlob, fileName);
   form.append("folder", "instagram");
   form.append("tags", Array.isArray(uploadTags) && uploadTags.length > 0 ? uploadTags.join(",") : `instagram,${username}`);
-  form.append("originalUrl", videoUrl);
+  form.append("originalUrl", sanitizedVideoUrl);
   form.append("sourceUrl", sourcePageUrl);
   form.append("namespace", namespace);
   if (permalink) form.append("description", permalink);
@@ -612,10 +653,28 @@ async function igGet(page, apiPath) {
 }
 
 async function extractSingleUrlRecord(page, instagramUrl, fallbackUsername, log) {
+  const networkVideoUrls = new Set();
+  const responseHandler = (response) => {
+    try {
+      const url = response.url();
+      if (typeof url !== "string" || !url.startsWith("http")) return;
+      const headers = response.headers();
+      const contentType = String(headers["content-type"] || "").toLowerCase();
+      const isVideoResponse =
+        contentType.startsWith("video/") ||
+        /\.(mp4|m4v|webm|mov|ogv|ogg)(\?|$)/i.test(url);
+      if (isVideoResponse) networkVideoUrls.add(url);
+    } catch {
+      // Ignore response inspection failures; DOM/script extraction still runs.
+    }
+  };
+  page.on("response", responseHandler);
   log.debug(`single_url_opening url=${instagramUrl}`);
-  await page.goto(instagramUrl, { waitUntil: "domcontentloaded" });
+  try {
+    await page.goto(instagramUrl, { waitUntil: "domcontentloaded" });
+    await page.waitForNetworkIdle({ idleTime: 750, timeout: 3000 }).catch(() => {});
 
-  const extracted = await page.evaluate(({ fallbackUsername }) => {
+    const extracted = await page.evaluate(({ fallbackUsername }) => {
     const toList = (items) => [...new Set(items.filter((item) => typeof item === "string" && item.length > 0))];
     const inferUsernameFromMetaText = (...candidates) => {
       for (const value of candidates) {
@@ -771,6 +830,12 @@ async function extractSingleUrlRecord(page, instagramUrl, fallbackUsername, log)
     }
 
     const pathname = window.location.pathname || "";
+    const searchParams = new URLSearchParams(window.location.search || "");
+    const rawImgIndex = searchParams.get("img_index");
+    const requestedImgIndex =
+      rawImgIndex && /^\d+$/.test(rawImgIndex) && Number.parseInt(rawImgIndex, 10) > 0
+        ? Number.parseInt(rawImgIndex, 10)
+        : null;
     const parts = pathname.split("/").filter(Boolean);
     let shortcode = null;
     for (let i = 0; i < parts.length - 1; i += 1) {
@@ -819,8 +884,29 @@ async function extractSingleUrlRecord(page, instagramUrl, fallbackUsername, log)
       else if (typename === "GraphImage") mediaType = 1;
     }
 
-    const productType = mediaNode?.product_type || null;
+    const sidecarChildren = Array.isArray(mediaNode?.edge_sidecar_to_children?.edges)
+      ? mediaNode.edge_sidecar_to_children.edges
+          .map((edge) => edge?.node)
+          .filter((node) => node && typeof node === "object")
+      : [];
+    const selectedChild =
+      requestedImgIndex != null && requestedImgIndex > 0 && sidecarChildren.length >= requestedImgIndex
+        ? sidecarChildren[requestedImgIndex - 1]
+        : null;
+    if (selectedChild) {
+      // When an Instagram carousel URL includes img_index, prefer the targeted child asset.
+      imageUrls.length = 0;
+      videoUrls.length = 0;
+      scanNode(selectedChild);
+    }
+
+    const childTypename = selectedChild?.__typename || "";
+    const childMediaType =
+      selectedChild?.media_type ??
+      (childTypename === "GraphVideo" ? 2 : childTypename === "GraphImage" ? 1 : null);
+    const productType = selectedChild?.product_type || mediaNode?.product_type || null;
     const likelyVideo =
+      childMediaType === 2 ||
       mediaType === 2 ||
       productType === "clips" ||
       sawVideoMetaTag ||
@@ -833,7 +919,7 @@ async function extractSingleUrlRecord(page, instagramUrl, fallbackUsername, log)
       pk,
       shortcode,
       permalink,
-      mediaType,
+      mediaType: childMediaType ?? mediaType,
       productType,
       takenAtUnix,
       caption,
@@ -849,55 +935,69 @@ async function extractSingleUrlRecord(page, instagramUrl, fallbackUsername, log)
         scriptField: sawVideoScriptField,
       },
     };
-  }, { fallbackUsername });
+    }, { fallbackUsername });
 
-  const username = extracted.username || fallbackUsername;
-  const takenAtIso = extracted.takenAtUnix ? new Date(extracted.takenAtUnix * 1000).toISOString() : null;
+    const username = extracted.username || fallbackUsername;
+    const takenAtIso = extracted.takenAtUnix ? new Date(extracted.takenAtUnix * 1000).toISOString() : null;
+    const mergedVideoUrls = [
+      ...(Array.isArray(extracted.videoUrls) ? extracted.videoUrls : []),
+      ...networkVideoUrls,
+    ];
 
-  const record = {
-    source: "instagram",
-    fetchedAt: new Date().toISOString(),
-    username,
-    userId: extracted.userId || null,
-    mediaId: extracted.mediaId || null,
-    pk: extracted.pk || null,
-    shortcode: extracted.shortcode || extractShortcodeFromInstagramUrl(instagramUrl),
-    permalink: extracted.permalink || instagramUrl,
-    mediaType: extracted.mediaType ?? null,
-    productType: extracted.productType ?? null,
-    takenAtUnix: extracted.takenAtUnix ?? null,
-    takenAtIso,
-    likeCount: null,
-    commentCount: null,
-    caption: extracted.caption || "",
-    imageUrls: Array.isArray(extracted.imageUrls) ? extracted.imageUrls : [],
-    videoUrls: Array.isArray(extracted.videoUrls) ? extracted.videoUrls : [],
-    likelyVideo: extracted.likelyVideo === true,
-    username_source: extracted.usernameSource || "unresolved",
-    video_source:
-      Array.isArray(extracted.videoUrls) && extracted.videoUrls.length > 0 ? "page_extract" : "none",
-  };
+    const record = {
+      source: "instagram",
+      fetchedAt: new Date().toISOString(),
+      username,
+      userId: extracted.userId || null,
+      mediaId: extracted.mediaId || null,
+      pk: extracted.pk || null,
+      shortcode: extracted.shortcode || extractShortcodeFromInstagramUrl(instagramUrl),
+      permalink: extracted.permalink || instagramUrl,
+      mediaType: extracted.mediaType ?? null,
+      productType: extracted.productType ?? null,
+      takenAtUnix: extracted.takenAtUnix ?? null,
+      takenAtIso,
+      likeCount: null,
+      commentCount: null,
+      caption: extracted.caption || "",
+      imageUrls: Array.isArray(extracted.imageUrls) ? extracted.imageUrls : [],
+      videoUrls: [...new Set(mergedVideoUrls.filter(Boolean))],
+      likelyVideo: extracted.likelyVideo === true,
+      username_source: extracted.usernameSource || "unresolved",
+      video_source:
+        (Array.isArray(extracted.videoUrls) && extracted.videoUrls.length > 0)
+          ? "page_extract"
+          : networkVideoUrls.size > 0
+            ? "network_capture"
+            : "none",
+    };
 
-  if (record.imageUrls.length === 0 && record.videoUrls.length === 0) {
-    throw new Error("Could not extract media URLs from Instagram page. Re-run auth and retry with --headful.");
+    if (record.imageUrls.length === 0 && record.videoUrls.length === 0) {
+      throw new Error("Could not extract media URLs from Instagram page. Re-run auth and retry with --headful.");
+    }
+
+    if (Array.isArray(extracted.notes) && extracted.notes.length > 0) {
+      log.trace(`single_url_extract_notes notes=${extracted.notes.join(",")}`);
+    }
+    if (networkVideoUrls.size > 0) {
+      log.trace(`single_url_network_video_capture count=${networkVideoUrls.size}`);
+    }
+    if (extracted.likelyVideo) {
+      const signals = extracted.videoSignals || {};
+      log.trace(
+        `single_url_video_signals likely_video=true meta=${Boolean(signals.metaTag)} video_el=${Boolean(signals.videoElement)} script=${Boolean(signals.scriptField)}`,
+      );
+    }
+    if (extracted.inferredMetaUsername && extracted.inferredMetaUsername !== record.username) {
+      log.trace(
+        `single_url_meta_username_ignored meta_username=${extracted.inferredMetaUsername} reason=display_name_can_masquerade_as_username`,
+      );
+    }
+
+    return record;
+  } finally {
+    page.off("response", responseHandler);
   }
-
-  if (Array.isArray(extracted.notes) && extracted.notes.length > 0) {
-    log.trace(`single_url_extract_notes notes=${extracted.notes.join(",")}`);
-  }
-  if (extracted.likelyVideo) {
-    const signals = extracted.videoSignals || {};
-    log.trace(
-      `single_url_video_signals likely_video=true meta=${Boolean(signals.metaTag)} video_el=${Boolean(signals.videoElement)} script=${Boolean(signals.scriptField)}`,
-    );
-  }
-  if (extracted.inferredMetaUsername && extracted.inferredMetaUsername !== record.username) {
-    log.trace(
-      `single_url_meta_username_ignored meta_username=${extracted.inferredMetaUsername} reason=display_name_can_masquerade_as_username`,
-    );
-  }
-
-  return record;
 }
 
 async function fetchSingleUrlRecordFromApiByShortcode(page, shortcode, fallbackUsername, fallbackUserId, log) {
@@ -1562,6 +1662,12 @@ async function runSingleUrl(opts, log) {
       log.info(
         `single_url_video_urls_reduced shortcode=${record.shortcode ?? "n/a"} before=${beforeReduceVideoCount} after=${record.videoUrls.length}`,
       );
+    }
+    if (record.videoUrls.length > 1) {
+      log.info(
+        `single_url_video_urls_truncated shortcode=${record.shortcode ?? "n/a"} keeping=1 dropped=${record.videoUrls.length - 1}`,
+      );
+      record.videoUrls = [record.videoUrls[0]];
     }
     if (record.videoUrls.length === 0) {
       record.video_source = record.likelyVideo ? "missing_likely_video" : "none";

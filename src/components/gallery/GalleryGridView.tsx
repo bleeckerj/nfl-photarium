@@ -17,6 +17,7 @@ interface GalleryGridViewProps {
   onToggleSelection: (imageId: string) => void;
   onBeforeNavigate: (imageId: string) => void;
   onCopyNamespace: (namespace: string) => void;
+  onSelectColor: (hex: string) => void;
   onToggleCopyMenu: (imageId: string) => void;
   onStartEdit: (image: CloudflareImage) => void;
   onDelete: (imageId: string) => void;
@@ -33,6 +34,7 @@ export const GalleryGridView: React.FC<GalleryGridViewProps> = ({
   onToggleSelection,
   onBeforeNavigate,
   onCopyNamespace,
+  onSelectColor,
   onToggleCopyMenu,
   onStartEdit,
   onDelete,
@@ -80,6 +82,7 @@ export const GalleryGridView: React.FC<GalleryGridViewProps> = ({
           onGenerateDisplayName={onGenerateDisplayName}
           onCopyUrl={onToggleCopyMenu}
           onCopyNamespace={onCopyNamespace}
+          onSelectColor={onSelectColor}
           onBeforeNavigate={onBeforeNavigate}
           galleryReturnHrefSuffix={galleryReturnHrefSuffix}
           onMouseEnter={onMouseEnter}

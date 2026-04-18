@@ -166,6 +166,7 @@ export const loadPreferences = (): GalleryPreferences => {
       onlyCanonical: Boolean(parsed.onlyCanonical),
       respectAspectRatio: Boolean(parsed.respectAspectRatio),
       onlyWithVariants: Boolean(parsed.onlyWithVariants),
+      showMotionAssetsOnly: Boolean(parsed.showMotionAssetsOnly),
       showComfyOnly: Boolean(parsed.showComfyOnly),
       selectedFolder: parsed.selectedFolder ?? 'all',
       selectedTag: parsed.selectedTag ?? '',

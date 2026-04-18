@@ -61,8 +61,8 @@ const deriveOutputName = (filename?: string) => {
   return cleaned.replace(/\.[^.]+$/, '') + '.webp';
 };
 
-const pickUploadedVariantUrl = (variants: string[]) =>
-  variants.find((url) => url.includes('/public')) || variants[0] || '';
+const buildInlineOriginalImageUrl = (imageId: string) =>
+  `/api/images/${encodeURIComponent(imageId)}/download?variant=original&disposition=inline`;
 
 const buildOptions = (variation: AnimatedWebpVariationInput): VideoAnimatedWebpOptions => ({
   maxWidth: variation.maxWidth,
@@ -250,7 +250,7 @@ export async function POST(
 
         created.push({
           imageId: uploadOutcome.data.id,
-          url: pickUploadedVariantUrl(uploadOutcome.data.variants),
+          url: buildInlineOriginalImageUrl(uploadOutcome.data.id),
           filename,
           bytes: generated.bytes,
           width: generated.width,

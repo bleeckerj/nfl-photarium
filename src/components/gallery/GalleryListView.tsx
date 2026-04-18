@@ -19,6 +19,7 @@ interface GalleryListViewProps {
   onGenerateDisplayName: (imageId: string) => void;
   onCopyUrl: (imageId: string) => void;
   onCopyNamespace: (namespace: string) => void;
+  onSelectColor: (hex: string) => void;
   onBeforeNavigate: (imageId: string) => void;
   onDragStart: (event: React.DragEvent, image: CloudflareImage) => void;
   onMouseEnter: (imageId: string, event: React.MouseEvent) => void;
@@ -35,6 +36,7 @@ export const GalleryListView: React.FC<GalleryListViewProps> = ({
   onGenerateDisplayName,
   onCopyUrl,
   onCopyNamespace,
+  onSelectColor,
   onBeforeNavigate,
   onDragStart,
   onMouseEnter,
@@ -49,7 +51,6 @@ export const GalleryListView: React.FC<GalleryListViewProps> = ({
     duplicateIds,
     childrenMap,
     colorMetadataMap,
-    embeddingPendingMap,
     altLoadingMap,
     displayNameLoadingMap,
     galleryReturnHrefSuffix,
@@ -70,7 +71,6 @@ export const GalleryListView: React.FC<GalleryListViewProps> = ({
             hrefSuffix={galleryReturnHrefSuffix}
             variationChildren={variationChildren}
             colorMetadata={colorMetadataMap[image.id] as ColorMetadata | undefined}
-            embeddingPending={embeddingPendingMap[image.id]}
             altLoading={Boolean(altLoadingMap[image.id])}
             displayNameLoading={Boolean(displayNameLoadingMap[image.id])}
             onToggleSelection={onToggleSelection}
@@ -80,6 +80,7 @@ export const GalleryListView: React.FC<GalleryListViewProps> = ({
             onGenerateDisplayName={onGenerateDisplayName}
             onCopyUrl={onCopyUrl}
             onCopyNamespace={onCopyNamespace}
+            onSelectColor={onSelectColor}
             onBeforeNavigate={onBeforeNavigate}
             onDragStart={onDragStart}
             onMouseEnter={onMouseEnter}

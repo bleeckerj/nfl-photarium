@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, forwardRef, useImperativeHandle, useMemo, useRef, useCallback, useLayoutEffect, useReducer } from 'react';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Info } from 'lucide-react';
 import MonoSelect from './MonoSelect';
 import GalleryCommandBar from './GalleryCommandBar';
 import FolderManagerButton from './FolderManagerButton';
@@ -15,6 +15,8 @@ import { useImageAspectRatio } from '@/hooks/useImageAspectRatio';
 import HoverPreview from './HoverPreview';
 import { downloadImageToFile, formatDownloadFileName } from '@/utils/downloadUtils';
 import LegacyTopBar from '@/components/gallery/LegacyTopBar';
+import { GalleryCompactHeader } from '@/components/gallery/GalleryCompactHeader';
+import { GalleryPagerStrip } from '@/components/gallery/GalleryPagerStrip';
 import { useGallerySelection } from './gallery/hooks/useGallerySelection';
 import { useGalleryFilters } from './gallery/hooks/useGalleryFilters';
 import { useGalleryItemActions } from './gallery/hooks/useGalleryItemActions';
@@ -24,8 +26,10 @@ import { useGalleryEmbedding } from './gallery/hooks/useGalleryEmbedding';
 import { GalleryListView } from './gallery/GalleryListView';
 import { GalleryGridView } from './gallery/GalleryGridView';
 import { GalleryModals } from './gallery/GalleryModals';
+import { normalizeColorSearchHex, resolveColorSearchAssets, type ColorSearchResultRow } from './gallery/colorSearch';
 import { AUDIT_LOG_LIMIT, DEFAULT_GRID_SIZE } from './gallery/constants';
 import { normalizeGridSize } from './gallery/gridSizing';
+import { resolveGalleryChromeScrollState, type GalleryChromeManualMode } from './gallery/galleryChrome';
 import { normalizeDateFilterValue, toDateKey } from './gallery/dateFilter';
 import {
   clearGalleryReturnState,
@@ -90,6 +94,7 @@ const DEFAULT_PAGE_SIZE = 30;
 const PAGE_SIZE_OPTIONS = [12, 24, 30, 48, 60, 90, 120];
 const VARIANT_DIMENSIONS = new Map(IMAGE_VARIANTS.map(variant => [variant.name, variant.width]));
 const VIDEO_LIMIT_STEP = 150;
+const COLOR_SEARCH_LIMIT = 100;
 
 type GalleryWarmCacheState = {
   namespace: string;
@@ -109,11 +114,13 @@ type StoredGalleryPreferences = {
   onlyCanonical: boolean;
   respectAspectRatio: boolean;
   onlyWithVariants: boolean;
+  showMotionAssetsOnly: boolean;
   showComfyOnly: boolean;
   embeddingFilter: EmbeddingFilter;
   selectedFolder: string;
   selectedTag: string;
   searchTerm: string;
+  colorSearchHex?: string | null;
   viewMode: 'grid' | 'list';
   gridSize: GridSize;
   filtersCollapsed: boolean;
@@ -125,6 +132,7 @@ type StoredGalleryPreferences = {
   hiddenFolders: string[];
   hiddenTags: string[];
   showCli: boolean;
+  controlsVisible: boolean;
   pageSize: number;
   dateFilter: DateFilter | null;
   currentPage: number;
@@ -137,6 +145,43 @@ type VideoMetaState = {
   totalScoped: number;
   truncated: boolean;
 } | null;
+
+export const buildGalleryImagesUrl = ({
+  forceRefresh = false,
+  namespace,
+  videoLimitOverride,
+  includeExtrasForGallery = false,
+  showMotionAssetsOnly = false,
+}: {
+  forceRefresh?: boolean;
+  namespace?: string;
+  videoLimitOverride?: number | null;
+  includeExtrasForGallery?: boolean;
+  showMotionAssetsOnly?: boolean;
+}) => {
+  const params = new URLSearchParams();
+  if (forceRefresh) {
+    params.set('refresh', '1');
+  }
+  if (namespace === '') {
+    params.set('namespace', '__none__');
+  } else if (namespace === '__all__') {
+    params.set('namespace', '__all__');
+  } else if (namespace && namespace !== '__all__') {
+    params.set('namespace', namespace);
+  }
+  if (videoLimitOverride && videoLimitOverride > 0) {
+    params.set('videoLimit', String(videoLimitOverride));
+  }
+  if (includeExtrasForGallery) {
+    params.set('includeExtras', '1');
+  }
+  if (showMotionAssetsOnly) {
+    params.set('mediaFilter', 'animated');
+  }
+  const query = params.toString();
+  return query ? `/api/images?${query}` : '/api/images';
+};
 
 let galleryWarmCache: GalleryWarmCacheState | null = null;
 
@@ -208,16 +253,18 @@ const bulkReducer = (state: BulkState, action: BulkAction): BulkState => {
   }
 };
 
-const getDefaultStoredPreferences = (): StoredGalleryPreferences => ({
+export const getDefaultStoredPreferences = (): StoredGalleryPreferences => ({
   variant: 'full',
   onlyCanonical: false,
   respectAspectRatio: false,
   onlyWithVariants: false,
+  showMotionAssetsOnly: false,
   showComfyOnly: false,
   embeddingFilter: 'none',
   selectedFolder: 'all',
   selectedTag: '',
   searchTerm: '',
+  colorSearchHex: null,
   viewMode: 'grid',
   gridSize: DEFAULT_GRID_SIZE,
   filtersCollapsed: false,
@@ -229,12 +276,13 @@ const getDefaultStoredPreferences = (): StoredGalleryPreferences => ({
   hiddenFolders: [],
   hiddenTags: [],
   showCli: true,
+  controlsVisible: true,
   pageSize: DEFAULT_PAGE_SIZE,
   dateFilter: null,
   currentPage: 1,
 });
 
-const getStoredPreferences = (
+export const getStoredPreferences = (
   namespace: string | undefined,
   initialGalleryReturnState: NormalizedGalleryReturnState | null
 ): StoredGalleryPreferences => {
@@ -252,10 +300,12 @@ const getStoredPreferences = (
         onlyCanonical?: boolean;
         respectAspectRatio?: boolean;
         onlyWithVariants?: boolean;
+        showMotionAssetsOnly?: boolean;
         showComfyOnly?: boolean;
         selectedFolder?: string;
         selectedTag?: string;
         searchTerm?: string;
+        colorSearchHex?: string | null;
         viewMode?: 'grid' | 'list';
         gridSize?: GridSize;
         filtersCollapsed?: boolean;
@@ -265,6 +315,7 @@ const getStoredPreferences = (
         showBrokenOnly?: boolean;
         aspectRatioFilters?: ('horizontal' | 'vertical' | 'square')[];
         showCli?: boolean;
+        controlsVisible?: boolean;
         pageSize?: number;
         dateFilter?: { startDate?: string; endDate?: string } | { year?: number; month?: number } | null;
         currentPage?: number;
@@ -280,10 +331,15 @@ const getStoredPreferences = (
       next.onlyCanonical = Boolean(parsed.onlyCanonical);
       next.respectAspectRatio = Boolean(parsed.respectAspectRatio);
       next.onlyWithVariants = Boolean(parsed.onlyWithVariants);
+      next.showMotionAssetsOnly = Boolean(parsed.showMotionAssetsOnly);
       next.showComfyOnly = Boolean(parsed.showComfyOnly);
       next.selectedFolder = parsed.selectedFolder ?? 'all';
       next.selectedTag = parsed.selectedTag ?? '';
       next.searchTerm = parsed.searchTerm ?? '';
+      next.colorSearchHex =
+        typeof parsed.colorSearchHex === 'string' && parsed.colorSearchHex.trim()
+          ? parsed.colorSearchHex.trim()
+          : null;
       next.viewMode = parsed.viewMode === 'list' ? 'list' : 'grid';
       next.gridSize = normalizeGridSize(parsed.gridSize, DEFAULT_GRID_SIZE);
       next.filtersCollapsed = Boolean(parsed.filtersCollapsed);
@@ -295,6 +351,7 @@ const getStoredPreferences = (
         ? parsed.aspectRatioFilters.filter((value) => value === 'horizontal' || value === 'vertical' || value === 'square')
         : [];
       next.showCli = parsed.showCli !== false;
+      next.controlsVisible = parsed.controlsVisible !== false;
       next.pageSize = normalizedPageSize;
       next.dateFilter = normalizeDateFilterValue(parsed.dateFilter);
       next.currentPage =
@@ -308,10 +365,12 @@ const getStoredPreferences = (
 
   if (initialGalleryReturnState?.filters) {
     next.searchTerm = initialGalleryReturnState.filters.searchTerm;
+    next.colorSearchHex = initialGalleryReturnState.filters.colorSearchHex ?? null;
     next.selectedFolder = initialGalleryReturnState.filters.selectedFolder;
     next.selectedTag = initialGalleryReturnState.filters.selectedTag;
     next.onlyCanonical = initialGalleryReturnState.filters.onlyCanonical;
     next.onlyWithVariants = initialGalleryReturnState.filters.onlyWithVariants;
+    next.showMotionAssetsOnly = initialGalleryReturnState.filters.showMotionAssetsOnly;
     next.showDuplicatesOnly = initialGalleryReturnState.filters.showDuplicatesOnly;
     next.showBrokenOnly = initialGalleryReturnState.filters.showBrokenOnly;
     next.showComfyOnly = initialGalleryReturnState.filters.showComfyOnly;
@@ -334,12 +393,16 @@ const getStoredPreferences = (
     const params = new URLSearchParams(window.location.search);
     const gns = params.get('gns') ?? '';
     const gpage = params.get('gpage');
+    const gcolor = normalizeColorSearchHex(params.get('gcolor'));
     const activeNamespace = namespace ?? '';
     if (gns === activeNamespace && gpage) {
       const parsedPage = Number.parseInt(gpage, 10);
       if (Number.isFinite(parsedPage) && parsedPage > 0) {
         next.currentPage = parsedPage;
       }
+    }
+    if (gns === activeNamespace && gcolor) {
+      next.colorSearchHex = gcolor;
     }
   } catch {
     // ignore
@@ -437,6 +500,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   );
   const [filtersCollapsed, setFiltersCollapsed] = useState(storedPreferencesRef.current.filtersCollapsed ?? false);
   const [showCli, setShowCli] = useState(storedPreferencesRef.current.showCli ?? true);
+  const [controlsVisiblePreference, setControlsVisiblePreference] = useState(storedPreferencesRef.current.controlsVisible ?? true);
+  const [galleryControlsVisible, setGalleryControlsVisible] = useState(storedPreferencesRef.current.controlsVisible ?? true);
+  const [compactScrollMode, setCompactScrollMode] = useState(!(storedPreferencesRef.current.controlsVisible ?? true));
   const [bulkState, dispatchBulk] = useReducer(
     bulkReducer,
     {
@@ -535,6 +601,12 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   );
   const [videoMeta, setVideoMeta] = useState<VideoMetaState>(null);
   const [videoResultsNotice, setVideoResultsNotice] = useState<string | null>(null);
+  const [colorSearchHex, setColorSearchHex] = useState<string | null>(
+    normalizeColorSearchHex(storedPreferencesRef.current.colorSearchHex ?? null)
+  );
+  const [colorSearchRows, setColorSearchRows] = useState<ColorSearchResultRow[]>([]);
+  const [colorSearchLoading, setColorSearchLoading] = useState(false);
+  const [colorSearchError, setColorSearchError] = useState<string | null>(null);
   const [colorMetadataMap, setColorMetadataMap] = useState<Record<string, { dominantColors?: string[]; averageColor?: string }>>({});
   const [promptThisMap, setPromptThisMap] = useState<Record<string, string | null>>({});
   const promptThisMapRef = useRef<Record<string, string | null>>({});
@@ -668,14 +740,16 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     if (typeof window === 'undefined') return;
     try {
       const url = new URL(window.location.href);
-      if (!url.searchParams.has('gpage') && !url.searchParams.has('gns')) return;
+      if (!url.searchParams.has('gpage') && !url.searchParams.has('gns') && !url.searchParams.has('gcolor')) return;
       url.searchParams.delete('gpage');
       url.searchParams.delete('gns');
+      url.searchParams.delete('gcolor');
       window.history.replaceState(window.history.state, '', url.toString());
     } catch {
       // ignore
     }
   }, []);
+
   const [editingImage, setEditingImage] = useState<string | null>(null);
   const [editTags, setEditTags] = useState<string>('');
   const [editFolderSelect, setEditFolderSelect] = useState<string>('');
@@ -689,10 +763,16 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [showPreview, setShowPreview] = useState(false);
   const [utilityExpanded, setUtilityExpanded] = useState(false);
   const galleryTopRef = useRef<HTMLDivElement | null>(null);
+  const chromeManualModeRef = useRef<GalleryChromeManualMode>(
+    (storedPreferencesRef.current.controlsVisible ?? true) ? 'auto' : 'hidden'
+  );
+  const lastScrollYRef = useRef(0);
+  const scrollFrameRef = useRef<number | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const initialLoadStartedAtRef = useRef<number>(typeof performance !== 'undefined' ? performance.now() : Date.now());
   const initialLoadLoggedRef = useRef(false);
   const videoAutoExpandPageRef = useRef<number | null>(null);
+  const showMotionAssetsOnlyRef = useRef(storedPreferencesRef.current.showMotionAssetsOnly ?? false);
   const PERF_LOGGING_ENABLED = process.env.NODE_ENV !== 'production';
 
   const scrollToUploader = useCallback(() => {
@@ -704,6 +784,64 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       uploaderSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   }, []);
+
+  const applyGalleryChromeState = useCallback((controlsVisible: boolean, compactMode: boolean) => {
+    setGalleryControlsVisible((prev) => (prev === controlsVisible ? prev : controlsVisible));
+    setCompactScrollMode((prev) => (prev === compactMode ? prev : compactMode));
+  }, []);
+
+  const toggleGalleryControls = useCallback(() => {
+    const shouldShow = !galleryControlsVisible;
+    const nextManualMode: GalleryChromeManualMode = shouldShow ? 'shown' : 'hidden';
+    chromeManualModeRef.current = nextManualMode;
+    setControlsVisiblePreference(shouldShow);
+    applyGalleryChromeState(shouldShow, !shouldShow);
+  }, [applyGalleryChromeState, galleryControlsVisible]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (loading) return;
+
+    const updateChromeState = () => {
+      scrollFrameRef.current = null;
+      const galleryTop = galleryTopRef.current
+        ? galleryTopRef.current.getBoundingClientRect().top + window.scrollY
+        : 0;
+      const next = resolveGalleryChromeScrollState({
+        currentScrollY: window.scrollY,
+        lastScrollY: lastScrollYRef.current,
+        galleryTop,
+        manualMode: chromeManualModeRef.current,
+        controlsVisible: galleryControlsVisible,
+      });
+
+      lastScrollYRef.current = window.scrollY;
+      chromeManualModeRef.current = next.manualMode;
+      applyGalleryChromeState(next.controlsVisible, next.compactMode);
+    };
+
+    const scheduleChromeStateUpdate = () => {
+      if (scrollFrameRef.current !== null) {
+        return;
+      }
+      scrollFrameRef.current = window.requestAnimationFrame(updateChromeState);
+    };
+
+    lastScrollYRef.current = window.scrollY;
+    updateChromeState();
+
+    window.addEventListener('scroll', scheduleChromeStateUpdate, { passive: true });
+    window.addEventListener('resize', scheduleChromeStateUpdate);
+
+    return () => {
+      window.removeEventListener('scroll', scheduleChromeStateUpdate);
+      window.removeEventListener('resize', scheduleChromeStateUpdate);
+      if (scrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollFrameRef.current);
+        scrollFrameRef.current = null;
+      }
+    };
+  }, [applyGalleryChromeState, galleryControlsVisible, loading]);
 
   const fetchImages = useCallback(async ({
     silent = false,
@@ -724,25 +862,13 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       setRefreshingCache(true);
     }
     try {
-      const params = new URLSearchParams();
-      if (forceRefresh) {
-        params.set('refresh', '1');
-      }
-      if (namespace === '') {
-        params.set('namespace', '__none__');
-      } else if (namespace === '__all__') {
-        params.set('namespace', '__all__');
-      } else if (namespace && namespace !== '__all__') {
-        params.set('namespace', namespace);
-      }
-      if (videoLimitOverride && videoLimitOverride > 0) {
-        params.set('videoLimit', String(videoLimitOverride));
-      }
-      if (includeExtrasForGallery) {
-        params.set('includeExtras', '1');
-      }
-      const query = params.toString();
-      const url = query ? `/api/images?${query}` : '/api/images';
+      const url = buildGalleryImagesUrl({
+        forceRefresh,
+        namespace,
+        videoLimitOverride,
+        includeExtrasForGallery,
+        showMotionAssetsOnly: showMotionAssetsOnlyRef.current,
+      });
       const response = await fetch(url, { signal: controller.signal });
       const data = await response.json();
       if (response.ok) {
@@ -854,6 +980,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         setSelectedTag('');
         setSearchTerm('');
         setOnlyCanonical(false); // Disable "Parents Only" as it might hide orphaned variants in the new namespace
+        setShowMotionAssetsOnly(false);
         setAspectRatioFilters([]);
       } else {
         pendingReturnNamespaceRef.current = false;
@@ -895,6 +1022,13 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   }, [namespace, fetchImages]);
 
   const toast = useToast();
+
+  const clearColorSearch = useCallback(() => {
+    setColorSearchHex(null);
+    setColorSearchRows([]);
+    setColorSearchError(null);
+    setColorSearchLoading(false);
+  }, []);
 
   const [backupInfo, setBackupInfo] = useState<{
     timestamp: string;
@@ -1171,6 +1305,16 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     }));
   }, [images, promptThisMap]);
 
+  const colorSearchResults = useMemo(
+    () => resolveColorSearchAssets(colorSearchRows, imagesWithPrompts),
+    [colorSearchRows, imagesWithPrompts]
+  );
+
+  const galleryImages = useMemo(
+    () => (colorSearchHex ? colorSearchResults : imagesWithPrompts),
+    [colorSearchHex, colorSearchResults, imagesWithPrompts]
+  );
+
   const {
     selectedFolder,
     setSelectedFolder,
@@ -1184,6 +1328,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     setRespectAspectRatio,
     onlyWithVariants,
     setOnlyWithVariants,
+    showMotionAssetsOnly,
+    setShowMotionAssetsOnly,
     showComfyOnly,
     setShowComfyOnly,
     showDuplicatesOnly,
@@ -1232,7 +1378,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     jumpForwardTenPages,
     scrollGalleryToTop,
   } = useGalleryFilters({
-    images: imagesWithPrompts,
+    images: galleryImages,
     initialPreferences: {
       selectedFolder: storedPreferencesRef.current.selectedFolder ?? 'all',
       selectedTag: storedPreferencesRef.current.selectedTag ?? '',
@@ -1240,6 +1386,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       onlyCanonical: storedPreferencesRef.current.onlyCanonical,
       respectAspectRatio: storedPreferencesRef.current.respectAspectRatio,
       onlyWithVariants: storedPreferencesRef.current.onlyWithVariants,
+      showMotionAssetsOnly: storedPreferencesRef.current.showMotionAssetsOnly ?? false,
       showComfyOnly: storedPreferencesRef.current.showComfyOnly ?? false,
       embeddingFilter: storedPreferencesRef.current.embeddingFilter ?? 'none',
       showDuplicatesOnly: storedPreferencesRef.current.showDuplicatesOnly ?? false,
@@ -1267,6 +1414,12 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     if (includeExtrasForGallery === shouldIncludeExtrasForSearch) return;
     setIncludeExtrasForGallery(shouldIncludeExtrasForSearch);
   }, [includeExtrasForGallery, shouldIncludeExtrasForSearch]);
+
+  useEffect(() => {
+    if (showMotionAssetsOnlyRef.current === showMotionAssetsOnly) return;
+    showMotionAssetsOnlyRef.current = showMotionAssetsOnly;
+    void fetchImages({ silent: true });
+  }, [showMotionAssetsOnly, fetchImages]);
 
   const uniqueFolders = useMemo(() => {
     const folderNames = images
@@ -1296,10 +1449,12 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         })),
         filters: {
           searchTerm,
+          colorSearchHex,
           selectedFolder,
           selectedTag,
           onlyCanonical,
           onlyWithVariants,
+          showMotionAssetsOnly,
           showDuplicatesOnly,
           showBrokenOnly,
           showComfyOnly,
@@ -1337,19 +1492,25 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     onlyWithVariants,
     pageImages,
     pageSize,
+    colorSearchHex,
     searchTerm,
     selectedFolder,
     selectedTag,
+    showMotionAssetsOnly,
     showBrokenOnly,
     showComfyOnly,
     showDuplicatesOnly,
   ]);
 
   const galleryReturnHrefSuffix = useMemo(() => {
-    const page = currentPage;
-    const ns = encodeURIComponent(namespace ?? '');
-    return `?gpage=${page}&gns=${ns}`;
-  }, [currentPage, namespace]);
+    const params = new URLSearchParams();
+    params.set('gpage', String(currentPage));
+    params.set('gns', namespace ?? '');
+    if (colorSearchHex) {
+      params.set('gcolor', colorSearchHex);
+    }
+    return `?${params.toString()}`;
+  }, [colorSearchHex, currentPage, namespace]);
 
   const loadMoreVideos = useCallback(() => {
     setVideoLimitOverride((prev) => {
@@ -1375,6 +1536,66 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       videoAutoExpandPageRef.current = null;
     }
   }, [videoMeta]);
+
+  useEffect(() => {
+    if (!colorSearchHex) {
+      setColorSearchRows([]);
+      setColorSearchError(null);
+      setColorSearchLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const searchNamespace = namespace === '__all__' ? null : (namespace ?? '');
+
+    const fetchColorSearchResults = async () => {
+      setColorSearchLoading(true);
+      setColorSearchError(null);
+
+      try {
+        const response = await fetch('/api/images/search', {
+          method: 'POST',
+          signal: controller.signal,
+          headers: {
+            'Content-Type': 'application/json',
+            'x-photarium-component': 'ImageGallery',
+            'x-photarium-trigger': 'swatch-click',
+            'x-photarium-source': 'ui',
+          },
+          body: JSON.stringify({
+            type: 'color',
+            query: colorSearchHex,
+            limit: COLOR_SEARCH_LIMIT,
+            namespace: searchNamespace,
+            diagnostics: {
+              component: 'ImageGallery',
+              trigger: 'swatch-click',
+            },
+          }),
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data?.error || 'Color search failed');
+        }
+
+        setColorSearchRows(Array.isArray(data?.results) ? data.results : []);
+      } catch (error) {
+        if ((error as Error).name === 'AbortError') return;
+        console.error('Failed to fetch color search results:', error);
+        setColorSearchRows([]);
+        setColorSearchError(error instanceof Error ? error.message : 'Color search failed');
+      } finally {
+        if (!controller.signal.aborted) {
+          setColorSearchLoading(false);
+        }
+      }
+    };
+
+    void fetchColorSearchResults();
+
+    return () => controller.abort();
+  }, [colorSearchHex, namespace]);
 
   // Enrich only the visible page with Redis metadata after initial render.
   useEffect(() => {
@@ -1453,6 +1674,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         respectAspectRatio,
         variant: selectedVariant,
         onlyWithVariants,
+        showMotionAssetsOnly,
         showComfyOnly,
         selectedFolder,
         selectedTag,
@@ -1466,6 +1688,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         showBrokenOnly,
         aspectRatioFilters,
         showCli,
+        controlsVisible: controlsVisiblePreference,
         pageSize,
         dateFilter,
         currentPage
@@ -1478,6 +1701,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     respectAspectRatio,
     selectedVariant,
     onlyWithVariants,
+    showMotionAssetsOnly,
     showComfyOnly,
     selectedFolder,
     selectedTag,
@@ -1491,6 +1715,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     showBrokenOnly,
     aspectRatioFilters,
     showCli,
+    controlsVisiblePreference,
     pageSize,
     dateFilter,
     currentPage,
@@ -1809,6 +2034,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     altLoadingMap,
     displayNameLoadingMap,
     galleryReturnHrefSuffix,
+    activeColorSearchHex: colorSearchHex,
   }), [
     pageImages,
     selectedVariant,
@@ -1822,7 +2048,21 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     altLoadingMap,
     displayNameLoadingMap,
     galleryReturnHrefSuffix,
+    colorSearchHex,
   ]);
+  const handleSelectColor = useCallback((hex: string) => {
+    const normalized = normalizeColorSearchHex(hex);
+    if (!normalized) return;
+    setColorSearchHex(normalized);
+    setColorSearchRows([]);
+    setColorSearchError(null);
+    goToFirstPage();
+    scrollGalleryToTop();
+  }, [goToFirstPage, scrollGalleryToTop]);
+  const handleClearFilters = useCallback(() => {
+    clearFilters();
+    clearColorSearch();
+  }, [clearColorSearch, clearFilters]);
   const backupAgeDays = backupInfo
     ? (Date.now() - backupInfo.date.getTime()) / (1000 * 60 * 60 * 24)
     : null;
@@ -1849,79 +2089,27 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     <div id="image-gallery-card" ref={galleryTopRef} className="overscroll-none bg-white rounded-lg shadow-lg p-6">
       <div
         id="gallery-top-bar"
-        className="sticky top-0 z-[3000] -m-6 mb-6 p-6 pb-4 bg-white/95 backdrop-blur rounded-t-lg border-b border-gray-100 relative"
+        className="sticky top-0 z-[3000] -m-6 mb-6 overflow-hidden rounded-t-lg border-b border-gray-100 bg-white/95 backdrop-blur"
       >
-        <LegacyTopBar
+        <GalleryCompactHeader
           filteredCount={filteredWithVariants.length}
           totalCount={images.length}
-          namespaceLabel={namespaceLabel}
-          namespace={namespace}
-          showPagination={showPagination}
-          currentPageRangeLabel={currentPageRangeLabel}
-          prevPageRangeLabel={prevPageRangeLabel}
-          nextPageRangeLabel={nextPageRangeLabel}
           pageIndex={pageIndex}
           totalPages={totalPages}
-          sortedImages={sortedImages}
-          dateFilter={dateFilter}
-          onDateFilterChange={setDateFilter}
-          bulkSelectionMode={bulkSelectionMode}
-          filtersCollapsed={filtersCollapsed}
-          hasActiveFilters={hasActiveFilters}
-          pageSize={pageSize}
-          pageSizeOptions={PAGE_SIZE_OPTIONS}
-          defaultPageSize={DEFAULT_PAGE_SIZE}
-          gridSize={gridSize}
-          refreshingCache={refreshingCache}
-          viewMode={viewMode}
-          selectedCount={selectedCount}
-          bulkEmbeddingGenerating={bulkEmbeddingGenerating}
-          bulkDeleting={bulkDeleting}
-          onToggleBulkSelection={() => setBulkSelectionMode(!bulkSelectionMode)}
-          onToggleFilters={() => setFiltersCollapsed(prev => !prev)}
-          onClearFilters={clearFilters}
-          onPageSizeChange={handlePageSizeChange}
-          onGridSizeChange={setGridSize}
-          onRefreshCache={() => fetchImages({ forceRefresh: true })}
-          onOpenNamespaceSettings={() => setNamespaceSettingsOpen(true)}
-          onToggleViewMode={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
-          onSelectPage={() => selectAllOnPage(pageImages)}
-          onClearSelection={clearSelection}
-          onOpenBulkEdit={openBulkEditModal}
-          onGenerateEmbeddings={generateEmbeddingsForSelected}
-          onDeleteSelected={deleteSelectedImages}
+          controlsVisible={galleryControlsVisible}
+          onToggleControls={toggleGalleryControls}
+        />
+        <GalleryPagerStrip
+          pageIndex={pageIndex}
+          totalPages={totalPages}
+          prevPageRangeLabel={prevPageRangeLabel}
+          nextPageRangeLabel={nextPageRangeLabel}
           onFirstPage={goToFirstPage}
           onJumpBackTen={jumpBackTenPages}
           onPrevPage={goToPreviousPage}
           onNextPage={goToNextPage}
           onJumpForwardTen={jumpForwardTenPages}
           onLastPage={goToLastPage}
-          backupControls={(
-            <div className="ml-1 flex items-end gap-2 text-[0.6rem] font-mono text-gray-500">
-              <div className="text-right leading-tight">
-                <div>Last backup: {backupTimeLabel}</div>
-                <div className="text-gray-400">{backupSizeLabel} • {backupAgeLabel}</div>
-                {backupError && <div className="text-red-500">{backupError}</div>}
-              </div>
-              <button
-                type="button"
-                onClick={handleCreateBackup}
-                disabled={backupLoading}
-                className="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-200 bg-white/80 text-gray-600 hover:bg-white disabled:opacity-50"
-                title="Create backup"
-                aria-label="Create backup"
-              >
-                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="4" y="3" width="16" height="18" rx="2" />
-                  <circle cx="12" cy="12" r="3" />
-                  <path d="M12 9v6" />
-                  <path d="M9 12h6" />
-                  <path d="M7 7h2" />
-                  <path d="M15 7h2" />
-                </svg>
-              </button>
-            </div>
-          )}
         />
       </div>
 
@@ -1959,27 +2147,109 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         </div>
       )}
 
-      {videoResultsNotice && (
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-200 bg-sky-50 p-3 text-[0.65rem] font-mono text-sky-900">
-          <span>{videoResultsNotice}</span>
+      {colorSearchHex && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-[0.65rem] font-mono text-violet-900">
+          <span className="rounded-full border border-violet-300 bg-white px-2 py-0.5">
+            Color: {colorSearchHex}
+          </span>
+          {colorSearchLoading && <span className="text-violet-700">Searching nearby colors…</span>}
+          {!colorSearchLoading && colorSearchError && (
+            <span className="text-red-700">Search failed: {colorSearchError}</span>
+          )}
+          {!colorSearchLoading && !colorSearchError && (
+            <span>{filteredWithVariants.length.toLocaleString()} result{filteredWithVariants.length === 1 ? '' : 's'}</span>
+          )}
           <button
             type="button"
-            onClick={loadMoreVideos}
-            className="rounded border border-sky-300 bg-white px-2 py-1 text-[0.6rem] text-sky-900 hover:bg-sky-100"
+            onClick={clearColorSearch}
+            className="rounded border border-violet-300 bg-white px-2.5 py-1 text-[0.6rem] hover:bg-violet-100"
           >
-            Load more videos
+            Clear color search
           </button>
         </div>
       )}
 
       <div
-        className={`transition-[max-height] duration-300 ease-in-out ${filtersCollapsed ? 'max-h-0 overflow-hidden' : 'max-h-[1200px] overflow-visible'}`}
-        aria-hidden={filtersCollapsed}
+        className={`overflow-hidden transition-[max-height,opacity,transform] duration-300 ease-in-out ${
+          galleryControlsVisible
+            ? 'mb-4 max-h-[2000px] opacity-100 translate-y-0'
+            : 'mb-0 max-h-0 pointer-events-none opacity-0 -translate-y-2'
+        }`}
+        aria-hidden={!galleryControlsVisible}
+        data-compact-mode={compactScrollMode ? 'true' : 'false'}
       >
+        <div className="mb-4 rounded-lg border border-gray-100 bg-white p-4 shadow-sm">
+          <LegacyTopBar
+            filteredCount={filteredWithVariants.length}
+            totalCount={images.length}
+            namespaceLabel={namespaceLabel}
+            namespace={namespace}
+            showPagination={showPagination}
+            currentPageRangeLabel={currentPageRangeLabel}
+            sortedImages={sortedImages}
+            dateFilter={dateFilter}
+            onDateFilterChange={setDateFilter}
+            bulkSelectionMode={bulkSelectionMode}
+            filtersCollapsed={filtersCollapsed}
+            hasActiveFilters={hasActiveFilters}
+            pageSize={pageSize}
+            pageSizeOptions={PAGE_SIZE_OPTIONS}
+            defaultPageSize={DEFAULT_PAGE_SIZE}
+            gridSize={gridSize}
+            refreshingCache={refreshingCache}
+            viewMode={viewMode}
+            selectedCount={selectedCount}
+            bulkEmbeddingGenerating={bulkEmbeddingGenerating}
+            bulkDeleting={bulkDeleting}
+            onToggleBulkSelection={() => setBulkSelectionMode(!bulkSelectionMode)}
+            onToggleFilters={() => setFiltersCollapsed(prev => !prev)}
+            onClearFilters={handleClearFilters}
+            onPageSizeChange={handlePageSizeChange}
+            onGridSizeChange={setGridSize}
+            onRefreshCache={() => fetchImages({ forceRefresh: true })}
+            onOpenNamespaceSettings={() => setNamespaceSettingsOpen(true)}
+            onToggleViewMode={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
+            onSelectPage={() => selectAllOnPage(pageImages)}
+            onClearSelection={clearSelection}
+            onOpenBulkEdit={openBulkEditModal}
+            onGenerateEmbeddings={generateEmbeddingsForSelected}
+            onDeleteSelected={deleteSelectedImages}
+            backupControls={(
+              <div className="ml-1 flex items-end gap-2 text-[0.6rem] font-mono text-gray-500">
+                <div className="text-right leading-tight">
+                  <div>Last backup: {backupTimeLabel}</div>
+                  <div className="text-gray-400">{backupSizeLabel} • {backupAgeLabel}</div>
+                  {backupError && <div className="text-red-500">{backupError}</div>}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCreateBackup}
+                  disabled={backupLoading}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-200 bg-white/80 text-gray-600 hover:bg-white disabled:opacity-50"
+                  title="Create backup"
+                  aria-label="Create backup"
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="4" y="3" width="16" height="18" rx="2" />
+                    <circle cx="12" cy="12" r="3" />
+                    <path d="M12 9v6" />
+                    <path d="M9 12h6" />
+                    <path d="M7 7h2" />
+                    <path d="M15 7h2" />
+                  </svg>
+                </button>
+              </div>
+            )}
+          />
+        </div>
         <div
-          id="gallery-filter-controls"
-          className={`relative z-10 space-y-4 p-4 bg-gray-50 rounded-lg transition-opacity duration-300 ${filtersCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+          className={`transition-[max-height] duration-300 ease-in-out ${filtersCollapsed ? 'max-h-0 overflow-hidden' : 'max-h-[1200px] overflow-visible'}`}
+          aria-hidden={filtersCollapsed}
         >
+          <div
+            id="gallery-filter-controls"
+            className={`relative z-10 space-y-4 rounded-lg bg-gray-50 p-4 transition-opacity duration-300 ${filtersCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+          >
           <div className="grid grid-cols-1 gap-4 items-start">
             <div>
               <GalleryFilters
@@ -2011,6 +2281,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                 onShowDuplicatesOnlyChange={setShowDuplicatesOnly}
                 showVariationsOnly={onlyWithVariants}
                 onShowVariationsOnlyChange={setOnlyWithVariants}
+                showMotionAssetsOnly={showMotionAssetsOnly}
+                onShowMotionAssetsOnlyChange={setShowMotionAssetsOnly}
                 showComfyOnly={showComfyOnly}
                 onShowComfyOnlyChange={setShowComfyOnly}
                 showOnlyMissingEmbeddings={embeddingFilter !== 'none'}
@@ -2019,8 +2291,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                 }
                 showBrokenOnly={showBrokenOnly}
                 onShowBrokenOnlyChange={setShowBrokenOnly}
-                onClearFilters={clearFilters}
-                hasActiveFilters={hasActiveFilters}
+                onClearFilters={handleClearFilters}
+                hasActiveFilters={hasActiveFilters || Boolean(colorSearchHex)}
               />
             </div>
 
@@ -2088,6 +2360,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
               onClose={() => setShowCli(false)}
             />
           )}
+          </div>
         </div>
       </div>
 
@@ -2124,6 +2397,34 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             >
               {showCli ? 'Hide CLI' : 'Show CLI'}
             </button>
+            {videoResultsNotice && (
+              <div className="flex flex-col gap-1 rounded-xl border border-sky-300/40 bg-sky-500/10 p-3 text-[0.6rem] text-sky-100">
+                <div className="flex items-center gap-2">
+                  <span className="rounded-full bg-sky-400/20 px-2 py-0.5 uppercase tracking-wide text-sky-100">
+                    Videos
+                  </span>
+                  <span>
+                    {videoMeta ? `${videoMeta.returned}/${videoMeta.totalScoped || videoMeta.returned} shown` : 'Video results limited'}
+                  </span>
+                  {videoMeta?.limit ? <span className="text-sky-200/80">limit {videoMeta.limit}</span> : null}
+                  <button
+                    type="button"
+                    className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-sky-300/50 bg-white/10 text-sky-100 hover:bg-white/20"
+                    title={videoResultsNotice}
+                    aria-label={videoResultsNotice}
+                  >
+                    <Info className="h-3 w-3" />
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={loadMoreVideos}
+                  className={`${utilityButtonClasses} self-start border border-sky-300/50 bg-white/10 hover:bg-white/20`}
+                >
+                  Load more videos
+                </button>
+              </div>
+            )}
             {selectedCount > 0 && (
               <div className="flex flex-col gap-1 text-[0.6rem] text-white">
                 <span>{selectedCount} selected</span>
@@ -2149,53 +2450,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                 </div>
               </div>
             )}
-            <div className="flex items-center gap-2 text-[0.6rem] text-gray-200">
-              <button
-                onClick={goToFirstPage}
-                disabled={pageIndex === 1}
-                className={`${utilityButtonClasses} disabled:opacity-40`}
-              >
-                First
-              </button>
-              <button
-                onClick={jumpBackTenPages}
-                disabled={pageIndex === 1}
-                className={`${utilityButtonClasses} disabled:opacity-40`}
-              >
-                -10
-              </button>
-              <button
-                onClick={goToPreviousPage}
-                disabled={pageIndex === 1}
-                className={`${utilityButtonClasses} disabled:opacity-40`}
-              >
-                Prev
-              </button>
-              <span className="text-[0.6rem]">
-                {pageIndex}/{totalPages}
-              </span>
-              <button
-                onClick={goToNextPage}
-                disabled={pageIndex === totalPages}
-                className={`${utilityButtonClasses} disabled:opacity-40`}
-              >
-                Next
-              </button>
-              <button
-                onClick={jumpForwardTenPages}
-                disabled={pageIndex === totalPages}
-                className={`${utilityButtonClasses} disabled:opacity-40`}
-              >
-                +10
-              </button>
-              <button
-                onClick={goToLastPage}
-                disabled={pageIndex === totalPages}
-                className={`${utilityButtonClasses} disabled:opacity-40`}
-              >
-                Last
-              </button>
-            </div>
             <div className="flex flex-col gap-2 text-[0.6rem] text-gray-200">
               <button
                 onClick={scrollGalleryToTop}
@@ -2233,11 +2487,15 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             {images.length === 0 ? 'No images uploaded yet' : 'No images match your filters'}
           </p>
           <p className="text-[0.7em] font-mono text-gray-400">
-            {images.length === 0 ? 'Upload some images to see them here' : 'Try adjusting your search or filters'}
+            {images.length === 0
+              ? 'Upload some images to see them here'
+              : colorSearchHex
+                ? 'Try a different swatch or clear the active color search'
+                : 'Try adjusting your search or filters'}
           </p>
-          {images.length > 0 && hasActiveFilters && (
+          {images.length > 0 && (hasActiveFilters || Boolean(colorSearchHex)) && (
             <button
-              onClick={clearFilters}
+              onClick={handleClearFilters}
               className="mt-3 px-3 py-1 text-[0.7em] font-mono border border-gray-200 rounded-md hover:bg-gray-100 transition"
             >
               Clear filters
@@ -2252,6 +2510,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             onToggleSelection={toggleSelection}
             onBeforeNavigate={saveGalleryReturnState}
             onCopyNamespace={(ns) => { void copyToClipboard(ns, 'Namespace', toast.push); }}
+            onSelectColor={handleSelectColor}
             onToggleCopyMenu={handleOpenCopyMenu}
             onStartEdit={startEdit}
             onDelete={deleteImage}
@@ -2271,6 +2530,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             onGenerateDisplayName={generateDisplayName}
             onCopyUrl={handleOpenCopyMenu}
             onCopyNamespace={(ns) => { void copyToClipboard(ns, 'Namespace', toast.push); }}
+            onSelectColor={handleSelectColor}
             onBeforeNavigate={saveGalleryReturnState}
             onDragStart={(event, img) => setDragPayloadForImage(event, img)}
             onMouseEnter={handleMouseEnter}
@@ -2325,35 +2585,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           </span>
         )}
       </div>
-
-      {showPagination && hasResults && (
-        <div className="flex flex-wrap items-center justify-between gap-3 mt-6 text-[0.7em] font-mono text-gray-600 border-t border-gray-100 pt-4">
-          <div>
-            {currentPageRangeLabel && (
-              <p>Currently viewing uploads from {currentPageRangeLabel}</p>
-            )}
-            <p className="text-[0.7em] font-mono text-gray-400">Page {pageIndex} of {totalPages}</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={goToPreviousPage}
-              disabled={pageIndex === 1}
-              className="px-3 py-1.5 border rounded-md disabled:opacity-40"
-              title={prevPageRangeLabel ? `Previous (${prevPageRangeLabel})` : 'Previous page'}
-            >
-              Previous
-            </button>
-            <button
-              onClick={goToNextPage}
-              disabled={pageIndex === totalPages}
-              className="px-3 py-1.5 border rounded-md disabled:opacity-40"
-              title={nextPageRangeLabel ? `Next (${nextPageRangeLabel})` : 'Next page'}
-            >
-              Next
-            </button>
-          </div>
-        </div>
-      )}
 
       <GalleryModals
         images={images}

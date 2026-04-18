@@ -6,6 +6,7 @@ const {
   transformApiImageToCachedMock,
   upsertCachedImageMock,
   fetchCloudflareImageMock,
+  probeAnimatedImageFromOriginalBlobMock,
   isVectorSearchAvailableMock,
   batchGetColorMetadataMock,
   batchGetAspectMetadataMock,
@@ -14,6 +15,7 @@ const {
   transformApiImageToCachedMock: vi.fn(),
   upsertCachedImageMock: vi.fn(),
   fetchCloudflareImageMock: vi.fn(),
+  probeAnimatedImageFromOriginalBlobMock: vi.fn(),
   isVectorSearchAvailableMock: vi.fn(),
   batchGetColorMetadataMock: vi.fn(),
   batchGetAspectMetadataMock: vi.fn(),
@@ -31,6 +33,10 @@ vi.mock('@/server/cloudflareClient', () => ({
     accountId: 'account',
     apiToken: 'token',
   })),
+}));
+
+vi.mock('@/server/animatedImageProbe', () => ({
+  probeAnimatedImageFromOriginalBlob: probeAnimatedImageFromOriginalBlobMock,
 }));
 
 vi.mock('@/server/imageArtifactCleanup', () => ({
@@ -88,6 +94,11 @@ describe('GET /api/images/:id embedding status', () => {
         }],
       ])
     );
+    probeAnimatedImageFromOriginalBlobMock.mockResolvedValue({
+      contentType: 'image/webp',
+      format: 'webp',
+      isAnimated: false,
+    });
   });
 
   it('enriches cached images with Redis embedding metadata before responding', async () => {
@@ -114,6 +125,42 @@ describe('GET /api/images/:id embedding status', () => {
         id: 'img-1',
         hasClipEmbedding: true,
         hasColorEmbedding: true,
+      })
+    );
+  });
+
+  it('self-heals cached webp assets with actual animated state from the original blob', async () => {
+    getCachedImageMock.mockResolvedValueOnce({
+      id: 'img-anim',
+      filename: 'generated.webp',
+      uploaded: '2026-03-20T00:00:00.000Z',
+      variants: ['https://imagedelivery.net/hash/img-anim/public'],
+      tags: [],
+      contentType: 'image/webp',
+      hasClipEmbedding: false,
+      hasColorEmbedding: false,
+    });
+    batchGetColorMetadataMock.mockResolvedValueOnce(new Map());
+    batchGetAspectMetadataMock.mockResolvedValueOnce(new Map());
+    probeAnimatedImageFromOriginalBlobMock.mockResolvedValueOnce({
+      contentType: 'image/webp',
+      format: 'webp',
+      isAnimated: true,
+    });
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/images/img-anim'),
+      { params: Promise.resolve({ id: 'img-anim' }) }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.image.isAnimated).toBe(true);
+    expect(upsertCachedImageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'img-anim',
+        isAnimated: true,
+        contentType: 'image/webp',
       })
     );
   });

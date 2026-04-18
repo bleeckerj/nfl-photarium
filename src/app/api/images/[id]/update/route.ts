@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   cleanString,
+  CLOUDFLARE_EXTRAS_ONLY_FIELDS,
   enforceCloudflareMetadataLimit,
+  omitExtrasOnlyCloudflareMetadata,
   parseCloudflareMetadata,
   pickCloudflareMetadata,
 } from '@/utils/cloudflareMetadata';
@@ -220,11 +222,10 @@ export async function PATCH(
         metadata.tags = cleanTags;
       }
 
-      // URL fields are extras-only (not Cloudflare metadata) to avoid 1024-byte pressure.
-      delete metadata.originalUrl;
-      delete metadata.originalUrlNormalized;
-      delete metadata.sourceUrl;
-      delete metadata.sourceUrlNormalized;
+      // Extras-only fields stay in local extras storage, not Cloudflare metadata.
+      Object.values(CLOUDFLARE_EXTRAS_ONLY_FIELDS).forEach((field) => {
+        delete metadata[field];
+      });
 
       if (flags.displayName) {
         metadata.displayName = cleanDisplayName ?? '';
@@ -246,6 +247,7 @@ export async function PATCH(
         sourceUrlNormalized?: string;
         originalUrl?: string;
         originalUrlNormalized?: string;
+        exif?: undefined;
       } = {};
       if (flags.description) {
         extrasPatch.description = cleanDescription || undefined;
@@ -261,12 +263,14 @@ export async function PATCH(
         extrasPatch.originalUrl = cleanOriginalUrl || undefined;
         extrasPatch.originalUrlNormalized = normalizeOriginalUrl(cleanOriginalUrl) || undefined;
       }
+      if (flags.clearExif) {
+        extrasPatch.exif = undefined;
+      }
       if (Object.keys(extrasPatch).length > 0) {
         await patchImageExtrasRecord(targetId, extrasPatch);
       }
 
-      // Keep Cloudflare metadata compact: description/alt text are durable in extras storage.
-      // We only mirror a small preview here for compatibility/fallback surfaces.
+      // Keep Cloudflare metadata compact: alt text gets a small mirror for fallback surfaces.
       metadata.altTag = toCloudflareTextMirror(
         flags.altTag
           ? (cleanAltTag ?? '')
@@ -277,18 +281,16 @@ export async function PATCH(
         metadata.variationSort = cleanVariationSort;
       }
 
-      // Clear EXIF data if explicitly requested
-      if (flags.clearExif) {
-        delete metadata.exif;
-      }
-
       if (flags.namespace) {
         metadata.namespace = cleanNamespace ?? '';
       }
 
       // IMPORTANT: Cloudflare PATCH semantics do not clear keys that are omitted.
       // Use includeEmpty so that user-cleared values ('' / []) are sent explicitly.
-      const metadataPayload = pickCloudflareMetadata(metadata, { includeEmpty: true });
+      const metadataPayload = pickCloudflareMetadata(
+        omitExtrasOnlyCloudflareMetadata(metadata),
+        { includeEmpty: true }
+      );
       const requiredKeys = new Set<string>();
       if (flags.folder) requiredKeys.add('folder');
       if (flags.tags) requiredKeys.add('tags');

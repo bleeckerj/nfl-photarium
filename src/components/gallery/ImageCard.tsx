@@ -13,6 +13,7 @@ import Link from 'next/link';
 import { Trash2, Copy, ExternalLink, Sparkles, Layers, AlertTriangle } from 'lucide-react';
 import { getCloudflareImageUrl, getCloudflareDownloadUrl } from '@/utils/imageUtils';
 import { formatBytes } from '@/utils/formatBytes';
+import { ColorSwatches } from '@/components/ColorSwatches';
 import { EmbeddingStatusDot } from '@/components/EmbeddingStatusIcon';
 import { SearchExclusionIcon } from './icons';
 import { AspectRatioDisplay } from './AspectRatioDisplay';
@@ -40,6 +41,7 @@ interface ImageCardProps {
   onGenerateDisplayName: (imageId: string) => void;
   onCopyUrl: (imageId: string) => void;
   onCopyNamespace: (namespace: string) => void;
+  onSelectColor?: (hex: string) => void;
   onBeforeNavigate?: (imageId: string) => void;
   galleryReturnHrefSuffix?: string;
   // Hover preview
@@ -80,6 +82,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
   onGenerateDisplayName,
   onCopyUrl,
   onCopyNamespace,
+  onSelectColor,
   onBeforeNavigate,
   galleryReturnHrefSuffix,
   onMouseEnter,
@@ -96,6 +99,8 @@ export const ImageCard: React.FC<ImageCardProps> = ({
     ? imageUrl
     : (svgImage ? getCloudflareImageUrl(image.id, 'original') : imageUrl);
   const fileSizeLabel = formatBytes(image.size);
+  const swatchAverageColor = colorMetadata?.averageColor ?? image.averageColor;
+  const swatchDominantColors = colorMetadata?.dominantColors ?? image.dominantColors;
   const detailHref = isVideoAsset
     ? `/videos/${image.id}${galleryReturnHrefSuffix ?? ''}`
     : `/images/${image.id}${galleryReturnHrefSuffix ?? ''}`;
@@ -283,35 +288,14 @@ export const ImageCard: React.FC<ImageCardProps> = ({
               </p>
             )}
             {/* Color metadata display */}
-            {colorMetadata && (
-              <div className="font-3270 text-[0.55rem] leading-tight mt-1 space-y-0.5">
-                {colorMetadata.averageColor && (
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className="inline-block w-3 h-3 rounded-sm border border-gray-200 shadow-sm"
-                      style={{ backgroundColor: colorMetadata.averageColor }}
-                      title={colorMetadata.averageColor}
-                    />
-                    <span className="text-gray-500 uppercase tracking-wide">
-                      avg {colorMetadata.averageColor}
-                    </span>
-                  </div>
-                )}
-                {colorMetadata.dominantColors && colorMetadata.dominantColors.length > 0 && (
-                  <div className="flex items-center gap-1">
-                    <span className="text-gray-400 mr-0.5">◆</span>
-                    {colorMetadata.dominantColors.slice(0, 5).map((color, idx) => (
-                      <span
-                        key={idx}
-                        className="inline-block w-3 h-3 rounded-sm border border-gray-200 shadow-sm"
-                        style={{ backgroundColor: color }}
-                        title={color}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+            <ColorSwatches
+              dominantColors={swatchDominantColors}
+              averageColor={swatchAverageColor}
+              size="compact"
+              showLabels={true}
+              className="mt-1"
+              onSelectColor={onSelectColor}
+            />
           </div>
         </div>
         <div className="pt-2">

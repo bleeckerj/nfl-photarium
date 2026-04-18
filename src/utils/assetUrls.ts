@@ -29,8 +29,6 @@ export const getAssetPreviewUrl = (
         asset.videoThumbnailUrl,
         asset.videoPreviewUrl,
         ...(Array.isArray(asset.variants) ? asset.variants : []),
-        asset.videoPlaybackUrl,
-        asset.videoHlsUrl,
       ]) || ''
     );
   }

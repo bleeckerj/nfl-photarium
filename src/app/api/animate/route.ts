@@ -255,7 +255,7 @@ export async function POST(request: NextRequest) {
         accountId,
         apiToken,
         folder: folder && folder.trim() ? folder.trim() : undefined,
-        tags: cleanTags,
+        tags: Array.from(new Set([...cleanTags, 'animated-webp'])),
         description: description && description.trim() ? description.trim() : undefined,
         originalUrl: originalUrl && originalUrl.trim() ? originalUrl.trim() : undefined,
         sourceUrl: sourceUrl && sourceUrl.trim() ? sourceUrl.trim() : undefined,

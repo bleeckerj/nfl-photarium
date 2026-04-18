@@ -415,19 +415,25 @@ export async function POST(request: NextRequest) {
       type: workingType,
       folder: cleanFolder,
       tags: cleanTags,
-      originalUrl: cleanOriginalUrl,
-      originalUrlNormalized: normalizedOriginalUrl,
-      sourceUrl: cleanSourceUrl,
-      sourceUrlNormalized: normalizedSourceUrl,
       namespace: effectiveNamespace,
       contentHash,
       variationParentId: effectiveParentId,
       duplicateFamilyOverride: deduplication.duplicateFamilySelection ? true : undefined,
       uploadNormalization: prepared.data.uploadNormalization,
-      exif: exifSummary,
       generatedBy: comfyExtraction.detected ? 'comfyui' : undefined,
       comfyMetadataDetected: comfyExtraction.detected ? true : undefined,
       comfyMetadataSource: comfyExtraction.source,
+    };
+    const extrasMetadata: Record<string, unknown> = {
+      originalUrl: cleanOriginalUrl || undefined,
+      originalUrlNormalized: normalizedOriginalUrl,
+      sourceUrl: cleanSourceUrl || undefined,
+      sourceUrlNormalized: normalizedSourceUrl,
+      exif: exifSummary,
+    };
+    const cachedMetadataPayload = {
+      ...metadataPayload,
+      ...extrasMetadata,
     };
 
     const { metadata: limitedMetadata, dropped, size, limitBytes } = enforceCloudflareMetadataLimit(metadataPayload);
@@ -525,7 +531,9 @@ export async function POST(request: NextRequest) {
       ));
     }
 
-    const baseMeta = imageData.meta ?? limitedMetadata;
+    const baseMeta = imageData.meta && typeof imageData.meta === 'object'
+      ? { ...cachedMetadataPayload, ...(imageData.meta as Record<string, unknown>) }
+      : cachedMetadataPayload;
     const cachedPrimary = transformApiImageToCached({
       id: primaryId,
       filename: primaryFilename,
@@ -536,9 +544,10 @@ export async function POST(request: NextRequest) {
     });
     upsertCachedImage(cachedPrimary);
 
-    if (cleanDescription) {
-      await patchImageExtrasRecord(primaryId, { description: cleanDescription });
-    }
+    await patchImageExtrasRecord(primaryId, {
+      ...(cleanDescription ? { description: cleanDescription } : {}),
+      ...extrasMetadata,
+    });
 
     if (typeof primaryId === 'string' && primaryId) {
       try {
@@ -607,12 +616,19 @@ export async function POST(request: NextRequest) {
               uploaded: webpResult.uploaded,
               variants: webpResult.variants,
               size: webpResult.size,
-              meta: webpResult.meta ?? limitedWebpMetadata
+              meta: webpResult.meta && typeof webpResult.meta === 'object'
+                ? {
+                    ...cachedMetadataPayload,
+                    ...limitedWebpMetadata,
+                    ...(webpResult.meta as Record<string, unknown>)
+                  }
+                : { ...cachedMetadataPayload, ...limitedWebpMetadata }
             });
             upsertCachedImage(cachedWebp);
-            if (cleanDescription) {
-              await patchImageExtrasRecord(webpResult.id, { description: cleanDescription });
-            }
+            await patchImageExtrasRecord(webpResult.id, {
+              ...(cleanDescription ? { description: cleanDescription } : {}),
+              ...extrasMetadata,
+            });
             if (process.env.NODE_ENV !== 'test') {
               await queueAutoEmbeddingsForImage(cachedWebp);
             }
@@ -652,7 +668,10 @@ export async function POST(request: NextRequest) {
               uploaded: primaryUploaded,
               variants: primaryVariants,
               size: imageData.size,
-              meta: updatedMetadata
+              meta: {
+                ...updatedMetadata,
+                ...extrasMetadata,
+              }
             })
           );
         }

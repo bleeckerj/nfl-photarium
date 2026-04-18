@@ -70,7 +70,17 @@ export const CLOUDFLARE_METADATA_FIELDS = [
   'updatedAt'
 ] as const;
 
+export const CLOUDFLARE_EXTRAS_ONLY_FIELDS = [
+  'description',
+  'originalUrl',
+  'originalUrlNormalized',
+  'sourceUrl',
+  'sourceUrlNormalized',
+  'exif',
+] as const;
+
 type CloudflareMetadataField = typeof CLOUDFLARE_METADATA_FIELDS[number];
+type CloudflareExtrasOnlyField = typeof CLOUDFLARE_EXTRAS_ONLY_FIELDS[number];
 
 /**
  * Check if a value is "empty" and should be excluded from metadata.
@@ -115,6 +125,14 @@ export function pickCloudflareMetadata(
     }
   });
   return trimmed as CloudflareMetadata;
+}
+
+export function omitExtrasOnlyCloudflareMetadata(meta: Record<string, unknown>) {
+  const trimmed = { ...meta };
+  CLOUDFLARE_EXTRAS_ONLY_FIELDS.forEach((key) => {
+    delete trimmed[key as CloudflareExtrasOnlyField];
+  });
+  return trimmed;
 }
 
 /**

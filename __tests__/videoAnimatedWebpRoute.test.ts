@@ -185,10 +185,12 @@ describe('POST /api/videos/[id]/animated-webp', () => {
       expect.objectContaining({
         animatedWebpImageId: 'img-1',
         animatedWebpStatus: 'ready',
+        animatedWebpUrl: '/api/images/img-1/download?variant=original&disposition=inline',
         animatedWebpBytes: 2048,
         animatedWebpVariants: expect.any(Array),
       })
     );
+    expect(payload.animatedWebp.url).toBe('/api/images/img-1/download?variant=original&disposition=inline');
   });
 
   it('supports generating multiple variations in one request', async () => {

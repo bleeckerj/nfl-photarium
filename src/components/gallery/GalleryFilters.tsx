@@ -41,6 +41,8 @@ interface GalleryFiltersProps {
   onShowDuplicatesOnlyChange: (value: boolean) => void;
   showVariationsOnly: boolean;
   onShowVariationsOnlyChange: (value: boolean) => void;
+  showMotionAssetsOnly: boolean;
+  onShowMotionAssetsOnlyChange: (value: boolean) => void;
   showOnlyMissingEmbeddings: boolean;
   onShowOnlyMissingEmbeddingsChange: (value: boolean) => void;
   onlyCanonical: boolean;
@@ -78,6 +80,8 @@ export const GalleryFilters: React.FC<GalleryFiltersProps> = ({
   onShowDuplicatesOnlyChange,
   showVariationsOnly,
   onShowVariationsOnlyChange,
+  showMotionAssetsOnly,
+  onShowMotionAssetsOnlyChange,
   showOnlyMissingEmbeddings,
   onShowOnlyMissingEmbeddingsChange,
   onlyCanonical,
@@ -354,6 +358,18 @@ export const GalleryFilters: React.FC<GalleryFiltersProps> = ({
           />
           <span className="text-[0.65em] font-mono text-gray-700">
             Variations Only
+          </span>
+        </label>
+
+        <label className="flex items-center gap-1.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showMotionAssetsOnly}
+            onChange={(e) => onShowMotionAssetsOnlyChange(e.target.checked)}
+            className="rounded"
+          />
+          <span className="text-[0.65em] font-mono text-gray-700">
+            Motion Assets Only
           </span>
         </label>
 

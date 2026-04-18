@@ -5,7 +5,7 @@ import { type VideoAssetRecord, updateVideoAssetRecord } from '@/server/videoCat
 export type VideoEmbeddingStatus = {
   enabled: boolean;
   queued: boolean;
-  reason?: 'disabled' | 'redis-unavailable' | 'missing-thumbnail' | 'already-exists' | 'unknown';
+  reason?: 'disabled' | 'redis-unavailable' | 'missing-thumbnail' | 'not-ready' | 'already-exists' | 'unknown';
 };
 
 const isTruthyDisabled = (value: string) => {
@@ -55,6 +55,9 @@ export async function queueAutoEmbeddingsForVideo(record: VideoAssetRecord): Pro
   if (!isAutoEmbedOnUploadEnabled()) {
     return { enabled: false, queued: false, reason: 'disabled' };
   }
+  if (record.videoStatus !== 'ready') {
+    return { enabled: true, queued: false, reason: 'not-ready' };
+  }
 
   const imageUrl = getEmbeddingImageUrl(record);
   if (!imageUrl) {
@@ -78,4 +81,3 @@ export async function queueAutoEmbeddingsForVideo(record: VideoAssetRecord): Pro
     return { enabled: true, queued: false, reason: 'unknown' };
   }
 }
-

@@ -898,6 +898,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                 onGenerateDisplayName={generateDisplayName}
                 onCopyUrl={handleCopyUrl}
                 onCopyNamespace={handleCopyNamespace}
+                onSelectColor={() => {}}
                 onMouseEnter={handleMouseEnter}
                 onMouseMove={handleMouseMove}
                 onMouseLeave={handleMouseLeave}
@@ -918,7 +919,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                 isDuplicate={duplicateIds.has(image.id)}
                 variationChildren={childrenMap[image.id]}
                 colorMetadata={colorMetadataMap[image.id]}
-                embeddingPending={embeddingPendingMap[image.id]}
                 altLoading={altLoadingMap[image.id] ?? false}
                 displayNameLoading={displayNameLoadingMap[image.id] ?? false}
                 onToggleSelection={toggleSelection}
@@ -928,6 +928,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                 onGenerateDisplayName={generateDisplayName}
                 onCopyUrl={handleCopyUrl}
                 onCopyNamespace={handleCopyNamespace}
+                onSelectColor={() => {}}
                 onMouseEnter={handleMouseEnter}
                 onMouseMove={handleMouseMove}
                 onMouseLeave={handleMouseLeave}

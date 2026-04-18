@@ -30,7 +30,7 @@ export function CloudflareMetadataHeader(props: {
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
       <span className="text-[11px] font-mono text-gray-700 bg-gray-100 border border-gray-200 rounded-full px-3 py-1">
-        Cloudflare meta (pending): {metadataByteSize} bytes
+        Cloudflare payload (pending): {metadataByteSize} bytes
         {metadataPrunedByteSize > 0 && metadataPrunedByteSize !== metadataByteSize && (
           <> • pruned: {metadataPrunedByteSize}/1024</>
         )}

@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
       context: {
         accountId,
         apiToken,
-        tags: [],
+        tags: ['animated-webp'],
         namespace: namespace && namespace !== '__all__' ? namespace : undefined
       }
     });

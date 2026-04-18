@@ -100,6 +100,7 @@ GET /api/images
 | `namespace` | string | Filter by namespace. Use `__all__` for all, `__none__` for no namespace |
 | `aspectRatioClass` | `"square"` \| `"horizontal"` \| `"vertical"` | Filter by aspect ratio class |
 | `aspectRatio` | string | Filter by exact aspect ratio (e.g., `"16:9"`) |
+| `mediaFilter` | `"animated"` | Return only motion-oriented assets: videos plus explicit animated-WebP image derivatives |
 
 **Response:**
 

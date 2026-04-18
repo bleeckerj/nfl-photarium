@@ -23,6 +23,7 @@ interface UseGalleryFiltersOptions {
     onlyCanonical: boolean;
     respectAspectRatio: boolean;
     onlyWithVariants: boolean;
+    showMotionAssetsOnly?: boolean;
     showDuplicatesOnly: boolean;
     showBrokenOnly: boolean;
     showComfyOnly?: boolean;
@@ -53,6 +54,8 @@ interface UseGalleryFiltersReturn {
   setRespectAspectRatio: (value: boolean) => void;
   onlyWithVariants: boolean;
   setOnlyWithVariants: (value: boolean) => void;
+  showMotionAssetsOnly: boolean;
+  setShowMotionAssetsOnly: (value: boolean) => void;
   showDuplicatesOnly: boolean;
   setShowDuplicatesOnly: (value: boolean) => void;
   showBrokenOnly: boolean;
@@ -123,6 +126,7 @@ export function useGalleryFilters({
   const [onlyCanonical, setOnlyCanonical] = useState(initialPreferences.onlyCanonical);
   const [respectAspectRatio, setRespectAspectRatio] = useState(initialPreferences.respectAspectRatio);
   const [onlyWithVariants, setOnlyWithVariants] = useState(initialPreferences.onlyWithVariants);
+  const [showMotionAssetsOnly, setShowMotionAssetsOnly] = useState(Boolean(initialPreferences.showMotionAssetsOnly));
   const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(initialPreferences.showDuplicatesOnly);
   const [showBrokenOnly, setShowBrokenOnly] = useState(initialPreferences.showBrokenOnly);
   const [showComfyOnly, setShowComfyOnly] = useState(Boolean(initialPreferences.showComfyOnly));
@@ -349,6 +353,7 @@ export function useGalleryFilters({
     onlyCanonical ||
     respectAspectRatio ||
     onlyWithVariants ||
+    showMotionAssetsOnly ||
     showDuplicatesOnly ||
     showBrokenOnly ||
     showComfyOnly ||
@@ -367,6 +372,7 @@ export function useGalleryFilters({
     setOnlyCanonical(false);
     setRespectAspectRatio(false);
     setOnlyWithVariants(false);
+    setShowMotionAssetsOnly(false);
     setShowDuplicatesOnly(false);
     setShowBrokenOnly(false);
     setShowComfyOnly(false);
@@ -450,6 +456,7 @@ export function useGalleryFilters({
     selectedTag,
     searchTerm,
     onlyWithVariants,
+    showMotionAssetsOnly,
     showDuplicatesOnly,
     showBrokenOnly,
     showComfyOnly,
@@ -480,6 +487,8 @@ export function useGalleryFilters({
     setRespectAspectRatio,
     onlyWithVariants,
     setOnlyWithVariants,
+    showMotionAssetsOnly,
+    setShowMotionAssetsOnly,
     showDuplicatesOnly,
     setShowDuplicatesOnly,
     showBrokenOnly,

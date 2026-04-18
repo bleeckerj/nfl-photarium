@@ -92,10 +92,12 @@ export interface GalleryPreferences {
   onlyCanonical: boolean;
   respectAspectRatio: boolean;
   onlyWithVariants: boolean;
+  showMotionAssetsOnly: boolean;
   showComfyOnly: boolean;
   selectedFolder: string;
   selectedTag: string;
   searchTerm: string;
+  colorSearchHex?: string | null;
   viewMode: ViewMode;
   gridSize: GridSize;
   filtersCollapsed: boolean;
@@ -126,6 +128,7 @@ export interface GalleryViewFilters {
   altLoadingMap: Record<string, boolean>;
   displayNameLoadingMap: Record<string, boolean>;
   galleryReturnHrefSuffix: string;
+  activeColorSearchHex?: string | null;
 }
 
 export type DuplicateReason = 'originalUrl+contentHash';

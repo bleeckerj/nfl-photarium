@@ -19,12 +19,20 @@ import SemanticNeighbors from '@/components/SemanticNeighbors';
 import HaikuDisplay from '@/components/HaikuDisplay';
 import AntipodeSearch from '@/components/AntipodeSearch';
 import { subscribeEmbeddingPending, clearPendingIfHasEmbeddings, type EmbeddingPendingEntry } from '@/utils/embeddingPending';
-import { cleanString, enforceCloudflareMetadataLimit, pickCloudflareMetadata } from '@/utils/cloudflareMetadata';
+import {
+  cleanString,
+  CLOUDFLARE_EXTRAS_ONLY_FIELDS,
+  enforceCloudflareMetadataLimit,
+  omitExtrasOnlyCloudflareMetadata,
+  pickCloudflareMetadata,
+} from '@/utils/cloudflareMetadata';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { useDropzone } from 'react-dropzone';
 import { downloadImageToFile, formatDownloadFileName } from '@/utils/downloadUtils';
 import { useImageAspectRatio } from '@/hooks/useImageAspectRatio';
 import { formatBytes } from '@/utils/formatBytes';
+import { ColorSwatches } from '@/components/ColorSwatches';
+import { normalizeColorSearchHex } from '@/components/gallery/colorSearch';
 
 import { AltTextEditor } from '@/components/image-detail/AltTextEditor';
 import { CloudflareMetadataHeader } from '@/components/image-detail/CloudflareMetadataHeader';
@@ -41,6 +49,10 @@ import { AdoptVariationSection } from '@/components/image-detail/AdoptVariationS
 import { UploadVariationSection } from '@/components/image-detail/UploadVariationSection';
 import { VARIATION_UPLOAD_ACCEPT } from '@/components/image-detail/variationUploadConfig';
 import { ParentInfoSection } from '@/components/image-detail/ParentInfoSection';
+import {
+  resolveInitialAltText,
+  resolveInitialDescription,
+} from '@/components/image-detail/metadataValueResolvers';
 
 import { useParentReassignment } from '@/hooks/useParentReassignment';
 import { useVariationUpload } from '@/hooks/useVariationUpload';
@@ -295,6 +307,7 @@ export default function ImageDetailPage() {
   const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const galleryPageParam = searchParams.get('gpage');
   const galleryNamespaceParam = searchParams.get('gns') ?? '';
+  const galleryColorParam = searchParams.get('gcolor');
   const hasGalleryNamespaceParam = searchParams.has('gns');
   const galleryNavSuffix = useMemo(() => {
     const qs = new URLSearchParams();
@@ -304,9 +317,12 @@ export default function ImageDetailPage() {
     if (hasGalleryNamespaceParam) {
       qs.set('gns', galleryNamespaceParam);
     }
+    if (galleryColorParam) {
+      qs.set('gcolor', galleryColorParam);
+    }
     const serialized = qs.toString();
     return serialized ? `?${serialized}` : '';
-  }, [galleryNamespaceParam, galleryPageParam, hasGalleryNamespaceParam]);
+  }, [galleryColorParam, galleryNamespaceParam, galleryPageParam, hasGalleryNamespaceParam]);
 
   const [image, setImage] = useState<CloudflareImage | null>(null);
   const [loading, setLoading] = useState(true);
@@ -323,11 +339,17 @@ export default function ImageDetailPage() {
       return;
     }
     if (galleryPageParam) {
-      router.push(`/?gpage=${encodeURIComponent(galleryPageParam)}&gns=${encodeURIComponent(galleryNamespaceParam)}`, { scroll: false });
+      const qs = new URLSearchParams();
+      qs.set('gpage', galleryPageParam);
+      qs.set('gns', galleryNamespaceParam);
+      if (galleryColorParam) {
+        qs.set('gcolor', galleryColorParam);
+      }
+      router.push(`/?${qs.toString()}`, { scroll: false });
       return;
     }
     router.push('/');
-  }, [galleryNamespaceParam, galleryPageParam, router]);
+  }, [galleryColorParam, galleryNamespaceParam, galleryPageParam, router]);
 
   const [allImages, setAllImages] = useState<CloudflareImage[]>([]);
   const [fallbackParentImage, setFallbackParentImage] = useState<CloudflareImage | null>(null);
@@ -421,8 +443,8 @@ export default function ImageDetailPage() {
     if (found) {
       setFolderSelect(found.folder || '');
       setTagsInput(Array.isArray(found.tags) ? found.tags.join(', ') : '');
-      setDescriptionInput(extrasForCurrentImage?.description || found.description || '');
-      setAltTextInput(extrasForCurrentImage?.altText || found.altTag || '');
+      setDescriptionInput(resolveInitialDescription(extrasForCurrentImage, found));
+      setAltTextInput(resolveInitialAltText(extrasForCurrentImage, found));
       setOriginalUrlInput(found.originalUrl || '');
       setSourceUrlInput(found.sourceUrl || '');
       setDisplayNameInput(found.displayName || found.filename || '');
@@ -870,12 +892,12 @@ export default function ImageDetailPage() {
         const jsonElapsedMs = Math.round(getNow() - jsonStartedAt);
         if (!mounted) return;
         setExtrasRecord(data.record ? { ...data.record, imageId: id } : null);
-        // Apply extras values if they exist, otherwise keep Cloudflare values
-        if (data.record?.description) {
-          setDescriptionInput(data.record.description);
+        // Apply extras values, including intentional empty strings from legacy records.
+        if (data.record && Object.prototype.hasOwnProperty.call(data.record, 'description')) {
+          setDescriptionInput(data.record.description ?? '');
         }
-        if (data.record?.altText) {
-          setAltTextInput(data.record.altText);
+        if (data.record && Object.prototype.hasOwnProperty.call(data.record, 'altText')) {
+          setAltTextInput(data.record.altText ?? '');
         }
         logDetailPerf('extrasFetch:total', startedAt, {
           jsonParseMs: jsonElapsedMs,
@@ -1109,8 +1131,6 @@ export default function ImageDetailPage() {
           .map((t) => t.trim())
           .filter(Boolean)
       : [];
-    const cleanDescription =
-      typeof descriptionInput === 'string' ? cleanString(descriptionInput) : undefined;
     const baseMetadata: Record<string, unknown> = {
       folder: image?.folder,
       tags: image?.tags ?? [],
@@ -1145,7 +1165,10 @@ export default function ImageDetailPage() {
     metadata.displayName = cleanedDisplayName ?? '';
     const cleanAltTag = cleanString(altTextInput) ?? '';
     metadata.altTag = toCloudflareTextMirror(cleanAltTag);
-    const compact = pickCloudflareMetadata(metadata, { includeEmpty: true });
+    const compact = pickCloudflareMetadata(
+      omitExtrasOnlyCloudflareMetadata(metadata),
+      { includeEmpty: true }
+    );
     try {
       const encoder = new TextEncoder();
       const size = encoder.encode(JSON.stringify(compact)).length;
@@ -1164,7 +1187,6 @@ export default function ImageDetailPage() {
   }, [
     altTextInput,
     clearExif,
-    descriptionInput,
     displayNameInput,
     folderSelect,
     image,
@@ -1198,6 +1220,15 @@ export default function ImageDetailPage() {
     },
     [allImages, galleryNavSuffix, galleryResultAssetTypes]
   );
+  const handleColorSearchNavigation = useCallback((hex: string) => {
+    const normalized = normalizeColorSearchHex(hex);
+    if (!normalized) return;
+    const targetNamespace = image?.namespace ?? galleryNamespaceParam;
+    const qs = new URLSearchParams();
+    qs.set('gcolor', normalized);
+    qs.set('gns', targetNamespace ?? '');
+    router.push(`/?${qs.toString()}`, { scroll: false });
+  }, [galleryNamespaceParam, image?.namespace, router]);
 
   const commitNavigation = useCallback((href: string, targetId?: string | null) => {
     lastUserNavIntentRef.current = Date.now();
@@ -1853,9 +1884,8 @@ export default function ImageDetailPage() {
     setFolderSelect(image.folder || '');
     setNewFolderInput('');
     setTagsInput(image.tags ? image.tags.join(', ') : '');
-    // Use Image Extras values if available, otherwise fall back to Cloudflare metadata
-    setDescriptionInput(extrasRecord?.description || image.description || '');
-    setAltTextInput(extrasRecord?.altText || image.altTag || '');
+    setDescriptionInput(resolveInitialDescription(extrasRecord, image));
+    setAltTextInput(resolveInitialAltText(extrasRecord, image));
     setOriginalUrlInput(image.originalUrl || '');
     setSourceUrlInput(image.sourceUrl || '');
     setDisplayNameInput(image.displayName || image.filename || '');
@@ -2702,6 +2732,13 @@ export default function ImageDetailPage() {
               <span className="text-gray-300">•</span>
               <span>Namespace {image.namespace || '[none]'}</span>
             </div>
+            <ColorSwatches
+              dominantColors={image.dominantColors}
+              averageColor={image.averageColor}
+              showLabels={true}
+              className="mt-2"
+              onSelectColor={handleColorSearchNavigation}
+            />
             <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-gray-600">
               <span className="text-gray-500">Image ID</span>
               <span className="font-mono text-gray-800">{image.id}</span>
@@ -2863,7 +2900,7 @@ export default function ImageDetailPage() {
               metadataPrunedByteSize={metadataPrunedByteSize}
               metadataLargestFields={metadataLargestFields}
               metadataPrunedDroppedFields={metadataPrunedDroppedFields}
-              extrasBackedFields={['description', 'altText']}
+              extrasBackedFields={[...CLOUDFLARE_EXTRAS_ONLY_FIELDS, 'altText']}
               isMetadataDirty={isMetadataDirty}
               pendingAutoSave={pendingAutoSave}
               saving={saving}

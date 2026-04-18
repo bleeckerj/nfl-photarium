@@ -601,20 +601,26 @@ export async function uploadImageBuffer({
     type: workingFileType,
     folder: folder,
     tags: tags,
-    originalUrl: originalUrl,
-    originalUrlNormalized: normalizedOriginalUrl,
-    sourceUrl: sourceUrl,
-    sourceUrlNormalized: normalizedSourceUrl,
     sourcePath: sourcePath,
     namespace: normalizedNamespace,
     contentHash,
     variationParentId: resolvedParentId,
     duplicateFamilyOverride: deduplication.duplicateFamilySelection ? true : undefined,
     uploadNormalization: prepared.data.uploadNormalization,
-    exif: exifSummary,
     generatedBy: comfyExtraction.detected ? 'comfyui' : undefined,
     comfyMetadataDetected: comfyExtraction.detected ? true : undefined,
     comfyMetadataSource: comfyExtraction.source,
+  };
+  const extrasMetadata: Record<string, unknown> = {
+    originalUrl: originalUrl || undefined,
+    originalUrlNormalized: normalizedOriginalUrl,
+    sourceUrl: sourceUrl || undefined,
+    sourceUrlNormalized: normalizedSourceUrl,
+    exif: exifSummary,
+  };
+  const cachedMetadataPayload = {
+    ...metadataPayload,
+    ...extrasMetadata,
   };
 
   const { metadata: limitedMetadata, dropped, size, limitBytes } = enforceCloudflareMetadataLimit(metadataPayload);
@@ -681,7 +687,7 @@ export async function uploadImageBuffer({
   const serverMeta = imageData.meta && typeof imageData.meta === 'object'
     ? (imageData.meta as Record<string, unknown>)
     : undefined;
-  const baseMeta = serverMeta ? { ...metadataPayload, ...serverMeta } : metadataPayload;
+  const baseMeta = serverMeta ? { ...cachedMetadataPayload, ...serverMeta } : cachedMetadataPayload;
   const primaryCached = transformApiImageToCached({
     id: imageData.id,
     filename: imageData.filename,
@@ -692,9 +698,10 @@ export async function uploadImageBuffer({
   });
   upsertCachedImage(primaryCached);
 
-  if (description) {
-    await patchImageExtrasRecord(imageData.id, { description });
-  }
+  await patchImageExtrasRecord(imageData.id, {
+    ...(description ? { description } : {}),
+    ...extrasMetadata,
+  });
 
   try {
     await ingestComfyWorkflowForImage({
@@ -760,13 +767,14 @@ export async function uploadImageBuffer({
             variants: webpResult.variants,
             size: webpResult.size,
             meta: webpResult.meta && typeof webpResult.meta === 'object'
-              ? { ...webpMetadataPayload, ...(webpResult.meta as Record<string, unknown>) }
-              : webpMetadataPayload
+              ? { ...cachedMetadataPayload, ...webpMetadataPayload, ...(webpResult.meta as Record<string, unknown>) }
+              : { ...cachedMetadataPayload, ...webpMetadataPayload }
           });
           upsertCachedImage(cachedVariant);
-          if (description) {
-            await patchImageExtrasRecord(webpResult.id, { description });
-          }
+          await patchImageExtrasRecord(webpResult.id, {
+            ...(description ? { description } : {}),
+            ...extrasMetadata,
+          });
           await persistAspectMetadataFromBuffer(webpResult.id, webpBuffer);
           await queueAutoEmbeddingsForImage(cachedVariant);
         }
@@ -808,7 +816,10 @@ export async function uploadImageBuffer({
           uploaded: imageData.uploaded,
           variants: imageData.variants,
           size: imageData.size,
-          meta: updatedMetadata
+          meta: {
+            ...updatedMetadata,
+            ...extrasMetadata,
+          }
         });
         upsertCachedImage(updatedPrimary);
       }

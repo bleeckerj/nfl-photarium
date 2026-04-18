@@ -10,13 +10,12 @@ import React from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Trash2, Copy, ExternalLink, Sparkles, Layers, AlertTriangle } from 'lucide-react';
+import { ColorSwatches } from '@/components/ColorSwatches';
 import { getCloudflareImageUrl, getCloudflareDownloadUrl } from '@/utils/imageUtils';
 import { formatBytes } from '@/utils/formatBytes';
-import { EmbeddingStatusDot } from '@/components/EmbeddingStatusIcon';
 import { AspectRatioDisplay } from './AspectRatioDisplay';
 import { isSvgImage } from './utils';
 import type { CloudflareImage, ColorMetadata } from './types';
-import type { EmbeddingPendingEntry } from '@/utils/embeddingPending';
 
 interface ImageListItemProps {
   image: CloudflareImage;
@@ -27,7 +26,6 @@ interface ImageListItemProps {
   hrefSuffix?: string;
   variationChildren?: CloudflareImage[];
   colorMetadata?: ColorMetadata;
-  embeddingPending?: EmbeddingPendingEntry;
   altLoading: boolean;
   displayNameLoading: boolean;
   // Actions
@@ -38,6 +36,7 @@ interface ImageListItemProps {
   onGenerateDisplayName: (imageId: string) => void;
   onCopyUrl: (imageId: string) => void;
   onCopyNamespace: (namespace: string) => void;
+  onSelectColor?: (hex: string) => void;
   onBeforeNavigate?: (imageId: string) => void;
   onDragStart?: (event: React.DragEvent, image: CloudflareImage) => void;
   // Hover preview
@@ -68,7 +67,6 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
   hrefSuffix,
   variationChildren,
   colorMetadata,
-  embeddingPending,
   altLoading,
   displayNameLoading,
   onToggleSelection,
@@ -78,6 +76,7 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
   onGenerateDisplayName,
   onCopyUrl,
   onCopyNamespace,
+  onSelectColor,
   onBeforeNavigate,
   onDragStart,
   onMouseEnter,
@@ -93,6 +92,8 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
     ? imageUrl
     : (svgImage ? getCloudflareImageUrl(image.id, 'original') : imageUrl);
   const fileSizeLabel = formatBytes(image.size);
+  const swatchAverageColor = colorMetadata?.averageColor ?? image.averageColor;
+  const swatchDominantColors = colorMetadata?.dominantColors ?? image.dominantColors;
   const detailHref = isVideoAsset
     ? `/videos/${image.id}${hrefSuffix ?? ''}`
     : `/images/${image.id}${hrefSuffix ?? ''}`;
@@ -252,34 +253,13 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
             {variationChildren.length} variation{variationChildren.length > 1 ? 's' : ''}
           </p>
         )}
-        {/* Color metadata display */}
-        {colorMetadata && (
-          <div className="font-3270 text-[0.6rem] leading-tight mt-1.5 flex items-center gap-3">
-            {colorMetadata.averageColor && (
-              <div className="flex items-center gap-1.5">
-                <span
-                  className="inline-block w-3.5 h-3.5 rounded-sm border border-gray-200 shadow-sm"
-                  style={{ backgroundColor: colorMetadata.averageColor }}
-                  title={colorMetadata.averageColor}
-                />
-                <span className="text-gray-500 uppercase tracking-wide">avg {colorMetadata.averageColor}</span>
-              </div>
-            )}
-            {colorMetadata.dominantColors && colorMetadata.dominantColors.length > 0 && (
-              <div className="flex items-center gap-1">
-                <span className="text-gray-400 mr-0.5">◆</span>
-                {colorMetadata.dominantColors.slice(0, 5).map((color, idx) => (
-                  <span
-                    key={idx}
-                    className="inline-block w-3.5 h-3.5 rounded-sm border border-gray-200 shadow-sm"
-                    style={{ backgroundColor: color }}
-                    title={color}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+        <ColorSwatches
+          dominantColors={swatchDominantColors}
+          averageColor={swatchAverageColor}
+          showLabels={true}
+          className="mt-1.5"
+          onSelectColor={onSelectColor}
+        />
         {!isVideoAsset && (
           <div className="mt-2 inline-flex overflow-hidden rounded-md border border-gray-200">
             <button

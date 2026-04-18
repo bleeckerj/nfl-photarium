@@ -49,6 +49,31 @@ describe('GET /api/images/:id/download', () => {
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
+  it('supports inline disposition for original blob rendering', async () => {
+    fetchCloudflareImageMock.mockResolvedValue({
+      id: 'img',
+      filename: 'anim.webp',
+      uploaded: '2026-02-01T00:00:00.000Z',
+      variants: ['https://imagedelivery.net/hash/img/public'],
+    });
+    getCloudflareCredentialsMock.mockReturnValue({ accountId: 'acct', apiToken: 'token' });
+
+    const mockFetch = vi.spyOn(globalThis, 'fetch').mockImplementation((input: any) => {
+      const url = String(input);
+      if (url.includes('/images/v1/img/blob')) {
+        return Promise.resolve(new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'image/webp' } }));
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    const req = new NextRequest(new Request('http://localhost/api/images/img/download?variant=original&disposition=inline', { method: 'GET' }));
+    const res = await GET(req, { params: Promise.resolve({ id: 'img' }) });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Disposition')).toBe('inline; filename="anim.webp"');
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
   it('downloads a named delivery variant and reports which was served', async () => {
     fetchCloudflareImageMock.mockResolvedValue({
       id: 'img',

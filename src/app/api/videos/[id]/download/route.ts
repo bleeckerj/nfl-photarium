@@ -41,6 +41,11 @@ const isLikelyBinaryVideoResponse = (response: Response, sourceUrl: string) => {
 const toUniqueUrls = (urls: string[]) =>
   urls.filter((value, index, array) => Boolean(value) && array.indexOf(value) === index);
 
+const isIgnorableStreamDownloadsError = (error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error);
+  return /bad request/i.test(message);
+};
+
 const fetchCandidateHead = async (url: string) => {
   try {
     return await fetch(url, {
@@ -101,11 +106,16 @@ const resolveVideoCandidateUrls = async (video: Awaited<ReturnType<typeof getVid
         }
       }
     } catch (error) {
-      console.warn('[video-download] stream downloads lookup failed', {
+      const payload = {
         id: video.id,
         streamUid: video.streamUid,
         error: error instanceof Error ? error.message : String(error),
-      });
+      };
+      if (isIgnorableStreamDownloadsError(error)) {
+        console.info('[video-download] stream downloads lookup unavailable; using fallback candidates', payload);
+      } else {
+        console.warn('[video-download] stream downloads lookup failed', payload);
+      }
     }
   }
 

@@ -18,6 +18,7 @@ export interface CachedCloudflareImage {
   variants: string[];
   size?: number;
   contentType?: string;
+  isAnimated?: boolean;
   folder?: string;
   tags: string[];
   description?: string;
@@ -199,6 +200,7 @@ const buildMetadataOverride = (image: CachedCloudflareImage): CloudflareMetadata
   assign('variationSort', image.variationSort);
   assign('size', image.size);
   assign('type', image.contentType);
+  assign('isAnimated', image.isAnimated);
   return override;
 };
 
@@ -314,6 +316,7 @@ const transformImage = (image: CloudflareImageApiResponse): CachedCloudflareImag
     }
     return undefined;
   })();
+  const isAnimated = mergedMeta.isAnimated === true ? true : undefined;
 
   return {
     id: image.id,
@@ -322,6 +325,7 @@ const transformImage = (image: CloudflareImageApiResponse): CachedCloudflareImag
     variants: image.variants,
     size: parsedSize,
     contentType,
+    isAnimated,
     folder: cleanFolder,
     tags: cleanTags,
     description: cleanDescription,

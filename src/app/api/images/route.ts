@@ -12,6 +12,7 @@ type ListableImage = {
   uploaded: string;
   variants: string[];
   size?: number;
+  isAnimated?: boolean;
   folder?: string;
   tags?: string[];
   description?: string;
@@ -51,6 +52,22 @@ type FamilyAsset = {
   assetType?: 'image' | 'video';
 };
 
+type ScopedAsset =
+  | {
+      id: string;
+      assetType?: 'image';
+      filename?: string;
+      tags?: string[];
+      isAnimated?: boolean;
+    }
+  | {
+      id: string;
+      assetType: 'video';
+      filename: string;
+      tags?: string[];
+      isAnimated?: boolean;
+    };
+
 const matchesNamespace = (assetNamespace: string | undefined, namespace: string | null) => {
   if (namespace === null) return true;
   if (namespace === '') return !assetNamespace;
@@ -81,6 +98,27 @@ const collectDirectFamilyAssets = <T extends FamilyAsset>(assets: T[], targetId:
   });
 };
 
+const hasTag = (tags: string[] | undefined, expected: string) =>
+  Array.isArray(tags) && tags.some((tag) => tag.trim().toLowerCase() === expected);
+
+const isExplicitAnimatedWebpImage = (asset: ScopedAsset) => {
+  if (asset.assetType === 'video') return false;
+  if (asset.isAnimated === true) return true;
+  const filename = typeof asset.filename === 'string' ? asset.filename.trim().toLowerCase() : '';
+  const tags = Array.isArray(asset.tags) ? asset.tags : [];
+  if (hasTag(tags, 'animated-webp')) return true;
+  // Backward compatibility for older /api/animate outputs that were saved as
+  // `animated-*.webp` but were not tagged as animated WebP artifacts.
+  if (filename.endsWith('.webp') && /(^|[-_])animated([-_]|$)/i.test(filename)) return true;
+  return filename.endsWith('.webp') && hasTag(tags, 'video-derivative');
+};
+
+const matchesMediaFilter = (asset: ScopedAsset, mediaFilter: string | null) => {
+  if (mediaFilter !== 'animated') return true;
+  if (asset.assetType === 'video') return true;
+  return isExplicitAnimatedWebpImage(asset);
+};
+
 function toListableImage(image: Record<string, unknown>): ListableImage {
   const rawDimensions = image.dimensions as { width?: unknown; height?: unknown } | undefined;
   const width = typeof rawDimensions?.width === 'number' ? rawDimensions.width : undefined;
@@ -96,6 +134,7 @@ function toListableImage(image: Record<string, unknown>): ListableImage {
     uploaded: typeof image.uploaded === 'string' ? image.uploaded : '',
     variants: Array.isArray(image.variants) ? (image.variants as string[]) : [],
     size: typeof image.size === 'number' ? image.size : undefined,
+    isAnimated: image.isAnimated === true,
     folder: typeof image.folder === 'string' ? image.folder : undefined,
     tags: Array.isArray(image.tags) ? (image.tags as string[]) : undefined,
     description: typeof image.description === 'string' ? image.description : undefined,
@@ -159,6 +198,7 @@ export async function GET(request: NextRequest) {
     const includeFamilyFor = request.nextUrl.searchParams.get('includeFamilyFor')?.trim() || '';
     const aspectRatioClass = request.nextUrl.searchParams.get('aspectRatioClass')?.trim();
     const aspectRatio = request.nextUrl.searchParams.get('aspectRatio')?.trim();
+    const mediaFilter = request.nextUrl.searchParams.get('mediaFilter')?.trim().toLowerCase() || null;
     const namespaceParam = request.nextUrl.searchParams.get('namespace');
     const videoLimitParam = request.nextUrl.searchParams.get('videoLimit');
     const pageParam = request.nextUrl.searchParams.get('page');
@@ -234,12 +274,15 @@ export async function GET(request: NextRequest) {
     const familyAssets = includeFamilyFor
       ? await markStage('family_collect', () => collectDirectFamilyAssets([...images, ...mappedVideos], includeFamilyFor))
       : [];
-    const scopedAssets = mergeUniqueAssets(
+    const mergedScopedAssets = mergeUniqueAssets(
       [...filteredImages, ...limitedVideos],
       familyAssets
     );
+    const scopedAssets = mergedScopedAssets.filter((asset) => matchesMediaFilter(asset as ScopedAsset, mediaFilter));
     diagnostics.family_asset_count = familyAssets.length;
+    diagnostics.media_filter = mediaFilter;
     diagnostics.scoped_asset_count = scopedAssets.length;
+    diagnostics.scoped_asset_count_before_media_filter = mergedScopedAssets.length;
     const scopedImageIds = new Set(
       scopedAssets
         .filter((asset) => !('assetType' in asset) || asset.assetType !== 'video')
@@ -434,12 +477,13 @@ export async function GET(request: NextRequest) {
         scopedAssets: diagnostics.scoped_asset_count,
         extrasImages: diagnostics.extras_image_count,
         payloadKb: diagnostics.payload_kb,
-        includeVectorMeta,
-        forceRefresh,
-        namespace: namespace ?? null,
-        videoLimit,
-        includeFamilyFor,
-      });
+      includeVectorMeta,
+      forceRefresh,
+      namespace: namespace ?? null,
+      mediaFilter,
+      videoLimit,
+      includeFamilyFor,
+    });
     }
     return response;
   } catch (error) {

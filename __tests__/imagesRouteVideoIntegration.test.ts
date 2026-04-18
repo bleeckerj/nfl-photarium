@@ -150,6 +150,120 @@ describe('GET /api/images video integration', () => {
     );
   });
 
+  it('returns only videos when mediaFilter=animated and no animated webp images exist', async () => {
+    getCachedImagesMock.mockResolvedValue([
+      {
+        id: 'img-1',
+        filename: 'photo.jpg',
+        uploaded: '2026-02-20T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/img-1/public'],
+        tags: [],
+      },
+      {
+        id: 'img-2',
+        filename: 'still.webp',
+        uploaded: '2026-02-19T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/img-2/public'],
+        tags: ['preview'],
+      },
+    ]);
+
+    const response = await GET(new NextRequest('http://localhost/api/images?mediaFilter=animated'));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.images).toEqual([
+      expect.objectContaining({
+        id: 'vid-1',
+        assetType: 'video',
+      }),
+    ]);
+    expect(payload.pagination).toBeNull();
+  });
+
+  it('includes explicit animated webp images alongside videos for mediaFilter=animated', async () => {
+    getCachedImagesMock.mockResolvedValue([
+      {
+        id: 'img-animated',
+        filename: 'clip-preview.webp',
+        uploaded: '2026-02-20T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/img-animated/public'],
+        tags: ['animated-webp', 'video-derivative'],
+      },
+      {
+        id: 'img-still',
+        filename: 'still.png',
+        uploaded: '2026-02-19T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/img-still/public'],
+        tags: [],
+      },
+    ]);
+
+    const response = await GET(new NextRequest('http://localhost/api/images?mediaFilter=animated'));
+    const payload = await response.json();
+    const ids = payload.images.map((entry: { id: string }) => entry.id);
+
+    expect(response.status).toBe(200);
+    expect(ids).toEqual(expect.arrayContaining(['img-animated', 'vid-1']));
+    expect(ids).not.toContain('img-still');
+  });
+
+  it('excludes plain still webp images unless they use animated-webp conventions', async () => {
+    getCachedImagesMock.mockResolvedValue([
+      {
+        id: 'img-still-webp',
+        filename: 'poster.webp',
+        uploaded: '2026-02-20T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/img-still-webp/public'],
+        tags: ['poster'],
+      },
+      {
+        id: 'img-derived-webp',
+        filename: 'derived.webp',
+        uploaded: '2026-02-19T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/img-derived-webp/public'],
+        tags: ['video-derivative'],
+      },
+    ]);
+    listVideoAssetRecordsWithSyncMock.mockResolvedValue([]);
+
+    const response = await GET(new NextRequest('http://localhost/api/images?mediaFilter=animated'));
+    const payload = await response.json();
+    const ids = payload.images.map((entry: { id: string }) => entry.id);
+
+    expect(response.status).toBe(200);
+    expect(ids).toContain('img-derived-webp');
+    expect(ids).not.toContain('img-still-webp');
+  });
+
+  it('includes legacy animated filename webps even when older uploads are missing animated tags', async () => {
+    getCachedImagesMock.mockResolvedValue([
+      {
+        id: 'img-legacy-animated',
+        filename: 'animated-1712345678901.webp',
+        uploaded: '2026-02-20T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/img-legacy-animated/public'],
+        tags: [],
+      },
+      {
+        id: 'img-still-webp',
+        filename: 'poster.webp',
+        uploaded: '2026-02-19T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/img-still-webp/public'],
+        tags: [],
+      },
+    ]);
+    listVideoAssetRecordsWithSyncMock.mockResolvedValue([]);
+
+    const response = await GET(new NextRequest('http://localhost/api/images?mediaFilter=animated'));
+    const payload = await response.json();
+    const ids = payload.images.map((entry: { id: string }) => entry.id);
+
+    expect(response.status).toBe(200);
+    expect(ids).toContain('img-legacy-animated');
+    expect(ids).not.toContain('img-still-webp');
+  });
+
   it('includes direct family members across namespaces when includeFamilyFor is provided', async () => {
     getCachedImagesMock.mockResolvedValue([
       {
@@ -233,6 +347,66 @@ describe('GET /api/images video integration', () => {
     expect(response.status).toBe(200);
     expect(ids).toContain('img-parent');
     expect(ids).toContain('img-child');
+  });
+
+  it('keeps namespace scoping in place when mediaFilter=animated is requested', async () => {
+    getCachedImagesMock.mockResolvedValue([
+      {
+        id: 'img-alpha',
+        filename: 'alpha-preview.webp',
+        namespace: 'alpha',
+        uploaded: '2026-02-20T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/img-alpha/public'],
+        tags: ['animated-webp'],
+      },
+      {
+        id: 'img-beta',
+        filename: 'beta-preview.webp',
+        namespace: 'beta',
+        uploaded: '2026-02-19T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/img-beta/public'],
+        tags: ['animated-webp'],
+      },
+    ]);
+    listVideoAssetRecordsWithSyncMock.mockResolvedValue([
+      {
+        id: 'vid-alpha',
+        assetType: 'video',
+        filename: 'alpha.mp4',
+        namespace: 'alpha',
+        uploaded: '2026-02-20T01:00:00.000Z',
+        streamUid: 'stream-alpha',
+        playbackUrl: 'https://videodelivery.net/stream-alpha/iframe',
+        videoStatus: 'pending',
+        tags: [],
+        createdAt: '2026-02-20T01:00:00.000Z',
+        updatedAt: '2026-02-20T01:00:00.000Z',
+      },
+      {
+        id: 'vid-beta',
+        assetType: 'video',
+        filename: 'beta.mp4',
+        namespace: 'beta',
+        uploaded: '2026-02-20T02:00:00.000Z',
+        streamUid: 'stream-beta',
+        playbackUrl: 'https://videodelivery.net/stream-beta/iframe',
+        videoStatus: 'pending',
+        tags: [],
+        createdAt: '2026-02-20T02:00:00.000Z',
+        updatedAt: '2026-02-20T02:00:00.000Z',
+      },
+    ]);
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/images?namespace=alpha&mediaFilter=animated')
+    );
+    const payload = await response.json();
+    const ids = payload.images.map((entry: { id: string }) => entry.id);
+
+    expect(response.status).toBe(200);
+    expect(ids).toEqual(expect.arrayContaining(['img-alpha', 'vid-alpha']));
+    expect(ids).not.toContain('img-beta');
+    expect(ids).not.toContain('vid-beta');
   });
 
   it('applies extras description/altText to image list payload', async () => {
@@ -350,6 +524,47 @@ describe('GET /api/images video integration', () => {
       pageSize: 1,
       total: 3,
       totalPages: 3,
+    });
+  });
+
+  it('reports pagination totals after mediaFilter=animated is applied', async () => {
+    getCachedImagesMock.mockResolvedValue([
+      {
+        id: 'img-animated-1',
+        filename: 'animated-1.webp',
+        uploaded: '2026-02-20T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/img-animated-1/public'],
+        tags: ['animated-webp'],
+      },
+      {
+        id: 'img-still',
+        filename: 'still.jpg',
+        uploaded: '2026-02-19T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/img-still/public'],
+        tags: [],
+      },
+      {
+        id: 'img-animated-2',
+        filename: 'animated-2.webp',
+        uploaded: '2026-02-18T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/img-animated-2/public'],
+        tags: ['video-derivative'],
+      },
+    ]);
+    listVideoAssetRecordsWithSyncMock.mockResolvedValue([]);
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/images?mediaFilter=animated&page=2&pageSize=1')
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.images).toHaveLength(1);
+    expect(payload.pagination).toEqual({
+      page: 2,
+      pageSize: 1,
+      total: 2,
+      totalPages: 2,
     });
   });
 });

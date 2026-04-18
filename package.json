@@ -20,6 +20,8 @@
     "redis:status": "docker compose ps",
     "embeddings:generate": "node scripts/generate-embeddings.mjs",
     "embeddings:backfill": "node scripts/backfill-embeddings.mjs",
+    "embeddings:recover:dry-run": "node scripts/backfill-embeddings.mjs --dry-run --live-verify -v",
+    "embeddings:recover": "node scripts/backfill-embeddings.mjs --throttle-ms=300 --batch=20 --delay=2000 --live-verify --checkpoint-file ./data/embedding-backfill-checkpoints/recover-all.json -vv",
     "embeddings:status": "curl -s http://localhost:3000/api/images/vectors/status | jq",
     "prompts:backfill": "node scripts/backfill-prompts.mjs",
     "discord:metadata:backfill": "node scripts/backfill-discord-image-metadata.mjs",

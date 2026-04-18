@@ -505,6 +505,17 @@ node scripts/backfill-embeddings.mjs --clip-only --limit=50
 node scripts/backfill-embeddings.mjs --dry-run
 ```
 
+**Recovery workflow after an interrupted run:**
+```bash
+# Inspect the current gap first
+npm run embeddings:recover:dry-run
+
+# Resume-safe corpus recovery with a fixed checkpoint
+npm run embeddings:recover
+```
+
+The recovery command writes progress to `data/embedding-backfill-checkpoints/recover-all.json`. If Photarium or Redis dies mid-run, restart the service and rerun the same command to continue from the last saved checkpoint.
+
 ### Backfill Script Options
 
 ```
@@ -512,6 +523,12 @@ node scripts/backfill-embeddings.mjs --dry-run
 --limit=<n>       Maximum images to process
 --batch=<n>       Batch size before pause (default: 10)
 --delay=<ms>      Delay between batches (default: 1000)
+--throttle-ms=<ms> Minimum delay between image requests (default: 150)
+--checkpoint-file <path> Override the checkpoint file location
+--resume          Resume from prior checkpoint state (default)
+--no-resume       Ignore prior checkpoint state
+--live-verify     Verify live Redis/vector state before acting (default)
+--heartbeat-ms=<ms> Emit progress while requests are in flight
 --clip-only       Only generate CLIP embeddings
 --color-only      Only generate color embeddings
 --force           Regenerate even if embeddings exist

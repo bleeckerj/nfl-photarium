@@ -16,10 +16,12 @@ export type GalleryReturnResultAsset = {
 
 export type GalleryReturnFilters = {
   searchTerm: string;
+  colorSearchHex?: string | null;
   selectedFolder: string;
   selectedTag: string;
   onlyCanonical: boolean;
   onlyWithVariants: boolean;
+  showMotionAssetsOnly: boolean;
   showDuplicatesOnly: boolean;
   showBrokenOnly: boolean;
   showComfyOnly: boolean;
@@ -133,10 +135,15 @@ const normalizeFilters = (value: unknown): GalleryReturnFilters | null => {
   const raw = value as Record<string, unknown>;
   return {
     searchTerm: typeof raw.searchTerm === 'string' ? raw.searchTerm : '',
+    colorSearchHex:
+      typeof raw.colorSearchHex === 'string' && raw.colorSearchHex.trim()
+        ? raw.colorSearchHex.trim()
+        : null,
     selectedFolder: typeof raw.selectedFolder === 'string' ? raw.selectedFolder : 'all',
     selectedTag: typeof raw.selectedTag === 'string' ? raw.selectedTag : '',
     onlyCanonical: Boolean(raw.onlyCanonical),
     onlyWithVariants: Boolean(raw.onlyWithVariants),
+    showMotionAssetsOnly: Boolean(raw.showMotionAssetsOnly),
     showDuplicatesOnly: Boolean(raw.showDuplicatesOnly),
     showBrokenOnly: Boolean(raw.showBrokenOnly),
     showComfyOnly: Boolean(raw.showComfyOnly),

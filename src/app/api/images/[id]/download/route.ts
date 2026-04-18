@@ -35,6 +35,9 @@ export async function GET(
     }
 
     const variant = (request.nextUrl.searchParams.get('variant') || 'public').trim();
+    const disposition = request.nextUrl.searchParams.get('disposition')?.trim().toLowerCase() === 'inline'
+      ? 'inline'
+      : 'attachment';
     const image = await fetchCloudflareImage(imageId);
 
     // "original" must return the uploaded bytes (including embedded metadata), not a derived delivery variant.
@@ -61,7 +64,7 @@ export async function GET(
       headers.set('Content-Type', blobResponse.headers.get('content-type') || 'application/octet-stream');
       headers.set(
         'Content-Disposition',
-        `attachment; filename="${image.filename || `${imageId}.bin`}"`
+        `${disposition}; filename="${image.filename || `${imageId}.bin`}"`
       );
       headers.set('X-Photarium-Variant-Requested', variant);
       headers.set('X-Photarium-Variant-Served', 'original');
@@ -88,7 +91,7 @@ export async function GET(
     headers.set('Content-Type', response.headers.get('content-type') || 'application/octet-stream');
     headers.set(
       'Content-Disposition',
-      `attachment; filename="${image.filename || `${imageId}.bin`}"`
+      `${disposition}; filename="${image.filename || `${imageId}.bin`}"`
     );
     headers.set('X-Photarium-Variant-Requested', variant);
     headers.set('X-Photarium-Variant-Served', extractVariantFromUrl(url, imageId) || 'unknown');

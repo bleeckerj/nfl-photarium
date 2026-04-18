@@ -2052,45 +2052,37 @@ export default function VideoDetailPage() {
               <p className="text-xs font-mono text-gray-600">count={sortedAnimatedWebpVariants.length}</p>
             </div>
 
-            {!cloudflareAccountHash ? (
-              <p className="text-xs font-mono text-amber-800">
-                Missing `NEXT_PUBLIC_CLOUDFLARE_ACCOUNT_HASH`, so thumbnails are unavailable.
-              </p>
-            ) : (
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-                {sortedAnimatedWebpVariants.map((variant) => (
-                  <Link
-                    key={variant.imageId}
-                    href={`/images/${variant.imageId}`}
-                    className="group rounded border border-gray-200 bg-white p-2 hover:border-gray-300"
-                    title="Open image detail"
-                  >
-                    <div className="relative aspect-square w-full overflow-hidden rounded bg-gray-100">
-                      <Image
-                        src={getCloudflareImageUrl(variant.imageId, 'w=300')}
-                        alt={variant.filename}
-                        fill
-                        className="object-cover transition-transform duration-200 group-hover:scale-[1.02]"
-                        unoptimized
-                      />
-                    </div>
-                    <div className="mt-2 space-y-1">
-                      <p className="truncate text-xs font-mono text-gray-900" title={variant.filename}>
-                        {variant.filename}
-                      </p>
-                      <p className="text-[11px] font-mono text-gray-600">
-                        {formatBytes(variant.bytes)} • {variant.fps}fps • {variant.loop ? 'loop' : 'no-loop'}
-                      </p>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            )}
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+              {sortedAnimatedWebpVariants.map((variant) => (
+                <Link
+                  key={variant.imageId}
+                  href={`/images/${variant.imageId}`}
+                  className="group rounded border border-gray-200 bg-white p-2 hover:border-gray-300"
+                  title="Open image detail"
+                >
+                  <div className="relative aspect-square w-full overflow-hidden rounded bg-gray-100">
+                    <img
+                      src={variant.url}
+                      alt={variant.filename}
+                      className="absolute inset-0 h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
+                    />
+                  </div>
+                  <div className="mt-2 space-y-1">
+                    <p className="truncate text-xs font-mono text-gray-900" title={variant.filename}>
+                      {variant.filename}
+                    </p>
+                    <p className="text-[11px] font-mono text-gray-600">
+                      {formatBytes(variant.bytes)} • {variant.fps}fps • {variant.loop ? 'loop' : 'no-loop'}
+                    </p>
+                  </div>
+                </Link>
+              ))}
+            </div>
           </section>
         )}
 
         <section className="rounded-lg border border-gray-200 bg-black p-3">
-          {video.playbackUrl ? (
+          {video.videoStatus === 'ready' && video.playbackUrl ? (
             <iframe
               src={video.playbackUrl}
               className="h-[60vh] w-full rounded"
@@ -2099,8 +2091,18 @@ export default function VideoDetailPage() {
               title={video.displayName || video.filename}
             />
           ) : (
-            <div className="flex h-[40vh] items-center justify-center text-sm font-mono text-gray-300">
-              Playback URL unavailable
+            <div className="flex h-[40vh] flex-col items-center justify-center gap-2 rounded text-center font-mono text-gray-300">
+              <p className="text-sm">
+                {video.videoStatus === 'pending'
+                  ? 'Video is still processing in Cloudflare Stream.'
+                  : video.videoStatus === 'error'
+                    ? 'Video processing failed.'
+                    : 'Playback URL unavailable'}
+              </p>
+              <p className="text-xs text-gray-400">
+                status={video.videoStatus}
+                {video.streamError ? ` • ${video.streamError}` : ''}
+              </p>
             </div>
           )}
         </section>

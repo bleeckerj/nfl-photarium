@@ -119,6 +119,20 @@ Unlock the full AI/discovery layer by connecting Redis Stack.
   1. Spin up a Redis Stack instance (see [Deployment Guide](./DEPLOYMENT.md)).
   2. Set `CACHE_STORAGE_TYPE=redis` and `REDIS_URL`.
 
+### Recover Missing Embeddings After an Interrupted Run
+
+If Photarium or Redis was interrupted before embedding generation finished, use the resumable backfill CLI:
+
+```bash
+# Inspect the current gap first
+npm run embeddings:recover:dry-run
+
+# Recover missing CLIP + color embeddings across the corpus
+npm run embeddings:recover
+```
+
+The recovery run uses a persisted checkpoint at `data/embedding-backfill-checkpoints/recover-all.json`, throttles requests, and resumes safely if you rerun the same command after another interruption.
+
 ---
 
 ## Quick Start
