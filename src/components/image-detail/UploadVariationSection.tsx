@@ -1,4 +1,16 @@
 import React from 'react';
+import { MAX_FILENAME_LENGTH, needsSanitization, sanitizeFilename } from '@/utils/filename';
+
+type UploadVariationQueueItem = {
+  id: string;
+  file: File;
+  filename: string;
+};
+
+const isArchiveFile = (file: File) => {
+  const lower = file.name.toLowerCase();
+  return lower.endsWith('.zip') || lower.endsWith('.key');
+};
 
 export interface UploadVariationSectionProps {
   getVariantDropzoneProps: () => Record<string, unknown>;
@@ -10,14 +22,17 @@ export interface UploadVariationSectionProps {
   fallbackFolder: string;
   fallbackTags: string[];
 
-  childUploadFiles: File[];
+  childUploadItems: UploadVariationQueueItem[];
+  onUpdateSelectedFilename: (id: string, value: string) => void;
   onClearSelectedFiles: () => void;
 
   onUpload: () => void | Promise<void>;
   childUploadLoading: boolean;
 
   childUploadUrl: string;
+  childUploadUrlFilename: string;
   onChildUploadUrlChange: (value: string) => void;
+  onChildUploadUrlFilenameChange: (value: string) => void;
   onUploadUrl: () => void | Promise<void>;
   childUploadUrlLoading: boolean;
 
@@ -37,12 +52,15 @@ export function UploadVariationSection(props: UploadVariationSectionProps) {
     childUploadTags,
     fallbackFolder,
     fallbackTags,
-    childUploadFiles,
+    childUploadItems,
+    onUpdateSelectedFilename,
     onClearSelectedFiles,
     onUpload,
     childUploadLoading,
     childUploadUrl,
+    childUploadUrlFilename,
     onChildUploadUrlChange,
+    onChildUploadUrlFilenameChange,
     onUploadUrl,
     childUploadUrlLoading,
     childImportUrl,
@@ -60,7 +78,7 @@ export function UploadVariationSection(props: UploadVariationSectionProps) {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div>
           <h3 className="text-xs font-mono font-medum text-gray-800">Upload a new variation</h3>
-          <p className="text-xs text-gray-600">Files automatically inherit this image&apos;s folder and tags.</p>
+          <p className="text-xs text-gray-600">Files inherit the current folder and tags. Namespace is inherited automatically from the canonical parent.</p>
           <p className="text-[11px] text-gray-500">Images, videos, and .zip/.key uploads are supported.</p>
         </div>
       </div>
@@ -82,23 +100,6 @@ export function UploadVariationSection(props: UploadVariationSectionProps) {
           Tags: <span className="font-mono">{tagsLabel || '[none]'}</span>
         </p>
       </div>
-
-      {childUploadFiles.length > 0 && (
-        <div className="text-xs text-gray-700 space-y-1">
-          {childUploadFiles.map((file, idx) => (
-            <p key={`${file.name}-${idx}`} className="truncate">
-              • {file.name}
-            </p>
-          ))}
-          <button
-            type="button"
-            onClick={onClearSelectedFiles}
-            className="mt-2 px-2 py-1 text-[11px] text-red-600 border border-red-200 rounded-md hover:bg-red-50"
-          >
-            Clear selected files
-          </button>
-        </div>
-      )}
 
       <div className="space-y-2">
         <label className="text-[11px] font-mono text-gray-700" htmlFor="child-import-url">
@@ -127,10 +128,90 @@ export function UploadVariationSection(props: UploadVariationSectionProps) {
         <p className="text-[11px] text-gray-500">Fetched images are added to the queue below.</p>
       </div>
 
+      {childUploadItems.length > 0 && (
+        <div className="space-y-2 text-xs text-gray-700">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] font-mono text-gray-700">
+              Queued upload{childUploadItems.length === 1 ? '' : 's'}: {childUploadItems.length}
+            </p>
+            <button
+              type="button"
+              onClick={onClearSelectedFiles}
+              className="px-2 py-1 text-[11px] text-red-600 border border-red-200 rounded-md hover:bg-red-50"
+            >
+              Clear selected files
+            </button>
+          </div>
+          {childUploadItems.map((item) => {
+            const editableFilename = !isArchiveFile(item.file);
+            return (
+              <div key={item.id} className="rounded-md border border-gray-200 bg-white/70 p-2">
+                {editableFilename ? (
+                  <>
+                    <label className="mb-1 block text-[11px] font-mono text-gray-700" htmlFor={`variation-file-${item.id}`}>
+                      Original filename
+                    </label>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <input
+                        id={`variation-file-${item.id}`}
+                        type="text"
+                        value={item.filename}
+                        onChange={(event) => onUpdateSelectedFilename(item.id, event.target.value)}
+                        className="min-w-0 flex-1 rounded-md border border-gray-300 bg-white px-2 py-2 font-mono text-xs text-gray-900 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        disabled={childUploadLoading}
+                      />
+                      {item.filename.trim() && needsSanitization(item.filename) && (
+                        <button
+                          type="button"
+                          onClick={() => onUpdateSelectedFilename(item.id, sanitizeFilename(item.filename))}
+                          className="rounded-md border border-amber-300 bg-amber-100 px-2 py-2 text-[11px] text-amber-800 hover:bg-amber-200"
+                          disabled={childUploadLoading}
+                        >
+                          Sanitize
+                        </button>
+                      )}
+                    </div>
+                    {item.filename.length > MAX_FILENAME_LENGTH && (
+                      <p className="mt-1 text-[11px] text-amber-700">
+                        Long filename ({item.filename.length} chars)
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <p className="truncate font-mono text-xs text-gray-900">{item.file.name}</p>
+                    <p className="mt-1 text-[11px] text-gray-500">Archive uploads keep the filenames stored inside the archive.</p>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       <div className="space-y-2">
         <label className="text-[11px] font-mono text-gray-700" htmlFor="child-variation-url">
           Upload asset by URL
         </label>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <input
+            id="child-variation-filename"
+            type="text"
+            placeholder="Optional filename override"
+            value={childUploadUrlFilename}
+            onChange={(event) => onChildUploadUrlFilenameChange(event.target.value)}
+            className="flex-1 px-2 py-2 text-xs font-mono border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          {childUploadUrlFilename.trim() && needsSanitization(childUploadUrlFilename) && (
+            <button
+              type="button"
+              onClick={() => onChildUploadUrlFilenameChange(sanitizeFilename(childUploadUrlFilename))}
+              className="px-3 py-2 text-[11px] border border-amber-300 bg-amber-100 text-amber-800 rounded-md hover:bg-amber-200"
+            >
+              Sanitize
+            </button>
+          )}
+        </div>
         <div className="flex flex-col sm:flex-row gap-2">
           <input
             id="child-variation-url"
@@ -150,12 +231,13 @@ export function UploadVariationSection(props: UploadVariationSectionProps) {
             {childUploadUrlLoading ? 'Uploading…' : 'Upload URL'}
           </button>
         </div>
+        <p className="text-[11px] text-gray-500">Leave the filename blank to use the name derived from the URL.</p>
         <p className="text-[11px] text-gray-500">URL uploads use the same folder and tags as file uploads. Video URLs are supported when the URL points to a video file.</p>
       </div>
 
       <button
         onClick={() => void onUpload()}
-        disabled={childUploadLoading || childUploadFiles.length === 0}
+        disabled={childUploadLoading || childUploadItems.length === 0}
         className="px-4 py-2 text-xs bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {childUploadLoading ? 'Uploading…' : 'Upload variation(s)'}

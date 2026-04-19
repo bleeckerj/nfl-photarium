@@ -74,6 +74,7 @@ describe('POST /api/import/page/upload-video', () => {
     validateParentForNewChildMock.mockResolvedValue({
       ok: true,
       canonicalParentId: undefined,
+      canonicalParentNamespace: undefined,
     });
   });
 
@@ -125,6 +126,7 @@ describe('POST /api/import/page/upload-video', () => {
     validateParentForNewChildMock.mockResolvedValue({
       ok: true,
       canonicalParentId: 'parent-123',
+      canonicalParentNamespace: 'ns-a',
       redirectedFromParentId: 'child-parent-456',
     });
 
@@ -141,6 +143,32 @@ describe('POST /api/import/page/upload-video', () => {
     expect(uploadVideoFromRemoteUrlMock).toHaveBeenCalledWith(
       expect.objectContaining({
         context: expect.objectContaining({
+          namespace: 'ns-a',
+          parentId: 'parent-123',
+        }),
+      })
+    );
+  });
+
+  it('inherits the canonical parent namespace for remote variation uploads', async () => {
+    validateParentForNewChildMock.mockResolvedValue({
+      ok: true,
+      canonicalParentId: 'parent-123',
+      canonicalParentNamespace: 'ns-inherited',
+    });
+
+    const response = await POST(
+      createJsonRequest({
+        url: 'https://cdn.example.com/video.mp4',
+        parentId: 'child-parent-456',
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(uploadVideoFromRemoteUrlMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          namespace: 'ns-inherited',
           parentId: 'parent-123',
         }),
       })
@@ -213,6 +241,7 @@ describe('POST /api/import/page/upload-video', () => {
     validateParentForNewChildMock.mockResolvedValue({
       ok: true,
       canonicalParentId: 'parent-789',
+      canonicalParentNamespace: 'ns-a',
     });
 
     const formData = new FormData();
@@ -228,6 +257,32 @@ describe('POST /api/import/page/upload-video', () => {
     expect(uploadVideoBufferMock).toHaveBeenCalledWith(
       expect.objectContaining({
         context: expect.objectContaining({
+          namespace: 'ns-a',
+          parentId: 'parent-789',
+        }),
+      })
+    );
+  });
+
+  it('inherits the canonical parent namespace for multipart variation uploads', async () => {
+    validateParentForNewChildMock.mockResolvedValue({
+      ok: true,
+      canonicalParentId: 'parent-789',
+      canonicalParentNamespace: 'ns-inherited',
+    });
+
+    const formData = new FormData();
+    const file = new File(['video-bytes'], 'clip.mp4', { type: 'video/mp4' });
+    formData.append('file', file);
+    formData.append('parentId', 'variant-parent-123');
+
+    const response = await POST(createFormRequest(formData));
+
+    expect(response.status).toBe(200);
+    expect(uploadVideoBufferMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          namespace: 'ns-inherited',
           parentId: 'parent-789',
         }),
       })

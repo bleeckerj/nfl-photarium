@@ -12,6 +12,7 @@ import { normalizeCookieHeader } from '@/server/pageImportCookies';
 import type { UploadFailure, UploadSuccess } from '@/server/uploadService';
 import { resolveUploadSource } from '@/server/import-metadata/uploadSourceResolver';
 import { isPrivateHost, isValidRemoteUrl } from '@/server/import-metadata/http';
+import { resolveUploadNamespace, SPECIFIC_NAMESPACE_REQUIRED_ERROR } from '@/server/uploadNamespace';
 
 const IMAGE_EXTENSION_MIME_MAP: Record<string, string> = {
   jpg: 'image/jpeg',
@@ -59,6 +60,7 @@ const getFilenameFromContentDisposition = (value: string | null) => {
 type UploadItem = {
   clientId: string;
   url: string;
+  filename?: string;
   displayName?: string;
   folder?: string;
   tags?: string;
@@ -114,6 +116,10 @@ export async function POST(request: NextRequest) {
         typeof item.displayName === 'string' && item.displayName.trim()
           ? item.displayName.trim()
           : undefined;
+      const cleanFilename =
+        typeof item.filename === 'string' && item.filename.trim()
+          ? sanitizeFilename(item.filename.trim())
+          : undefined;
       const cleanFolder = typeof item.folder === 'string' && item.folder.trim() ? item.folder.trim() : undefined;
       const cleanTags = typeof item.tags === 'string'
         ? item.tags.split(',').map((tag) => tag.trim()).filter(Boolean)
@@ -121,21 +127,6 @@ export async function POST(request: NextRequest) {
       const cleanDescription = typeof item.description === 'string' && item.description.trim()
         ? item.description.trim()
         : undefined;
-      const rawNamespace = typeof item.namespace === 'string' ? item.namespace.trim() : '';
-      const cleanNamespace =
-        rawNamespace && rawNamespace !== 'undefined' && rawNamespace !== '__all__' && rawNamespace !== '__none__'
-          ? rawNamespace
-          : undefined;
-      if (!cleanNamespace) {
-        failures.push({
-          clientId: item.clientId,
-          filename: item.url || 'unknown',
-          error: 'A specific namespace is required for uploads. Select a namespace instead of All.',
-          reason: 'upload'
-        });
-        continue;
-      }
-      const effectiveNamespace = cleanNamespace;
       const parentIdValue = typeof item.parentId === 'string' ? item.parentId.trim() : '';
       const cleanParentId = parentIdValue && parentIdValue !== 'undefined' ? parentIdValue : undefined;
 
@@ -145,6 +136,16 @@ export async function POST(request: NextRequest) {
           clientId: item.clientId,
           filename: item.url || 'unknown',
           error: parentValidation.error,
+          reason: 'upload'
+        });
+        continue;
+      }
+      const effectiveNamespace = resolveUploadNamespace(item.namespace, parentValidation);
+      if (!effectiveNamespace) {
+        failures.push({
+          clientId: item.clientId,
+          filename: item.url || 'unknown',
+          error: SPECIFIC_NAMESPACE_REQUIRED_ERROR,
           reason: 'upload'
         });
         continue;
@@ -242,9 +243,11 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        const filename = resolvedSource.filename
-          ? sanitizeFilename(resolvedSource.filename)
-          : extractFilenameFromUrl(item.url, inferredContentType);
+        const filename = cleanFilename || (
+          resolvedSource.filename
+            ? sanitizeFilename(resolvedSource.filename)
+            : extractFilenameFromUrl(item.url, inferredContentType)
+        );
 
         const outcome = await uploadImageBuffer({
           buffer,

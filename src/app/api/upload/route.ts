@@ -4,6 +4,7 @@ import { toDuplicateSummary } from '@/server/duplicateDetector';
 import { upsertRegistryNamespace } from '@/server/namespaceRegistry';
 import { validateParentForNewChild } from '@/server/parentValidation';
 import { getPromptThisRecord, setPromptThisRecord, type PromptThisRecord } from '@/server/promptThis';
+import { resolveUploadNamespace, SPECIFIC_NAMESPACE_REQUIRED_ERROR } from '@/server/uploadNamespace';
 import { SUPPORTED_IMAGE_TYPES, uploadImageBuffer } from '@/server/uploadService';
 import type { UploadFailure, UploadSuccess } from '@/server/uploadService';
 
@@ -170,6 +171,7 @@ export async function POST(request: NextRequest) {
     const originalUrl = formData.get('originalUrl') as string;
     const sourceUrl = formData.get('sourceUrl') as string;
     const sourcePath = formData.get('sourcePath') as string;
+    const filenameRaw = formData.get('filename');
     const namespace = formData.get('namespace') as string;
     const parentIdRaw = formData.get('parentId');
     const duplicateActionRaw = formData.get('duplicateAction');
@@ -190,18 +192,10 @@ export async function POST(request: NextRequest) {
     const cleanOriginalUrl = originalUrl && originalUrl.trim() && originalUrl !== 'undefined' ? originalUrl.trim() : undefined;
     const cleanSourceUrl = sourceUrl && sourceUrl.trim() && sourceUrl !== 'undefined' ? sourceUrl.trim() : undefined;
     const cleanSourcePath = sourcePath && sourcePath.trim() && sourcePath !== 'undefined' ? sourcePath.trim() : undefined;
-    const rawNamespace = typeof namespace === 'string' ? namespace.trim() : '';
-    const cleanNamespace =
-      rawNamespace && rawNamespace !== 'undefined' && rawNamespace !== '__all__' && rawNamespace !== '__none__'
-        ? rawNamespace
+    const cleanFilename =
+      typeof filenameRaw === 'string' && filenameRaw.trim() && filenameRaw !== 'undefined'
+        ? normalizeFilename(filenameRaw.trim())
         : undefined;
-    if (!cleanNamespace) {
-      return NextResponse.json(
-        { error: 'A specific namespace is required for uploads. Select a namespace instead of All.' },
-        { status: 400 }
-      );
-    }
-    const effectiveNamespace = cleanNamespace;
     const parentIdValue = typeof parentIdRaw === 'string' ? parentIdRaw.trim() : '';
     const cleanParentId = parentIdValue && parentIdValue !== 'undefined' ? parentIdValue : undefined;
 
@@ -210,6 +204,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: parentValidation.error },
         { status: parentValidation.status }
+      );
+    }
+    const effectiveNamespace = resolveUploadNamespace(namespace, parentValidation);
+    if (!effectiveNamespace) {
+      return NextResponse.json(
+        { error: SPECIFIC_NAMESPACE_REQUIRED_ERROR },
+        { status: 400 }
       );
     }
     const resolvedParentId = parentValidation.canonicalParentId;
@@ -348,7 +349,7 @@ export async function POST(request: NextRequest) {
     const outcome = await uploadImageBuffer({
       buffer: fileBuffer,
       originalBuffer: fileBuffer,
-      fileName: file.name,
+      fileName: cleanFilename || file.name,
       fileType,
       fileSize: file.size,
       context: uploadContext

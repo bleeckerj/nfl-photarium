@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 import base64
 import json
+import os
 import sys
 from io import BytesIO
+
+os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 
 from PIL import Image
 from sentence_transformers import SentenceTransformer

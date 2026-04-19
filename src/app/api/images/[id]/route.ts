@@ -258,68 +258,56 @@ export async function GET(
       return NextResponse.json({ error: 'Image ID is required' }, { status: 400 });
     }
 
-    const cacheStartedAt = performance.now();
-    const cached = await getCachedImage(imageId);
-    timings.cache_lookup = mark(performance.now() - cacheStartedAt);
-    if (cached) {
-      let responseImage = cached;
-      const animatedProbeStartedAt = performance.now();
-      responseImage = await enrichAnimatedState(responseImage);
-      timings.animated_probe = mark(performance.now() - animatedProbeStartedAt);
-      if (responseImage !== cached) {
-        upsertCachedImage(responseImage);
-      }
-      try {
-        const vectorStartedAt = performance.now();
-        responseImage = await enrichWithVectorMetadata(responseImage);
-        timings.vector_enrich = mark(performance.now() - vectorStartedAt);
-        if (responseImage !== cached) {
-          upsertCachedImage(responseImage);
-        }
-      } catch (error) {
-        console.warn('[SingleImage] Vector metadata enrichment failed:', { imageId, error });
-      }
-      diagnostics.source = 'cache';
-      diagnostics.had_known_size = typeof readKnownSize(responseImage) === 'number';
-      if (typeof readKnownSize(responseImage) !== 'number') {
-        void enrichImageSize(responseImage).then((enriched) => {
-          if ((responseImage.size ?? null) !== (enriched.size ?? null)) {
-            upsertCachedImage(enriched);
-          }
-        }).catch((error) => {
-          console.warn('[SingleImage] Background size enrichment failed', { imageId, error });
-        });
-      }
-      timings.total = mark(performance.now() - startedAt);
-      const response = NextResponse.json({
-        image: { ...responseImage, fileSizeBytes: responseImage.size ?? null },
-        timings,
-        diagnostics,
-      });
-      response.headers.set(
-        'Server-Timing',
-        Object.entries(timings)
-          .map(([name, duration]) => `${name};dur=${duration}`)
-          .join(', ')
-      );
-      return response;
-    }
+    let baseImage: CachedCloudflareImage | undefined;
+    let shouldPersistResponseImage = false;
 
     const cloudflareStartedAt = performance.now();
-    const image = await fetchCloudflareImage(imageId);
-    timings.cloudflare_fetch = mark(performance.now() - cloudflareStartedAt);
-    diagnostics.source = 'cloudflare';
-    const transformed = transformApiImageToCached(image);
-    let responseImage = await enrichAnimatedState(transformed);
+    try {
+      const image = await fetchCloudflareImage(imageId);
+      timings.cloudflare_fetch = mark(performance.now() - cloudflareStartedAt);
+      diagnostics.source = 'cloudflare';
+      baseImage = transformApiImageToCached(image);
+      shouldPersistResponseImage = true;
+    } catch (error) {
+      timings.cloudflare_fetch = mark(performance.now() - cloudflareStartedAt);
+      diagnostics.cloudflare_error = error instanceof Error ? error.message : String(error);
+
+      const cacheStartedAt = performance.now();
+      const cached = await getCachedImage(imageId);
+      timings.cache_lookup = mark(performance.now() - cacheStartedAt);
+
+      if (!cached) {
+        throw error;
+      }
+
+      diagnostics.source = 'cache';
+      diagnostics.cloudflare_fallback = true;
+      baseImage = cached;
+    }
+
+    let responseImage = baseImage;
+    const animatedProbeStartedAt = performance.now();
+    responseImage = await enrichAnimatedState(responseImage);
+    timings.animated_probe = mark(performance.now() - animatedProbeStartedAt);
+    if (responseImage !== baseImage) {
+      shouldPersistResponseImage = true;
+    }
+
     try {
       const vectorStartedAt = performance.now();
       responseImage = await enrichWithVectorMetadata(responseImage);
       timings.vector_enrich = mark(performance.now() - vectorStartedAt);
+      if (responseImage !== baseImage) {
+        shouldPersistResponseImage = true;
+      }
     } catch (error) {
       console.warn('[SingleImage] Vector metadata enrichment failed:', { imageId, error });
     }
-    diagnostics.had_known_size = typeof readKnownSize(transformed) === 'number';
-    upsertCachedImage(responseImage);
+
+    diagnostics.had_known_size = typeof readKnownSize(responseImage) === 'number';
+    if (shouldPersistResponseImage) {
+      upsertCachedImage(responseImage);
+    }
     if (typeof readKnownSize(responseImage) !== 'number') {
       void enrichImageSize(responseImage).then((enriched) => {
         if ((responseImage.size ?? null) !== (enriched.size ?? null)) {

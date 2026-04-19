@@ -2089,7 +2089,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     <div id="image-gallery-card" ref={galleryTopRef} className="overscroll-none bg-white rounded-lg shadow-lg p-6">
       <div
         id="gallery-top-bar"
-        className="sticky top-0 z-[3000] -m-6 mb-6 overflow-hidden rounded-t-lg border-b border-gray-100 bg-white/95 backdrop-blur"
+        className="sticky top-0 z-[3000] -m-6 mb-6 overflow-visible rounded-t-lg border-b border-gray-100 bg-white/95 backdrop-blur"
       >
         <GalleryCompactHeader
           filteredCount={filteredWithVariants.length}

@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { buildParentReassignmentState } from '@/hooks/parentReassignmentUtils';
 
 export type ParentReassignmentImage = {
   id: string;
@@ -11,6 +12,7 @@ export type ParentReassignmentImage = {
   description?: string;
   altTag?: string;
   tags?: string[];
+  namespace?: string;
 };
 
 export type ParentOption = { value: string; label: string };
@@ -28,43 +30,19 @@ export function useParentReassignment({
   adoptableImages: ParentReassignmentImage[];
   reassignParentOptions: ParentOption[];
 } {
-  const parentImage = useMemo(() => {
-    const parentId = currentImage?.parentId;
-    if (!parentId) return null;
-    return allImages.find((img) => img.id === parentId) || null;
-  }, [allImages, currentImage?.parentId]);
-
-  const canonicalCandidates = useMemo(() => {
-    return allImages.filter((img) => {
-      if (img.parentId) return false;
-      if (excludeId && img.id === excludeId) return false;
-      return true;
-    });
-  }, [allImages, excludeId]);
-
-  const parentCandidates = useMemo(
-    () => canonicalCandidates.filter((img) => img.assetType !== 'video'),
-    [canonicalCandidates]
-  );
-
-  const adoptableImages = useMemo(() => {
-    return canonicalCandidates;
-  }, [canonicalCandidates]);
-
-  const reassignParentOptions = useMemo(
-    () => [
-      { value: '', label: 'No parent (make canonical)' },
-      ...parentCandidates.map((candidate) => ({
-        value: candidate.id,
-        label: `${candidate.displayName || candidate.filename || candidate.id} · ${candidate.id}`,
-      })),
-    ],
-    [parentCandidates]
+  const state = useMemo(
+    () =>
+      buildParentReassignmentState({
+        allImages,
+        currentImage,
+        excludeId,
+      }),
+    [allImages, currentImage, excludeId]
   );
 
   return {
-    parentImage,
-    adoptableImages,
-    reassignParentOptions,
+    parentImage: state.parentImage,
+    adoptableImages: state.adoptableImages,
+    reassignParentOptions: state.reassignParentOptions,
   };
 }

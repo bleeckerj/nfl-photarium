@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import sharp from 'sharp';
 
 const formatTimestamp = () => new Date().toLocaleString('en-US', { hour12: false });
 const logEmbeddingInfo = (...args: unknown[]) => console.info(`[${formatTimestamp()}]`, ...args);
@@ -413,9 +414,10 @@ async function generateClipEmbeddingLocalFromBytes(
     const buffer = imageBytes instanceof Buffer
       ? imageBytes
       : Buffer.from(new Uint8Array(imageBytes));
+    const normalizedBuffer = await normalizeEmbeddingImageBuffer(buffer);
     const payload: { mode: 'image'; imageBase64: string } = {
       mode: 'image',
-      imageBase64: buffer.toString('base64')
+      imageBase64: normalizedBuffer.toString('base64')
     };
     return await runLocalEmbeddingScript(payload);
   } catch (error) {
@@ -434,6 +436,19 @@ async function generateClipTextEmbeddingLocal(text: string): Promise<number[] | 
   } catch (error) {
     console.error('[Embedding] Local text embedding error:', error);
     return null;
+  }
+}
+
+async function normalizeEmbeddingImageBuffer(imageBuffer: Buffer): Promise<Buffer> {
+  try {
+    return await sharp(imageBuffer, { animated: true })
+      .flatten({ background: '#ffffff' })
+      .resize(224, 224, { fit: 'inside', withoutEnlargement: true })
+      .png()
+      .toBuffer();
+  } catch (error) {
+    console.warn('[Embedding] Failed to normalize image buffer for local embedding, using original bytes:', error);
+    return imageBuffer;
   }
 }
 

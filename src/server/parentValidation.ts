@@ -4,6 +4,7 @@ export type ParentValidationResult =
   | {
       ok: true;
       canonicalParentId?: string;
+      canonicalParentNamespace?: string;
       redirectedFromParentId?: string;
     }
   | { ok: false; status: number; error: string };
@@ -11,6 +12,12 @@ export type ParentValidationResult =
 const normalizeParentId = (value?: string | null) => {
   if (typeof value !== 'string') return '';
   return value.trim();
+};
+
+const normalizeNamespace = (value?: string | null) => {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
 };
 
 const resolveImages = async (options?: { forceRefresh?: boolean }) => {
@@ -81,6 +88,7 @@ export async function validateParentForNewChild(
       return {
         ok: true,
         canonicalParentId: currentId,
+        canonicalParentNamespace: normalizeNamespace(current.namespace),
         redirectedFromParentId: currentId !== parentId ? parentId : undefined
       };
     }

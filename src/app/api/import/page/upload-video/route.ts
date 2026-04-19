@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cleanString } from '@/utils/cloudflareMetadata';
+import { sanitizeFilename } from '@/utils/filename';
 import { uploadVideoBuffer, uploadVideoFromRemoteUrl, type VideoUploadContext } from '@/server/videoUploadService';
 import { validateParentForNewChild } from '@/server/parentValidation';
+import { resolveUploadNamespace, SPECIFIC_NAMESPACE_REQUIRED_ERROR } from '@/server/uploadNamespace';
 
 type UploadVideoRequestBody = {
   url?: string;
@@ -41,12 +43,29 @@ const parseTags = (value?: string | null) =>
     .map((tag) => tag.trim())
     .filter(Boolean);
 
-const normalizeNamespace = (value?: string | null) => {
+const extractFilenameExtension = (value?: string | null) => {
   const cleaned = cleanString(value);
-  if (!cleaned || cleaned === '__all__' || cleaned === '__none__' || cleaned === 'undefined') {
-    return undefined;
+  if (!cleaned) return '';
+
+  try {
+    const parsed = new URL(cleaned);
+    return parsed.pathname.match(/\.[a-z0-9]{2,5}$/i)?.[0] || '';
+  } catch {
+    return cleaned.match(/\.[a-z0-9]{2,5}$/i)?.[0] || '';
   }
-  return cleaned;
+};
+
+const sanitizeOptionalFilename = (value?: string | null, fallback?: string | null) => {
+  const cleaned = cleanString(value);
+  if (!cleaned) return undefined;
+
+  const sanitized = sanitizeFilename(cleaned);
+  if (/\.[a-z0-9]{2,5}$/i.test(sanitized)) {
+    return sanitized;
+  }
+
+  const fallbackExtension = extractFilenameExtension(fallback);
+  return fallbackExtension ? `${sanitized}${fallbackExtension}` : sanitized;
 };
 
 const parseContext = (
@@ -109,21 +128,21 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
-      const namespaceValue = normalizeNamespace(body.namespace);
-      if (!namespaceValue) {
-        return NextResponse.json(
-          { error: 'A specific namespace is required for uploads. Select a namespace instead of All.' },
-          { status: 400 }
-        );
-      }
       const parentValidation = await validateParentForNewChild(body.parentId);
       if (!parentValidation.ok) {
         return NextResponse.json({ error: parentValidation.error }, { status: parentValidation.status });
       }
+      const namespaceValue = resolveUploadNamespace(body.namespace, parentValidation);
+      if (!namespaceValue) {
+        return NextResponse.json(
+          { error: SPECIFIC_NAMESPACE_REQUIRED_ERROR },
+          { status: 400 }
+        );
+      }
 
       const outcome = await uploadVideoFromRemoteUrl({
         sourceUrl: safeUrl,
-        fileName: cleanString(body.filename),
+        fileName: sanitizeOptionalFilename(body.filename, safeUrl),
         context: parseContext({
           folder: body.folder,
           tags: body.tags,
@@ -149,24 +168,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No video file provided' }, { status: 400 });
     }
 
-    const namespaceValue = normalizeNamespace(formData.get('namespace') as string | null);
-    if (!namespaceValue) {
-      return NextResponse.json(
-        { error: 'A specific namespace is required for uploads. Select a namespace instead of All.' },
-        { status: 400 }
-      );
-    }
-    const namespace = namespaceValue;
     const rawParentId = cleanString(formData.get('parentId') as string | null);
     const parentValidation = await validateParentForNewChild(rawParentId);
     if (!parentValidation.ok) {
       return NextResponse.json({ error: parentValidation.error }, { status: parentValidation.status });
     }
+    const namespace = resolveUploadNamespace(formData.get('namespace') as string | null, parentValidation);
+    if (!namespace) {
+      return NextResponse.json(
+        { error: SPECIFIC_NAMESPACE_REQUIRED_ERROR },
+        { status: 400 }
+      );
+    }
 
     const buffer = Buffer.from(await file.arrayBuffer());
+    const explicitFilename = sanitizeOptionalFilename(formData.get('filename') as string | null, file.name);
     const outcome = await uploadVideoBuffer({
       buffer,
-      fileName: file.name,
+      fileName: explicitFilename || file.name,
       fileType: cleanString(file.type),
       fileSize: file.size,
       context: parseContext({

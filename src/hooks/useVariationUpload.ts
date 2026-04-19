@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { importVariationFromUrl, uploadVariationFile, uploadVariationUrl } from '@/services/variationUploadService';
+import {
+  formatDuplicateMessage,
+  formatFailureNames,
+  formatFailureSummary,
+  resolveUploadFilename,
+  type VariationUploadFailureItem,
+} from '@/hooks/variationUploadUtils';
 
 export type VariationUploadToast = {
   push: (message: string) => void;
-};
-
-type UploadFailureItem = {
-  filename?: string;
-  error?: string;
-  duplicates?: Array<{ id?: string; filename?: string; folder?: string }>;
 };
 
 type UseVariationUploadParams = {
@@ -20,29 +21,20 @@ type UseVariationUploadParams = {
   toast: VariationUploadToast;
 };
 
-const formatFailureNames = (failures: UploadFailureItem[]) => {
-  const names = failures.map((failure) => failure.filename || 'unknown');
-  const preview = names.slice(0, 3).join(', ');
-  if (names.length <= 3) {
-    return preview;
-  }
-  return `${preview} +${names.length - 3} more`;
+export type VariationUploadQueueItem = {
+  id: string;
+  file: File;
+  filename: string;
 };
 
-const formatDuplicateMessage = (failure: UploadFailureItem, fallback?: string) => {
-  const duplicates = Array.isArray(failure.duplicates) ? failure.duplicates : [];
-  if (!duplicates.length) return undefined;
-  const summary = duplicates
-    .map((dup) => {
-      const label = dup.filename || 'Untitled';
-      const location = dup.folder ? `${label} (${dup.folder})` : label;
-      return dup.id ? `${location} [${dup.id}]` : location;
-    })
-    .slice(0, 3)
-    .join(', ');
-  const extra = duplicates.length > 3 ? '…' : '';
-  return `${fallback || failure.error || 'Duplicate detected.'} Existing: ${summary}${extra}`;
-};
+const generateQueueItemId = () =>
+  `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+
+const createQueueItem = (file: File): VariationUploadQueueItem => ({
+  id: generateQueueItemId(),
+  file,
+  filename: file.name,
+});
 
 export function useVariationUpload({
   imageId,
@@ -52,11 +44,12 @@ export function useVariationUpload({
   refreshImageList,
   toast
 }: UseVariationUploadParams) {
-  const [childUploadFiles, setChildUploadFiles] = useState<File[]>([]);
+  const [childUploadItems, setChildUploadItems] = useState<VariationUploadQueueItem[]>([]);
   const [childUploadTags, setChildUploadTags] = useState('');
   const [childUploadFolder, setChildUploadFolder] = useState('');
   const [childUploadLoading, setChildUploadLoading] = useState(false);
   const [childUploadUrl, setChildUploadUrl] = useState('');
+  const [childUploadUrlFilename, setChildUploadUrlFilename] = useState('');
   const [childUploadUrlLoading, setChildUploadUrlLoading] = useState(false);
   const [childImportUrl, setChildImportUrl] = useState('');
   const [childImportLoading, setChildImportLoading] = useState(false);
@@ -67,24 +60,38 @@ export function useVariationUpload({
     setChildUploadTags(Array.isArray(imageTags) ? imageTags.join(', ') : '');
   }, [imageFolder, imageTags]);
 
+  const appendChildUploadFiles = useCallback((files: File[]) => {
+    if (files.length === 0) return;
+    setChildUploadItems((prev) => [...prev, ...files.map(createQueueItem)]);
+  }, []);
+
+  const clearChildUploadFiles = useCallback(() => {
+    setChildUploadItems([]);
+  }, []);
+
+  const updateChildUploadFilename = useCallback((id: string, filename: string) => {
+    setChildUploadItems((prev) => prev.map((item) => (
+      item.id === id ? { ...item, filename } : item
+    )));
+  }, []);
+
   const handleChildUpload = useCallback(async () => {
-    if (!imageId || childUploadFiles.length === 0) return;
-    const resolvedNamespace = imageNamespace?.trim();
-    if (!resolvedNamespace) {
-      toast.push('Select a specific namespace before uploading variations.');
-      return;
-    }
+    if (!imageId || childUploadItems.length === 0) return;
+    const resolvedNamespace = imageNamespace?.trim() || undefined;
     setChildUploadLoading(true);
     try {
       const defaultFolder = childUploadFolder.trim();
       const defaultTags = childUploadTags.trim();
       let successCount = 0;
-      const failures: UploadFailureItem[] = [];
-      const skipped: UploadFailureItem[] = [];
+      const failures: VariationUploadFailureItem[] = [];
+      const skipped: VariationUploadFailureItem[] = [];
+      const remainingItems: VariationUploadQueueItem[] = [];
 
-      for (const file of childUploadFiles) {
+      for (const item of childUploadItems) {
+        const resolvedFilename = resolveUploadFilename(item.filename, item.file.name);
         const { ok, payload } = await uploadVariationFile({
-          file,
+          file: item.file,
+          filename: resolvedFilename,
           folder: defaultFolder || undefined,
           tags: defaultTags || undefined,
           namespace: resolvedNamespace,
@@ -93,10 +100,11 @@ export function useVariationUpload({
 
         if (!ok) {
           failures.push({
-            filename: file.name,
+            filename: resolvedFilename,
             error: payload.error || 'Upload failed',
             duplicates: payload.duplicates
           });
+          remainingItems.push(item);
           continue;
         }
 
@@ -108,6 +116,9 @@ export function useVariationUpload({
           if (Array.isArray(payload.skipped)) {
             skipped.push(...payload.skipped);
           }
+          if (payload.results.length === 0) {
+            remainingItems.push(item);
+          }
         } else {
           successCount += 1;
         }
@@ -116,44 +127,42 @@ export function useVariationUpload({
       if (successCount > 0) {
         toast.push(`Uploaded ${successCount} variation(s)`);
         await refreshImageList();
-      } else {
+      } else if (failures.length === 0 && skipped.length === 0) {
         toast.push('No variations uploaded');
       }
 
       if (failures.length) {
         const duplicateFailure = failures.find((failure) => Array.isArray(failure.duplicates) && failure.duplicates.length > 0);
         const duplicateMessage = duplicateFailure ? formatDuplicateMessage(duplicateFailure) : undefined;
-        toast.push(duplicateMessage || `Failed: ${formatFailureNames(failures)}`);
+        toast.push(duplicateMessage || `Failed: ${formatFailureSummary(failures)}`);
       }
       if (skipped.length) {
         toast.push(`Skipped: ${formatFailureNames(skipped)}`);
       }
 
-      setChildUploadFiles([]);
+      setChildUploadItems(remainingItems);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to upload variation';
       toast.push(message);
     } finally {
       setChildUploadLoading(false);
     }
-  }, [childUploadFiles, childUploadFolder, childUploadTags, imageId, imageNamespace, refreshImageList, toast]);
+  }, [childUploadFolder, childUploadItems, childUploadTags, imageId, imageNamespace, refreshImageList, toast]);
 
   const handleChildUploadByUrl = useCallback(async () => {
     if (!imageId) return;
-    const resolvedNamespace = imageNamespace?.trim();
-    if (!resolvedNamespace) {
-      toast.push('Select a specific namespace before uploading variations.');
-      return;
-    }
+    const resolvedNamespace = imageNamespace?.trim() || undefined;
     const trimmedUrl = childUploadUrl.trim();
     if (!trimmedUrl) return;
     setChildUploadUrlLoading(true);
     try {
       const defaultFolder = childUploadFolder.trim();
       const defaultTags = childUploadTags.trim();
+      const resolvedFilename = resolveUploadFilename(childUploadUrlFilename, trimmedUrl);
 
       const { ok, payload } = await uploadVariationUrl({
         url: trimmedUrl,
+        filename: resolvedFilename === trimmedUrl ? undefined : resolvedFilename,
         folder: defaultFolder || undefined,
         tags: defaultTags || undefined,
         namespace: resolvedNamespace,
@@ -173,14 +182,15 @@ export function useVariationUpload({
         toast.push(`Uploaded ${results.length} variation(s)`);
         await refreshImageList();
         setChildUploadUrl('');
-      } else {
+        setChildUploadUrlFilename('');
+      } else if (failures.length === 0) {
         toast.push('No variations uploaded');
       }
 
       if (failures.length) {
         const duplicateFailure = failures.find((failure) => Array.isArray(failure.duplicates) && failure.duplicates.length > 0);
         const duplicateMessage = duplicateFailure ? formatDuplicateMessage(duplicateFailure) : undefined;
-        toast.push(duplicateMessage || `Failed: ${formatFailureNames(failures)}`);
+        toast.push(duplicateMessage || `Failed: ${formatFailureSummary(failures)}`);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to upload URL';
@@ -188,7 +198,7 @@ export function useVariationUpload({
     } finally {
       setChildUploadUrlLoading(false);
     }
-  }, [childUploadFolder, childUploadTags, childUploadUrl, imageId, imageNamespace, refreshImageList, toast]);
+  }, [childUploadFolder, childUploadTags, childUploadUrl, childUploadUrlFilename, imageId, imageNamespace, refreshImageList, toast]);
 
   const handleImportFromUrl = useCallback(async () => {
     if (!childImportUrl.trim()) return;
@@ -200,24 +210,28 @@ export function useVariationUpload({
         setChildImportError(payload?.error || 'Failed to import image');
         return;
       }
-      setChildUploadFiles((prev) => [...prev, file]);
+      appendChildUploadFiles([file]);
       setChildImportUrl('');
     } catch (error) {
       setChildImportError(error instanceof Error ? error.message : 'Failed to import image');
     } finally {
       setChildImportLoading(false);
     }
-  }, [childImportUrl, setChildUploadFiles]);
+  }, [appendChildUploadFiles, childImportUrl]);
 
   return {
-    childUploadFiles,
-    setChildUploadFiles,
+    childUploadItems,
+    appendChildUploadFiles,
+    clearChildUploadFiles,
+    updateChildUploadFilename,
     childUploadTags,
     childUploadFolder,
     childUploadLoading,
     childUploadUrl,
+    childUploadUrlFilename,
     childUploadUrlLoading,
     setChildUploadUrl,
+    setChildUploadUrlFilename,
     childImportUrl,
     childImportLoading,
     childImportError,

@@ -63,6 +63,7 @@ import { GET } from '@/app/api/images/[id]/route';
 describe('GET /api/images/:id embedding status', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    fetchCloudflareImageMock.mockRejectedValue(new Error('Cloudflare unavailable'));
     getCachedImageMock.mockResolvedValue({
       id: 'img-1',
       filename: 'photo.jpg',
@@ -161,6 +162,63 @@ describe('GET /api/images/:id embedding status', () => {
         id: 'img-anim',
         isAnimated: true,
         contentType: 'image/webp',
+      })
+    );
+  });
+
+  it('prefers live Cloudflare metadata over stale cached image details', async () => {
+    getCachedImageMock.mockResolvedValueOnce({
+      id: 'img-live',
+      filename: 'photo.jpg',
+      uploaded: '2026-03-20T00:00:00.000Z',
+      variants: ['https://imagedelivery.net/hash/img-live/public'],
+      tags: [],
+      namespace: undefined,
+      hasClipEmbedding: false,
+      hasColorEmbedding: false,
+    });
+    fetchCloudflareImageMock.mockResolvedValueOnce({
+      id: 'img-live',
+      filename: 'photo.jpg',
+      uploaded: '2026-03-20T00:00:00.000Z',
+      variants: ['https://imagedelivery.net/hash/img-live/public'],
+      meta: JSON.stringify({
+        namespace: 'cf-midjourney',
+        tags: [],
+      }),
+    });
+    transformApiImageToCachedMock.mockReturnValueOnce({
+      id: 'img-live',
+      filename: 'photo.jpg',
+      uploaded: '2026-03-20T00:00:00.000Z',
+      variants: ['https://imagedelivery.net/hash/img-live/public'],
+      tags: [],
+      namespace: 'cf-midjourney',
+      hasClipEmbedding: false,
+      hasColorEmbedding: false,
+    });
+    batchGetColorMetadataMock.mockResolvedValueOnce(new Map());
+    batchGetAspectMetadataMock.mockResolvedValueOnce(new Map());
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/images/img-live'),
+      { params: Promise.resolve({ id: 'img-live' }) }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(fetchCloudflareImageMock).toHaveBeenCalledWith('img-live');
+    expect(getCachedImageMock).not.toHaveBeenCalled();
+    expect(payload.diagnostics).toEqual(
+      expect.objectContaining({
+        source: 'cloudflare',
+      })
+    );
+    expect(payload.image.namespace).toBe('cf-midjourney');
+    expect(upsertCachedImageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'img-live',
+        namespace: 'cf-midjourney',
       })
     );
   });

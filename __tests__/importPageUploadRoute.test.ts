@@ -45,7 +45,11 @@ describe('POST /api/import/page/upload', () => {
     process.env = { ...ORIGINAL_ENV };
     process.env.CLOUDFLARE_ACCOUNT_ID = 'acct';
     process.env.CLOUDFLARE_API_TOKEN = 'token';
-    validateParentForNewChildMock.mockResolvedValue({ ok: true, canonicalParentId: undefined });
+    validateParentForNewChildMock.mockResolvedValue({
+      ok: true,
+      canonicalParentId: undefined,
+      canonicalParentNamespace: undefined,
+    });
     uploadImageBufferMock.mockResolvedValue({
       ok: true,
       data: {
@@ -178,6 +182,41 @@ describe('POST /api/import/page/upload', () => {
       expect.objectContaining({
         context: expect.objectContaining({
           duplicateAction: 'family',
+        }),
+      })
+    );
+  });
+
+  it('inherits the canonical parent namespace for variation URL uploads', async () => {
+    validateParentForNewChildMock.mockResolvedValue({
+      ok: true,
+      canonicalParentId: 'parent-1',
+      canonicalParentNamespace: 'ns-parent',
+    });
+    resolveUploadSourceMock.mockResolvedValue({
+      buffer: Buffer.from(new Uint8Array(4096)),
+      contentType: 'image/png',
+      filename: 'cached-image.png',
+    });
+
+    const response = await POST(createRequest({
+      items: [
+        {
+          clientId: 'c1',
+          url: 'https://example.com/cached-image.png',
+          parentId: 'child-1',
+        },
+      ],
+    }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.failures).toEqual([]);
+    expect(uploadImageBufferMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          namespace: 'ns-parent',
+          parentId: 'parent-1',
         }),
       })
     );

@@ -626,14 +626,18 @@ export default function VideoDetailPage() {
   }, [totalAdoptPages]);
 
   const {
-    childUploadFiles,
-    setChildUploadFiles,
+    childUploadItems,
+    appendChildUploadFiles,
+    clearChildUploadFiles,
+    updateChildUploadFilename,
     childUploadTags,
     childUploadFolder,
     childUploadLoading,
     childUploadUrl,
+    childUploadUrlFilename,
     childUploadUrlLoading,
     setChildUploadUrl,
+    setChildUploadUrlFilename,
     childImportUrl,
     childImportLoading,
     childImportError,
@@ -652,8 +656,8 @@ export default function VideoDetailPage() {
 
   const onVariantDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
-    setChildUploadFiles((prev) => [...prev, ...acceptedFiles]);
-  }, [setChildUploadFiles]);
+    appendChildUploadFiles(acceptedFiles);
+  }, [appendChildUploadFiles]);
 
   const {
     getRootProps: getVariantDropzoneProps,
@@ -1558,12 +1562,15 @@ export default function VideoDetailPage() {
               childUploadTags={childUploadTags}
               fallbackFolder={familyRootAsset?.folder || ''}
               fallbackTags={familyRootAsset?.tags || []}
-              childUploadFiles={childUploadFiles}
-              onClearSelectedFiles={() => setChildUploadFiles([])}
+              childUploadItems={childUploadItems}
+              onUpdateSelectedFilename={updateChildUploadFilename}
+              onClearSelectedFiles={clearChildUploadFiles}
               onUpload={handleChildUpload}
               childUploadLoading={childUploadLoading}
               childUploadUrl={childUploadUrl}
+              childUploadUrlFilename={childUploadUrlFilename}
               onChildUploadUrlChange={setChildUploadUrl}
+              onChildUploadUrlFilenameChange={setChildUploadUrlFilename}
               onUploadUrl={handleChildUploadByUrl}
               childUploadUrlLoading={childUploadUrlLoading}
               childImportUrl={childImportUrl}

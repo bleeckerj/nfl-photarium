@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 type SelectOption = {
   label: string;
@@ -38,8 +39,14 @@ export default function MonoSelect({
 }: MonoSelectProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [menuStyle, setMenuStyle] = useState<{
+    top: number;
+    left: number;
+    width: number;
+  } | null>(null);
   const filteredOptions = useMemo(() => {
     if (!searchable) {
       return options;
@@ -61,7 +68,10 @@ export default function MonoSelect({
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      const clickedTrigger = containerRef.current?.contains(target);
+      const clickedMenu = menuRef.current?.contains(target);
+      if (!clickedTrigger && !clickedMenu) {
         setOpen(false);
       }
     };
@@ -154,10 +164,39 @@ export default function MonoSelect({
     }
   }, [open, searchable]);
 
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuStyle(null);
+      return;
+    }
+
+    const updateMenuPosition = () => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setMenuStyle({
+        top: rect.bottom + window.scrollY + 4,
+        left: rect.left + window.scrollX,
+        width: rect.width,
+      });
+    };
+
+    updateMenuPosition();
+    window.addEventListener('resize', updateMenuPosition);
+    window.addEventListener('scroll', updateMenuPosition, true);
+
+    return () => {
+      window.removeEventListener('resize', updateMenuPosition);
+      window.removeEventListener('scroll', updateMenuPosition, true);
+    };
+  }, [open]);
+
   const selectedOption = options.find((opt) => opt.value === value);
 
   return (
-    <div ref={containerRef} className={cn('relative', className)}>
+    <div
+      ref={containerRef}
+      className={cn('relative', open && 'z-[4000]', className)}
+    >
       <button
         type="button"
         id={id}
@@ -197,11 +236,17 @@ export default function MonoSelect({
         </svg>
       </button>
 
-      {open && (
+      {open && menuStyle && typeof document !== 'undefined' && createPortal(
         <div
+          ref={menuRef}
           role="listbox"
           id={id ? `${id}-listbox` : undefined}
-          className="absolute z-[3000] mt-1 w-full max-h-64 overflow-auto rounded-md border border-gray-200 bg-white shadow-xl"
+          className="fixed z-[100002] max-h-64 overflow-auto rounded-md border border-gray-200 bg-white shadow-xl"
+          style={{
+            top: menuStyle.top,
+            left: menuStyle.left,
+            width: menuStyle.width,
+          }}
         >
           {searchable && (
             <div className="sticky top-0 bg-white border-b border-gray-200 px-2 py-2">
@@ -228,7 +273,7 @@ export default function MonoSelect({
                 disabled={option.disabled}
                 className={cn(
                   'w-full text-left px-3 py-2 font-mono transition',
-                  size === 'sm' ? 'text-[0.8em]' : 'text-[0.9em]',
+                  size === 'sm' ? 'text-[10px]' : 'text-[11px]',
                   option.disabled
                     ? 'text-gray-400 cursor-not-allowed'
                     : option.value === value
@@ -245,7 +290,7 @@ export default function MonoSelect({
             ))
           )}
         </div>
-      )}
+      , document.body)}
     </div>
   );
 }

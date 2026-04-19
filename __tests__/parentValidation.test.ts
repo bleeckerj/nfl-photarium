@@ -24,13 +24,14 @@ describe('validateParentForNewChild', () => {
   });
 
   it('keeps canonical parent ids unchanged', async () => {
-    getCachedImagesMock.mockResolvedValue([{ id: 'parent' }]);
+    getCachedImagesMock.mockResolvedValue([{ id: 'parent', namespace: 'ns-parent' }]);
 
     const result = await validateParentForNewChild('parent');
 
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.canonicalParentId).toBe('parent');
+      expect(result.canonicalParentNamespace).toBe('ns-parent');
       expect(result.redirectedFromParentId).toBeUndefined();
     }
   });
@@ -38,7 +39,7 @@ describe('validateParentForNewChild', () => {
   it('redirects variant parent ids to the canonical parent id and logs the redirect', async () => {
     const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
     getCachedImagesMock.mockResolvedValue([
-      { id: 'canonical' },
+      { id: 'canonical', namespace: 'ns-canonical' },
       { id: 'variant', parentId: 'canonical' },
     ]);
 
@@ -47,6 +48,7 @@ describe('validateParentForNewChild', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.canonicalParentId).toBe('canonical');
+      expect(result.canonicalParentNamespace).toBe('ns-canonical');
       expect(result.redirectedFromParentId).toBe('variant');
     }
     expect(infoSpy).toHaveBeenCalledWith(
