@@ -1,3 +1,5 @@
+import { cleanString } from '@/utils/cloudflareMetadata';
+
 type TextExtras = {
   description?: string;
   altText?: string;
@@ -20,4 +22,22 @@ export function resolveInitialAltText(
   image: ImageTextFallbacks | null | undefined
 ): string {
   return extras?.altText ?? image?.altTag ?? '';
+}
+
+export function hasDirtyTextMetadata(
+  values: {
+    descriptionInput?: string | null;
+    altTextInput?: string | null;
+  },
+  extras: TextExtras | null | undefined,
+  image: ImageTextFallbacks | null | undefined
+): boolean {
+  const initialDescription = resolveInitialDescription(extras, image);
+  if ((values.descriptionInput ?? '') !== initialDescription) {
+    return true;
+  }
+
+  const initialAltText = cleanString(resolveInitialAltText(extras, image)) ?? '';
+  const currentAltText = cleanString(values.altTextInput ?? '') ?? '';
+  return currentAltText !== initialAltText;
 }

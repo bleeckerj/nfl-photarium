@@ -50,6 +50,7 @@ import { UploadVariationSection } from '@/components/image-detail/UploadVariatio
 import { VARIATION_UPLOAD_ACCEPT } from '@/components/image-detail/variationUploadConfig';
 import { ParentInfoSection } from '@/components/image-detail/ParentInfoSection';
 import {
+  hasDirtyTextMetadata,
   resolveInitialAltText,
   resolveInitialDescription,
 } from '@/components/image-detail/metadataValueResolvers';
@@ -1392,11 +1393,15 @@ export default function ImageDetailPage() {
         return true;
       }
     }
-    const descriptionValue = descriptionInput ?? '';
-    const imageDescription = extrasRecord?.imageId === image.id
-      ? (extrasRecord.description ?? '')
-      : (image.description ?? '');
-    if (descriptionValue !== imageDescription) {
+    const extrasForCurrentImage = extrasRecord?.imageId === image.id ? extrasRecord : null;
+    if (hasDirtyTextMetadata(
+      {
+        descriptionInput,
+        altTextInput,
+      },
+      extrasForCurrentImage,
+      image
+    )) {
       return true;
     }
     const originalValue = cleanString(originalUrlInput) ?? '';
@@ -1407,11 +1412,6 @@ export default function ImageDetailPage() {
     const displayNameValue = cleanString(displayNameInput) ?? '';
     const imageDisplayName = cleanString(image.displayName || image.filename) ?? '';
     if (displayNameValue !== imageDisplayName) {
-      return true;
-    }
-    const altValue = cleanString(altTextInput) ?? '';
-    const imageAlt = cleanString(image.altTag) ?? '';
-    if (altValue !== imageAlt) {
       return true;
     }
     // EXIF clearing is a dirty state
