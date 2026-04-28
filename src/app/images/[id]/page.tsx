@@ -33,9 +33,16 @@ import { useImageAspectRatio } from '@/hooks/useImageAspectRatio';
 import { formatBytes } from '@/utils/formatBytes';
 import { ColorSwatches } from '@/components/ColorSwatches';
 import { normalizeColorSearchHex } from '@/components/gallery/colorSearch';
+import { buildCanonicalGalleryHref } from '@/components/gallery/focusNavigation';
 
 import { AltTextEditor } from '@/components/image-detail/AltTextEditor';
 import { CloudflareMetadataHeader } from '@/components/image-detail/CloudflareMetadataHeader';
+import {
+  IMAGE_DETAIL_DRAFT_KEY_PREFIX,
+  LEGACY_IMAGE_DETAIL_DRAFT_KEY_PREFIX,
+  shouldRestoreImageDetailDraft,
+  type ImageDetailDraft,
+} from '@/components/image-detail/detailDraft';
 import { DescriptionEditor } from '@/components/image-detail/DescriptionEditor';
 import { PromptThisEditor } from '@/components/image-detail/PromptThisEditor';
 import { ComfyWorkflowPanel, type ComfyWorkflowRecord } from '@/components/image-detail/comfy';
@@ -136,8 +143,6 @@ interface CloudflareImage {
 }
 
 const DEFAULT_LIST_VARIANT = 'full';
-const IMAGE_DETAIL_DRAFT_KEY_PREFIX = 'imageDetailDraftV1:';
-const IMAGE_DETAIL_DRAFT_TTL_MS = 6 * 60 * 60 * 1000;
 const VARIANT_DIMENSIONS = new Map(IMAGE_VARIANTS.map(variant => [variant.name, variant.width]));
 
 type BulkUpdateFailure = {
@@ -145,18 +150,6 @@ type BulkUpdateFailure = {
   name: string;
   error?: string;
   reason?: 'metadata' | 'network' | 'unknown';
-};
-
-type ImageDetailDraft = {
-  savedAt: number;
-  folderSelect: string;
-  tagsInput: string;
-  altTextInput: string;
-  descriptionInput: string;
-  originalUrlInput: string;
-  sourceUrlInput: string;
-  displayNameInput: string;
-  clearExif: boolean;
 };
 
 const ensureWebpFormat = (inputUrl: string) => {
@@ -454,13 +447,13 @@ export default function ImageDetailPage() {
 
       if (typeof window !== 'undefined') {
         const draftKey = `${IMAGE_DETAIL_DRAFT_KEY_PREFIX}${found.id}`;
+        const legacyDraftKey = `${LEGACY_IMAGE_DETAIL_DRAFT_KEY_PREFIX}${found.id}`;
         try {
+          window.sessionStorage.removeItem(legacyDraftKey);
           const raw = window.sessionStorage.getItem(draftKey);
           if (raw) {
             const parsed = JSON.parse(raw) as Partial<ImageDetailDraft>;
-            const savedAt = typeof parsed.savedAt === 'number' ? parsed.savedAt : 0;
-            const isFresh = savedAt > 0 && Date.now() - savedAt < IMAGE_DETAIL_DRAFT_TTL_MS;
-            if (isFresh && draftAppliedRef.current !== found.id) {
+            if (shouldRestoreImageDetailDraft(parsed) && draftAppliedRef.current !== found.id) {
               if (typeof parsed.folderSelect === 'string') setFolderSelect(parsed.folderSelect);
               if (typeof parsed.tagsInput === 'string') setTagsInput(parsed.tagsInput);
               if (typeof parsed.descriptionInput === 'string') setDescriptionInput(parsed.descriptionInput);
@@ -608,54 +601,6 @@ export default function ImageDetailPage() {
       clearPendingIfHasEmbeddings(image.id, image.hasClipEmbedding, image.hasColorEmbedding);
     }
   }, [image?.id, image?.hasClipEmbedding, image?.hasColorEmbedding]);
-
-  useEffect(() => {
-    if (!id || typeof window === 'undefined') {
-      return;
-    }
-    const draft: ImageDetailDraft = {
-      savedAt: Date.now(),
-      folderSelect,
-      tagsInput,
-      altTextInput,
-      descriptionInput,
-      originalUrlInput,
-      sourceUrlInput,
-      displayNameInput,
-      clearExif,
-    };
-    const hasMeaningfulDraft =
-      Boolean(
-        folderSelect ||
-          tagsInput ||
-          altTextInput ||
-          descriptionInput ||
-          originalUrlInput ||
-          sourceUrlInput ||
-          displayNameInput
-      ) ||
-      clearExif;
-    const draftKey = `${IMAGE_DETAIL_DRAFT_KEY_PREFIX}${id}`;
-    try {
-      if (!hasMeaningfulDraft) {
-        window.sessionStorage.removeItem(draftKey);
-        return;
-      }
-      window.sessionStorage.setItem(draftKey, JSON.stringify(draft));
-    } catch {
-      // Ignore storage quota/access failures.
-    }
-  }, [
-    altTextInput,
-    clearExif,
-    descriptionInput,
-    displayNameInput,
-    folderSelect,
-    id,
-    originalUrlInput,
-    sourceUrlInput,
-    tagsInput
-  ]);
 
   const refreshImageList = useCallback(async () => {
     if (!id) {
@@ -1234,6 +1179,17 @@ export default function ImageDetailPage() {
     qs.set('gns', targetNamespace ?? '');
     router.push(`/?${qs.toString()}`, { scroll: false });
   }, [galleryNamespaceParam, image?.namespace, router]);
+  const handleShowInGalleryOrder = useCallback(() => {
+    if (!id) return;
+    const targetNamespace = image?.namespace ?? galleryNamespaceParam;
+    router.push(
+      buildCanonicalGalleryHref({
+        assetId: id,
+        namespace: targetNamespace,
+      }),
+      { scroll: false }
+    );
+  }, [galleryNamespaceParam, id, image?.namespace, router]);
 
   const commitNavigation = useCallback((href: string, targetId?: string | null) => {
     lastUserNavIntentRef.current = Date.now();
@@ -1454,6 +1410,47 @@ export default function ImageDetailPage() {
       variationOrderSaving
     ]
   );
+
+  useEffect(() => {
+    if (!id || typeof window === 'undefined') {
+      return;
+    }
+    const draftKey = `${IMAGE_DETAIL_DRAFT_KEY_PREFIX}${id}`;
+    const legacyDraftKey = `${LEGACY_IMAGE_DETAIL_DRAFT_KEY_PREFIX}${id}`;
+    try {
+      window.sessionStorage.removeItem(legacyDraftKey);
+      if (!isMetadataDirty) {
+        window.sessionStorage.removeItem(draftKey);
+        return;
+      }
+      const draft: ImageDetailDraft = {
+        savedAt: Date.now(),
+        hasUnsavedChanges: true,
+        folderSelect,
+        tagsInput,
+        altTextInput,
+        descriptionInput,
+        originalUrlInput,
+        sourceUrlInput,
+        displayNameInput,
+        clearExif,
+      };
+      window.sessionStorage.setItem(draftKey, JSON.stringify(draft));
+    } catch {
+      // Ignore storage quota/access failures.
+    }
+  }, [
+    altTextInput,
+    clearExif,
+    descriptionInput,
+    displayNameInput,
+    folderSelect,
+    id,
+    isMetadataDirty,
+    originalUrlInput,
+    sourceUrlInput,
+    tagsInput
+  ]);
 
   useEffect(() => {
     setVariationOrderOverride(null);
@@ -2508,9 +2505,18 @@ export default function ImageDetailPage() {
       <div id="image-detail-container" className="max-w-5xl mx-auto bg-white rounded-lg shadow-md overflow-hidden">
         <div className="p-6">
           <div id="detail-navigation" className="flex items-center justify-between gap-3 mb-4">
-            <button type="button" onClick={handleBackToGallery} className="text-xs text-blue-600 underline">
-              ← Back to gallery
-            </button>
+            <div className="flex flex-wrap items-center gap-3">
+              <button type="button" onClick={handleBackToGallery} className="text-xs text-blue-600 underline">
+                ← Back to gallery
+              </button>
+              <button
+                type="button"
+                onClick={handleShowInGalleryOrder}
+                className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-xs font-mono text-blue-700 hover:border-blue-300"
+              >
+                Show in gallery order
+              </button>
+            </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
               {Boolean(image.parentId) && familyLoaded && familyVariantSequence.length > 0 && (
                 <div className="flex items-center gap-2">

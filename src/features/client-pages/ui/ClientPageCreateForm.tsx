@@ -1,26 +1,44 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ClientPageProjectFields } from './ClientPageProjectFields';
-import { clientPageApi } from './api';
+import { clientPageApi, type ClientSiteSummary } from './api';
 import { useToast } from '@/components/Toast';
-
-const splitNamespaces = (value: string) =>
-  value
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean);
 
 export function ClientPageCreateForm() {
   const router = useRouter();
   const toast = useToast();
   const [title, setTitle] = useState('');
   const [clientName, setClientName] = useState('');
+  const [clientSiteId, setClientSiteId] = useState('');
   const [notes, setNotes] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
-  const [sourceNamespaces, setSourceNamespaces] = useState('');
+  const [sourceNamespaces, setSourceNamespaces] = useState<string[]>([]);
+  const [availableNamespaces, setAvailableNamespaces] = useState<string[]>([]);
+  const [clientSites, setClientSites] = useState<ClientSiteSummary[]>([]);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    clientPageApi
+      .listClientSites()
+      .then(setClientSites)
+      .catch(() => {
+        // Keep the create form usable even when the optional lookup fails.
+      });
+
+    fetch('/api/namespaces', { cache: 'no-store' })
+      .then((response) => response.json())
+      .then((data) => {
+        const nextNamespaces = Array.isArray(data?.namespaces)
+          ? data.namespaces.filter((entry: unknown): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+          : [];
+        setAvailableNamespaces(nextNamespaces);
+      })
+      .catch(() => {
+        setAvailableNamespaces([]);
+      });
+  }, []);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -29,9 +47,10 @@ export function ClientPageCreateForm() {
       const result = await clientPageApi.createProject({
         title,
         clientName: clientName || undefined,
+        clientSiteId: clientSiteId || undefined,
         notes: notes || undefined,
         expiresAt: expiresAt || null,
-        sourceNamespaces: splitNamespaces(sourceNamespaces),
+        sourceNamespaces,
       });
       toast.push('Client page draft created.');
       router.push(`/client-pages/${result.project.id}`);
@@ -47,7 +66,7 @@ export function ClientPageCreateForm() {
       <div className="border-b border-stone-200 pb-4">
         <p className="text-[11px] font-mono uppercase tracking-[0.24em] text-stone-500">New client page</p>
         <p className="mt-1 max-w-2xl text-sm text-stone-600">
-          Create a local draft in Photarium, then assign images and publish it to the shared public client-pages worker.
+          Create a local draft in Photarium, link it to a deployed client site, then assign images and publish it to that dedicated worker.
         </p>
       </div>
 
@@ -55,11 +74,15 @@ export function ClientPageCreateForm() {
         <ClientPageProjectFields
           title={title}
           clientName={clientName}
+          clientSiteId={clientSiteId}
           notes={notes}
           expiresAt={expiresAt}
           sourceNamespaces={sourceNamespaces}
+          availableNamespaces={availableNamespaces}
+          clientSites={clientSites}
           onTitleChange={setTitle}
           onClientNameChange={setClientName}
+          onClientSiteIdChange={setClientSiteId}
           onNotesChange={setNotes}
           onExpiresAtChange={setExpiresAt}
           onSourceNamespacesChange={setSourceNamespaces}

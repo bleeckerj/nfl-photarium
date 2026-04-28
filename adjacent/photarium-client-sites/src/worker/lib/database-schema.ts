@@ -37,12 +37,15 @@ const schemaStatements = [
       project_id TEXT NOT NULL,
       revision_id TEXT NOT NULL,
       source_image_id TEXT NOT NULL,
+      source_asset_id TEXT,
+      asset_type TEXT NOT NULL DEFAULT 'image',
       filename TEXT NOT NULL,
       display_name TEXT,
       description TEXT,
       visible_tags_json TEXT NOT NULL,
       source_tags_json TEXT NOT NULL,
       uploaded_at TEXT NOT NULL,
+      file_size_bytes INTEGER,
       aspect_ratio TEXT,
       width INTEGER,
       height INTEGER,
@@ -51,6 +54,12 @@ const schemaStatements = [
       cluster_id TEXT,
       cluster_label TEXT,
       preview_variant TEXT,
+      video_playback_url TEXT,
+      video_hls_url TEXT,
+      video_thumbnail_url TEXT,
+      video_preview_url TEXT,
+      video_download_url TEXT,
+      video_duration_seconds REAL,
       sort_order INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -77,6 +86,23 @@ const schemaStatements = [
   'CREATE INDEX IF NOT EXISTS idx_shortlist_submissions_project_id ON shortlist_submissions(project_id)',
 ];
 
+const projectAssetColumnUpgrades = [
+  "ALTER TABLE project_assets ADD COLUMN source_asset_id TEXT",
+  "ALTER TABLE project_assets ADD COLUMN asset_type TEXT NOT NULL DEFAULT 'image'",
+  "ALTER TABLE project_assets ADD COLUMN video_playback_url TEXT",
+  "ALTER TABLE project_assets ADD COLUMN video_hls_url TEXT",
+  "ALTER TABLE project_assets ADD COLUMN video_thumbnail_url TEXT",
+  "ALTER TABLE project_assets ADD COLUMN video_preview_url TEXT",
+  "ALTER TABLE project_assets ADD COLUMN video_download_url TEXT",
+  "ALTER TABLE project_assets ADD COLUMN video_duration_seconds REAL",
+  "ALTER TABLE project_assets ADD COLUMN file_size_bytes INTEGER",
+];
+
+const hasDuplicateColumnError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('duplicate column name');
+};
+
 let ensureSchemaPromise: Promise<void> | null = null;
 
 export const ensureDatabaseSchema = async (database: D1Database): Promise<void> => {
@@ -85,6 +111,20 @@ export const ensureDatabaseSchema = async (database: D1Database): Promise<void> 
       for (const statement of schemaStatements) {
         await database.prepare(statement).run();
       }
+
+      for (const statement of projectAssetColumnUpgrades) {
+        try {
+          await database.prepare(statement).run();
+        } catch (error) {
+          if (!hasDuplicateColumnError(error)) {
+            throw error;
+          }
+        }
+      }
+
+      await database
+        .prepare('UPDATE project_assets SET source_asset_id = source_image_id WHERE source_asset_id IS NULL')
+        .run();
     })();
   }
 

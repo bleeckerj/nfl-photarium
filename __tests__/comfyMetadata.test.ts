@@ -1,5 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { detectComfyMetadata, extractComfyWorkflowMetadata } from '@/utils/comfyMetadata';
+
+const { readVideoContainerMetadataFromBufferMock } = vi.hoisted(() => ({
+  readVideoContainerMetadataFromBufferMock: vi.fn(),
+}));
+
+vi.mock('@/utils/videoContainerMetadata', () => ({
+  readVideoContainerMetadataFromBuffer: readVideoContainerMetadataFromBufferMock,
+}));
 
 const BASE_PNG_1X1 = Buffer.from(
   '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6360000000020001e527d4a20000000049454e44ae426082',
@@ -17,6 +25,11 @@ const addChunkBeforeIend = (png: Buffer, type: string, data: Buffer) => {
 };
 
 describe('detectComfyMetadata', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    readVideoContainerMetadataFromBufferMock.mockResolvedValue(null);
+  });
+
   it('detects ComfyUI prompt metadata in PNG text chunks', async () => {
     const promptJson = JSON.stringify({
       '1': { class_type: 'KSampler', inputs: { seed: 1 } },
@@ -51,9 +64,48 @@ describe('detectComfyMetadata', () => {
     expect(result.detected).toBe(false);
     expect(result.sources).toEqual([]);
   });
+
+  it('detects ComfyUI prompt metadata in video container tags', async () => {
+    readVideoContainerMetadataFromBufferMock.mockResolvedValueOnce({
+      formatTags: {
+        prompt: JSON.stringify({
+          '1': { class_type: 'CLIPTextEncode', inputs: { text: 'stormy sea cliffs' } },
+        }),
+      },
+      streamTags: [],
+    });
+
+    const result = await detectComfyMetadata(Buffer.from('video'), { mimeType: 'video/mp4' });
+
+    expect(result.detected).toBe(true);
+    expect(result.sources).toContain('video:prompt');
+  });
+
+  it('detects ComfyUI workflow metadata in video stream tags', async () => {
+    readVideoContainerMetadataFromBufferMock.mockResolvedValueOnce({
+      formatTags: {},
+      streamTags: [
+        {
+          workflow: JSON.stringify({
+            nodes: [{ id: 1, type: 'KSampler' }],
+          }),
+        },
+      ],
+    });
+
+    const result = await detectComfyMetadata(Buffer.from('video'), { mimeType: 'video/webm' });
+
+    expect(result.detected).toBe(true);
+    expect(result.sources).toContain('video-stream:workflow');
+  });
 });
 
 describe('extractComfyWorkflowMetadata', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    readVideoContainerMetadataFromBufferMock.mockResolvedValue(null);
+  });
+
   it('extracts workflow JSON payload from prompt metadata', async () => {
     const promptNodeMap = {
       '1': { class_type: 'CLIPTextEncode', inputs: { text: 'stormy sea cliffs' } },
@@ -66,5 +118,59 @@ describe('extractComfyWorkflowMetadata', () => {
     expect(result.detected).toBe(true);
     expect(result.workflowSourceKey).toBe('prompt');
     expect(result.workflowJson).toEqual(promptNodeMap);
+  });
+
+  it('prefers workflow over prompt in video metadata', async () => {
+    const workflowJson = { nodes: [{ id: 1, type: 'SaveVideo' }] };
+    readVideoContainerMetadataFromBufferMock.mockResolvedValueOnce({
+      formatTags: {
+        prompt: JSON.stringify({
+          '1': { class_type: 'CLIPTextEncode', inputs: { text: 'fallback' } },
+        }),
+        workflow: JSON.stringify(workflowJson),
+      },
+      streamTags: [],
+    });
+
+    const result = await extractComfyWorkflowMetadata(Buffer.from('video'), { mimeType: 'video/mp4' });
+
+    expect(result.detected).toBe(true);
+    expect(result.workflowSourceKey).toBe('workflow');
+    expect(result.workflowJson).toEqual(workflowJson);
+  });
+
+  it('extracts nested workflow payloads from video metadata wrappers', async () => {
+    const nestedWorkflow = {
+      nodes: [{ id: 1, type: 'CLIPTextEncode' }],
+    };
+    readVideoContainerMetadataFromBufferMock.mockResolvedValueOnce({
+      formatTags: {
+        workflow: JSON.stringify({
+          workflow: nestedWorkflow,
+          prompt: { ignored: true },
+        }),
+      },
+      streamTags: [],
+    });
+
+    const result = await extractComfyWorkflowMetadata(Buffer.from('video'), { mimeType: 'video/mp4' });
+
+    expect(result.detected).toBe(true);
+    expect(result.workflowJson).toEqual(nestedWorkflow);
+  });
+
+  it('returns not detected when video metadata is present but not valid workflow JSON', async () => {
+    readVideoContainerMetadataFromBufferMock.mockResolvedValueOnce({
+      formatTags: {
+        prompt: JSON.stringify({ hello: 'world' }),
+      },
+      streamTags: [],
+    });
+
+    const result = await extractComfyWorkflowMetadata(Buffer.from('video'), { mimeType: 'video/mp4' });
+
+    expect(result.detected).toBe(false);
+    expect(result.sources).toEqual([]);
+    expect(result.workflowJson).toBeUndefined();
   });
 });

@@ -3,8 +3,11 @@ interface GalleryCompactHeaderProps {
   totalCount: number;
   pageIndex: number;
   totalPages: number;
+  namespaceLabel: string;
   controlsVisible: boolean;
+  showSearchButton: boolean;
   onToggleControls: () => void;
+  onOpenSearch: () => void;
 }
 
 export function GalleryCompactHeader({
@@ -12,8 +15,11 @@ export function GalleryCompactHeader({
   totalCount,
   pageIndex,
   totalPages,
+  namespaceLabel,
   controlsVisible,
+  showSearchButton,
   onToggleControls,
+  onOpenSearch,
 }: GalleryCompactHeaderProps) {
   return (
     <div
@@ -25,17 +31,28 @@ export function GalleryCompactHeader({
           Image Gallery ({filteredCount}/{totalCount})
         </p>
         <p className="text-[0.65rem] font-mono text-gray-500">
-          Page {pageIndex} / {Math.max(totalPages, 1)}
+          Namespace: {namespaceLabel} · Page {pageIndex} / {Math.max(totalPages, 1)}
         </p>
       </div>
-      <button
-        type="button"
-        onClick={onToggleControls}
-        className="inline-flex items-center rounded-md border border-gray-200 bg-white px-3 py-1 text-[0.7rem] font-mono text-gray-700 hover:bg-gray-100"
-        aria-pressed={controlsVisible}
-      >
-        {controlsVisible ? 'Hide controls' : 'Show controls'}
-      </button>
+      <div className="flex items-center gap-2">
+        {showSearchButton ? (
+          <button
+            type="button"
+            onClick={onOpenSearch}
+            className="inline-flex items-center rounded-md border border-gray-200 bg-white px-3 py-1 text-[0.7rem] font-mono text-gray-700 hover:bg-gray-100"
+          >
+            Search
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={onToggleControls}
+          className="inline-flex items-center rounded-md border border-gray-200 bg-white px-3 py-1 text-[0.7rem] font-mono text-gray-700 hover:bg-gray-100"
+          aria-pressed={controlsVisible}
+        >
+          {controlsVisible ? 'Hide controls' : 'Show controls'}
+        </button>
+      </div>
     </div>
   );
 }

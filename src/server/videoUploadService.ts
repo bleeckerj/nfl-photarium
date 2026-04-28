@@ -3,6 +3,8 @@ import { createVideoAssetRecord, type VideoAssetRecord } from '@/server/videoCat
 import { cleanString } from '@/utils/cloudflareMetadata';
 import { calculateAspectRatio } from '@/utils/imageUtils';
 import { queueAutoEmbeddingsForVideo } from '@/server/videoEmbeddingService';
+import { extractComfyWorkflowMetadata } from '@/utils/comfyMetadata';
+import { ingestComfyWorkflowForVideo } from '@/server/comfy/videoWorkflowIngestion';
 
 export const MAX_VIDEO_BYTES = Math.max(
   5 * 1024 * 1024,
@@ -39,6 +41,9 @@ export type VideoUploadContext = {
 export type VideoUploadSuccess = {
   id: string;
   assetType: 'video';
+  generatedBy?: string;
+  comfyMetadataDetected?: boolean;
+  comfyMetadataSource?: string;
   filename: string;
   displayName?: string;
   uploaded: string;
@@ -166,6 +171,9 @@ const buildHlsUrl = (streamUid: string, deliveryBase?: string) => `${deliveryBas
 const mapRecordToResponse = (record: VideoAssetRecord): VideoUploadSuccess => ({
   id: record.id,
   assetType: 'video',
+  generatedBy: record.generatedBy,
+  comfyMetadataDetected: record.comfyMetadataDetected,
+  comfyMetadataSource: record.comfyMetadataSource,
   filename: record.filename,
   displayName: record.displayName ?? record.filename,
   uploaded: record.uploaded,
@@ -263,6 +271,7 @@ export async function uploadVideoBuffer(
   }
 
   try {
+    const comfyExtraction = await extractComfyWorkflowMetadata(buffer, { mimeType: normalizedFileType });
     const result = await createStreamVideoFromFile({
       buffer,
       fileName,
@@ -278,8 +287,12 @@ export async function uploadVideoBuffer(
 
     const record = await createVideoAssetRecord({
       assetType: 'video',
+      generatedBy: comfyExtraction.detected ? 'comfyui' : undefined,
+      comfyMetadataDetected: comfyExtraction.detected ? true : undefined,
+      comfyMetadataSource: comfyExtraction.source,
       filename: fileName,
       displayName: cleanedContext.displayName || fileName,
+      fileSizeBytes: fileSize,
       uploaded: new Date().toISOString(),
       parentId: cleanedContext.parentId,
       streamUid: result.uid,
@@ -299,6 +312,12 @@ export async function uploadVideoBuffer(
       sourceUrl: cleanedContext.sourceUrl,
       namespace: cleanedContext.namespace,
     });
+    if (comfyExtraction.detected) {
+      await ingestComfyWorkflowForVideo({
+        videoId: record.id,
+        comfyExtraction,
+      });
+    }
     void queueAutoEmbeddingsForVideo(record);
 
     return { ok: true, data: mapRecordToResponse(record) };

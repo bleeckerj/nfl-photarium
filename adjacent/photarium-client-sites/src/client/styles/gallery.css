@@ -40,6 +40,7 @@
 }
 
 .asset-card__image-button {
+  position: relative;
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--line);
@@ -48,14 +49,77 @@
   cursor: pointer;
 }
 
-.asset-card__image {
-  width: 100%;
-  aspect-ratio: 4 / 3;
-  object-fit: cover;
+.asset-card__media-frame {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--surface-muted);
 }
 
-.asset-card__title,
-.asset-card__tags {
+.asset-card__image {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+
+.asset-card__video {
+  background: #111;
+}
+
+.asset-card__image--empty {
+  display: grid;
+  place-items: center;
+  min-height: 220px;
+  color: var(--muted);
+  font-family: ui-monospace, 'SFMono-Regular', 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.asset-card__badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.82);
+  color: #fff;
+  font-family: ui-monospace, 'SFMono-Regular', 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.asset-card__play-toggle {
+  position: absolute;
+  inset: auto auto 8px 8px;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.95);
+  border-radius: 999px;
+  background: rgba(17, 17, 17, 0.88);
+  color: #fff;
+  cursor: pointer;
+  font-family: ui-monospace, 'SFMono-Regular', 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.asset-card__play-toggle:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.asset-card__play-toggle--active {
+  background: rgba(255, 255, 255, 0.94);
+  color: #111;
+  border-color: rgba(17, 17, 17, 0.16);
+}
+
+.asset-card__title {
   margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -67,10 +131,30 @@
   line-height: 1.25;
 }
 
-.asset-card__tags {
+.asset-card__meta {
+  display: grid;
+  gap: 6px;
+}
+
+.asset-card__tag-list,
+.asset-card__detail-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.asset-card__tag-pill,
+.asset-card__detail {
   font-family: ui-monospace, 'SFMono-Regular', 'SF Mono', Menlo, Consolas, monospace;
   font-size: 0.62rem;
   color: var(--muted);
+}
+
+.asset-card__tag-pill {
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: var(--surface-muted);
 }
 
 .asset-card__footer {

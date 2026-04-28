@@ -167,6 +167,12 @@ Edit `.env.local`:
 ```env
 CLOUDFLARE_ACCOUNT_ID=abc123
 CLOUDFLARE_API_TOKEN=your_token_here
+# Optional: dedicated deploy token for client-sites worker automation
+# CLIENT_SITES_CLOUDFLARE_API_TOKEN=your_client_sites_token_here
+# Optional: managed client-site subdomain automation
+# CLIENT_SITES_BASE_DOMAIN=clients.example.com
+# CLIENT_SITES_ZONE_ID=your_zone_id_here
+# CLIENT_SITES_USE_CUSTOM_DOMAINS=true
 NEXT_PUBLIC_CLOUDFLARE_ACCOUNT_HASH=your_hash_here
 IMAGE_NAMESPACE=default
 NEXT_PUBLIC_IMAGE_NAMESPACE=default
@@ -183,6 +189,150 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000)
+
+---
+
+## Client Sites Setup
+
+Use this when you want Photarium to publish client review galleries to dedicated Cloudflare Workers, with clean URLs such as `andsons.clients.example.com`.
+
+### What gets deployed
+
+- Photarium remains the internal asset/workflow app.
+- Each client site gets its own Worker and D1 database.
+- Client page publishing pushes manifests from Photarium into the adjacent `adjacent/photarium-client-sites` Worker app.
+- If custom domains are configured, deploy promotes the client site from `workers.dev` to `https://<client-slug>.<your-base-domain>`.
+
+### Prerequisites
+
+- Your main Photarium app is already configured and running locally.
+- The parent domain for client sites is on Cloudflare.
+- You know the Cloudflare zone ID for that parent domain.
+- You have a Cloudflare API token that can deploy Workers and manage Worker domains.
+
+### Required env vars for client-site deploys
+
+Add these to `.env.local`:
+
+```env
+CLOUDFLARE_ACCOUNT_ID=abc123
+NEXT_PUBLIC_CLOUDFLARE_ACCOUNT_HASH=your_images_account_hash
+
+# Use either the shared token or a dedicated client-sites token.
+CLOUDFLARE_API_TOKEN=your_default_cloudflare_token
+# CLIENT_SITES_CLOUDFLARE_API_TOKEN=your_dedicated_client_sites_token
+```
+
+What each does:
+
+- `CLOUDFLARE_ACCOUNT_ID`: Cloudflare account that owns the Workers and D1 databases.
+- `NEXT_PUBLIC_CLOUDFLARE_ACCOUNT_HASH`: Cloudflare Images delivery hash used by published client sites.
+- `CLOUDFLARE_API_TOKEN`: fallback deploy token if you do not provide the dedicated client-sites token.
+- `CLIENT_SITES_CLOUDFLARE_API_TOKEN`: preferred token for client-site Worker deploys, domain attachment, and D1 provisioning.
+
+Recommended permissions for the client-sites deploy token:
+
+- `Workers Scripts:Edit`
+- `Workers Scripts:Read`
+- `D1:Edit`
+- `Account Settings:Read`
+
+### Optional env vars for clean client subdomains
+
+These enable automatic attachment of URLs like `andsons.clients.example.com`:
+
+```env
+CLIENT_SITES_BASE_DOMAIN=clients.example.com
+CLIENT_SITES_ZONE_ID=your_cloudflare_zone_id
+CLIENT_SITES_USE_CUSTOM_DOMAINS=true
+```
+
+What each does:
+
+- `CLIENT_SITES_BASE_DOMAIN`: parent hostname under your control. If the client slug is `andsons`, the deployed hostname becomes `andsons.clients.example.com`.
+- `CLIENT_SITES_ZONE_ID`: Cloudflare zone ID for that base domain.
+- `CLIENT_SITES_USE_CUSTOM_DOMAINS`: optional explicit flag. If omitted, custom-domain automation is still enabled when both values above are present.
+
+If you do not set these, client sites still deploy, but the public URL remains the `workers.dev` hostname.
+
+### Worker runtime secrets set during deploy
+
+You do not manually set these in the adjacent Worker for normal deploys; the Photarium deploy flow uploads them:
+
+- `CLIENT_SITES_PUBLISH_SECRET`
+- `ACCESS_LINK_HASH_SECRET`
+- `SESSION_SIGNING_SECRET`
+- `IMAGES_ACCOUNT_HASH`
+- optional `IMAGES_SIGNING_KEY`
+
+### Create and deploy a client site
+
+1. Start Photarium locally so you can manage client pages from the main app.
+2. Create a client site:
+
+```bash
+npm run client-sites:create -- --name "And Sons"
+```
+
+This will:
+
+- derive the slug (`and-sons`)
+- provision the D1 database if needed
+- build and deploy the adjacent Worker
+- attach `and-sons.<base-domain>` if custom-domain automation is configured
+- store the resulting `publicBaseUrl` in the client-site record
+
+3. List deployed client sites:
+
+```bash
+npm run client-sites:list
+```
+
+4. Re-deploy or refresh a client site later:
+
+```bash
+npm run client-sites:deploy -- --site <client-site-id>
+```
+
+5. Inspect deployment health:
+
+```bash
+npm run client-sites:doctor -- --site <client-site-id>
+```
+
+### Publish a client page to that site
+
+1. In the Photarium UI, create or edit a client page and assign it to the client site.
+2. Select the assets to publish.
+3. Publish from the UI, or via CLI:
+
+```bash
+npm run client-sites:publish -- --project <project-id>
+```
+
+The resulting share URL uses the client site’s `publicBaseUrl`, so once custom domains are attached it will look like:
+
+```text
+https://and-sons.clients.example.com/p/<public-slug>?k=<access-key>
+```
+
+### Access model
+
+- Default outer URL: clean client subdomain.
+- Default inner auth: existing secret-link flow (`?k=...`) plus signed session cookie in the client-site Worker.
+- Cloudflare Access is not automatically provisioned by this repo yet; if you want site-wide login in front of the Worker, add it separately at the Cloudflare layer.
+
+### Local development notes
+
+- Local publish targets such as `http://127.0.0.1:8788` can omit the publish secret when the adjacent worker is running with `LOCAL_DEV_MODE=true`.
+- Custom-domain attachment is a deployed-environment feature; local dev continues to use localhost or `workers.dev` style targets.
+
+### Common failure points
+
+- Missing `CLIENT_SITES_ZONE_ID`: deploy succeeds to `workers.dev` but cannot attach the clean client hostname.
+- Wrong token scope: Worker deploy may succeed while domain attach or D1 provisioning fails.
+- Wrong `NEXT_PUBLIC_CLOUDFLARE_ACCOUNT_HASH`: published galleries deploy but image delivery URLs break.
+- Parent domain not on Cloudflare: automatic custom-domain attach will not work.
 
 ---
 
@@ -326,6 +476,8 @@ Notes:
 - Requires the local Photarium app running at `http://localhost:3000` unless overridden with `--api-base`
 - Use `--throttle-ms` to globally pace uploads (for example `500` = ~2 uploads/sec max)
 - AI metadata requires `OPENAI_API_KEY` configured in the Photarium app environment
+- Display-name generation via `/api/images/:id/display-name` and `/api/display-name/suggest` defaults to `gpt-4.1-nano`; set `OPENAI_DISPLAY_NAME_MODEL` to override it
+- Semantic-tag generation via `/api/images/:id/tags` defaults to `gpt-4.1-nano`; set `OPENAI_TAGS_MODEL` to override it
 - Checkpoints are stored under `data/fs-ingest-checkpoints/` (keyed by source root + namespace). A file is considered unchanged when its path, size, and modified time match.
 
 ---

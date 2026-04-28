@@ -2,12 +2,17 @@ import { randomUUID } from 'crypto';
 import { getCacheStorage } from '@/server/cacheStorage';
 import { getStreamVideo } from '@/server/cloudflareStreamClient';
 import { calculateAspectRatio } from '@/utils/imageUtils';
+import { deleteVideoExtrasRecord } from '@/server/videoExtras';
 
 export type VideoAssetRecord = {
   id: string;
   assetType: 'video';
+  generatedBy?: string;
+  comfyMetadataDetected?: boolean;
+  comfyMetadataSource?: string;
   filename: string;
   displayName?: string;
+  fileSizeBytes?: number;
   uploaded: string;
   parentId?: string;
   variationSort?: number;
@@ -182,6 +187,7 @@ export const deleteVideoAssetRecord = async (id: string): Promise<boolean> => {
   }
 
   await storage.delete(getRecordKey(id));
+  await deleteVideoExtrasRecord(id);
   const index = await storage.get<string[]>(VIDEO_RECORD_INDEX_KEY);
   const ids = index?.data ?? [];
   const nextIds = ids.filter((entry) => entry !== id);

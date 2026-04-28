@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 const outputFormatSchema = z.enum(['jpg', 'png', 'webp']);
 const fitModeSchema = z.enum(['scale-down', 'contain', 'cover']);
+const publishedAssetTypeSchema = z.enum(['image', 'video']);
 
 const secretLinkAccessPolicySchema = z.object({
   mode: z.literal('secret-link'),
@@ -37,14 +38,16 @@ export const downloadPresetPolicySchema = z.object({
 });
 
 export const publishedProjectAssetSchema = z.object({
+  assetType: publishedAssetTypeSchema,
   projectAssetId: z.string().min(1),
-  sourceImageId: z.string().min(1),
+  sourceAssetId: z.string().min(1),
   filename: z.string().min(1),
   displayName: z.string().min(1).optional(),
   description: z.string().optional(),
   visibleTags: z.array(z.string().min(1)).optional(),
   sourceTags: z.array(z.string().min(1)),
   uploadedAt: z.string().datetime(),
+  fileSizeBytes: z.number().int().positive().optional(),
   aspectRatio: z.string().min(1).optional(),
   dimensions: z
     .object({
@@ -61,6 +64,12 @@ export const publishedProjectAssetSchema = z.object({
     })
     .optional(),
   previewVariant: z.string().min(1).optional(),
+  videoPlaybackUrl: z.string().url().optional(),
+  videoHlsUrl: z.string().url().optional(),
+  videoThumbnailUrl: z.string().url().optional(),
+  videoPreviewUrl: z.string().url().optional(),
+  videoDownloadUrl: z.string().url().optional(),
+  videoDurationSeconds: z.number().positive().optional(),
   sortOrder: z.number().int().nonnegative().optional(),
 });
 
@@ -114,4 +123,3 @@ export const createProjectRequestSchema = z.object({
   visibleTagPolicy: visibleTagPolicySchema.optional(),
   downloadPresetPolicy: downloadPresetPolicySchema.optional(),
 });
-

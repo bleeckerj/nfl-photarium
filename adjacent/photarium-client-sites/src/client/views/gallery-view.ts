@@ -9,9 +9,12 @@ export const renderGalleryView = (
   handlers: {
     onToggleSelect: (assetId: string) => void;
     onOpenLightbox: (assetId: string) => void;
+    onStartInlinePlayback: (assetId: string) => void;
+    onStopInlinePlayback: () => void;
   }
-): void => {
+): () => void => {
   const assets = getVisibleAssets(state);
+  const cleanups: Array<() => void> = [];
 
   root.replaceChildren();
 
@@ -20,7 +23,7 @@ export const renderGalleryView = (
     emptyState.className = 'gallery-empty';
     emptyState.textContent = clientCopy.emptyGallery;
     root.append(emptyState);
-    return;
+    return () => undefined;
   }
 
   groupAssetsByCluster(assets).forEach((group) => {
@@ -35,17 +38,24 @@ export const renderGalleryView = (
     grid.className = 'asset-grid';
 
     group.assets.forEach((asset) => {
-      grid.append(
-        renderGalleryCard({
+      const rendered = renderGalleryCard({
           asset,
           isSelected: state.selectedAssetIds.has(asset.id),
+          isInlinePlaying: state.inlinePlayingAssetId === asset.id,
           onToggleSelect: handlers.onToggleSelect,
           onOpenLightbox: handlers.onOpenLightbox,
-        })
-      );
+          onStartInlinePlayback: handlers.onStartInlinePlayback,
+          onStopInlinePlayback: handlers.onStopInlinePlayback,
+        });
+      cleanups.push(rendered.cleanup);
+      grid.append(rendered.element);
     });
 
     section.append(title, grid);
     root.append(section);
   });
+
+  return () => {
+    cleanups.forEach((cleanup) => cleanup());
+  };
 };

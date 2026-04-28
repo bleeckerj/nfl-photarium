@@ -17,6 +17,12 @@ interface RemoteProjectCreateResponse {
   accessKey: string;
 }
 
+const readResponseSnippet = async (response: Response): Promise<string> => {
+  const text = (await response.text().catch(() => '')).trim();
+  if (!text) return '';
+  return text.length > 300 ? `${text.slice(0, 300)}...` : text;
+};
+
 export const publishClientSiteProject = async (request: ClientSitePublishRequest) => {
   const targetBaseUrl = normalizePublishTargetBaseUrl(request.targetBaseUrl);
   const publishSecret = resolvePublishSecret(request);
@@ -38,7 +44,10 @@ export const publishClientSiteProject = async (request: ClientSitePublishRequest
     });
 
     if (!createResponse.ok) {
-      throw new Error(`Failed to create remote client-site project (${createResponse.status})`);
+      const responseSnippet = await readResponseSnippet(createResponse);
+      throw new Error(
+        `Failed to create remote client-site project (${createResponse.status})${responseSnippet ? `: ${responseSnippet}` : ''}`
+      );
     }
 
     const created = (await createResponse.json()) as RemoteProjectCreateResponse;
@@ -69,7 +78,10 @@ export const publishClientSiteProject = async (request: ClientSitePublishRequest
   });
 
   if (!publishResponse.ok) {
-    throw new Error(`Failed to publish remote client-site project (${publishResponse.status})`);
+    const responseSnippet = await readResponseSnippet(publishResponse);
+    throw new Error(
+      `Failed to publish remote client-site project (${publishResponse.status})${responseSnippet ? `: ${responseSnippet}` : ''}`
+    );
   }
 
   const publishResult = await publishResponse.json();

@@ -2,50 +2,71 @@
 
 import { useEffect, useState } from 'react';
 import { ClientPageProjectFields } from './ClientPageProjectFields';
-import { joinNamespaces } from './formatters';
 import type { ClientPageProjectRecord } from '../types';
+import type { ClientSiteSummary } from './api';
 
 interface ClientPageMetadataFormProps {
   project: ClientPageProjectRecord;
+  clientSites: ClientSiteSummary[];
   busy: boolean;
   onSave: (payload: {
     title: string;
     clientName?: string;
+    clientSiteId?: string;
     notes?: string;
     expiresAt?: string | null;
     sourceNamespaces?: string[];
   }) => Promise<void>;
 }
 
-const splitNamespaces = (value: string) =>
-  value
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-
-export function ClientPageMetadataForm({ project, busy, onSave }: ClientPageMetadataFormProps) {
+export function ClientPageMetadataForm({ project, clientSites, busy, onSave }: ClientPageMetadataFormProps) {
   const [title, setTitle] = useState(project.title);
   const [clientName, setClientName] = useState(project.clientName ?? '');
+  const [clientSiteId, setClientSiteId] = useState(project.clientSiteId ?? '');
   const [notes, setNotes] = useState(project.notes ?? '');
   const [expiresAt, setExpiresAt] = useState(project.expiresAt ? project.expiresAt.slice(0, 10) : '');
-  const [sourceNamespaces, setSourceNamespaces] = useState(joinNamespaces(project.sourceNamespaces));
+  const [sourceNamespaces, setSourceNamespaces] = useState(project.sourceNamespaces);
+  const [availableNamespaces, setAvailableNamespaces] = useState<string[]>([]);
 
   useEffect(() => {
     setTitle(project.title);
     setClientName(project.clientName ?? '');
+    setClientSiteId(project.clientSiteId ?? '');
     setNotes(project.notes ?? '');
     setExpiresAt(project.expiresAt ? project.expiresAt.slice(0, 10) : '');
-    setSourceNamespaces(joinNamespaces(project.sourceNamespaces));
+    setSourceNamespaces(project.sourceNamespaces);
   }, [project]);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/namespaces', { cache: 'no-store' })
+      .then((response) => response.json())
+      .then((data) => {
+        if (!active) return;
+        const nextNamespaces = Array.isArray(data?.namespaces)
+          ? data.namespaces.filter((entry: unknown): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+          : [];
+        setAvailableNamespaces(nextNamespaces);
+      })
+      .catch(() => {
+        if (!active) return;
+        setAvailableNamespaces([]);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     await onSave({
       title,
       clientName: clientName || undefined,
+      clientSiteId: clientSiteId || undefined,
       notes: notes || undefined,
       expiresAt: expiresAt || null,
-      sourceNamespaces: splitNamespaces(sourceNamespaces),
+      sourceNamespaces,
     });
   };
 
@@ -60,11 +81,15 @@ export function ClientPageMetadataForm({ project, busy, onSave }: ClientPageMeta
         <ClientPageProjectFields
           title={title}
           clientName={clientName}
+          clientSiteId={clientSiteId}
           notes={notes}
           expiresAt={expiresAt}
           sourceNamespaces={sourceNamespaces}
+          availableNamespaces={availableNamespaces}
+          clientSites={clientSites}
           onTitleChange={setTitle}
           onClientNameChange={setClientName}
+          onClientSiteIdChange={setClientSiteId}
           onNotesChange={setNotes}
           onExpiresAtChange={setExpiresAt}
           onSourceNamespacesChange={setSourceNamespaces}

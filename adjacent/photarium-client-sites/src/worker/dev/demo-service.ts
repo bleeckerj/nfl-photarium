@@ -34,7 +34,8 @@ const localDemoDeliveryPolicy: DownloadPresetPolicy = {
 
 const demoAssetTemplates: Array<Omit<PublishedProjectAsset, 'projectAssetId'>> = [
   {
-    sourceImageId: 'b591b2dd-c298-4fd3-1b0e-295c0f0f1100',
+    assetType: 'image',
+    sourceAssetId: 'b591b2dd-c298-4fd3-1b0e-295c0f0f1100',
     filename: 'headphones-kit.jpg',
     displayName: 'Headphones kit',
     description: 'Primary product frame with accessories and packaging.',
@@ -50,7 +51,8 @@ const demoAssetTemplates: Array<Omit<PublishedProjectAsset, 'projectAssetId'>> =
     sortOrder: 1,
   },
   {
-    sourceImageId: '771bc8dd-9012-4b51-34ae-5c1ac7676700',
+    assetType: 'image',
+    sourceAssetId: '771bc8dd-9012-4b51-34ae-5c1ac7676700',
     filename: 'headphones-profile.jpg',
     displayName: 'Headphones profile',
     description: 'Alternate product view for side-by-side comparison.',
@@ -64,7 +66,8 @@ const demoAssetTemplates: Array<Omit<PublishedProjectAsset, 'projectAssetId'>> =
     sortOrder: 2,
   },
   {
-    sourceImageId: '216ab14e-da20-478e-385a-20bba4097400',
+    assetType: 'image',
+    sourceAssetId: '216ab14e-da20-478e-385a-20bba4097400',
     filename: 'chip-feature.jpg',
     displayName: 'Chip feature art',
     description: 'Editorial-style frame with a tight macro composition.',
@@ -78,7 +81,8 @@ const demoAssetTemplates: Array<Omit<PublishedProjectAsset, 'projectAssetId'>> =
     sortOrder: 3,
   },
   {
-    sourceImageId: '83e75e69-e170-4757-a5c2-bb99fa90f800',
+    assetType: 'image',
+    sourceAssetId: '83e75e69-e170-4757-a5c2-bb99fa90f800',
     filename: 'snow-crash-cover.jpg',
     displayName: 'Snow Crash cover',
     description: 'Book cover example for a print-oriented visual cluster.',
@@ -92,7 +96,8 @@ const demoAssetTemplates: Array<Omit<PublishedProjectAsset, 'projectAssetId'>> =
     sortOrder: 4,
   },
   {
-    sourceImageId: '1b422df6-b7f1-4716-aae8-37d3f698f200',
+    assetType: 'image',
+    sourceAssetId: '1b422df6-b7f1-4716-aae8-37d3f698f200',
     filename: 'archive-fragment.webp',
     displayName: 'Archive fragment',
     description: 'Loose found image for testing mixed-source selections.',
@@ -106,7 +111,8 @@ const demoAssetTemplates: Array<Omit<PublishedProjectAsset, 'projectAssetId'>> =
     sortOrder: 5,
   },
   {
-    sourceImageId: '95b00065-e63e-4441-3390-1251e7310600',
+    assetType: 'image',
+    sourceAssetId: '95b00065-e63e-4441-3390-1251e7310600',
     filename: 'telegram-scan.jpg',
     displayName: 'Telegram scan',
     description: 'Light neutral frame for shortlist and download checks.',
@@ -118,6 +124,28 @@ const demoAssetTemplates: Array<Omit<PublishedProjectAsset, 'projectAssetId'>> =
     clusterSeed: { id: 'cluster-notes', label: 'Notes' },
     previewVariant: 'public',
     sortOrder: 6,
+  },
+  {
+    assetType: 'video',
+    sourceAssetId: 'video-demo-1',
+    filename: 'studio-reel.mp4',
+    displayName: 'Studio reel',
+    description: 'Short campaign motion cut for video playback checks.',
+    visibleTags: ['motion', 'studio'],
+    sourceTags: ['motion', 'studio'],
+    uploadedAt: '2026-04-01T20:21:31.000Z',
+    aspectRatio: '16:9',
+    dimensions: { width: 1920, height: 1080 },
+    isCanonical: true,
+    hasEmbedding: false,
+    clusterSeed: { id: 'cluster-motion', label: 'Motion' },
+    videoPlaybackUrl: 'https://videodelivery.net/demo-video/watch',
+    videoHlsUrl: 'https://videodelivery.net/demo-video/manifest/video.m3u8',
+    videoThumbnailUrl: 'https://videodelivery.net/demo-video/thumbnails/thumbnail.jpg',
+    videoPreviewUrl: 'https://videodelivery.net/demo-video/thumbnails/thumbnail.jpg',
+    videoDownloadUrl: 'https://videodelivery.net/demo-video/downloads/default.mp4',
+    videoDurationSeconds: 12,
+    sortOrder: 7,
   },
 ];
 
@@ -206,4 +234,3 @@ export class LocalDemoService {
     };
   }
 }
-

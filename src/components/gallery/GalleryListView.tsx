@@ -54,6 +54,7 @@ export const GalleryListView: React.FC<GalleryListViewProps> = ({
     altLoadingMap,
     displayNameLoadingMap,
     galleryReturnHrefSuffix,
+    focusedGalleryAssetId,
   } = filters;
 
   return (
@@ -73,6 +74,7 @@ export const GalleryListView: React.FC<GalleryListViewProps> = ({
             colorMetadata={colorMetadataMap[image.id] as ColorMetadata | undefined}
             altLoading={Boolean(altLoadingMap[image.id])}
             displayNameLoading={Boolean(displayNameLoadingMap[image.id])}
+            isFocusedInGallery={focusedGalleryAssetId === image.id}
             onToggleSelection={onToggleSelection}
             onStartEdit={onStartEdit}
             onDelete={onDelete}

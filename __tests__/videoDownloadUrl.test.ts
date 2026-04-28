@@ -8,22 +8,22 @@ describe('resolveVideoDownloadUrl', () => {
     process.env = { ...ORIGINAL_ENV };
   });
 
-  it('derives Cloudflare download URL from HLS URL', () => {
+  it('does not infer downloadable files from HLS manifests', () => {
     expect(resolveVideoDownloadUrl({
       hlsUrl: 'https://videodelivery.net/abc123/manifest/video.m3u8',
-    })).toBe('https://videodelivery.net/abc123/downloads/default.mp4');
+    })).toBe('');
   });
 
-  it('derives Cloudflare download URL from playback iframe URL', () => {
+  it('does not infer downloadable files from iframe URLs', () => {
     expect(resolveVideoDownloadUrl({
       playbackUrl: 'https://videodelivery.net/abc123/iframe',
-    })).toBe('https://videodelivery.net/abc123/downloads/default.mp4');
+    })).toBe('');
   });
 
-  it('derives Cloudflare download URL from watch URL', () => {
+  it('does not infer downloadable files from watch URLs', () => {
     expect(resolveVideoDownloadUrl({
       playbackUrl: 'https://videodelivery.net/abc123/watch',
-    })).toBe('https://videodelivery.net/abc123/downloads/default.mp4');
+    })).toBe('');
   });
 
   it('falls back to source/original direct video URLs', () => {
@@ -36,9 +36,7 @@ describe('resolveVideoDownloadUrl', () => {
     expect(resolveVideoDownloadUrls({
       streamUid: 'abc12345',
       sourceUrl: 'https://www.threads.com/@example/post/abc123',
-    })).toEqual([
-      'https://videodelivery.net/abc12345/downloads/default.mp4',
-    ]);
+    })).toEqual([]);
   });
 
   it('returns empty string when nothing downloadable is available', () => {
@@ -49,25 +47,20 @@ describe('resolveVideoDownloadUrl', () => {
     })).toBe('');
   });
 
-  it('includes a streamUid-derived fallback download URL', () => {
+  it('does not synthesize streamUid-derived download URLs', () => {
     expect(resolveVideoDownloadUrls({
       streamUid: 'abc12345',
       playbackUrl: 'https://old.example.com/abc12345/iframe',
-    })).toEqual([
-      'https://old.example.com/abc12345/downloads/default.mp4',
-      'https://videodelivery.net/abc12345/downloads/default.mp4',
-    ]);
+    })).toEqual([]);
   });
 
-  it('extracts stream uid when legacy records store streamUid as a full URL', () => {
+  it('does not synthesize download URLs from legacy streamUid URL strings', () => {
     expect(resolveVideoDownloadUrls({
       streamUid: 'https://videodelivery.net/xyz98765/iframe',
-    })).toEqual([
-      'https://videodelivery.net/xyz98765/downloads/default.mp4',
-    ]);
+    })).toEqual([]);
   });
 
-  it('uses the configured customer subdomain for streamUid fallback URLs', () => {
+  it('ignores customer subdomain config when no direct downloadable URL exists', () => {
     process.env = {
       ...ORIGINAL_ENV,
       CLOUDFLARE_STREAM_CUSTOMER_SUBDOMAIN: 'customer-streams',
@@ -75,20 +68,15 @@ describe('resolveVideoDownloadUrl', () => {
 
     expect(resolveVideoDownloadUrls({
       streamUid: 'abc12345',
-    })).toEqual([
-      'https://customer-streams.cloudflarestream.com/abc12345/downloads/default.mp4',
-    ]);
+    })).toEqual([]);
   });
 
-  it('prefers the customer delivery host inferred from thumbnail and preview URLs', () => {
+  it('does not infer download URLs from thumbnail and preview hosts', () => {
     expect(resolveVideoDownloadUrls({
       streamUid: 'abc12345',
       playbackUrl: 'https://videodelivery.net/abc12345/iframe',
       thumbnailUrl: 'https://customer-2v1fhua5q7p6kxxk.cloudflarestream.com/abc12345/thumbnails/thumbnail.jpg',
       previewUrl: 'https://customer-2v1fhua5q7p6kxxk.cloudflarestream.com/abc12345/watch',
-    })).toEqual([
-      'https://videodelivery.net/abc12345/downloads/default.mp4',
-      'https://customer-2v1fhua5q7p6kxxk.cloudflarestream.com/abc12345/downloads/default.mp4',
-    ]);
+    })).toEqual([]);
   });
 });

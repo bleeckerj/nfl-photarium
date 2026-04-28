@@ -7,6 +7,7 @@ import {
 } from '@client/domain/selectors';
 import { AppStore } from '@client/state/store';
 import { bindLightboxKeyboardNavigation } from '@client/interactions/lightbox-keyboard';
+import { syncGalleryPlaybackState } from '@client/rendering/gallery-playback-state';
 import { syncGallerySelectionState } from '@client/rendering/gallery-selection-state';
 import { renderGalleryView } from '@client/views/gallery-view';
 import { renderLightboxView } from '@client/views/lightbox-view';
@@ -47,6 +48,8 @@ export const startProjectRoute = async (
   const api = new ClientSiteApi(options.projectSlug);
   const store = new AppStore();
   let lastGalleryStructureSignature: string | null = null;
+  let cleanupGalleryMedia: () => void = () => undefined;
+  let cleanupLightboxMedia: () => void = () => undefined;
 
   const stepLightbox = (direction: 'previous' | 'next') => {
     const context = getLightboxAssetContext(store.getState());
@@ -84,15 +87,34 @@ export const startProjectRoute = async (
 
     renderTagFilterView(shell.tagFilterBar, state, (tag) => store.setActiveTag(tag));
     if (galleryStructureSignature !== lastGalleryStructureSignature) {
-      renderGalleryView(shell.galleryRoot, state, {
+      cleanupGalleryMedia();
+      cleanupGalleryMedia = renderGalleryView(shell.galleryRoot, state, {
         onToggleSelect: (assetId) => store.toggleAssetSelection(assetId),
-        onOpenLightbox: (assetId) => store.setLightboxAssetId(assetId),
+        onOpenLightbox: (assetId) => {
+          store.setInlinePlayingAssetId(null);
+          store.setLightboxAssetId(assetId);
+        },
+        onStartInlinePlayback: (assetId) => {
+          store.setLightboxAssetId(null);
+          store.setInlinePlayingAssetId(assetId);
+        },
+        onStopInlinePlayback: () => store.setInlinePlayingAssetId(null),
       });
       lastGalleryStructureSignature = galleryStructureSignature;
     } else {
       syncGallerySelectionState(shell.galleryRoot, state.selectedAssetIds);
+      syncGalleryPlaybackState(shell.galleryRoot, {
+        assets: visibleAssets,
+        inlinePlayingAssetId: state.inlinePlayingAssetId,
+        onOpenLightbox: (assetId) => {
+          store.setInlinePlayingAssetId(null);
+          store.setLightboxAssetId(assetId);
+        },
+        onStopInlinePlayback: () => store.setInlinePlayingAssetId(null),
+      });
     }
-    renderLightboxView(shell.lightboxRoot, state, {
+    cleanupLightboxMedia();
+    cleanupLightboxMedia = renderLightboxView(shell.lightboxRoot, state, {
       onClose: () => store.setLightboxAssetId(null),
       onToggleSelect: (assetId) => store.toggleAssetSelection(assetId),
       onShowPrevious: () => stepLightbox('previous'),
@@ -148,4 +170,3 @@ export const startProjectRoute = async (
     renderFatalError(shell, getBootstrapErrorMessage(error));
   }
 };
-

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cleanString, parseCloudflareMetadata } from '@/utils/cloudflareMetadata';
+import { sanitizeSingleWordSuggestedTags } from '@/server/aiTagParsing';
 
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
 const DEFAULT_TAG_COUNT = 6;
@@ -27,31 +28,6 @@ const extractMessageText = (content: unknown): string | undefined => {
     .join(' ')
     .trim();
   return merged || undefined;
-};
-
-const normalizeSingleWordTag = (value: string) =>
-  value
-    .toLowerCase()
-    .replace(/[`'".,;:!?()[\]{}]/g, ' ')
-    .replace(/[_/]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/\s+/g, '-');
-
-const sanitizeSuggestedTags = (raw: string | undefined, expectedCount: number) => {
-  if (!raw) {
-    return [];
-  }
-  const seen = new Set<string>();
-  const tags: string[] = [];
-  for (const part of raw.split(/[,\n]/g)) {
-    const cleaned = normalizeSingleWordTag(part);
-    if (!cleaned || seen.has(cleaned)) continue;
-    seen.add(cleaned);
-    tags.push(cleaned);
-    if (tags.length >= expectedCount) break;
-  }
-  return tags;
 };
 
 export async function POST(
@@ -120,10 +96,12 @@ export async function POST(
     const prompt = [
       'Analyze this image and return only a comma-separated list of semantic tags.',
       `Return exactly ${requestedCount} tags.`,
+      'Separate every tag with a comma.',
       'Each tag must be a single word.',
       'Use lowercase ASCII words only.',
       'Prefer concrete scene, subject, object, mood, material, or setting terms.',
       'No phrases, no punctuation, no numbering, no explanation, no markdown.',
+      'Do not collapse multiple tags into one hyphenated slug.',
       filename ? `Filename hint: ${filename}` : null,
       folder ? `Folder hint: ${folder}` : null,
       existingTags.length ? `Existing tags for context: ${existingTags.join(', ')}` : null,
@@ -131,7 +109,7 @@ export async function POST(
       .filter(Boolean)
       .join('\n');
 
-    const model = process.env.OPENAI_TAGS_MODEL || process.env.OPENAI_DISPLAY_NAME_MODEL || 'gpt-4.1-mini';
+    const model = process.env.OPENAI_TAGS_MODEL || process.env.OPENAI_DISPLAY_NAME_MODEL || 'gpt-4.1-nano';
     const openAiResponse = await fetch(OPENAI_API_URL, {
       method: 'POST',
       headers: {
@@ -167,7 +145,7 @@ export async function POST(
     }
 
     const raw = extractMessageText(openAiPayload?.choices?.[0]?.message?.content);
-    const tags = sanitizeSuggestedTags(raw, requestedCount);
+    const tags = sanitizeSingleWordSuggestedTags(raw, requestedCount);
     if (tags.length === 0) {
       return NextResponse.json({ error: 'OpenAI response did not contain usable tags' }, { status: 422 });
     }

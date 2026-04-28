@@ -57,6 +57,7 @@ export const GalleryGridView: React.FC<GalleryGridViewProps> = ({
     altLoadingMap,
     displayNameLoadingMap,
     galleryReturnHrefSuffix,
+    focusedGalleryAssetId,
   } = filters;
 
   return (
@@ -75,6 +76,7 @@ export const GalleryGridView: React.FC<GalleryGridViewProps> = ({
           embeddingPending={embeddingPendingMap[image.id]}
           altLoading={Boolean(altLoadingMap[image.id])}
           displayNameLoading={Boolean(displayNameLoadingMap[image.id])}
+          isFocusedInGallery={focusedGalleryAssetId === image.id}
           onToggleSelection={onToggleSelection}
           onStartEdit={onStartEdit}
           onDelete={onDelete}

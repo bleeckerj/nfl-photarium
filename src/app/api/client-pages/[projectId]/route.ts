@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClientPageProjectService } from '@/features/client-pages/server';
+import { createClientPageProjectService, createClientPagePublishService } from '@/features/client-pages/server';
 import { parseUpdateClientPageProjectInput } from '@/features/client-pages/api/parsers';
 import { jsonBadRequest, jsonServerError } from '@/features/client-pages/api/http';
 import { toClientPageProjectResponse } from '@/features/client-pages/api/responses';
@@ -21,11 +21,12 @@ export async function GET(
   try {
     const projectId = await getProjectId(params);
     const projectService = createClientPageProjectService();
+    const publishService = createClientPagePublishService();
     const project = await projectService.getProject(projectId);
     if (!project) {
       return NextResponse.json({ error: 'Project not found.' }, { status: 404 });
     }
-    return NextResponse.json(toClientPageProjectResponse(project));
+    return NextResponse.json(await toClientPageProjectResponse(project, publishService));
   } catch (error) {
     return jsonServerError(error, 'client-pages/get');
   }
@@ -39,8 +40,9 @@ export async function PATCH(
     const projectId = await getProjectId(params);
     const payload = parseUpdateClientPageProjectInput(await request.json());
     const projectService = createClientPageProjectService();
+    const publishService = createClientPagePublishService();
     const project = await projectService.updateProject(projectId, payload);
-    return NextResponse.json(toClientPageProjectResponse(project));
+    return NextResponse.json(await toClientPageProjectResponse(project, publishService));
   } catch (error) {
     console.error('[client-pages] update failed', error);
     return jsonBadRequest(

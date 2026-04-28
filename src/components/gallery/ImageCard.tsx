@@ -44,6 +44,7 @@ interface ImageCardProps {
   onSelectColor?: (hex: string) => void;
   onBeforeNavigate?: (imageId: string) => void;
   galleryReturnHrefSuffix?: string;
+  isFocusedInGallery?: boolean;
   // Hover preview
   onMouseEnter: (imageId: string, event: React.MouseEvent) => void;
   onMouseMove: (imageId: string, event: React.MouseEvent) => void;
@@ -85,6 +86,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
   onSelectColor,
   onBeforeNavigate,
   galleryReturnHrefSuffix,
+  isFocusedInGallery = false,
   onMouseEnter,
   onMouseMove,
   onMouseLeave,
@@ -107,9 +109,13 @@ export const ImageCard: React.FC<ImageCardProps> = ({
 
   return (
     <div
+      id={`gallery-asset-${image.id}`}
+      data-gallery-asset-id={image.id}
       className={`z-0 group bg-gray-100 rounded-lg overflow-hidden flex flex-col h-full border ${
         isSelected ? 'border-blue-500 ring-2 ring-blue-400' : 'border-transparent'
-      } ${bulkSelectionMode ? 'cursor-pointer' : ''}`}
+      } ${isFocusedInGallery ? 'border-amber-400 ring-2 ring-amber-300 ring-offset-2' : ''} ${
+        bulkSelectionMode ? 'cursor-pointer' : ''
+      }`}
     >
       <Link
         href={detailHref}

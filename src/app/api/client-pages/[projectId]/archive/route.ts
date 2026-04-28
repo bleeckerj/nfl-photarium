@@ -23,7 +23,7 @@ export async function POST(
 
     const publishService = createClientPagePublishService();
     const updatedProject = await publishService.archive(project);
-    return NextResponse.json(toClientPageProjectResponse(updatedProject));
+    return NextResponse.json(await toClientPageProjectResponse(updatedProject, publishService));
   } catch (error) {
     return jsonServerError(error, 'client-pages/archive');
   }

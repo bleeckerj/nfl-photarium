@@ -174,8 +174,8 @@ export default function MonoSelect({
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
       setMenuStyle({
-        top: rect.bottom + window.scrollY + 4,
-        left: rect.left + window.scrollX,
+        top: rect.bottom + 4,
+        left: rect.left,
         width: rect.width,
       });
     };

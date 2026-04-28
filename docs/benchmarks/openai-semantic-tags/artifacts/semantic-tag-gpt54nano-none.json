@@ -1,0 +1,94 @@
+[
+  {
+    "imagePath": "ltm1100_mountain_04_16x9_00001.png",
+    "filename": "ltm1100_mountain_04_16x9_00001.png",
+    "status": 200,
+    "rawText": "{\"tags\":[\"truck\",\"mountains\",\"desert\",\"snow\",\"wilderness\",\"scenic\"]}",
+    "tags": [
+      "truck",
+      "mountains",
+      "desert",
+      "snow",
+      "wilderness",
+      "scenic"
+    ],
+    "usage": {
+      "inputTokens": 1304,
+      "outputTokens": 28,
+      "totalTokens": 1332,
+      "reasoningTokens": 0
+    },
+    "costUsd": 0.0002958,
+    "error": null,
+    "elapsedMs": 1673
+  },
+  {
+    "imagePath": "tmp/autotrader_00505__900px.jpg",
+    "filename": "autotrader_00505__900px.jpg",
+    "status": 200,
+    "rawText": "{\"tags\":[\"suv\",\"offroad\",\"camera\",\"mount\",\"beach\",\"overcast\"]}",
+    "tags": [
+      "suv",
+      "offroad",
+      "camera",
+      "mount",
+      "beach",
+      "overcast"
+    ],
+    "usage": {
+      "inputTokens": 1121,
+      "outputTokens": 28,
+      "totalTokens": 1149,
+      "reasoningTokens": 0
+    },
+    "costUsd": 0.0002592,
+    "error": null,
+    "elapsedMs": 1628
+  },
+  {
+    "imagePath": "tmp/dng-ingest-previews/003f40318fc90018.jpg",
+    "filename": "003f40318fc90018.jpg",
+    "status": 200,
+    "rawText": "{\"tags\":[\"door\",\"number\",\"25\",\"yellow\",\"paint\",\"handle\"]}",
+    "tags": [
+      "door",
+      "number",
+      "25",
+      "yellow",
+      "paint",
+      "handle"
+    ],
+    "usage": {
+      "inputTokens": 3039,
+      "outputTokens": 24,
+      "totalTokens": 3063,
+      "reasoningTokens": 0
+    },
+    "costUsd": 0.0006378,
+    "error": null,
+    "elapsedMs": 1996
+  },
+  {
+    "imagePath": "tmp/dng-ingest-previews/6cb822ee7c7d85bd.jpg",
+    "filename": "6cb822ee7c7d85bd.jpg",
+    "status": 200,
+    "rawText": "{\"tags\":[\"bulletinboard\",\"stickers\",\"posters\",\"corridor\",\"crowd\",\"warmlight\"]}",
+    "tags": [
+      "bulletinboard",
+      "stickers",
+      "posters",
+      "corridor",
+      "crowd",
+      "warmlight"
+    ],
+    "usage": {
+      "inputTokens": 3042,
+      "outputTokens": 31,
+      "totalTokens": 3073,
+      "reasoningTokens": 0
+    },
+    "costUsd": 0.0006471500000000001,
+    "error": null,
+    "elapsedMs": 4104
+  }
+]

@@ -17,6 +17,7 @@ import { downloadImageToFile, formatDownloadFileName } from '@/utils/downloadUti
 import LegacyTopBar from '@/components/gallery/LegacyTopBar';
 import { GalleryCompactHeader } from '@/components/gallery/GalleryCompactHeader';
 import { GalleryPagerStrip } from '@/components/gallery/GalleryPagerStrip';
+import GallerySemanticSearch, { type GallerySemanticSearchRef } from '@/components/gallery/GallerySemanticSearch';
 import { useGallerySelection } from './gallery/hooks/useGallerySelection';
 import { useGalleryFilters } from './gallery/hooks/useGalleryFilters';
 import { useGalleryItemActions } from './gallery/hooks/useGalleryItemActions';
@@ -29,7 +30,6 @@ import { GalleryModals } from './gallery/GalleryModals';
 import { normalizeColorSearchHex, resolveColorSearchAssets, type ColorSearchResultRow } from './gallery/colorSearch';
 import { AUDIT_LOG_LIMIT, DEFAULT_GRID_SIZE } from './gallery/constants';
 import { normalizeGridSize } from './gallery/gridSizing';
-import { resolveGalleryChromeScrollState, type GalleryChromeManualMode } from './gallery/galleryChrome';
 import { normalizeDateFilterValue, toDateKey } from './gallery/dateFilter';
 import {
   clearGalleryReturnState,
@@ -39,6 +39,7 @@ import {
   saveGalleryReturnState as persistGalleryReturnState,
   type NormalizedGalleryReturnState,
 } from './gallery/returnState';
+import { parseCanonicalGalleryFocusFromSearch } from './gallery/focusNavigation';
 import { isLikelySourceSearchTerm } from '@/utils/galleryFilter';
 
 interface CloudflareImage {
@@ -415,14 +416,18 @@ export const getStoredPreferences = (
 
 const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   ({ refreshTrigger, namespace, onNamespaceChange }, ref) => {
+  const initialFocusTargetRef = useRef(
+    typeof window === 'undefined' ? null : parseCanonicalGalleryFocusFromSearch(window.location.search)
+  );
   const initialGalleryReturnStateRef = useRef<NormalizedGalleryReturnState | null>(
-    getFreshGalleryReturnState()
+    initialFocusTargetRef.current ? null : getFreshGalleryReturnState()
   );
   const storedPreferencesRef = useRef(
     getStoredPreferences(namespace, initialGalleryReturnStateRef.current)
   );
 
   const initialReturningFromDetail = (() => {
+    if (initialFocusTargetRef.current) return false;
     if (initialGalleryReturnStateRef.current) return true;
     if (typeof window === 'undefined') return false;
     try {
@@ -502,7 +507,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [showCli, setShowCli] = useState(storedPreferencesRef.current.showCli ?? true);
   const [controlsVisiblePreference, setControlsVisiblePreference] = useState(storedPreferencesRef.current.controlsVisible ?? true);
   const [galleryControlsVisible, setGalleryControlsVisible] = useState(storedPreferencesRef.current.controlsVisible ?? true);
-  const [compactScrollMode, setCompactScrollMode] = useState(!(storedPreferencesRef.current.controlsVisible ?? true));
   const [bulkState, dispatchBulk] = useReducer(
     bulkReducer,
     {
@@ -629,7 +633,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     setNamespaceSelectValue(next || '');
   }, [namespace]);
 
-  const fetchNamespaces = useCallback(async (cache: RequestCache = 'default') => {
+  const fetchNamespaces = useCallback(async (cache: RequestCache = 'no-store') => {
     try {
       const response = await fetch('/api/namespaces', { cache });
       const data = await response.json();
@@ -642,6 +646,31 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
 
   useEffect(() => {
     void fetchNamespaces('no-store');
+  }, [fetchNamespaces]);
+
+  const registerNamespace = useCallback(async (value: string) => {
+    const namespace = value.trim();
+    if (!namespace || namespace === '__all__' || namespace === '__none__') {
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/namespaces', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({ namespace }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(typeof data?.error === 'string' ? data.error : 'Failed to register namespace');
+      }
+      const payload = Array.isArray(data?.namespaces) ? data.namespaces : [];
+      setRegistryNamespaces(payload.filter((entry: unknown): entry is string => typeof entry === 'string'));
+    } catch (error) {
+      console.warn('Failed to register namespace', error);
+      void fetchNamespaces('no-store');
+    }
   }, [fetchNamespaces]);
 
   const namespaceOptions = useMemo(() => {
@@ -711,7 +740,11 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     return options;
   }, [images, namespace, registryNamespaces]);
 
-  const namespaceLabel = namespace === '__all__' ? 'All namespaces' : namespace;
+  const namespaceLabel = namespace === '__all__'
+    ? 'All namespaces'
+    : namespace
+      ? namespace
+      : '(no namespace)';
 
   // Restore scroll position when returning from a detail page.
   // Page is restored during initial state hydration to avoid a visible jump.
@@ -762,12 +795,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   const [showPreview, setShowPreview] = useState(false);
   const [utilityExpanded, setUtilityExpanded] = useState(false);
+  const [semanticSearchAvailable, setSemanticSearchAvailable] = useState(false);
+  const [pendingSemanticSearchReveal, setPendingSemanticSearchReveal] = useState(false);
   const galleryTopRef = useRef<HTMLDivElement | null>(null);
-  const chromeManualModeRef = useRef<GalleryChromeManualMode>(
-    (storedPreferencesRef.current.controlsVisible ?? true) ? 'auto' : 'hidden'
-  );
-  const lastScrollYRef = useRef(0);
-  const scrollFrameRef = useRef<number | null>(null);
+  const semanticSearchRef = useRef<GallerySemanticSearchRef | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const initialLoadStartedAtRef = useRef<number>(typeof performance !== 'undefined' ? performance.now() : Date.now());
   const initialLoadLoggedRef = useRef(false);
@@ -785,63 +816,46 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     }
   }, []);
 
-  const applyGalleryChromeState = useCallback((controlsVisible: boolean, compactMode: boolean) => {
+  const applyGalleryControlsVisibility = useCallback((controlsVisible: boolean) => {
     setGalleryControlsVisible((prev) => (prev === controlsVisible ? prev : controlsVisible));
-    setCompactScrollMode((prev) => (prev === compactMode ? prev : compactMode));
   }, []);
 
   const toggleGalleryControls = useCallback(() => {
     const shouldShow = !galleryControlsVisible;
-    const nextManualMode: GalleryChromeManualMode = shouldShow ? 'shown' : 'hidden';
-    chromeManualModeRef.current = nextManualMode;
     setControlsVisiblePreference(shouldShow);
-    applyGalleryChromeState(shouldShow, !shouldShow);
-  }, [applyGalleryChromeState, galleryControlsVisible]);
+    applyGalleryControlsVisibility(shouldShow);
+  }, [applyGalleryControlsVisibility, galleryControlsVisible]);
+
+  const openSemanticSearch = useCallback(() => {
+    setControlsVisiblePreference(true);
+    applyGalleryControlsVisibility(true);
+    setPendingSemanticSearchReveal(true);
+  }, [applyGalleryControlsVisibility]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (loading) return;
+    if (!pendingSemanticSearchReveal || !galleryControlsVisible) return;
 
-    const updateChromeState = () => {
-      scrollFrameRef.current = null;
-      const galleryTop = galleryTopRef.current
-        ? galleryTopRef.current.getBoundingClientRect().top + window.scrollY
-        : 0;
-      const next = resolveGalleryChromeScrollState({
-        currentScrollY: window.scrollY,
-        lastScrollY: lastScrollYRef.current,
-        galleryTop,
-        manualMode: chromeManualModeRef.current,
-        controlsVisible: galleryControlsVisible,
+    let secondFrameId: number | null = null;
+    const frameId = window.requestAnimationFrame(() => {
+      secondFrameId = window.requestAnimationFrame(() => {
+        semanticSearchRef.current?.reveal();
+        setPendingSemanticSearchReveal(false);
       });
-
-      lastScrollYRef.current = window.scrollY;
-      chromeManualModeRef.current = next.manualMode;
-      applyGalleryChromeState(next.controlsVisible, next.compactMode);
-    };
-
-    const scheduleChromeStateUpdate = () => {
-      if (scrollFrameRef.current !== null) {
-        return;
-      }
-      scrollFrameRef.current = window.requestAnimationFrame(updateChromeState);
-    };
-
-    lastScrollYRef.current = window.scrollY;
-    updateChromeState();
-
-    window.addEventListener('scroll', scheduleChromeStateUpdate, { passive: true });
-    window.addEventListener('resize', scheduleChromeStateUpdate);
+    });
 
     return () => {
-      window.removeEventListener('scroll', scheduleChromeStateUpdate);
-      window.removeEventListener('resize', scheduleChromeStateUpdate);
-      if (scrollFrameRef.current !== null) {
-        window.cancelAnimationFrame(scrollFrameRef.current);
-        scrollFrameRef.current = null;
+      window.cancelAnimationFrame(frameId);
+      if (secondFrameId !== null) {
+        window.cancelAnimationFrame(secondFrameId);
       }
     };
-  }, [applyGalleryChromeState, galleryControlsVisible, loading]);
+  }, [galleryControlsVisible, pendingSemanticSearchReveal]);
+
+  useEffect(() => {
+    if (galleryControlsVisible) return;
+    setPendingSemanticSearchReveal(false);
+    semanticSearchRef.current?.collapse();
+  }, [galleryControlsVisible]);
 
   const fetchImages = useCallback(async ({
     silent = false,
@@ -1030,6 +1044,14 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     setColorSearchLoading(false);
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (focusHighlightTimerRef.current !== null) {
+        clearTimeout(focusHighlightTimerRef.current);
+      }
+    };
+  }, []);
+
   const [backupInfo, setBackupInfo] = useState<{
     timestamp: string;
     date: Date;
@@ -1038,6 +1060,11 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   } | null>(null);
   const [backupLoading, setBackupLoading] = useState(false);
   const [backupError, setBackupError] = useState<string | null>(null);
+  const [focusedGalleryAssetId, setFocusedGalleryAssetId] = useState<string | null>(null);
+  const [focusNotice, setFocusNotice] = useState<string | null>(null);
+  const focusCanonicalizedRef = useRef(false);
+  const focusAppliedRef = useRef(false);
+  const focusHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const {
     brokenAudit,
@@ -1409,6 +1436,19 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     () => isLikelySourceSearchTerm(searchTerm),
     [searchTerm]
   );
+
+  useEffect(() => {
+    const focusTarget = initialFocusTargetRef.current;
+    if (!focusTarget) return;
+    if (focusCanonicalizedRef.current) return;
+    const activeNamespace = namespace ?? '';
+    if (focusTarget.namespace !== activeNamespace) return;
+
+    focusCanonicalizedRef.current = true;
+    clearFilters();
+    clearColorSearch();
+    setFocusNotice(null);
+  }, [clearColorSearch, clearFilters, namespace]);
 
   useEffect(() => {
     if (includeExtrasForGallery === shouldIncludeExtrasForSearch) return;
@@ -1876,7 +1916,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
 
   const openBulkEditModal = useCallback(() => {
     if (!selectedCount) {
-      toast.push('Select at least one image');
+      toast.push('Select at least one asset');
       return;
     }
     dispatchBulk({ type: 'resetEdit' });
@@ -2017,9 +2057,12 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     const next = namespaceSelectValue === '__custom__'
       ? namespaceDraft.trim()
       : namespaceSelectValue;
+    if (namespaceSelectValue === '__custom__' && next) {
+      void registerNamespace(next);
+    }
     onNamespaceChange?.(next);
     setNamespaceSettingsOpen(false);
-  }, [namespaceDraft, namespaceSelectValue, onNamespaceChange]);
+  }, [namespaceDraft, namespaceSelectValue, onNamespaceChange, registerNamespace]);
 
   const viewFilters = useMemo(() => ({
     images: pageImages,
@@ -2035,6 +2078,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     displayNameLoadingMap,
     galleryReturnHrefSuffix,
     activeColorSearchHex: colorSearchHex,
+    focusedGalleryAssetId,
   }), [
     pageImages,
     selectedVariant,
@@ -2049,6 +2093,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     displayNameLoadingMap,
     galleryReturnHrefSuffix,
     colorSearchHex,
+    focusedGalleryAssetId,
   ]);
   const handleSelectColor = useCallback((hex: string) => {
     const normalized = normalizeColorSearchHex(hex);
@@ -2063,6 +2108,56 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     clearFilters();
     clearColorSearch();
   }, [clearColorSearch, clearFilters]);
+
+  useEffect(() => {
+    const focusTarget = initialFocusTargetRef.current;
+    if (!focusTarget) return;
+    if (focusAppliedRef.current) return;
+    const activeNamespace = namespace ?? '';
+    if (focusTarget.namespace !== activeNamespace) return;
+    if (!focusCanonicalizedRef.current) return;
+    if (loading) return;
+
+    const scopedAsset = galleryImages.find((entry) => entry.id === focusTarget.assetId);
+    if (!scopedAsset) {
+      focusAppliedRef.current = true;
+      setFocusNotice('The requested asset is not available in this gallery scope.');
+      return;
+    }
+
+    const focusedIndex = filteredImages.findIndex((entry) => entry.id === focusTarget.assetId);
+    if (focusedIndex < 0) {
+      focusAppliedRef.current = true;
+      setFocusNotice('The requested asset could not be placed in gallery order.');
+      return;
+    }
+
+    const targetPage = Math.floor(focusedIndex / pageSize) + 1;
+    if (pageIndex !== targetPage) {
+      goToPageNumber(targetPage);
+      return;
+    }
+
+    focusAppliedRef.current = true;
+    setFocusNotice(null);
+    setFocusedGalleryAssetId(focusTarget.assetId);
+
+    if (focusHighlightTimerRef.current !== null) {
+      clearTimeout(focusHighlightTimerRef.current);
+    }
+
+    window.requestAnimationFrame(() => {
+      const target = document.querySelector<HTMLElement>(
+        `[data-gallery-asset-id="${focusTarget.assetId}"]`
+      );
+      target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+
+    focusHighlightTimerRef.current = setTimeout(() => {
+      setFocusedGalleryAssetId((current) => (current === focusTarget.assetId ? null : current));
+      focusHighlightTimerRef.current = null;
+    }, 4000);
+  }, [filteredImages, galleryImages, goToPageNumber, loading, namespace, pageIndex, pageSize]);
   const backupAgeDays = backupInfo
     ? (Date.now() - backupInfo.date.getTime()) / (1000 * 60 * 60 * 24)
     : null;
@@ -2096,8 +2191,11 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           totalCount={images.length}
           pageIndex={pageIndex}
           totalPages={totalPages}
+          namespaceLabel={namespaceLabel}
           controlsVisible={galleryControlsVisible}
+          showSearchButton={semanticSearchAvailable}
           onToggleControls={toggleGalleryControls}
+          onOpenSearch={openSemanticSearch}
         />
         <GalleryPagerStrip
           pageIndex={pageIndex}
@@ -2169,6 +2267,19 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         </div>
       )}
 
+      {focusNotice && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[0.65rem] font-mono text-amber-900">
+          <span>{focusNotice}</span>
+          <button
+            type="button"
+            onClick={() => setFocusNotice(null)}
+            className="rounded border border-amber-300 bg-white px-2.5 py-1 text-[0.6rem] hover:bg-amber-100"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       <div
         className={`overflow-hidden transition-[max-height,opacity,transform] duration-300 ease-in-out ${
           galleryControlsVisible
@@ -2176,9 +2287,13 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             : 'mb-0 max-h-0 pointer-events-none opacity-0 -translate-y-2'
         }`}
         aria-hidden={!galleryControlsVisible}
-        data-compact-mode={compactScrollMode ? 'true' : 'false'}
       >
         <div className="mb-4 rounded-lg border border-gray-100 bg-white p-4 shadow-sm">
+          <GallerySemanticSearch
+            ref={semanticSearchRef}
+            namespace={namespace}
+            onAvailabilityChange={setSemanticSearchAvailable}
+          />
           <LegacyTopBar
             filteredCount={filteredWithVariants.length}
             totalCount={images.length}

@@ -5,9 +5,10 @@
     "types": ["./worker-configuration.d.ts", "@cloudflare/workers-types"],
     "baseUrl": ".",
     "paths": {
-      "@worker/*": ["src/worker/*"]
+      "@worker/*": ["src/worker/*"],
+      "@client/*": ["src/client/*"]
     }
   },
-  "include": ["src/worker/**/*.ts", "test/**/*.ts"]
+  "include": ["src/worker/**/*.ts", "test/**/*.ts"],
+  "exclude": ["test/gallery.playback-state.test.ts", "test/video-player.test.ts"]
 }
-

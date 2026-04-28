@@ -199,6 +199,8 @@ const buildMetadataOverride = (image: CachedCloudflareImage): CloudflareMetadata
   assign('linkedAssetId', image.linkedAssetId);
   assign('variationSort', image.variationSort);
   assign('size', image.size);
+  assign('aspectRatio', image.aspectRatio);
+  assign('dimensions', image.dimensions);
   assign('type', image.contentType);
   assign('isAnimated', image.isAnimated);
   return override;
@@ -317,6 +319,35 @@ const transformImage = (image: CloudflareImageApiResponse): CachedCloudflareImag
     return undefined;
   })();
   const isAnimated = mergedMeta.isAnimated === true ? true : undefined;
+  const parsedDimensions = (() => {
+    const rawDimensions = mergedMeta.dimensions;
+    if (!rawDimensions || typeof rawDimensions !== 'object') {
+      return undefined;
+    }
+    const typed = rawDimensions as { width?: unknown; height?: unknown };
+    const width =
+      typeof typed.width === 'number'
+        ? typed.width
+        : typeof typed.width === 'string'
+          ? Number(typed.width)
+          : undefined;
+    const height =
+      typeof typed.height === 'number'
+        ? typed.height
+        : typeof typed.height === 'string'
+          ? Number(typed.height)
+          : undefined;
+    return width && height && Number.isFinite(width) && Number.isFinite(height)
+      ? { width, height }
+      : undefined;
+  })();
+  const parsedAspectRatio = (() => {
+    if (typeof mergedMeta.aspectRatio !== 'string') {
+      return undefined;
+    }
+    const trimmed = mergedMeta.aspectRatio.trim();
+    return trimmed ? trimmed : undefined;
+  })();
 
   return {
     id: image.id,
@@ -344,7 +375,9 @@ const transformImage = (image: CloudflareImageApiResponse): CachedCloudflareImag
     duplicateFamilyOverride: duplicateFamilyOverride || undefined,
     variationSort: cleanVariationSort,
     parentId,
-    linkedAssetId
+    linkedAssetId,
+    aspectRatio: parsedAspectRatio,
+    dimensions: parsedDimensions,
   };
 };
 

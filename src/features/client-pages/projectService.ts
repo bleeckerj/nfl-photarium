@@ -9,6 +9,7 @@ import type {
 } from './types';
 import type { ClientPageProjectStore } from './storage/fileStore';
 import { ClientPageSelectionService } from './selectionService';
+import { upsertRegistryNamespaces } from '@/server/namespaceRegistry';
 
 const cleanOptionalString = (value?: string) => {
   const trimmed = value?.trim();
@@ -27,7 +28,8 @@ const normalizeNamespaces = (namespaces?: string[]) =>
 export class ClientPageProjectService {
   constructor(
     private readonly store: ClientPageProjectStore,
-    private readonly selectionService = new ClientPageSelectionService()
+    private readonly selectionService = new ClientPageSelectionService(),
+    private readonly registerNamespaces: (namespaces: string[]) => Promise<void> = upsertRegistryNamespaces
   ) {}
 
   async listProjects(publicBaseUrl?: string): Promise<ClientPageProjectListItem[]> {
@@ -58,6 +60,7 @@ export class ClientPageProjectService {
       id: randomUUID(),
       title,
       clientName: cleanOptionalString(input.clientName),
+      clientSiteId: cleanOptionalString(input.clientSiteId),
       notes: cleanOptionalString(input.notes),
       status: 'draft',
       expiresAt: input.expiresAt ?? null,
@@ -71,6 +74,7 @@ export class ClientPageProjectService {
     };
 
     await this.store.writeProjects([project, ...projects]);
+    await this.registerNamespaces(project.sourceNamespaces);
     return project;
   }
 
@@ -90,6 +94,7 @@ export class ClientPageProjectService {
       ...target,
       title: nextTitle,
       clientName: patch.clientName === undefined ? target.clientName : cleanOptionalString(patch.clientName),
+      clientSiteId: patch.clientSiteId === undefined ? target.clientSiteId : cleanOptionalString(patch.clientSiteId),
       notes: patch.notes === undefined ? target.notes : cleanOptionalString(patch.notes),
       expiresAt: patch.expiresAt === undefined ? target.expiresAt : patch.expiresAt,
       sourceNamespaces:
@@ -102,6 +107,7 @@ export class ClientPageProjectService {
     await this.store.writeProjects(
       projects.map((project) => (project.id === projectId ? updatedProject : project))
     );
+    await this.registerNamespaces(updatedProject.sourceNamespaces);
     return updatedProject;
   }
 

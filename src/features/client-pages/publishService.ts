@@ -1,36 +1,27 @@
 import type { ClientSitePublishRequest, ClientSitePublishRequest as PublishRequestShape } from '@/features/client-sites-publishing/types';
 import { publishClientSiteProject } from '@/features/client-sites-publishing/publisher';
 import { buildPublishHeaders, isLocalPublishTarget } from '@/features/client-sites-publishing/publishAuth';
+import type { ClientSiteService } from '@/features/client-sites/service';
+import type { ClientSiteRecord } from '@/features/client-sites/types';
+import { buildClientSiteBaseUrl, resolveClientSiteCustomDomain } from '@/features/client-sites/domain';
+import { isLegacyWorkersDevUrl, resolveWorkersDevUrl } from '@/features/client-sites/workersDevUrl';
 import type { ClientPageProjectRecord, ClientPagePublishResult } from './types';
 import { buildClientPageShareUrl } from './utils/shareUrl';
 import type { ClientPageProjectService } from './projectService';
 
-const getRequiredEnv = (name: string): string => {
-  const value = process.env[name]?.trim();
-  if (!value) {
-    throw new Error(`${name} is required to publish client pages.`);
-  }
-  return value;
-};
-
-const getTargetBaseUrl = (): string => getRequiredEnv('CLIENT_SITES_TARGET_BASE_URL');
-
-const getConfiguredPublishSecret = (targetBaseUrl: string): string | undefined => {
-  const configuredSecret =
-    process.env.CLIENT_SITES_PUBLISH_SECRET?.trim() ||
-    process.env.CLIENT_SITES_ADMIN_API_TOKEN?.trim();
+const getConfiguredPublishSecret = (clientSite: ClientSiteRecord): string | undefined => {
+  const configuredSecret = clientSite.publishSecret?.trim();
+  const targetBaseUrl = clientSite.deployment.publicBaseUrl;
   if (configuredSecret) return configuredSecret;
   if (isLocalPublishTarget(targetBaseUrl)) return undefined;
-  throw new Error(
-    'CLIENT_SITES_PUBLISH_SECRET is required when publishing to a non-local client-sites host.'
-  );
+  throw new Error(`Client site "${clientSite.name}" is missing a publish secret.`);
 };
 
-const buildPublishRequest = (project: ClientPageProjectRecord): PublishRequestShape => {
-  const targetBaseUrl = getTargetBaseUrl();
+const buildPublishRequest = (project: ClientPageProjectRecord, clientSite: ClientSiteRecord): PublishRequestShape => {
+  const targetBaseUrl = clientSite.deployment.publicBaseUrl;
   return {
     targetBaseUrl,
-    publishSecret: getConfiguredPublishSecret(targetBaseUrl),
+    publishSecret: getConfiguredPublishSecret(clientSite),
     project: {
       remoteProjectId: project.remoteProjectId,
       publicSlug: project.publicSlug,
@@ -39,7 +30,7 @@ const buildPublishRequest = (project: ClientPageProjectRecord): PublishRequestSh
       sourceNamespaces: project.sourceNamespaces,
     },
     selection: {
-      imageIds: project.selectedImageIds,
+      assetIds: project.selectedImageIds,
     },
     accessPolicy: project.accessPolicy,
     visibleTagPolicy: project.visibleTagPolicy,
@@ -47,18 +38,15 @@ const buildPublishRequest = (project: ClientPageProjectRecord): PublishRequestSh
   };
 };
 
-const getPublicBaseUrl = (): string =>
-  process.env.CLIENT_SITES_PUBLIC_BASE_URL?.trim() ||
-  getTargetBaseUrl();
-
 const callLifecycleEndpoint = async (
   project: ClientPageProjectRecord,
+  clientSite: ClientSiteRecord,
   status: 'shadow' | 'archived'
 ): Promise<void> => {
   if (!project.remoteProjectId) return;
 
-  const targetBaseUrl = getTargetBaseUrl().replace(/\/$/, '');
-  const publishSecret = getConfiguredPublishSecret(targetBaseUrl);
+  const targetBaseUrl = clientSite.deployment.publicBaseUrl.replace(/\/$/, '');
+  const publishSecret = getConfiguredPublishSecret(clientSite);
   const response = await fetch(`${targetBaseUrl}/api/admin/projects/${project.remoteProjectId}/status`, {
     method: 'POST',
     headers: buildPublishHeaders(publishSecret),
@@ -75,14 +63,58 @@ const callLifecycleEndpoint = async (
 };
 
 export class ClientPagePublishService {
-  constructor(private readonly projectService: ClientPageProjectService) {}
+  constructor(
+    private readonly projectService: ClientPageProjectService,
+    private readonly clientSiteService: ClientSiteService
+  ) {}
+
+  private async requireClientSite(project: ClientPageProjectRecord): Promise<ClientSiteRecord> {
+    if (!project.clientSiteId) {
+      throw new Error('Assign this client page to a client site before publishing.');
+    }
+    let clientSite = await this.clientSiteService.getClientSite(project.clientSiteId);
+    if (!clientSite) {
+      throw new Error('Assigned client site could not be found.');
+    }
+    if (clientSite.status === 'deleted') {
+      throw new Error('Assigned client site has been deleted.');
+    }
+    if (isLegacyWorkersDevUrl(clientSite.deployment.publicBaseUrl)) {
+      const customDomain = resolveClientSiteCustomDomain(clientSite.slug, clientSite.deployment.customDomain);
+      if (customDomain) {
+        clientSite = await this.clientSiteService.updateStoredClientSite({
+          ...clientSite,
+          deployment: {
+            ...clientSite.deployment,
+            publicBaseUrl: buildClientSiteBaseUrl(customDomain),
+            customDomain,
+          },
+        });
+        return clientSite;
+      }
+
+      const correctedWorkersDevUrl = await resolveWorkersDevUrl(clientSite.deployment.workerName).catch(() => null);
+      if (correctedWorkersDevUrl) {
+        clientSite = await this.clientSiteService.updateStoredClientSite({
+          ...clientSite,
+          deployment: {
+            ...clientSite.deployment,
+            publicBaseUrl: correctedWorkersDevUrl,
+            workersDevUrl: correctedWorkersDevUrl,
+          },
+        });
+      }
+    }
+    return clientSite;
+  }
 
   async publish(project: ClientPageProjectRecord): Promise<ClientPagePublishResult> {
     if (project.selectedImageIds.length === 0) {
-      throw new Error('Select at least one image before publishing.');
+      throw new Error('Select at least one asset before publishing.');
     }
 
-    const result = await publishClientSiteProject(buildPublishRequest(project) as ClientSitePublishRequest);
+    const clientSite = await this.requireClientSite(project);
+    const result = await publishClientSiteProject(buildPublishRequest(project, clientSite) as ClientSitePublishRequest);
 
     const updatedProject = await this.projectService.updateStoredProject({
       ...project,
@@ -93,11 +125,12 @@ export class ClientPagePublishService {
       lastPublishedRevisionId: result.manifest.revision.projectRevisionId,
       lastPublishedAt: new Date().toISOString(),
     });
+    await this.clientSiteService.syncRootPresentation(clientSite.id);
 
     return {
       project: updatedProject,
       shareUrl: buildClientPageShareUrl(
-        getPublicBaseUrl(),
+        clientSite.deployment.publicBaseUrl,
         updatedProject.publicSlug!,
         updatedProject.accessKey!
       ),
@@ -106,23 +139,34 @@ export class ClientPagePublishService {
   }
 
   async shadow(project: ClientPageProjectRecord): Promise<ClientPageProjectRecord> {
-    await callLifecycleEndpoint(project, 'shadow');
-    return this.projectService.updateStoredProject({
+    const clientSite = await this.requireClientSite(project);
+    await callLifecycleEndpoint(project, clientSite, 'shadow');
+    const updatedProject = await this.projectService.updateStoredProject({
       ...project,
       status: 'shadow',
     });
+    await this.clientSiteService.syncRootPresentation(clientSite.id);
+    return updatedProject;
   }
 
   async archive(project: ClientPageProjectRecord): Promise<ClientPageProjectRecord> {
-    await callLifecycleEndpoint(project, 'archived');
-    return this.projectService.updateStoredProject({
+    const clientSite = await this.requireClientSite(project);
+    await callLifecycleEndpoint(project, clientSite, 'archived');
+    const updatedProject = await this.projectService.updateStoredProject({
       ...project,
       status: 'archived',
     });
+    await this.clientSiteService.syncRootPresentation(clientSite.id);
+    return updatedProject;
   }
 
-  getShareUrl(project: ClientPageProjectRecord): string | null {
+  async getShareUrl(project: ClientPageProjectRecord): Promise<string | null> {
     if (!project.publicSlug || !project.accessKey) return null;
-    return buildClientPageShareUrl(getPublicBaseUrl(), project.publicSlug, project.accessKey);
+    const clientSite = await this.requireClientSite(project);
+    return buildClientPageShareUrl(
+      clientSite.deployment.publicBaseUrl,
+      project.publicSlug,
+      project.accessKey
+    );
   }
 }

@@ -11,6 +11,7 @@ export interface ClientPageProjectRecord {
   id: string;
   title: string;
   clientName?: string;
+  clientSiteId?: string;
   notes?: string;
   status: ClientPageProjectStatus;
   expiresAt?: string | null;
@@ -36,6 +37,7 @@ export interface ClientPageProjectListItem extends ClientPageProjectRecord {
 export interface CreateClientPageProjectInput {
   title: string;
   clientName?: string;
+  clientSiteId?: string;
   notes?: string;
   expiresAt?: string | null;
   sourceNamespaces?: string[];
@@ -44,6 +46,7 @@ export interface CreateClientPageProjectInput {
 export interface UpdateClientPageProjectInput {
   title?: string;
   clientName?: string;
+  clientSiteId?: string;
   notes?: string;
   expiresAt?: string | null;
   sourceNamespaces?: string[];

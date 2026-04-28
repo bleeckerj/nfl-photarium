@@ -8,6 +8,7 @@ const initialState: AppState = {
   activeTag: null,
   selectedAssetIds: new Set<string>(),
   lightboxAssetId: null,
+  inlinePlayingAssetId: null,
   shortlistTrayExpanded: false,
   shortlistSubmitExpanded: false,
   submissionState: 'idle',
@@ -37,6 +38,10 @@ export class AppStore {
 
   setLightboxAssetId(lightboxAssetId: string | null): void {
     this.update({ lightboxAssetId });
+  }
+
+  setInlinePlayingAssetId(inlinePlayingAssetId: string | null): void {
+    this.update({ inlinePlayingAssetId });
   }
 
   setShortlistTrayExpanded(shortlistTrayExpanded: boolean): void {

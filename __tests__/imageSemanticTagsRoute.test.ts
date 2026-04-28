@@ -14,6 +14,36 @@ function createRequest(body: Record<string, unknown>) {
 }
 
 describe('POST /api/images/:id/tags', () => {
+  const mockImageResponse = () =>
+    new Response(
+      JSON.stringify({
+        result: {
+          id: 'img-123',
+          filename: 'museum-scene.png',
+          variants: ['https://example.com/public'],
+          meta: JSON.stringify({
+            folder: 'editorial',
+            tags: ['existing-tag'],
+          }),
+        },
+      }),
+      { status: 200 }
+    );
+
+  const mockTagResponse = (content: string) =>
+    new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              content,
+            },
+          },
+        ],
+      }),
+      { status: 200 }
+    );
+
   beforeEach(() => {
     vi.restoreAllMocks();
     process.env = { ...ORIGINAL_ENV };
@@ -35,36 +65,8 @@ describe('POST /api/images/:id/tags', () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch');
 
     fetchMock
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            result: {
-              id: 'img-123',
-              filename: 'museum-scene.png',
-              variants: ['https://example.com/public'],
-              meta: JSON.stringify({
-                folder: 'editorial',
-                tags: ['existing-tag'],
-              }),
-            },
-          }),
-          { status: 200 }
-        )
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            choices: [
-              {
-                message: {
-                  content: 'portrait, gallery, sculpture, frame, lighting',
-                },
-              },
-            ],
-          }),
-          { status: 200 }
-        )
-      );
+      .mockResolvedValueOnce(mockImageResponse())
+      .mockResolvedValueOnce(mockTagResponse('portrait, gallery, sculpture, frame, lighting'));
 
     const response = await POST(createRequest({ count: 5 }), {
       params: Promise.resolve({ id: 'img-123' }),
@@ -80,5 +82,65 @@ describe('POST /api/images/:id/tags', () => {
     const openAiBody = JSON.parse(String(openAiCall?.[1]?.body));
     expect(openAiBody.model).toBe('gpt-4.1-mini');
     expect(openAiBody.messages[1].content[0].text).toContain('Return exactly 5 tags.');
+  });
+
+  it('splits a hyphen-collapsed model response into separate tags', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+
+    fetchMock
+      .mockResolvedValueOnce(mockImageResponse())
+      .mockResolvedValueOnce(mockTagResponse('apple-logo-rainbow-colors-fruit-technology-vintage'));
+
+    const response = await POST(createRequest({ count: 6 }), {
+      params: Promise.resolve({ id: 'img-123' }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.tags).toEqual(['apple', 'logo', 'rainbow', 'colors', 'fruit', 'technology']);
+  });
+
+  it('defaults to gpt-4.1-nano when no tag model overrides are set', async () => {
+    delete process.env.OPENAI_TAGS_MODEL;
+    delete process.env.OPENAI_DISPLAY_NAME_MODEL;
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    fetchMock
+      .mockResolvedValueOnce(mockImageResponse())
+      .mockResolvedValueOnce(mockTagResponse('portrait, gallery, sculpture, frame, lighting'));
+
+    const response = await POST(createRequest({ count: 5 }), {
+      params: Promise.resolve({ id: 'img-123' }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.model).toBe('gpt-4.1-nano');
+
+    const openAiCall = fetchMock.mock.calls[1];
+    const openAiBody = JSON.parse(String(openAiCall?.[1]?.body));
+    expect(openAiBody.model).toBe('gpt-4.1-nano');
+  });
+
+  it('prefers OPENAI_TAGS_MODEL over OPENAI_DISPLAY_NAME_MODEL', async () => {
+    process.env.OPENAI_TAGS_MODEL = 'gpt-4.1-nano';
+    process.env.OPENAI_DISPLAY_NAME_MODEL = 'gpt-5-mini';
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    fetchMock
+      .mockResolvedValueOnce(mockImageResponse())
+      .mockResolvedValueOnce(mockTagResponse('portrait, gallery, sculpture, frame, lighting'));
+
+    const response = await POST(createRequest({ count: 5 }), {
+      params: Promise.resolve({ id: 'img-123' }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.model).toBe('gpt-4.1-nano');
+
+    const openAiCall = fetchMock.mock.calls[1];
+    const openAiBody = JSON.parse(String(openAiCall?.[1]?.body));
+    expect(openAiBody.model).toBe('gpt-4.1-nano');
   });
 });

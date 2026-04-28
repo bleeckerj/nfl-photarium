@@ -2,9 +2,9 @@ import type { SubmissionState } from '../domain/types';
 
 export const clientCopy = {
   reviewBarEyebrow: 'Client selection',
-  reviewSummary: 'Browse the set, open any image for detail, and mark the ones you want included.',
-  toolbarHelper: 'Filter by visible tags. Open any image for downloads and a larger review.',
-  emptyGallery: 'No images match this filter.',
+  reviewSummary: 'Browse the set, open any asset for detail, and mark the ones you want included.',
+  toolbarHelper: 'Filter by visible tags. Open any asset for downloads, playback, and a larger review.',
+  emptyGallery: 'No assets match this filter.',
   projectUnavailableTitle: 'Project unavailable',
   projectUnavailableFallback: 'The project could not be loaded.',
   projectRouteMissing: 'Open a seeded project URL, not the worker root.',
@@ -15,9 +15,9 @@ export const clientCopy = {
   allTagsLabel: 'All',
   reviewShortlist: 'Review shortlist',
   hideShortlist: 'Hide selection',
-  shortlistTitle: 'Selected images',
-  shortlistEmpty: 'No images selected yet.',
-  shortlistSummary: 'Review the marked images before sending.',
+  shortlistTitle: 'Selected assets',
+  shortlistEmpty: 'No assets selected yet.',
+  shortlistSummary: 'Review the marked assets before sending.',
   selectionDetailsTitle: 'Selection details',
   sendSelection: 'Send selection',
   hideForm: 'Hide form',
@@ -30,6 +30,7 @@ export const clientCopy = {
   previousImage: 'Previous',
   nextImage: 'Next',
   downloadTitle: 'Downloads',
+  playbackTitle: 'Playback',
   clusterLabel: 'Cluster',
   tagsLabel: 'Tags',
   noDescription: 'No description provided.',
@@ -66,7 +67,7 @@ export const getSubmissionStatusCopy = (state: SubmissionState): string => {
 };
 
 export const getLightboxPositionCopy = (assetIndex: number, assetCount: number): string =>
-  `Image ${assetIndex + 1} / ${assetCount}`;
+  `Asset ${assetIndex + 1} / ${assetCount}`;
 
 export const getShortlistCountCopy = (count: number): string =>
-  count === 0 ? clientCopy.shortlistEmpty : `${count} image${count === 1 ? '' : 's'} selected`;
+  count === 0 ? clientCopy.shortlistEmpty : `${count} asset${count === 1 ? '' : 's'} selected`;

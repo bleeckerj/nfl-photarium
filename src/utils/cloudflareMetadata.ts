@@ -3,6 +3,11 @@ export type CloudflareMetadata = {
   tags?: string[];
   description?: string;
   size?: number | string;
+  aspectRatio?: string;
+  dimensions?: {
+    width?: number;
+    height?: number;
+  };
   bytes?: number | string;
   fileSize?: number | string;
   type?: string;

@@ -19,7 +19,7 @@ describe('client site publish auth helpers', () => {
         publishSecret: 'publish-secret',
         adminApiToken: 'legacy-secret',
         project: { title: 'Review set' },
-        selection: { imageIds: ['img-1'] },
+        selection: { assetIds: ['img-1'] },
       })
     ).toBe('publish-secret');
   });

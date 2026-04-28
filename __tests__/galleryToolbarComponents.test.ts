@@ -14,14 +14,70 @@ describe('gallery toolbar components', () => {
         totalCount: 40,
         pageIndex: 3,
         totalPages: 9,
+        namespaceLabel: 'default',
         controlsVisible: true,
+        showSearchButton: true,
         onToggleControls: vi.fn(),
+        onOpenSearch: vi.fn(),
       })
     );
 
     expect(markup).toContain('Image Gallery (12/40)');
+    expect(markup).toContain('Namespace: default');
     expect(markup).toContain('Page 3 / 9');
+    expect(markup).toContain('Search');
     expect(markup).toContain('Hide controls');
+  });
+
+  it('renders compact header namespace labels for all and none states', () => {
+    const allMarkup = renderToStaticMarkup(
+      React.createElement(GalleryCompactHeader, {
+        filteredCount: 12,
+        totalCount: 40,
+        pageIndex: 3,
+        totalPages: 9,
+        namespaceLabel: 'All namespaces',
+        controlsVisible: false,
+        showSearchButton: false,
+        onToggleControls: vi.fn(),
+        onOpenSearch: vi.fn(),
+      })
+    );
+    const noneMarkup = renderToStaticMarkup(
+      React.createElement(GalleryCompactHeader, {
+        filteredCount: 12,
+        totalCount: 40,
+        pageIndex: 3,
+        totalPages: 9,
+        namespaceLabel: '(no namespace)',
+        controlsVisible: false,
+        showSearchButton: false,
+        onToggleControls: vi.fn(),
+        onOpenSearch: vi.fn(),
+      })
+    );
+
+    expect(allMarkup).toContain('Namespace: All namespaces');
+    expect(noneMarkup).toContain('Namespace: (no namespace)');
+  });
+
+  it('omits the search chip when semantic search is unavailable', () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(GalleryCompactHeader, {
+        filteredCount: 12,
+        totalCount: 40,
+        pageIndex: 3,
+        totalPages: 9,
+        namespaceLabel: 'default',
+        controlsVisible: false,
+        showSearchButton: false,
+        onToggleControls: vi.fn(),
+        onOpenSearch: vi.fn(),
+      })
+    );
+
+    expect(markup).not.toContain('>Search<');
+    expect(markup).toContain('Show controls');
   });
 
   it('renders the pager strip outside the legacy toolbar layout', () => {

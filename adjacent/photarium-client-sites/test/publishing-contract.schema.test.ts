@@ -39,12 +39,26 @@ describe('publishedProjectManifestSchema', () => {
       assets: [
         {
           projectAssetId: 'asset-1',
-          sourceImageId: 'source-1',
+          assetType: 'image',
+          sourceAssetId: 'source-1',
           filename: 'hero.jpg',
           sourceTags: ['portrait'],
           uploadedAt: '2026-04-01T12:00:00.000Z',
           isCanonical: true,
           hasEmbedding: true,
+        },
+        {
+          projectAssetId: 'asset-2',
+          assetType: 'video',
+          sourceAssetId: 'video-1',
+          filename: 'hero.mp4',
+          sourceTags: ['portrait'],
+          uploadedAt: '2026-04-01T12:00:00.000Z',
+          isCanonical: true,
+          hasEmbedding: false,
+          videoPlaybackUrl: 'https://videodelivery.net/video-1/watch',
+          videoHlsUrl: 'https://videodelivery.net/video-1/manifest/video.m3u8',
+          videoThumbnailUrl: 'https://videodelivery.net/video-1/thumbnails/thumbnail.jpg',
         },
       ],
     });

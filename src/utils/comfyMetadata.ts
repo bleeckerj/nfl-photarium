@@ -1,6 +1,7 @@
 import sharp from 'sharp';
 import exifReader from 'exif-reader';
 import { inflateSync } from 'zlib';
+import { readVideoContainerMetadataFromBuffer } from '@/utils/videoContainerMetadata';
 
 export type ComfyMetadataDetection = {
   detected: boolean;
@@ -290,6 +291,36 @@ const detectFromExif = async (
   }
 };
 
+const detectFromVideoMetadataTags = (
+  tags: Record<string, string>,
+  sourcePrefix: string,
+  sources: Set<string>,
+  onEvidence?: (evidence: ComfyMetadataEvidence) => void
+) => {
+  for (const [key, value] of Object.entries(tags)) {
+    maybeAddComfyEvidence(key, value, sourcePrefix, sources, onEvidence);
+  }
+};
+
+const detectFromVideoMetadata = async (
+  buffer: Buffer,
+  mimeType: string | undefined,
+  sources: Set<string>,
+  onEvidence?: (evidence: ComfyMetadataEvidence) => void
+) => {
+  try {
+    const metadata = await readVideoContainerMetadataFromBuffer(buffer, mimeType);
+    if (!metadata) return;
+
+    detectFromVideoMetadataTags(metadata.formatTags, 'video', sources, onEvidence);
+    for (const streamTags of metadata.streamTags) {
+      detectFromVideoMetadataTags(streamTags, 'video-stream', sources, onEvidence);
+    }
+  } catch {
+    // Video probing is best-effort and should never fail the caller.
+  }
+};
+
 const resolveWorkflowJson = (evidence: ComfyMetadataEvidence[]): { workflowJson?: unknown; workflowSourceKey?: string } => {
   if (!evidence.length) return {};
 
@@ -358,6 +389,9 @@ export const extractComfyWorkflowMetadata = async (
   }
 
   await detectFromExif(buffer, sources, pushEvidence);
+  if (mimeType?.startsWith('video/')) {
+    await detectFromVideoMetadata(buffer, mimeType, sources, pushEvidence);
+  }
 
   const sourceList = Array.from(sources);
   const workflowSelection = resolveWorkflowJson(evidence);

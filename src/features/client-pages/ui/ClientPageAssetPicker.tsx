@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { ClientPageCatalogFilters } from './ClientPageCatalogFilters';
-import { ClientPageCatalogGrid } from './ClientPageCatalogGrid';
+import { ClientPageCatalogGrid, type ClientPagePickerGridDensity } from './ClientPageCatalogGrid';
 import { useClientPageCatalog } from './useClientPageCatalog';
 import type { CloudflareImage } from '@/components/gallery/types';
 
@@ -27,6 +27,8 @@ export function ClientPageAssetPicker({
 }: ClientPageAssetPickerProps) {
   const catalog = useClientPageCatalog(initialNamespace ?? '__all__');
   const selectedSet = new Set(selectedImageIds);
+  const [gridDensity, setGridDensity] = useState<ClientPagePickerGridDensity>('medium');
+  const [respectNaturalAspectRatio, setRespectNaturalAspectRatio] = useState(false);
 
   useEffect(() => {
     onImagesLoaded?.(catalog.images);
@@ -37,6 +39,9 @@ export function ClientPageAssetPicker({
       <ClientPageCatalogFilters
         allImages={catalog.images}
         namespace={catalog.namespace}
+        scopedImageCount={catalog.scopedImages.length}
+        totalImageCount={catalog.images.length}
+        namespaceFallbackNotice={catalog.namespaceFallbackNotice}
         namespaceOptions={catalog.namespaceOptions}
         selectedFolder={catalog.selectedFolder}
         folderOptions={catalog.folderOptions}
@@ -49,7 +54,14 @@ export function ClientPageAssetPicker({
         semanticLoading={catalog.semanticLoading}
         semanticError={catalog.semanticError}
         hasSemanticFilter={catalog.hasSemanticFilter}
-        onNamespaceChange={catalog.setNamespace}
+        onNamespaceChange={(value) => {
+          catalog.setNamespaceFallbackNotice(null);
+          catalog.setNamespace(value);
+        }}
+        onShowAllNamespaces={() => {
+          catalog.setNamespace('__all__');
+          catalog.setNamespaceFallbackNotice(null);
+        }}
         onFolderChange={catalog.setSelectedFolder}
         onTagChange={catalog.setSelectedTag}
         onSearchTermChange={catalog.setSearchTerm}
@@ -68,7 +80,29 @@ export function ClientPageAssetPicker({
               {catalog.filteredImages.length} filtered assets, page {catalog.currentPage} of {catalog.totalPages}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-xs font-mono text-stone-600">
+              <span>Grid size</span>
+              <select
+                value={gridDensity}
+                onChange={(event) => setGridDensity(event.target.value as ClientPagePickerGridDensity)}
+                className="rounded-md border border-stone-300 bg-white px-2 py-2 text-xs text-stone-900"
+              >
+                <option value="small">Small</option>
+                <option value="medium">Medium</option>
+                <option value="large">Large</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-xs font-mono text-stone-600">
+              <input
+                type="checkbox"
+                checked={respectNaturalAspectRatio}
+                onChange={(event) => setRespectNaturalAspectRatio(event.target.checked)}
+                className="h-4 w-4 rounded border-stone-300 text-stone-900 focus:ring-stone-500"
+              />
+              <span>Natural aspect ratio</span>
+            </label>
+            <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => onAddMany(catalog.pageImages.map((image) => image.id))}
@@ -100,6 +134,7 @@ export function ClientPageAssetPicker({
             >
               Remove filtered from project
             </button>
+            </div>
           </div>
         </div>
 
@@ -113,6 +148,8 @@ export function ClientPageAssetPicker({
               images={catalog.pageImages}
               selectedImageIds={selectedSet}
               busy={busy}
+              gridDensity={gridDensity}
+              respectNaturalAspectRatio={respectNaturalAspectRatio}
               onToggleImage={onToggleImage}
             />
 

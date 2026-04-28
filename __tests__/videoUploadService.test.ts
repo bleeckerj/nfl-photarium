@@ -10,11 +10,15 @@ const {
   createStreamVideoFromUrlMock,
   createVideoAssetRecordMock,
   queueAutoEmbeddingsForVideoMock,
+  extractComfyWorkflowMetadataMock,
+  ingestComfyWorkflowForVideoMock,
 } = vi.hoisted(() => ({
   createStreamVideoFromFileMock: vi.fn(),
   createStreamVideoFromUrlMock: vi.fn(),
   createVideoAssetRecordMock: vi.fn(),
   queueAutoEmbeddingsForVideoMock: vi.fn(),
+  extractComfyWorkflowMetadataMock: vi.fn(),
+  ingestComfyWorkflowForVideoMock: vi.fn(),
 }));
 
 vi.mock('@/server/cloudflareStreamClient', () => ({
@@ -28,6 +32,14 @@ vi.mock('@/server/videoCatalogStorage', () => ({
 
 vi.mock('@/server/videoEmbeddingService', () => ({
   queueAutoEmbeddingsForVideo: queueAutoEmbeddingsForVideoMock,
+}));
+
+vi.mock('@/utils/comfyMetadata', () => ({
+  extractComfyWorkflowMetadata: extractComfyWorkflowMetadataMock,
+}));
+
+vi.mock('@/server/comfy/videoWorkflowIngestion', () => ({
+  ingestComfyWorkflowForVideo: ingestComfyWorkflowForVideoMock,
 }));
 
 describe('videoUploadService', () => {
@@ -56,6 +68,15 @@ describe('videoUploadService', () => {
     queueAutoEmbeddingsForVideoMock.mockResolvedValue({
       enabled: true,
       queued: true,
+    });
+    extractComfyWorkflowMetadataMock.mockResolvedValue({
+      detected: false,
+      sources: [],
+    });
+    ingestComfyWorkflowForVideoMock.mockResolvedValue({
+      persisted: false,
+      indexed: false,
+      reason: 'not-comfy',
     });
   });
 
@@ -90,6 +111,16 @@ describe('videoUploadService', () => {
   });
 
   it('uploads a video buffer and stores a catalog record', async () => {
+    extractComfyWorkflowMetadataMock.mockResolvedValueOnce({
+      detected: true,
+      source: 'video:prompt',
+      sources: ['video:prompt'],
+      workflowJson: {
+        '1': { class_type: 'CLIPTextEncode', inputs: { text: 'looping city lights' } },
+      },
+      workflowSourceKey: 'prompt',
+    });
+
     const result = await uploadVideoBuffer({
       buffer: Buffer.from('video-bytes'),
       fileName: 'clip.mp4',
@@ -107,14 +138,29 @@ describe('videoUploadService', () => {
     if (!result.ok) return;
     expect(result.data.streamUid).toBe('stream-1');
     expect(result.data.videoStatus).toBe('pending');
+    expect(result.data.generatedBy).toBe('comfyui');
+    expect(result.data.comfyMetadataDetected).toBe(true);
+    expect(result.data.comfyMetadataSource).toBe('video:prompt');
     expect(createStreamVideoFromFileMock).toHaveBeenCalledTimes(1);
     expect(createVideoAssetRecordMock).toHaveBeenCalledWith(
       expect.objectContaining({
+        generatedBy: 'comfyui',
+        comfyMetadataDetected: true,
+        comfyMetadataSource: 'video:prompt',
         filename: 'clip.mp4',
         streamUid: 'stream-1',
         folder: 'loops',
         tags: ['loop', 'hero'],
         namespace: 'test',
+      })
+    );
+    expect(ingestComfyWorkflowForVideoMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        videoId: 'asset-1',
+        comfyExtraction: expect.objectContaining({
+          detected: true,
+          source: 'video:prompt',
+        }),
       })
     );
   });
@@ -131,6 +177,27 @@ describe('videoUploadService', () => {
     expect(result.data.originalUrl).toBe('https://cdn.example.com/loop.mp4');
     expect(result.data.sourceUrl).toBe('https://cdn.example.com/loop.mp4');
     expect(createStreamVideoFromUrlMock).toHaveBeenCalledTimes(1);
+    expect(extractComfyWorkflowMetadataMock).not.toHaveBeenCalled();
+    expect(ingestComfyWorkflowForVideoMock).not.toHaveBeenCalled();
+  });
+
+  it('does not ingest workflow extras when video metadata is not detected', async () => {
+    const result = await uploadVideoBuffer({
+      buffer: Buffer.from('plain-video-bytes'),
+      fileName: 'plain.mp4',
+      fileType: 'video/mp4',
+      fileSize: 2048,
+      context: {
+        tags: [],
+        namespace: 'test',
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.generatedBy).toBeUndefined();
+    expect(result.data.comfyMetadataDetected).toBeUndefined();
+    expect(ingestComfyWorkflowForVideoMock).not.toHaveBeenCalled();
   });
 
   it('requires explicit namespace for remote uploads', async () => {

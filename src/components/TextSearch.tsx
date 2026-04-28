@@ -13,7 +13,7 @@
 
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, forwardRef, useImperativeHandle, type ReactNode } from 'react';
 import Image from 'next/image';
 import { Search, X, Loader2, Sparkles, History, Palette } from 'lucide-react';
 import { getCloudflareImageUrl } from '@/utils/imageUtils';
@@ -31,10 +31,16 @@ interface SearchResult {
 
 interface TextSearchProps {
   className?: string;
+  headerAction?: ReactNode;
   onImageClick?: (result: SearchResult) => void;
   initialQuery?: string;
   // Current operating namespace from the gallery. Can be '', '__all__', or a namespace string.
   namespace?: string;
+}
+
+export interface TextSearchRef {
+  focusInput: () => void;
+  revealSearch: () => void;
 }
 
 // Hover preview state
@@ -63,7 +69,10 @@ const SEARCH_PRESETS = [
 const SEARCH_LIMIT = parseInt(process.env.NEXT_PUBLIC_SEARCH_LIMIT || '48', 10);
 const PAGE_SIZE = parseInt(process.env.NEXT_PUBLIC_SEARCH_PAGE_SIZE || '12', 10);
 
-export function TextSearch({ className = '', onImageClick, initialQuery = '', namespace = '' }: TextSearchProps) {
+const TextSearch = forwardRef<TextSearchRef, TextSearchProps>(function TextSearch(
+  { className = '', headerAction, onImageClick, initialQuery = '', namespace = '' }: TextSearchProps,
+  ref
+) {
   const [query, setQuery] = useState(initialQuery);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
@@ -75,6 +84,18 @@ export function TextSearch({ className = '', onImageClick, initialQuery = '', na
   const [searchType, setSearchType] = useState<'text' | 'color'>('text');
   const [searchAllNamespaces, setSearchAllNamespaces] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const focusTextInput = useCallback(() => {
+    setSearchType('text');
+    setShowPresets(true);
+
+    inputRef.current?.focus();
+  }, []);
+
+  useImperativeHandle(ref, () => ({
+    focusInput: () => focusTextInput(),
+    revealSearch: () => focusTextInput(),
+  }), [focusTextInput]);
 
   const effectiveNamespaceFilter = (() => {
     if (namespace === '__all__') return null;
@@ -209,9 +230,12 @@ export function TextSearch({ className = '', onImageClick, initialQuery = '', na
   return (
     <div className={`bg-gray-500 rounded-md border border-gray-700 p-4 ${className}`}>
       {/* Header */}
-      <div className="flex items-center gap-2 mb-4">
-        <Sparkles className="w-5 h-5 text-purple-400" />
-        <h3 className="text-sm font-medium text-gray-200">Semantic Search</h3>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-5 h-5 text-purple-400" />
+          <h3 className="text-sm font-medium text-gray-200">Semantic Search</h3>
+        </div>
+        {headerAction}
       </div>
 
       {/* Namespace scope toggle */}
@@ -481,6 +505,6 @@ export function TextSearch({ className = '', onImageClick, initialQuery = '', na
       )}
     </div>
   );
-}
+});
 
 export default TextSearch;

@@ -34,7 +34,9 @@
     "namespace:backfill": "node scripts/backfill-namespace.mjs",
     "namespace:scan": "node scripts/scan-namespaces.mjs",
     "variants:folderize": "node scripts/folder-to-variants.mjs",
-    "aspect:backfill": "node scripts/backfill-aspect-ratios.mjs",
+    "aspect:backfill": "node --import tsx ./scripts/backfill-image-metadata.ts",
+    "image:metadata:backfill": "node --import tsx ./scripts/backfill-image-metadata.ts",
+    "video:metadata:backfill": "node --import tsx ./scripts/backfill-video-metadata.ts",
     "page:ingest": "node scripts/page-ingest.mjs ingest",
     "page:browser-ingest": "node scripts/page-ingest.mjs browser-ingest",
     "page:auth-help": "node scripts/page-ingest.mjs auth-help",
@@ -55,7 +57,16 @@
     "flickr:ingest": "node scripts/flickr-ingest.mjs ingest",
     "telegram:listen": "node scripts/telegram-channel-listener.mjs",
     "threads:auth": "node scripts/threads-ingest.mjs auth",
-    "threads:url": "node scripts/threads-ingest.mjs single-url"
+    "threads:url": "node scripts/threads-ingest.mjs single-url",
+    "client-sites": "node --import tsx ./scripts/client-sites/cli.ts",
+    "client-sites:create": "node --import tsx ./scripts/client-sites/cli.ts create",
+    "client-sites:publish": "node --import tsx ./scripts/client-sites/cli.ts publish",
+    "client-sites:republish": "node --import tsx ./scripts/client-sites/cli.ts republish",
+    "client-sites:deploy": "node --import tsx ./scripts/client-sites/cli.ts deploy",
+    "client-sites:refresh": "node --import tsx ./scripts/client-sites/cli.ts refresh",
+    "client-sites:list": "node --import tsx ./scripts/client-sites/cli.ts list",
+    "client-sites:delete": "node --import tsx ./scripts/client-sites/cli.ts delete",
+    "client-sites:doctor": "node --import tsx ./scripts/client-sites/cli.ts doctor"
   },
   "dependencies": {
     "adm-zip": "^0.5.16",
@@ -85,6 +96,7 @@
     "eslint-config-next": "^15.5.9",
     "tailwindcss": "^4",
     "typescript": "^5",
+    "tsx": "^4.20.6",
     "vitest": "^2.1.4"
   }
 }

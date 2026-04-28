@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
 import { handleCreateLocalDemo } from './routes/dev/create-demo';
-import { handleLocalRootShell } from './routes/dev/root-shell';
 import { handleLocalDevStatus } from './routes/dev/status';
 import { handleCreateProject } from './routes/admin/create-project';
 import { handlePublishProject } from './routes/admin/publish-project';
@@ -8,12 +7,14 @@ import { handleAddAssets } from './routes/admin/add-assets';
 import { handleRemoveAssets } from './routes/admin/remove-assets';
 import { handleUpdateStatus } from './routes/admin/update-status';
 import { handleProjectShell } from './routes/public/project-shell';
+import { handleRootState } from './routes/public/root-state';
 import { handleProjectData } from './routes/public/project-data';
 import { handleProjectAssets } from './routes/public/project-assets';
 import { handleCreateSession } from './routes/public/session';
 import { handleSubmitShortlist } from './routes/public/submit-shortlist';
 import { handleViewAsset } from './routes/public/view-asset';
 import { handleDownloadAsset } from './routes/public/download-asset';
+import { handleRootEntry } from './routes/public/root';
 import { ensureDatabaseSchema } from './lib/database-schema';
 import { jsonError } from './lib/json';
 import { withNoIndex } from './lib/http';
@@ -26,13 +27,14 @@ app.use('*', async (context, next) => {
   await next();
 });
 
-app.get('/', handleLocalRootShell);
+app.get('/', handleRootEntry);
 app.get('/health', (context) =>
   Response.json({
     ok: true,
     service: context.env.PUBLIC_SITE_NAME,
   })
 );
+app.get('/api/root', handleRootState);
 
 app.get('/api/dev/status', handleLocalDevStatus);
 app.post('/api/dev/demo', handleCreateLocalDemo);

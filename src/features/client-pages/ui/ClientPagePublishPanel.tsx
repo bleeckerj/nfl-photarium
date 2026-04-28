@@ -30,7 +30,7 @@ export function ClientPagePublishPanel({
       <div className="flex items-start justify-between gap-3 border-b border-stone-200 pb-4">
         <div>
           <p className="text-[11px] font-mono uppercase tracking-[0.24em] text-stone-500">Publish</p>
-          <p className="mt-1 text-sm text-stone-600">Send this explicit image set to the public Cloudflare client-pages worker.</p>
+          <p className="mt-1 text-sm text-stone-600">Send this explicit asset set to the public Cloudflare client-pages worker.</p>
         </div>
         <ClientPageStatusBadge status={project.status} />
       </div>

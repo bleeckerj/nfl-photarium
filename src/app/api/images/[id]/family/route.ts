@@ -122,6 +122,9 @@ export async function GET(
       ? (await listVideoAssetRecordsWithSync()).map((video) => ({
           id: video.id,
           assetType: 'video' as const,
+          generatedBy: typeof video.generatedBy === 'string' ? video.generatedBy : undefined,
+          comfyMetadataDetected: Boolean(video.comfyMetadataDetected),
+          comfyMetadataSource: typeof video.comfyMetadataSource === 'string' ? video.comfyMetadataSource : undefined,
           filename: video.filename,
           displayName: video.displayName || video.filename,
           uploaded: video.uploaded,

@@ -520,6 +520,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       ...videos.map((video) => ({
         id: video.id,
         assetType: 'video' as const,
+        generatedBy: typeof video.generatedBy === 'string' ? video.generatedBy : undefined,
+        comfyMetadataDetected: Boolean(video.comfyMetadataDetected),
+        comfyMetadataSource: typeof video.comfyMetadataSource === 'string' ? video.comfyMetadataSource : undefined,
         filename: video.filename,
         displayName: video.filename,
         folder: video.folder,
@@ -634,6 +637,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       ...videos.map((video) => ({
         id: video.id,
         assetType: 'video' as const,
+        generatedBy: typeof video.generatedBy === 'string' ? video.generatedBy : undefined,
+        comfyMetadataDetected: Boolean(video.comfyMetadataDetected),
+        comfyMetadataSource: typeof video.comfyMetadataSource === 'string' ? video.comfyMetadataSource : undefined,
         filename: video.filename,
         displayName: video.filename,
         folder: video.folder,

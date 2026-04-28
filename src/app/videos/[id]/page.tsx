@@ -40,6 +40,9 @@ import {
 type VideoRecord = {
   id: string;
   assetType?: 'video';
+  generatedBy?: string;
+  comfyMetadataDetected?: boolean;
+  comfyMetadataSource?: string;
   filename: string;
   displayName?: string;
   uploaded: string;

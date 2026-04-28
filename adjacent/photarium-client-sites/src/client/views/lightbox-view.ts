@@ -2,6 +2,8 @@ import { clientCopy, getLightboxPositionCopy } from '@client/content/copy';
 import { getLightboxAssetContext } from '@client/domain/selectors';
 import type { AppState } from '@client/domain/types';
 import { renderLightboxDownloadGroups } from '@client/rendering/lightbox-download-group';
+import { formatVideoDuration, getAssetPosterUrl, resolveVideoPlayback } from '@client/rendering/media';
+import { attachResolvedVideoPlayback } from '@client/rendering/video-player';
 
 export const renderLightboxView = (
   root: HTMLElement,
@@ -12,12 +14,12 @@ export const renderLightboxView = (
     onShowPrevious: () => void;
     onShowNext: () => void;
   }
-): void => {
+): () => void => {
   root.replaceChildren();
-  if (!state.lightboxAssetId || !state.project) return;
+  if (!state.lightboxAssetId || !state.project) return () => undefined;
 
   const context = getLightboxAssetContext(state);
-  if (!context) return;
+  if (!context) return () => undefined;
 
   const { asset } = context;
 
@@ -70,13 +72,42 @@ export const renderLightboxView = (
 
   const stage = document.createElement('div');
   stage.className = 'lightbox__stage';
+  let cleanup: () => void = () => undefined;
+  let disposed = false;
 
-  const image = document.createElement('img');
-  image.className = 'lightbox__image';
-  image.src = `/a/${asset.id}/lightbox`;
-  image.alt = asset.displayName;
-  image.loading = 'eager';
-  stage.append(image);
+  if (asset.assetType === 'video') {
+    const playback = resolveVideoPlayback(asset);
+    if (playback.hasPlayableSource) {
+      const video = document.createElement('video');
+      video.className = 'lightbox__image';
+      video.controls = true;
+      video.playsInline = true;
+      video.preload = 'metadata';
+      if (playback.posterUrl) {
+        video.poster = playback.posterUrl;
+      }
+      void attachResolvedVideoPlayback(video, playback).then((dispose) => {
+        if (disposed) {
+          dispose();
+          return;
+        }
+        cleanup = dispose;
+      });
+      stage.append(video);
+    } else {
+      const unavailable = document.createElement('div');
+      unavailable.className = 'lightbox__media-unavailable';
+      unavailable.textContent = 'Video playback is unavailable for this asset.';
+      stage.append(unavailable);
+    }
+  } else {
+    const image = document.createElement('img');
+    image.className = 'lightbox__image';
+    image.src = `/a/${asset.id}/lightbox`;
+    image.alt = asset.displayName;
+    image.loading = 'eager';
+    stage.append(image);
+  }
 
   const rail = document.createElement('aside');
   rail.className = 'lightbox__rail';
@@ -88,6 +119,11 @@ export const renderLightboxView = (
   const tags = document.createElement('p');
   tags.className = 'lightbox__tags';
   tags.textContent = `${clientCopy.tagsLabel}: ${asset.visibleTags.join(' · ') || 'Untagged'}`;
+
+  const duration = asset.assetType === 'video' ? formatVideoDuration(resolveVideoPlayback(asset).durationSeconds) : null;
+  const durationMeta = document.createElement('p');
+  durationMeta.className = 'lightbox__cluster';
+  durationMeta.textContent = duration ? `Duration: ${duration}` : '';
 
   const cluster = document.createElement('p');
   cluster.className = 'lightbox__cluster';
@@ -109,12 +145,13 @@ export const renderLightboxView = (
 
   const downloadsHeading = document.createElement('h3');
   downloadsHeading.className = 'lightbox__downloads-heading';
-  downloadsHeading.textContent = clientCopy.downloadTitle;
+  downloadsHeading.textContent = asset.assetType === 'video' ? clientCopy.playbackTitle : clientCopy.downloadTitle;
 
   rail.append(title, tags);
+  if (durationMeta.textContent) rail.append(durationMeta);
   if (cluster.textContent) rail.append(cluster);
   rail.append(description, selectButton, downloadsHeading, renderLightboxDownloadGroups({
-    assetId: asset.id,
+    asset,
     project: state.project,
   }));
 
@@ -122,4 +159,8 @@ export const renderLightboxView = (
   panel.append(topbar, body);
   overlay.append(panel);
   root.append(overlay);
+  return () => {
+    disposed = true;
+    cleanup();
+  };
 };

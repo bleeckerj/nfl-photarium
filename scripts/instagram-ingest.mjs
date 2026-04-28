@@ -5,6 +5,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
+import { pathToFileURL } from "node:url";
 import puppeteer from "puppeteer";
 
 const APP_ID = "936619743392459";
@@ -96,6 +97,7 @@ Options:
   --download-dir <path>     Optional directory to download image assets
   --push-cloudflare         Push discovered images to /api/upload/external
   --no-push-cloudflare      Disable Cloudflare pushes for single-url mode
+  --ai-display-name         Generate display names for image uploads during ingest
   --skip-video-push         Skip pushing videos during ingest
   --api-base <url>          Base URL for local API (default: http://localhost:3000)
   --namespace <name>        Upload namespace (default: cf-default)
@@ -108,7 +110,7 @@ Options:
 `);
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const out = {
     command: null,
     username: DEFAULT_USERNAME,
@@ -124,6 +126,7 @@ function parseArgs(argv) {
     instagramUrl: "",
     downloadDir: "",
     pushCloudflare: false,
+    aiDisplayName: false,
     skipVideoPush: false,
     apiBase: "http://localhost:3000",
     namespace: "cf-default",
@@ -185,6 +188,7 @@ function parseArgs(argv) {
       i += 1;
     } else if (arg === "--push-cloudflare") out.pushCloudflare = true;
     else if (arg === "--no-push-cloudflare") out.pushCloudflare = false;
+    else if (arg === "--ai-display-name") out.aiDisplayName = true;
     else if (arg === "--skip-video-push") out.skipVideoPush = true;
     else if (arg === "--no-resume") out.resume = false;
     else if (arg === "--headful") out.headful = true;
@@ -308,6 +312,40 @@ async function fetchImageBuffer(imageUrl) {
   const bytes = Buffer.from(await res.arrayBuffer());
   const contentType = (res.headers.get("content-type") || "").split(";")[0].trim();
   return { bytes, contentType };
+}
+
+export async function suggestDisplayNameFromBuffer({
+  apiBase,
+  imageBytes,
+  imageMime,
+  filename,
+  folder,
+  existingTags = [],
+}) {
+  const form = new FormData();
+  form.append("file", new Blob([imageBytes], { type: imageMime || "image/jpeg" }), filename);
+  form.append("filename", filename);
+  if (folder) form.append("folder", folder);
+  if (Array.isArray(existingTags) && existingTags.length > 0) {
+    form.append("tags", existingTags.join(","));
+  }
+
+  const res = await fetch(`${apiBase}/api/display-name/suggest`, {
+    method: "POST",
+    body: form,
+  });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(payload?.error || `Display-name request failed (${res.status})`);
+  }
+
+  return {
+    displayName:
+      typeof payload?.displayName === "string" && payload.displayName.trim()
+        ? payload.displayName.trim()
+        : undefined,
+    model: typeof payload?.model === "string" ? payload.model : undefined,
+  };
 }
 
 function isRetryableVideoPushError(message) {
@@ -494,7 +532,7 @@ function contentTypeToExt(contentType) {
   return ".jpg";
 }
 
-async function pushImageToCloudflare({
+export async function pushImageToCloudflare({
   apiBase,
   imageUrl,
   username,
@@ -504,8 +542,10 @@ async function pushImageToCloudflare({
   sourcePageUrl,
   namespace,
   log,
+  displayName,
+  fetchedImage,
 }) {
-  const { bytes, contentType } = await fetchImageBuffer(imageUrl);
+  const { bytes, contentType } = fetchedImage ?? await fetchImageBuffer(imageUrl);
   const ext = contentTypeToExt(contentType || imageUrl);
   const safeShortcode = shortcode || `ig_${Date.now()}`;
   const fileName = `${safeShortcode}${ext}`;
@@ -518,6 +558,7 @@ async function pushImageToCloudflare({
   form.append("sourceUrl", sourcePageUrl);
   form.append("originalUrl", imageUrl);
   form.append("namespace", namespace);
+  if (displayName) form.append("displayName", displayName);
   if (permalink) form.append("description", permalink);
 
   const endpoint = `${apiBase}/api/upload/external`;
@@ -548,6 +589,64 @@ async function pushImageToCloudflare({
     url: body?.url || null,
     variants: Array.isArray(body?.variants) ? body.variants : [],
   };
+}
+
+export async function ingestImageToCloudflare({
+  apiBase,
+  imageUrl,
+  username,
+  uploadTags,
+  shortcode,
+  permalink,
+  sourcePageUrl,
+  namespace,
+  log,
+  aiDisplayName = false,
+}) {
+  let fetchedImage;
+  let displayName;
+
+  if (aiDisplayName) {
+    fetchedImage = await fetchImageBuffer(imageUrl);
+    const ext = contentTypeToExt(fetchedImage.contentType || imageUrl);
+    const safeShortcode = shortcode || `ig_${Date.now()}`;
+    const filename = `${safeShortcode}${ext}`;
+
+    try {
+      const ai = await suggestDisplayNameFromBuffer({
+        apiBase,
+        imageBytes: fetchedImage.bytes,
+        imageMime: fetchedImage.contentType || "image/jpeg",
+        filename,
+        folder: "instagram",
+        existingTags: Array.isArray(uploadTags) ? uploadTags : [],
+      });
+      displayName = ai.displayName;
+      if (displayName) {
+        log.trace(
+          `cloudflare_ai_display_name_ok shortcode=${shortcode ?? "n/a"} model=${ai.model ?? "unknown"} display_name=${displayName}`,
+        );
+      }
+    } catch (error) {
+      log.warn(
+        `cloudflare_ai_display_name_failed shortcode=${shortcode ?? "n/a"} image=${imageUrl} err=${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  return pushImageToCloudflare({
+    apiBase,
+    imageUrl,
+    username,
+    uploadTags,
+    shortcode,
+    permalink,
+    sourcePageUrl,
+    namespace,
+    log,
+    displayName,
+    fetchedImage,
+  });
 }
 
 async function pushVideoToCloudflare({
@@ -1148,6 +1247,7 @@ async function runIngest(opts, log) {
     log.info(`push_cloudflare=true api_base=${opts.apiBase}`);
     log.info(`push_namespace=${opts.namespace}`);
     log.info(`push_tags=instagram,${opts.username} push_folder=instagram`);
+    log.info(`push_ai_display_name=${opts.aiDisplayName}`);
     if (opts.skipVideoPush) {
       log.warn("skip_video_push=true (videos will be deferred; only images pushed during ingest)");
     }
@@ -1266,15 +1366,17 @@ async function runIngest(opts, log) {
         const sourcePageUrl = `https://www.instagram.com/${opts.username}/`;
         for (const imageUrl of record.imageUrls) {
           try {
-            const pushed = await pushImageToCloudflare({
+            const pushed = await ingestImageToCloudflare({
               apiBase: opts.apiBase,
               imageUrl,
               username: opts.username,
+              uploadTags: buildInstagramUploadTags(opts.username, ""),
               shortcode: record.shortcode,
               permalink: record.permalink,
               sourcePageUrl,
               namespace: opts.namespace,
               log,
+              aiDisplayName: opts.aiDisplayName,
             });
             record.cloudflare.push({
               assetType: "image",
@@ -1871,7 +1973,13 @@ async function main() {
   process.exitCode = 1;
 }
 
-main().catch((err) => {
-  console.error(`${C.red}${err.message}${C.reset}`);
-  process.exitCode = 1;
-});
+const isDirectRun =
+  typeof process.argv[1] === "string" &&
+  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
+
+if (isDirectRun) {
+  main().catch((err) => {
+    console.error(`${C.red}${err.message}${C.reset}`);
+    process.exitCode = 1;
+  });
+}

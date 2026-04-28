@@ -1,4 +1,7 @@
 LOCAL_DEV_MODE=true
+# Optional dedicated deploy token used by the parent Photarium client-sites CLI
+# when you keep client-site Cloudflare credentials with the adjacent worker config.
+# CLIENT_SITES_CLOUDFLARE_API_TOKEN=replace-with-client-sites-deploy-token
 # Optional in local dev. When unset, localhost admin publish routes are allowed
 # without auth so a single-operator Photarium instance can publish directly.
 # CLIENT_SITES_PUBLISH_SECRET=local-dev-publish-secret

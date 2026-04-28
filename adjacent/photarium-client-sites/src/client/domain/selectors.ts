@@ -48,7 +48,7 @@ export const groupAssetsByCluster = (assets: ClientAsset[]): ClusterGroup[] => {
   const groups = new Map<string, ClientAsset[]>();
 
   assets.forEach((asset) => {
-    const key = asset.clusterLabel ?? 'All images';
+    const key = asset.clusterLabel ?? 'All assets';
     groups.set(key, [...(groups.get(key) ?? []), asset]);
   });
 

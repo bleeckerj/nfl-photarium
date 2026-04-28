@@ -1,5 +1,6 @@
 import type { ClientAsset } from '@client/domain/types';
 import { clientCopy } from '@client/content/copy';
+import { getAssetPosterUrl } from '@client/rendering/media';
 
 interface ShortlistItemOptions {
   asset: ClientAsset;
@@ -9,12 +10,13 @@ interface ShortlistItemOptions {
 export const renderShortlistItem = (options: ShortlistItemOptions): HTMLElement => {
   const item = document.createElement('article');
   item.className = 'shortlist-item';
+  const mediaUrl = getAssetPosterUrl(options.asset, 'grid') || '';
 
   item.innerHTML = `
-    <img class="shortlist-item__image" src="/a/${options.asset.id}/grid" alt="${options.asset.displayName}" />
+    ${mediaUrl ? `<img class="shortlist-item__image" src="${mediaUrl}" alt="${options.asset.displayName}" />` : ''}
     <div class="shortlist-item__body">
       <strong>${options.asset.displayName}</strong>
-      <span>${options.asset.visibleTags.join(' · ') || 'Untagged'}</span>
+      <span>${options.asset.assetType === 'video' ? 'Video · ' : ''}${options.asset.visibleTags.join(' · ') || 'Untagged'}</span>
     </div>
   `;
 

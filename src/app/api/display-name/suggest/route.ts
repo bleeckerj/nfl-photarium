@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fallbackDisplayNameFromFilename, sanitizeSuggestedDisplayName } from '@/utils/displayName';
+import { sanitizePhraseSuggestedTags } from '@/server/aiTagParsing';
 
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
 
@@ -31,31 +32,14 @@ const parseIntField = (value: FormDataEntryValue | null, fallback: number) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const sanitizeTag = (value: string) =>
-  value
-    .toLowerCase()
-    .replace(/[_/]+/g, ' ')
-    .replace(/[^\w\s-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+const buildTagShapeExample = (requestedTagCount: number) => {
+  const tags = Array.from({ length: requestedTagCount }, (_, index) => `tag${index + 1}`);
+  return JSON.stringify({ tags });
+};
 
-const sanitizeSuggestedTags = (value: unknown, maxCount = 4): string[] => {
-  const source = Array.isArray(value)
-    ? value
-    : typeof value === 'string'
-      ? value.split(/[,\n]/g)
-      : [];
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const entry of source) {
-    if (typeof entry !== 'string') continue;
-    const cleaned = sanitizeTag(entry);
-    if (!cleaned || seen.has(cleaned)) continue;
-    seen.add(cleaned);
-    out.push(cleaned);
-    if (out.length >= maxCount) break;
-  }
-  return out;
+const buildDisplayNameAndTagShapeExample = (requestedTagCount: number) => {
+  const tags = Array.from({ length: requestedTagCount }, (_, index) => `tag${index + 1}`);
+  return JSON.stringify({ displayName: 'short name', tags });
 };
 
 const tryParseJsonObject = (raw?: string): Record<string, unknown> | null => {
@@ -124,12 +108,13 @@ export async function POST(request: NextRequest) {
       ? [
           'Analyze this image and return JSON only.',
           skipDisplayName
-            ? `Return exactly this shape: {"tags":["tag1","tag2","tag3","tag4"]}`
-            : `Return exactly this shape: {"displayName":"short name","tags":["tag1","tag2","tag3","tag4"]}`,
+            ? `Return exactly this shape: ${buildTagShapeExample(requestedTagCount)}`
+            : `Return exactly this shape: ${buildDisplayNameAndTagShapeExample(requestedTagCount)}`,
           skipDisplayName
-            ? `Provide ${Math.max(3, Math.min(4, requestedTagCount))} to ${Math.min(4, Math.max(3, requestedTagCount))} concise semantic tags.`
-            : `Provide a short semantic displayName (2-5 words) and ${Math.max(3, Math.min(4, requestedTagCount))} to ${Math.min(4, Math.max(3, requestedTagCount))} concise semantic tags.`,
+            ? `Provide exactly ${requestedTagCount} concise semantic tags.`
+            : `Provide a short semantic displayName (2-5 words) and exactly ${requestedTagCount} concise semantic tags.`,
           'Tags should be short lowercase phrases, no punctuation, no hashtags, no explanation.',
+          'Each tag must be its own JSON array item, never a single hyphen-joined string.',
           'Do not include markdown fences.',
           filename ? `Filename hint: ${filename}` : null,
           folder ? `Folder hint: ${folder}` : null,
@@ -149,7 +134,7 @@ export async function POST(request: NextRequest) {
           .filter(Boolean)
           .join('\n');
 
-    const model = process.env.OPENAI_DISPLAY_NAME_MODEL || 'gpt-4o';
+    const model = process.env.OPENAI_DISPLAY_NAME_MODEL || 'gpt-4.1-nano';
     const openAiResponse = await fetch(OPENAI_API_URL, {
       method: 'POST',
       headers: {
@@ -192,7 +177,7 @@ export async function POST(request: NextRequest) {
           ? sanitizeSuggestedDisplayName(parsedDisplayName)
           : fallbackDisplayNameFromFilename(filename);
     const suggestedTags = includeTags
-      ? sanitizeSuggestedTags(parsedObject?.tags ?? raw, requestedTagCount)
+      ? sanitizePhraseSuggestedTags(parsedObject?.tags ?? raw, requestedTagCount)
       : undefined;
 
     return NextResponse.json({

@@ -101,7 +101,7 @@ export function useGalleryData({ namespace, refreshTrigger }: UseGalleryDataOpti
   // Fetch namespaces on mount
   useEffect(() => {
     let active = true;
-    fetch('/api/namespaces')
+    fetch('/api/namespaces', { cache: 'no-store' })
       .then(response => response.json())
       .then(data => {
         if (!active) return;

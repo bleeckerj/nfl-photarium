@@ -1117,6 +1117,30 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
       });
   }, []);
 
+  const registerUploadNamespace = useCallback(async (value: string) => {
+    const namespace = value.trim();
+    if (!namespace || namespace === '__all__' || namespace === '__none__') return;
+
+    try {
+      const response = await fetch('/api/namespaces', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({ namespace }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(typeof data?.error === 'string' ? data.error : 'Failed to register namespace');
+      }
+      const namespaces = Array.isArray(data?.namespaces)
+        ? data.namespaces.filter((entry: unknown): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+        : [];
+      setRegistryNamespaces(namespaces);
+    } catch (error) {
+      console.warn('Failed to register namespace for uploader', error);
+    }
+  }, []);
+
   const handleUploadNamespaceSelectChange = useCallback((value: string) => {
     setUploadNamespaceSelectValue(value);
     if (value === '__custom__') return;
@@ -1128,8 +1152,9 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     const nextNamespace = uploadNamespaceDraft.trim();
     if (!nextNamespace) return;
     setUploadNamespaceSelectValue('__custom__');
+    void registerUploadNamespace(nextNamespace);
     onNamespaceChange?.(nextNamespace);
-  }, [onNamespaceChange, uploadNamespaceDraft]);
+  }, [onNamespaceChange, registerUploadNamespace, uploadNamespaceDraft]);
 
   // Function to actually upload files
   const resolveFolder = useCallback(() => {

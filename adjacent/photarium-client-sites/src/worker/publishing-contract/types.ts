@@ -5,6 +5,7 @@
 export type ProjectLifecycleStatus = 'draft' | 'published' | 'shadow' | 'archived';
 export type OutputFormat = 'jpg' | 'png' | 'webp';
 export type ImageFitMode = 'scale-down' | 'contain' | 'cover';
+export type PublishedAssetType = 'image' | 'video';
 
 export interface SecretLinkAccessPolicy {
   mode: 'secret-link';
@@ -40,14 +41,16 @@ export interface DownloadPresetPolicy {
 }
 
 export interface PublishedProjectAsset {
+  assetType: PublishedAssetType;
   projectAssetId: string;
-  sourceImageId: string;
+  sourceAssetId: string;
   filename: string;
   displayName?: string;
   description?: string;
   visibleTags?: string[];
   sourceTags: string[];
   uploadedAt: string;
+  fileSizeBytes?: number;
   aspectRatio?: string;
   dimensions?: {
     width: number;
@@ -60,6 +63,12 @@ export interface PublishedProjectAsset {
     label?: string;
   };
   previewVariant?: string;
+  videoPlaybackUrl?: string;
+  videoHlsUrl?: string;
+  videoThumbnailUrl?: string;
+  videoPreviewUrl?: string;
+  videoDownloadUrl?: string;
+  videoDurationSeconds?: number;
   sortOrder?: number;
 }
 

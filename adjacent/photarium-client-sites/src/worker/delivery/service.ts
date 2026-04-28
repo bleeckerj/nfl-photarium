@@ -17,9 +17,12 @@ export class AssetDeliveryService {
   ) {}
 
   buildViewUrl(asset: ProjectAssetRecord, policy: DownloadPresetPolicy, presetName: string): string | null {
+    if (asset.assetType === 'video') {
+      return asset.videoThumbnailUrl || null;
+    }
     const preset = resolveViewPreset(policy, presetName);
     if (!preset) return null;
-    return `https://imagedelivery.net/${this.accountHash}/${asset.sourceImageId}/${preset.sourceVariant}`;
+    return `https://imagedelivery.net/${this.accountHash}/${asset.sourceAssetId}/${preset.sourceVariant}`;
   }
 
   async buildDownloadResponse(
@@ -28,10 +31,14 @@ export class AssetDeliveryService {
     presetName: string,
     format: string
   ): Promise<Response | null> {
+    if (asset.assetType === 'video') {
+      return null;
+    }
+
     const preset = resolveDownloadPreset(policy, presetName);
     if (!preset || !isOutputFormatAllowed(policy, format)) return null;
 
-    const sourceUrl = `https://imagedelivery.net/${this.accountHash}/${asset.sourceImageId}/public`;
+    const sourceUrl = `https://imagedelivery.net/${this.accountHash}/${asset.sourceAssetId}/public`;
     const requestInit = {
       cf: {
         image: {

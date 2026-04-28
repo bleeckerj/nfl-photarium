@@ -1,12 +1,8 @@
 import fs from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
+import { getPhotariumRuntimeDataDir } from './runtimeDataDir';
 
-const RUNTIME_DATA_DIR =
-  process.env.PHOTARIUM_RUNTIME_DATA_DIR ??
-  (process.env.NODE_ENV === 'development'
-    ? path.join(os.tmpdir(), 'photarium-data')
-    : path.join(process.cwd(), 'data'));
+const RUNTIME_DATA_DIR = getPhotariumRuntimeDataDir();
 // Local JSON registry used to populate namespace dropdown options in the UI.
 const REGISTRY_PATH = path.join(RUNTIME_DATA_DIR, 'namespace-registry.json');
 
@@ -67,6 +63,26 @@ export const upsertRegistryNamespace = async (namespace?: string) => {
   const payload = await readRegistry();
   if (payload.namespaces.includes(normalized)) return;
   payload.namespaces.push(normalized);
+  payload.updatedAt = new Date().toISOString();
+  await writeRegistry(payload);
+};
+
+export const upsertRegistryNamespaces = async (namespaces: string[]) => {
+  const normalized = Array.from(
+    new Set(namespaces.map((entry) => normalizeNamespace(entry)).filter(Boolean))
+  );
+  if (!normalized.length) return;
+
+  const payload = await readRegistry();
+  let didChange = false;
+  normalized.forEach((namespace) => {
+    if (!payload.namespaces.includes(namespace)) {
+      payload.namespaces.push(namespace);
+      didChange = true;
+    }
+  });
+
+  if (!didChange) return;
   payload.updatedAt = new Date().toISOString();
   await writeRegistry(payload);
 };

@@ -39,6 +39,7 @@ interface ImageListItemProps {
   onSelectColor?: (hex: string) => void;
   onBeforeNavigate?: (imageId: string) => void;
   onDragStart?: (event: React.DragEvent, image: CloudflareImage) => void;
+  isFocusedInGallery?: boolean;
   // Hover preview
   onMouseEnter: (imageId: string, event: React.MouseEvent) => void;
   onMouseMove: (imageId: string, event: React.MouseEvent) => void;
@@ -79,6 +80,7 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
   onSelectColor,
   onBeforeNavigate,
   onDragStart,
+  isFocusedInGallery = false,
   onMouseEnter,
   onMouseMove,
   onMouseLeave,
@@ -107,9 +109,11 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
 
   return (
     <div
+      id={`gallery-asset-${image.id}`}
+      data-gallery-asset-id={image.id}
       className={`flex items-center space-x-4 p-4 border rounded-lg hover:bg-gray-50 ${
         isSelected ? 'border-blue-500 ring-2 ring-blue-400' : 'border-gray-200'
-      }`}
+      } ${isFocusedInGallery ? 'border-amber-400 ring-2 ring-amber-300 ring-offset-2' : ''}`}
     >
       <Link
         href={detailHref}

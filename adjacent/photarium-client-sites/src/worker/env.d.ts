@@ -6,4 +6,9 @@ interface Env {
   SESSION_SIGNING_SECRET: string;
   IMAGES_ACCOUNT_HASH: string;
   IMAGES_SIGNING_KEY?: string;
+  CLIENT_ROOT_DEFAULT_PATH?: string;
+  CLIENT_ROOT_PROJECTS_JSON?: string;
+  CLIENT_BRAND_FAVICON_URL?: string;
+  CLIENT_BRAND_LOGO_URL?: string;
+  CLIENT_BRAND_LOGO_ALT?: string;
 }

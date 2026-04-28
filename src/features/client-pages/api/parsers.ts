@@ -36,6 +36,7 @@ export const parseCreateClientPageProjectInput = (value: unknown): CreateClientP
   return {
     title: object.title,
     clientName: parseOptionalString(object.clientName),
+    clientSiteId: parseOptionalString(object.clientSiteId),
     notes: parseOptionalString(object.notes),
     expiresAt: parseOptionalString(object.expiresAt) ?? null,
     sourceNamespaces: parseOptionalStringArray(object.sourceNamespaces),
@@ -47,6 +48,7 @@ export const parseUpdateClientPageProjectInput = (value: unknown): UpdateClientP
   return {
     title: parseOptionalString(object.title),
     clientName: parseOptionalString(object.clientName),
+    clientSiteId: parseOptionalString(object.clientSiteId),
     notes: parseOptionalString(object.notes),
     expiresAt: object.expiresAt === null ? null : parseOptionalString(object.expiresAt),
     sourceNamespaces: parseOptionalStringArray(object.sourceNamespaces),

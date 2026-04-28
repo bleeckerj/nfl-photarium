@@ -9,6 +9,22 @@ import type {
   UpdateClientPageProjectInput,
 } from '../types';
 
+export interface ClientSiteSummary {
+  id: string;
+  name: string;
+  slug: string;
+  status: 'draft' | 'deployed' | 'inactive' | 'deleted';
+  linkedProjectCount?: number;
+  deployment: {
+    workerName: string;
+    publicBaseUrl: string;
+    customDomain?: string;
+    lastDeployStatus?: 'idle' | 'success' | 'failed';
+    lastDeployAt?: string;
+    lastDeployMessage?: string;
+  };
+}
+
 export interface ClientPageProjectResponse {
   project: ClientPageProjectRecord;
   shareUrl: string | null;
@@ -16,6 +32,10 @@ export interface ClientPageProjectResponse {
 
 export interface ClientPageListResponse {
   projects: ClientPageProjectListItem[];
+}
+
+export interface ClientSiteListResponse {
+  clientSites: ClientSiteSummary[];
 }
 
 const readJson = async <T>(response: Response): Promise<T> => {
@@ -77,12 +97,17 @@ export const clientPageApi = {
   loadCatalogImages: async () => {
     const response = await fetch('/api/images?includeVectorMeta=1&namespace=__all__');
     const payload = await readJson<{ images?: CloudflareImage[] }>(response);
-    return (payload.images ?? []).filter((image) => image.assetType !== 'video');
+    return payload.images ?? [];
   },
   loadNamespaces: async () => {
-    const response = await fetch('/api/namespaces');
+    const response = await fetch('/api/namespaces', { cache: 'no-store' });
     const payload = await readJson<{ namespaces?: string[] }>(response);
     return Array.isArray(payload.namespaces) ? payload.namespaces : [];
+  },
+  listClientSites: async () => {
+    const response = await fetch('/api/client-sites');
+    const payload = await readJson<ClientSiteListResponse>(response);
+    return payload.clientSites ?? [];
   },
   searchSemantically: async (query: string, namespace: string) => {
     const response = await fetch('/api/images/search', {

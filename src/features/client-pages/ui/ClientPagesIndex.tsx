@@ -36,7 +36,7 @@ export function ClientPagesIndex({ initialProjects }: ClientPagesIndexProps) {
             <p className="text-[11px] font-mono uppercase tracking-[0.24em] text-stone-500">Client pages</p>
             <h1 className="mt-2 text-3xl font-semibold text-stone-900">Create and manage client-facing selects</h1>
             <p className="mt-2 max-w-3xl text-sm text-stone-600">
-              Draft client pages inside Photarium, assign images from the existing catalog, and publish them into the shared public Cloudflare worker without building a new site each time.
+              Draft client pages inside Photarium, assign images from the existing catalog, and publish them into the dedicated client site linked to each project.
             </p>
           </div>
           <Link

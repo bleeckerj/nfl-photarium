@@ -1,0 +1,326 @@
+{
+  "recommendation": {
+    "model": "gpt-4.1-nano",
+    "reason": "Best cost/quality tradeoff in the final low-cost comparison."
+  },
+  "methodology": {
+    "instructions": "You create compact single-word semantic tags for images. Return JSON only.",
+    "prompt": "Analyze this image and return exactly 6 semantic tags.\nEach tag must be a single lowercase ASCII word.\nPrefer concrete scene, subject, object, mood, material, or setting terms.\nNo phrases, no punctuation, no explanation.\nFilename hint: <filename>",
+    "schema": {
+      "tags": "array[6] of lowercase ASCII tag strings"
+    },
+    "notes": [
+      "Final comparison uses Responses API with strict JSON schema output.",
+      "The initial gpt-5.4-nano run used an unsupported reasoning.effort value and was replaced by the none-effort rerun.",
+      "Earlier incompatible GPT-5 exploratory runs are historical only and are not part of the final recommendation."
+    ]
+  },
+  "models": {
+    "gpt-4o-mini": {
+      "successes": 4,
+      "averageCostUsd": 0.0051289874999999995
+    },
+    "gpt-5.4-nano": {
+      "successes": 4,
+      "averageCostUsd": 0.00045998750000000003
+    },
+    "gpt-5-mini": {
+      "successes": 4,
+      "averageCostUsd": 0.000466625
+    },
+    "gpt-4.1-nano": {
+      "successes": 4,
+      "averageCostUsd": 0.00031177500000000003
+    },
+    "gpt-4.1-mini": {
+      "successes": 4,
+      "averageCostUsd": 0.0008439000000000001
+    }
+  },
+  "images": [
+    {
+      "imagePath": "ltm1100_mountain_04_16x9_00001.png",
+      "results": [
+        {
+          "model": "gpt-4o-mini",
+          "tags": [
+            "truck",
+            "mountain",
+            "desert",
+            "nature",
+            "vehicle",
+            "landscape"
+          ],
+          "costUsd": 0.0055549499999999995,
+          "status": 200
+        },
+        {
+          "model": "gpt-5.4-nano",
+          "tags": [
+            "truck",
+            "mountains",
+            "desert",
+            "snow",
+            "wilderness",
+            "scenic"
+          ],
+          "costUsd": 0.0002958,
+          "status": 200
+        },
+        {
+          "model": "gpt-5-mini",
+          "tags": [
+            "expedition",
+            "truck",
+            "mountains",
+            "desert",
+            "camper",
+            "wilderness"
+          ],
+          "costUsd": 0.00041200000000000004,
+          "status": 200
+        },
+        {
+          "model": "gpt-4.1-nano",
+          "tags": [
+            "vehicle",
+            "mountains",
+            "desert",
+            "animals",
+            "clouds",
+            "landscape"
+          ],
+          "costUsd": 0.0002636,
+          "status": 200
+        },
+        {
+          "model": "gpt-4.1-mini",
+          "tags": [
+            "truck",
+            "desert",
+            "mountain",
+            "snow",
+            "bird",
+            "vehicle"
+          ],
+          "costUsd": 0.0007192,
+          "status": 200
+        }
+      ]
+    },
+    {
+      "imagePath": "tmp/autotrader_00505__900px.jpg",
+      "results": [
+        {
+          "model": "gpt-4o-mini",
+          "tags": [
+            "vehicle",
+            "beach",
+            "outdoor",
+            "camera",
+            "rugged",
+            "photography"
+          ],
+          "costUsd": 0.00385455,
+          "status": 200
+        },
+        {
+          "model": "gpt-5.4-nano",
+          "tags": [
+            "suv",
+            "offroad",
+            "camera",
+            "mount",
+            "beach",
+            "overcast"
+          ],
+          "costUsd": 0.0002592,
+          "status": 200
+        },
+        {
+          "model": "gpt-5-mini",
+          "tags": [
+            "offroad",
+            "pickup",
+            "camera",
+            "beach",
+            "mudguard",
+            "overcast"
+          ],
+          "costUsd": 0.00036425,
+          "status": 200
+        },
+        {
+          "model": "gpt-4.1-nano",
+          "tags": [
+            "car",
+            "offroad",
+            "camera",
+            "film",
+            "mountain",
+            "beach"
+          ],
+          "costUsd": 0.0002262,
+          "status": 200
+        },
+        {
+          "model": "gpt-4.1-mini",
+          "tags": [
+            "vehicle",
+            "camera",
+            "beach",
+            "offroad",
+            "technology",
+            "wet"
+          ],
+          "costUsd": 0.0006208,
+          "status": 200
+        }
+      ]
+    },
+    {
+      "imagePath": "tmp/dng-ingest-previews/003f40318fc90018.jpg",
+      "results": [
+        {
+          "model": "gpt-4o-mini",
+          "tags": [
+            "door",
+            "yellow",
+            "number",
+            "room",
+            "handle",
+            "interior"
+          ],
+          "costUsd": 0.0055527,
+          "status": 200
+        },
+        {
+          "model": "gpt-5.4-nano",
+          "tags": [
+            "door",
+            "number",
+            "25",
+            "yellow",
+            "paint",
+            "handle"
+          ],
+          "costUsd": 0.0006378,
+          "status": 200
+        },
+        {
+          "model": "gpt-5-mini",
+          "tags": [
+            "door",
+            "yellow",
+            "number",
+            "metal",
+            "handle",
+            "painted"
+          ],
+          "costUsd": 0.00054275,
+          "status": 200
+        },
+        {
+          "model": "gpt-4.1-nano",
+          "tags": [
+            "door",
+            "yellow",
+            "number",
+            "metal",
+            "handle",
+            "wall"
+          ],
+          "costUsd": 0.00037650000000000004,
+          "status": 200
+        },
+        {
+          "model": "gpt-4.1-mini",
+          "tags": [
+            "door",
+            "number",
+            "yellow",
+            "wall",
+            "metal",
+            "handle"
+          ],
+          "costUsd": 0.0010164,
+          "status": 200
+        }
+      ]
+    },
+    {
+      "imagePath": "tmp/dng-ingest-previews/6cb822ee7c7d85bd.jpg",
+      "results": [
+        {
+          "model": "gpt-4o-mini",
+          "tags": [
+            "stickers",
+            "door",
+            "black",
+            "crew",
+            "labels",
+            "backstage"
+          ],
+          "costUsd": 0.0055537500000000005,
+          "status": 200
+        },
+        {
+          "model": "gpt-5.4-nano",
+          "tags": [
+            "bulletinboard",
+            "stickers",
+            "posters",
+            "corridor",
+            "crowd",
+            "warmlight"
+          ],
+          "costUsd": 0.0006471500000000001,
+          "status": 200
+        },
+        {
+          "model": "gpt-5-mini",
+          "tags": [
+            "stickers",
+            "locker",
+            "door",
+            "colorful",
+            "venue",
+            "collage"
+          ],
+          "costUsd": 0.0005475,
+          "status": 200
+        },
+        {
+          "model": "gpt-4.1-nano",
+          "tags": [
+            "stickers",
+            "cabinet",
+            "stickers",
+            "metal",
+            "colorful",
+            "street"
+          ],
+          "costUsd": 0.00038080000000000004,
+          "status": 200
+        },
+        {
+          "model": "gpt-4.1-mini",
+          "tags": [
+            "door",
+            "stickers",
+            "music",
+            "venue",
+            "wall",
+            "label"
+          ],
+          "costUsd": 0.0010192,
+          "status": 200
+        }
+      ]
+    }
+  ],
+  "artifacts": {
+    "expandedBenchmark": "semantic-tag-expanded-benchmark.json",
+    "gpt54NanoRerun": "semantic-tag-gpt54nano-none.json"
+  }
+}

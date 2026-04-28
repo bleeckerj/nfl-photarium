@@ -1,5 +1,6 @@
 export type ClientSiteStatus = 'draft' | 'published' | 'shadow' | 'archived';
 export type ClientSiteOutputFormat = 'jpg' | 'png' | 'webp';
+export type ClientSiteAssetType = 'image' | 'video';
 
 export interface ClientSiteAccessPolicy {
   mode: 'secret-link';
@@ -35,14 +36,16 @@ export interface ClientSiteDownloadPresetPolicy {
 }
 
 export interface PublishedProjectAssetPayload {
+  assetType: ClientSiteAssetType;
   projectAssetId: string;
-  sourceImageId: string;
+  sourceAssetId: string;
   filename: string;
   displayName?: string;
   description?: string;
   visibleTags?: string[];
   sourceTags: string[];
   uploadedAt: string;
+  fileSizeBytes?: number;
   aspectRatio?: string;
   dimensions?: {
     width: number;
@@ -55,6 +58,12 @@ export interface PublishedProjectAssetPayload {
     label?: string;
   };
   previewVariant?: string;
+  videoPlaybackUrl?: string;
+  videoHlsUrl?: string;
+  videoThumbnailUrl?: string;
+  videoPreviewUrl?: string;
+  videoDownloadUrl?: string;
+  videoDurationSeconds?: number;
   sortOrder?: number;
 }
 
@@ -89,7 +98,7 @@ export interface ClientSiteManifestRequest {
     sourceNamespaces?: string[];
   };
   selection: {
-    imageIds: string[];
+    assetIds: string[];
   };
   accessPolicy?: ClientSiteAccessPolicy;
   visibleTagPolicy?: ClientSiteVisibleTagPolicy;
@@ -108,7 +117,7 @@ export interface ClientSitePublishRequest {
     sourceNamespaces?: string[];
   };
   selection: {
-    imageIds: string[];
+    assetIds: string[];
   };
   accessPolicy?: ClientSiteAccessPolicy;
   visibleTagPolicy?: ClientSiteVisibleTagPolicy;

@@ -129,6 +129,7 @@ export interface GalleryViewFilters {
   displayNameLoadingMap: Record<string, boolean>;
   galleryReturnHrefSuffix: string;
   activeColorSearchHex?: string | null;
+  focusedGalleryAssetId?: string | null;
 }
 
 export type DuplicateReason = 'originalUrl+contentHash';

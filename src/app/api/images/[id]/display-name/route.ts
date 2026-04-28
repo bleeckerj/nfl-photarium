@@ -78,7 +78,7 @@ export async function POST(
       .filter(Boolean)
       .join('\n');
 
-    const model = process.env.OPENAI_DISPLAY_NAME_MODEL || 'gpt-4o';
+    const model = process.env.OPENAI_DISPLAY_NAME_MODEL || 'gpt-4.1-nano';
     const openAiResponse = await fetch(OPENAI_API_URL, {
       method: 'POST',
       headers: {

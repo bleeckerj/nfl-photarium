@@ -6,12 +6,15 @@ interface ProjectAssetRow {
   project_id: string;
   revision_id: string;
   source_image_id: string;
+  source_asset_id: string | null;
+  asset_type: string | null;
   filename: string;
   display_name: string | null;
   description: string | null;
   visible_tags_json: string;
   source_tags_json: string;
   uploaded_at: string;
+  file_size_bytes: number | null;
   aspect_ratio: string | null;
   width: number | null;
   height: number | null;
@@ -20,22 +23,30 @@ interface ProjectAssetRow {
   cluster_id: string | null;
   cluster_label: string | null;
   preview_variant: string | null;
+  video_playback_url: string | null;
+  video_hls_url: string | null;
+  video_thumbnail_url: string | null;
+  video_preview_url: string | null;
+  video_download_url: string | null;
+  video_duration_seconds: number | null;
   sort_order: number;
   created_at: string;
   updated_at: string;
 }
 
 const mapAssetRow = (row: ProjectAssetRow): ProjectAssetRecord => ({
+  assetType: row.asset_type === 'video' ? 'video' : 'image',
   publicAssetId: row.public_asset_id,
   projectId: row.project_id,
   revisionId: row.revision_id,
-  sourceImageId: row.source_image_id,
+  sourceAssetId: row.source_asset_id ?? row.source_image_id,
   filename: row.filename,
   displayName: row.display_name ?? undefined,
   description: row.description ?? undefined,
   visibleTags: JSON.parse(row.visible_tags_json),
   sourceTags: JSON.parse(row.source_tags_json),
   uploadedAt: row.uploaded_at,
+  fileSizeBytes: row.file_size_bytes ?? undefined,
   aspectRatio: row.aspect_ratio ?? undefined,
   width: row.width ?? undefined,
   height: row.height ?? undefined,
@@ -44,6 +55,12 @@ const mapAssetRow = (row: ProjectAssetRow): ProjectAssetRecord => ({
   clusterId: row.cluster_id ?? undefined,
   clusterLabel: row.cluster_label ?? undefined,
   previewVariant: row.preview_variant ?? undefined,
+  videoPlaybackUrl: row.video_playback_url ?? undefined,
+  videoHlsUrl: row.video_hls_url ?? undefined,
+  videoThumbnailUrl: row.video_thumbnail_url ?? undefined,
+  videoPreviewUrl: row.video_preview_url ?? undefined,
+  videoDownloadUrl: row.video_download_url ?? undefined,
+  videoDurationSeconds: row.video_duration_seconds ?? undefined,
   sortOrder: row.sort_order,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -67,24 +84,29 @@ export class ProjectAssetRepository {
         .prepare(
           `
             INSERT INTO project_assets (
-              public_asset_id, project_id, revision_id, source_image_id, filename,
+              public_asset_id, project_id, revision_id, source_image_id, source_asset_id, asset_type, filename,
               display_name, description, visible_tags_json, source_tags_json, uploaded_at,
-              aspect_ratio, width, height, is_canonical, has_embedding,
-              cluster_id, cluster_label, preview_variant, sort_order, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              file_size_bytes, aspect_ratio, width, height, is_canonical, has_embedding,
+              cluster_id, cluster_label, preview_variant, video_playback_url, video_hls_url,
+              video_thumbnail_url, video_preview_url, video_download_url, video_duration_seconds,
+              sort_order, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `
         )
         .bind(
           asset.publicAssetId,
           asset.projectId,
           revisionId,
-          asset.sourceImageId,
+          asset.sourceAssetId,
+          asset.sourceAssetId,
+          asset.assetType,
           asset.filename,
           asset.displayName ?? null,
           asset.description ?? null,
           JSON.stringify(asset.visibleTags),
           JSON.stringify(asset.sourceTags),
           asset.uploadedAt,
+          asset.fileSizeBytes ?? null,
           asset.aspectRatio ?? null,
           asset.width ?? null,
           asset.height ?? null,
@@ -93,6 +115,12 @@ export class ProjectAssetRepository {
           asset.clusterId ?? null,
           asset.clusterLabel ?? null,
           asset.previewVariant ?? null,
+          asset.videoPlaybackUrl ?? null,
+          asset.videoHlsUrl ?? null,
+          asset.videoThumbnailUrl ?? null,
+          asset.videoPreviewUrl ?? null,
+          asset.videoDownloadUrl ?? null,
+          asset.videoDurationSeconds ?? null,
           asset.sortOrder,
           asset.createdAt,
           asset.updatedAt
@@ -110,24 +138,29 @@ export class ProjectAssetRepository {
         .prepare(
           `
             INSERT OR REPLACE INTO project_assets (
-              public_asset_id, project_id, revision_id, source_image_id, filename,
+              public_asset_id, project_id, revision_id, source_image_id, source_asset_id, asset_type, filename,
               display_name, description, visible_tags_json, source_tags_json, uploaded_at,
-              aspect_ratio, width, height, is_canonical, has_embedding,
-              cluster_id, cluster_label, preview_variant, sort_order, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              file_size_bytes, aspect_ratio, width, height, is_canonical, has_embedding,
+              cluster_id, cluster_label, preview_variant, video_playback_url, video_hls_url,
+              video_thumbnail_url, video_preview_url, video_download_url, video_duration_seconds,
+              sort_order, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `
         )
         .bind(
           asset.publicAssetId,
           projectId,
           revisionId,
-          asset.sourceImageId,
+          asset.sourceAssetId,
+          asset.sourceAssetId,
+          asset.assetType,
           asset.filename,
           asset.displayName ?? null,
           asset.description ?? null,
           JSON.stringify(asset.visibleTags),
           JSON.stringify(asset.sourceTags),
           asset.uploadedAt,
+          asset.fileSizeBytes ?? null,
           asset.aspectRatio ?? null,
           asset.width ?? null,
           asset.height ?? null,
@@ -136,6 +169,12 @@ export class ProjectAssetRepository {
           asset.clusterId ?? null,
           asset.clusterLabel ?? null,
           asset.previewVariant ?? null,
+          asset.videoPlaybackUrl ?? null,
+          asset.videoHlsUrl ?? null,
+          asset.videoThumbnailUrl ?? null,
+          asset.videoPreviewUrl ?? null,
+          asset.videoDownloadUrl ?? null,
+          asset.videoDurationSeconds ?? null,
           asset.sortOrder,
           asset.createdAt,
           asset.updatedAt
@@ -186,16 +225,18 @@ export class ProjectAssetRepository {
     const nowIso = new Date().toISOString();
 
     return {
+      assetType: asset.assetType,
       publicAssetId: asset.projectAssetId,
       projectId,
       revisionId,
-      sourceImageId: asset.sourceImageId,
+      sourceAssetId: asset.sourceAssetId,
       filename: asset.filename,
       displayName: asset.displayName,
       description: asset.description,
       visibleTags,
       sourceTags: asset.sourceTags,
       uploadedAt: asset.uploadedAt,
+      fileSizeBytes: asset.fileSizeBytes,
       aspectRatio: asset.aspectRatio,
       width: asset.dimensions?.width,
       height: asset.dimensions?.height,
@@ -204,6 +245,12 @@ export class ProjectAssetRepository {
       clusterId: asset.clusterSeed?.id,
       clusterLabel: asset.clusterSeed?.label,
       previewVariant: asset.previewVariant,
+      videoPlaybackUrl: asset.videoPlaybackUrl,
+      videoHlsUrl: asset.videoHlsUrl,
+      videoThumbnailUrl: asset.videoThumbnailUrl,
+      videoPreviewUrl: asset.videoPreviewUrl,
+      videoDownloadUrl: asset.videoDownloadUrl,
+      videoDurationSeconds: asset.videoDurationSeconds,
       sortOrder: asset.sortOrder ?? 0,
       createdAt: nowIso,
       updatedAt: nowIso,

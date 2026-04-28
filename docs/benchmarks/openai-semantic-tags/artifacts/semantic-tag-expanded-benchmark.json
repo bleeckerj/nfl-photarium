@@ -1,0 +1,704 @@
+{
+  "instructions": "You create compact single-word semantic tags for images. Return JSON only.",
+  "textFormat": {
+    "type": "json_schema",
+    "name": "semantic_tags",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tags"
+      ],
+      "properties": {
+        "tags": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]+$"
+          }
+        }
+      }
+    }
+  },
+  "results": [
+    {
+      "imagePath": "ltm1100_mountain_04_16x9_00001.png",
+      "filename": "ltm1100_mountain_04_16x9_00001.png",
+      "model": "gpt-4o-mini",
+      "instructions": "You create compact single-word semantic tags for images. Return JSON only.",
+      "prompt": "Analyze this image and return exactly 6 semantic tags.\nEach tag must be a single lowercase ASCII word.\nPrefer concrete scene, subject, object, mood, material, or setting terms.\nNo phrases, no punctuation, no explanation.\nFilename hint: ltm1100_mountain_04_16x9_00001.png",
+      "status": 200,
+      "ok": true,
+      "rawText": "{\"tags\":[\"truck\",\"mountain\",\"desert\",\"nature\",\"vehicle\",\"landscape\"]}",
+      "parsed": {
+        "tags": [
+          "truck",
+          "mountain",
+          "desert",
+          "nature",
+          "vehicle",
+          "landscape"
+        ]
+      },
+      "tags": [
+        "truck",
+        "mountain",
+        "desert",
+        "nature",
+        "vehicle",
+        "landscape"
+      ],
+      "usage": {
+        "inputTokens": 36953,
+        "outputTokens": 20,
+        "totalTokens": 36973,
+        "reasoningTokens": 0
+      },
+      "elapsedMs": 3073,
+      "costUsd": 0.0055549499999999995,
+      "error": null
+    },
+    {
+      "imagePath": "ltm1100_mountain_04_16x9_00001.png",
+      "filename": "ltm1100_mountain_04_16x9_00001.png",
+      "model": "gpt-5.4-nano",
+      "instructions": "You create compact single-word semantic tags for images. Return JSON only.",
+      "prompt": "Analyze this image and return exactly 6 semantic tags.\nEach tag must be a single lowercase ASCII word.\nPrefer concrete scene, subject, object, mood, material, or setting terms.\nNo phrases, no punctuation, no explanation.\nFilename hint: ltm1100_mountain_04_16x9_00001.png",
+      "status": 400,
+      "ok": false,
+      "rawText": "",
+      "parsed": null,
+      "tags": [],
+      "usage": {
+        "inputTokens": null,
+        "outputTokens": null,
+        "totalTokens": null,
+        "reasoningTokens": 0
+      },
+      "elapsedMs": 398,
+      "costUsd": null,
+      "error": "Unsupported value: 'minimal' is not supported with the 'gpt-5.4-nano' model. Supported values are: 'none', 'low', 'medium', 'high', and 'xhigh'."
+    },
+    {
+      "imagePath": "ltm1100_mountain_04_16x9_00001.png",
+      "filename": "ltm1100_mountain_04_16x9_00001.png",
+      "model": "gpt-5-mini",
+      "instructions": "You create compact single-word semantic tags for images. Return JSON only.",
+      "prompt": "Analyze this image and return exactly 6 semantic tags.\nEach tag must be a single lowercase ASCII word.\nPrefer concrete scene, subject, object, mood, material, or setting terms.\nNo phrases, no punctuation, no explanation.\nFilename hint: ltm1100_mountain_04_16x9_00001.png",
+      "status": 200,
+      "ok": true,
+      "rawText": "{\"tags\":[\"expedition\",\"truck\",\"mountains\",\"desert\",\"camper\",\"wilderness\"]}",
+      "parsed": {
+        "tags": [
+          "expedition",
+          "truck",
+          "mountains",
+          "desert",
+          "camper",
+          "wilderness"
+        ]
+      },
+      "tags": [
+        "expedition",
+        "truck",
+        "mountains",
+        "desert",
+        "camper",
+        "wilderness"
+      ],
+      "usage": {
+        "inputTokens": 1304,
+        "outputTokens": 43,
+        "totalTokens": 1347,
+        "reasoningTokens": 0
+      },
+      "elapsedMs": 3618,
+      "costUsd": 0.00041200000000000004,
+      "error": null
+    },
+    {
+      "imagePath": "ltm1100_mountain_04_16x9_00001.png",
+      "filename": "ltm1100_mountain_04_16x9_00001.png",
+      "model": "gpt-4.1-nano",
+      "instructions": "You create compact single-word semantic tags for images. Return JSON only.",
+      "prompt": "Analyze this image and return exactly 6 semantic tags.\nEach tag must be a single lowercase ASCII word.\nPrefer concrete scene, subject, object, mood, material, or setting terms.\nNo phrases, no punctuation, no explanation.\nFilename hint: ltm1100_mountain_04_16x9_00001.png",
+      "status": 200,
+      "ok": true,
+      "rawText": "{\"tags\":[\"vehicle\",\"mountains\",\"desert\",\"animals\",\"clouds\",\"landscape\"]}",
+      "parsed": {
+        "tags": [
+          "vehicle",
+          "mountains",
+          "desert",
+          "animals",
+          "clouds",
+          "landscape"
+        ]
+      },
+      "tags": [
+        "vehicle",
+        "mountains",
+        "desert",
+        "animals",
+        "clouds",
+        "landscape"
+      ],
+      "usage": {
+        "inputTokens": 2552,
+        "outputTokens": 21,
+        "totalTokens": 2573,
+        "reasoningTokens": 0
+      },
+      "elapsedMs": 3706,
+      "costUsd": 0.0002636,
+      "error": null
+    },
+    {
+      "imagePath": "ltm1100_mountain_04_16x9_00001.png",
+      "filename": "ltm1100_mountain_04_16x9_00001.png",
+      "model": "gpt-4.1-mini",
+      "instructions": "You create compact single-word semantic tags for images. Return JSON only.",
+      "prompt": "Analyze this image and return exactly 6 semantic tags.\nEach tag must be a single lowercase ASCII word.\nPrefer concrete scene, subject, object, mood, material, or setting terms.\nNo phrases, no punctuation, no explanation.\nFilename hint: ltm1100_mountain_04_16x9_00001.png",
+      "status": 200,
+      "ok": true,
+      "rawText": "{\"tags\":[\"truck\",\"desert\",\"mountain\",\"snow\",\"bird\",\"vehicle\"]}",
+      "parsed": {
+        "tags": [
+          "truck",
+          "desert",
+          "mountain",
+          "snow",
+          "bird",
+          "vehicle"
+        ]
+      },
+      "tags": [
+        "truck",
+        "desert",
+        "mountain",
+        "snow",
+        "bird",
+        "vehicle"
+      ],
+      "usage": {
+        "inputTokens": 1722,
+        "outputTokens": 19,
+        "totalTokens": 1741,
+        "reasoningTokens": 0
+      },
+      "elapsedMs": 3685,
+      "costUsd": 0.0007192,
+      "error": null
+    },
+    {
+      "imagePath": "tmp/autotrader_00505__900px.jpg",
+      "filename": "autotrader_00505__900px.jpg",
+      "model": "gpt-4o-mini",
+      "instructions": "You create compact single-word semantic tags for images. Return JSON only.",
+      "prompt": "Analyze this image and return exactly 6 semantic tags.\nEach tag must be a single lowercase ASCII word.\nPrefer concrete scene, subject, object, mood, material, or setting terms.\nNo phrases, no punctuation, no explanation.\nFilename hint: autotrader_00505__900px.jpg",
+      "status": 200,
+      "ok": true,
+      "rawText": "{\"tags\":[\"vehicle\",\"beach\",\"outdoor\",\"camera\",\"rugged\",\"photography\"]}",
+      "parsed": {
+        "tags": [
+          "vehicle",
+          "beach",
+          "outdoor",
+          "camera",
+          "rugged",
+          "photography"
+        ]
+      },
+      "tags": [
+        "vehicle",
+        "beach",
+        "outdoor",
+        "camera",
+        "rugged",
+        "photography"
+      ],
+      "usage": {
+        "inputTokens": 25613,
+        "outputTokens": 21,
+        "totalTokens": 25634,
+        "reasoningTokens": 0
+      },
+      "elapsedMs": 2595,
+      "costUsd": 0.00385455,
+      "error": null
+    },
+    {
+      "imagePath": "tmp/autotrader_00505__900px.jpg",
+      "filename": "autotrader_00505__900px.jpg",
+      "model": "gpt-5.4-nano",
+      "instructions": "You create compact single-word semantic tags for images. Return JSON only.",
+      "prompt": "Analyze this image and return exactly 6 semantic tags.\nEach tag must be a single lowercase ASCII word.\nPrefer concrete scene, subject, object, mood, material, or setting terms.\nNo phrases, no punctuation, no explanation.\nFilename hint: autotrader_00505__900px.jpg",
+      "status": 400,
+      "ok": false,
+      "rawText": "",
+      "parsed": null,
+      "tags": [],
+      "usage": {
+        "inputTokens": null,
+        "outputTokens": null,
+        "totalTokens": null,
+        "reasoningTokens": 0
+      },
+      "elapsedMs": 319,
+      "costUsd": null,
+      "error": "Unsupported value: 'minimal' is not supported with the 'gpt-5.4-nano' model. Supported values are: 'none', 'low', 'medium', 'high', and 'xhigh'."
+    },
+    {
+      "imagePath": "tmp/autotrader_00505__900px.jpg",
+      "filename": "autotrader_00505__900px.jpg",
+      "model": "gpt-5-mini",
+      "instructions": "You create compact single-word semantic tags for images. Return JSON only.",
+      "prompt": "Analyze this image and return exactly 6 semantic tags.\nEach tag must be a single lowercase ASCII word.\nPrefer concrete scene, subject, object, mood, material, or setting terms.\nNo phrases, no punctuation, no explanation.\nFilename hint: autotrader_00505__900px.jpg",
+      "status": 200,
+      "ok": true,
+      "rawText": "{\"tags\":[\"offroad\",\"pickup\",\"camera\",\"beach\",\"mudguard\",\"overcast\"]}",
+      "parsed": {
+        "tags": [
+          "offroad",
+          "pickup",
+          "camera",
+          "beach",
+          "mudguard",
+          "overcast"
+        ]
+      },
+      "tags": [
+        "offroad",
+        "pickup",
+        "camera",
+        "beach",
+        "mudguard",
+        "overcast"
+      ],
+      "usage": {
+        "inputTokens": 1121,
+        "outputTokens": 42,
+        "totalTokens": 1163,
+        "reasoningTokens": 0
+      },
+      "elapsedMs": 3934,
+      "costUsd": 0.00036425,
+      "error": null
+    },
+    {
+      "imagePath": "tmp/autotrader_00505__900px.jpg",
+      "filename": "autotrader_00505__900px.jpg",
+      "model": "gpt-4.1-nano",
+      "instructions": "You create compact single-word semantic tags for images. Return JSON only.",
+      "prompt": "Analyze this image and return exactly 6 semantic tags.\nEach tag must be a single lowercase ASCII word.\nPrefer concrete scene, subject, object, mood, material, or setting terms.\nNo phrases, no punctuation, no explanation.\nFilename hint: autotrader_00505__900px.jpg",
+      "status": 200,
+      "ok": true,
+      "rawText": "{\"tags\":[\"car\",\"offroad\",\"camera\",\"film\",\"mountain\",\"beach\"]}",
+      "parsed": {
+        "tags": [
+          "car",
+          "offroad",
+          "camera",
+          "film",
+          "mountain",
+          "beach"
+        ]
+      },
+      "tags": [
+        "car",
+        "offroad",
+        "camera",
+        "film",
+        "mountain",
+        "beach"
+      ],
+      "usage": {
+        "inputTokens": 2182,
+        "outputTokens": 20,
+        "totalTokens": 2202,
+        "reasoningTokens": 0
+      },
+      "elapsedMs": 2352,
+      "costUsd": 0.0002262,
+      "error": null
+    },
+    {
+      "imagePath": "tmp/autotrader_00505__900px.jpg",
+      "filename": "autotrader_00505__900px.jpg",
+      "model": "gpt-4.1-mini",
+      "instructions": "You create compact single-word semantic tags for images. Return JSON only.",
+      "prompt": "Analyze this image and return exactly 6 semantic tags.\nEach tag must be a single lowercase ASCII word.\nPrefer concrete scene, subject, object, mood, material, or setting terms.\nNo phrases, no punctuation, no explanation.\nFilename hint: autotrader_00505__900px.jpg",
+      "status": 200,
+      "ok": true,
+      "rawText": "{\"tags\":[\"vehicle\",\"camera\",\"beach\",\"offroad\",\"technology\",\"wet\"]}",
+      "parsed": {
+        "tags": [
+          "vehicle",
+          "camera",
+          "beach",
+          "offroad",
+          "technology",
+          "wet"
+        ]
+      },
+      "tags": [
+        "vehicle",
+        "camera",
+        "beach",
+        "offroad",
+        "technology",
+        "wet"
+      ],
+      "usage": {
+        "inputTokens": 1476,
+        "outputTokens": 19,
+        "totalTokens": 1495,
+        "reasoningTokens": 0
+      },
+      "elapsedMs": 2160,
+      "costUsd": 0.0006208,
+      "error": null
+    },
+    {
+      "imagePath": "tmp/dng-ingest-previews/003f40318fc90018.jpg",
+      "filename": "003f40318fc90018.jpg",
+      "model": "gpt-4o-mini",
+      "instructions": "You create compact single-word semantic tags for images. Return JSON only.",
+      "prompt": "Analyze this image and return exactly 6 semantic tags.\nEach tag must be a single lowercase ASCII word.\nPrefer concrete scene, subject, object, mood, material, or setting terms.\nNo phrases, no punctuation, no explanation.\nFilename hint: 003f40318fc90018.jpg",
+      "status": 200,
+      "ok": true,
+      "rawText": "{\"tags\":[\"door\",\"yellow\",\"number\",\"room\",\"handle\",\"interior\"]}",
+      "parsed": {
+        "tags": [
+          "door",
+          "yellow",
+          "number",
+          "room",
+          "handle",
+          "interior"
+        ]
+      },
+      "tags": [
+        "door",
+        "yellow",
+        "number",
+        "room",
+        "handle",
+        "interior"
+      ],
+      "usage": {
+        "inputTokens": 36946,
+        "outputTokens": 18,
+        "totalTokens": 36964,
+        "reasoningTokens": 0
+      },
+      "elapsedMs": 5099,
+      "costUsd": 0.0055527,
+      "error": null
+    },
+    {
+      "imagePath": "tmp/dng-ingest-previews/003f40318fc90018.jpg",
+      "filename": "003f40318fc90018.jpg",
+      "model": "gpt-5.4-nano",
+      "instructions": "You create compact single-word semantic tags for images. Return JSON only.",
+      "prompt": "Analyze this image and return exactly 6 semantic tags.\nEach tag must be a single lowercase ASCII word.\nPrefer concrete scene, subject, object, mood, material, or setting terms.\nNo phrases, no punctuation, no explanation.\nFilename hint: 003f40318fc90018.jpg",
+      "status": 400,
+      "ok": false,
+      "rawText": "",
+      "parsed": null,
+      "tags": [],
+      "usage": {
+        "inputTokens": null,
+        "outputTokens": null,
+        "totalTokens": null,
+        "reasoningTokens": 0
+      },
+      "elapsedMs": 841,
+      "costUsd": null,
+      "error": "Unsupported value: 'minimal' is not supported with the 'gpt-5.4-nano' model. Supported values are: 'none', 'low', 'medium', 'high', and 'xhigh'."
+    },
+    {
+      "imagePath": "tmp/dng-ingest-previews/003f40318fc90018.jpg",
+      "filename": "003f40318fc90018.jpg",
+      "model": "gpt-5-mini",
+      "instructions": "You create compact single-word semantic tags for images. Return JSON only.",
+      "prompt": "Analyze this image and return exactly 6 semantic tags.\nEach tag must be a single lowercase ASCII word.\nPrefer concrete scene, subject, object, mood, material, or setting terms.\nNo phrases, no punctuation, no explanation.\nFilename hint: 003f40318fc90018.jpg",
+      "status": 200,
+      "ok": true,
+      "rawText": "{\"tags\":[\"door\",\"yellow\",\"number\",\"metal\",\"handle\",\"painted\"]}",
+      "parsed": {
+        "tags": [
+          "door",
+          "yellow",
+          "number",
+          "metal",
+          "handle",
+          "painted"
+        ]
+      },
+      "tags": [
+        "door",
+        "yellow",
+        "number",
+        "metal",
+        "handle",
+        "painted"
+      ],
+      "usage": {
+        "inputTokens": 1859,
+        "outputTokens": 39,
+        "totalTokens": 1898,
+        "reasoningTokens": 0
+      },
+      "elapsedMs": 3236,
+      "costUsd": 0.00054275,
+      "error": null
+    },
+    {
+      "imagePath": "tmp/dng-ingest-previews/003f40318fc90018.jpg",
+      "filename": "003f40318fc90018.jpg",
+      "model": "gpt-4.1-nano",
+      "instructions": "You create compact single-word semantic tags for images. Return JSON only.",
+      "prompt": "Analyze this image and return exactly 6 semantic tags.\nEach tag must be a single lowercase ASCII word.\nPrefer concrete scene, subject, object, mood, material, or setting terms.\nNo phrases, no punctuation, no explanation.\nFilename hint: 003f40318fc90018.jpg",
+      "status": 200,
+      "ok": true,
+      "rawText": "{\"tags\":[\"door\",\"yellow\",\"number\",\"metal\",\"handle\",\"wall\"]}",
+      "parsed": {
+        "tags": [
+          "door",
+          "yellow",
+          "number",
+          "metal",
+          "handle",
+          "wall"
+        ]
+      },
+      "tags": [
+        "door",
+        "yellow",
+        "number",
+        "metal",
+        "handle",
+        "wall"
+      ],
+      "usage": {
+        "inputTokens": 3697,
+        "outputTokens": 17,
+        "totalTokens": 3714,
+        "reasoningTokens": 0
+      },
+      "elapsedMs": 3864,
+      "costUsd": 0.00037650000000000004,
+      "error": null
+    },
+    {
+      "imagePath": "tmp/dng-ingest-previews/003f40318fc90018.jpg",
+      "filename": "003f40318fc90018.jpg",
+      "model": "gpt-4.1-mini",
+      "instructions": "You create compact single-word semantic tags for images. Return JSON only.",
+      "prompt": "Analyze this image and return exactly 6 semantic tags.\nEach tag must be a single lowercase ASCII word.\nPrefer concrete scene, subject, object, mood, material, or setting terms.\nNo phrases, no punctuation, no explanation.\nFilename hint: 003f40318fc90018.jpg",
+      "status": 200,
+      "ok": true,
+      "rawText": "{\"tags\":[\"door\",\"number\",\"yellow\",\"wall\",\"metal\",\"handle\"]}",
+      "parsed": {
+        "tags": [
+          "door",
+          "number",
+          "yellow",
+          "wall",
+          "metal",
+          "handle"
+        ]
+      },
+      "tags": [
+        "door",
+        "number",
+        "yellow",
+        "wall",
+        "metal",
+        "handle"
+      ],
+      "usage": {
+        "inputTokens": 2473,
+        "outputTokens": 17,
+        "totalTokens": 2490,
+        "reasoningTokens": 0
+      },
+      "elapsedMs": 10308,
+      "costUsd": 0.0010164,
+      "error": null
+    },
+    {
+      "imagePath": "tmp/dng-ingest-previews/6cb822ee7c7d85bd.jpg",
+      "filename": "6cb822ee7c7d85bd.jpg",
+      "model": "gpt-4o-mini",
+      "instructions": "You create compact single-word semantic tags for images. Return JSON only.",
+      "prompt": "Analyze this image and return exactly 6 semantic tags.\nEach tag must be a single lowercase ASCII word.\nPrefer concrete scene, subject, object, mood, material, or setting terms.\nNo phrases, no punctuation, no explanation.\nFilename hint: 6cb822ee7c7d85bd.jpg",
+      "status": 200,
+      "ok": true,
+      "rawText": "{\"tags\":[\"stickers\",\"door\",\"black\",\"crew\",\"labels\",\"backstage\"]}",
+      "parsed": {
+        "tags": [
+          "stickers",
+          "door",
+          "black",
+          "crew",
+          "labels",
+          "backstage"
+        ]
+      },
+      "tags": [
+        "stickers",
+        "door",
+        "black",
+        "crew",
+        "labels",
+        "backstage"
+      ],
+      "usage": {
+        "inputTokens": 36949,
+        "outputTokens": 19,
+        "totalTokens": 36968,
+        "reasoningTokens": 0
+      },
+      "elapsedMs": 4502,
+      "costUsd": 0.0055537500000000005,
+      "error": null
+    },
+    {
+      "imagePath": "tmp/dng-ingest-previews/6cb822ee7c7d85bd.jpg",
+      "filename": "6cb822ee7c7d85bd.jpg",
+      "model": "gpt-5.4-nano",
+      "instructions": "You create compact single-word semantic tags for images. Return JSON only.",
+      "prompt": "Analyze this image and return exactly 6 semantic tags.\nEach tag must be a single lowercase ASCII word.\nPrefer concrete scene, subject, object, mood, material, or setting terms.\nNo phrases, no punctuation, no explanation.\nFilename hint: 6cb822ee7c7d85bd.jpg",
+      "status": 400,
+      "ok": false,
+      "rawText": "",
+      "parsed": null,
+      "tags": [],
+      "usage": {
+        "inputTokens": null,
+        "outputTokens": null,
+        "totalTokens": null,
+        "reasoningTokens": 0
+      },
+      "elapsedMs": 1413,
+      "costUsd": null,
+      "error": "Unsupported value: 'minimal' is not supported with the 'gpt-5.4-nano' model. Supported values are: 'none', 'low', 'medium', 'high', and 'xhigh'."
+    },
+    {
+      "imagePath": "tmp/dng-ingest-previews/6cb822ee7c7d85bd.jpg",
+      "filename": "6cb822ee7c7d85bd.jpg",
+      "model": "gpt-5-mini",
+      "instructions": "You create compact single-word semantic tags for images. Return JSON only.",
+      "prompt": "Analyze this image and return exactly 6 semantic tags.\nEach tag must be a single lowercase ASCII word.\nPrefer concrete scene, subject, object, mood, material, or setting terms.\nNo phrases, no punctuation, no explanation.\nFilename hint: 6cb822ee7c7d85bd.jpg",
+      "status": 200,
+      "ok": true,
+      "rawText": "{\"tags\":[\"stickers\",\"locker\",\"door\",\"colorful\",\"venue\",\"collage\"]}",
+      "parsed": {
+        "tags": [
+          "stickers",
+          "locker",
+          "door",
+          "colorful",
+          "venue",
+          "collage"
+        ]
+      },
+      "tags": [
+        "stickers",
+        "locker",
+        "door",
+        "colorful",
+        "venue",
+        "collage"
+      ],
+      "usage": {
+        "inputTokens": 1862,
+        "outputTokens": 41,
+        "totalTokens": 1903,
+        "reasoningTokens": 0
+      },
+      "elapsedMs": 4316,
+      "costUsd": 0.0005475,
+      "error": null
+    },
+    {
+      "imagePath": "tmp/dng-ingest-previews/6cb822ee7c7d85bd.jpg",
+      "filename": "6cb822ee7c7d85bd.jpg",
+      "model": "gpt-4.1-nano",
+      "instructions": "You create compact single-word semantic tags for images. Return JSON only.",
+      "prompt": "Analyze this image and return exactly 6 semantic tags.\nEach tag must be a single lowercase ASCII word.\nPrefer concrete scene, subject, object, mood, material, or setting terms.\nNo phrases, no punctuation, no explanation.\nFilename hint: 6cb822ee7c7d85bd.jpg",
+      "status": 200,
+      "ok": true,
+      "rawText": "{\"tags\": [\"stickers\", \"cabinet\", \"stickers\", \"metal\", \"colorful\", \"street\"]}",
+      "parsed": {
+        "tags": [
+          "stickers",
+          "cabinet",
+          "stickers",
+          "metal",
+          "colorful",
+          "street"
+        ]
+      },
+      "tags": [
+        "stickers",
+        "cabinet",
+        "stickers",
+        "metal",
+        "colorful",
+        "street"
+      ],
+      "usage": {
+        "inputTokens": 3700,
+        "outputTokens": 27,
+        "totalTokens": 3727,
+        "reasoningTokens": 0
+      },
+      "elapsedMs": 5084,
+      "costUsd": 0.00038080000000000004,
+      "error": null
+    },
+    {
+      "imagePath": "tmp/dng-ingest-previews/6cb822ee7c7d85bd.jpg",
+      "filename": "6cb822ee7c7d85bd.jpg",
+      "model": "gpt-4.1-mini",
+      "instructions": "You create compact single-word semantic tags for images. Return JSON only.",
+      "prompt": "Analyze this image and return exactly 6 semantic tags.\nEach tag must be a single lowercase ASCII word.\nPrefer concrete scene, subject, object, mood, material, or setting terms.\nNo phrases, no punctuation, no explanation.\nFilename hint: 6cb822ee7c7d85bd.jpg",
+      "status": 200,
+      "ok": true,
+      "rawText": "{\"tags\":[\"door\",\"stickers\",\"music\",\"venue\",\"wall\",\"label\"]}",
+      "parsed": {
+        "tags": [
+          "door",
+          "stickers",
+          "music",
+          "venue",
+          "wall",
+          "label"
+        ]
+      },
+      "tags": [
+        "door",
+        "stickers",
+        "music",
+        "venue",
+        "wall",
+        "label"
+      ],
+      "usage": {
+        "inputTokens": 2476,
+        "outputTokens": 18,
+        "totalTokens": 2494,
+        "reasoningTokens": 0
+      },
+      "elapsedMs": 4332,
+      "costUsd": 0.0010192,
+      "error": null
+    }
+  ]
+}

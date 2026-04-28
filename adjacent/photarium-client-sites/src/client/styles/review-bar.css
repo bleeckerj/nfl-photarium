@@ -22,6 +22,15 @@
   font-family: ui-monospace, 'SFMono-Regular', 'SF Mono', Menlo, Consolas, monospace;
 }
 
+.review-bar__brand-logo {
+  width: auto;
+  max-width: min(280px, 55vw);
+  height: auto;
+  max-height: 56px;
+  margin-bottom: var(--space-s);
+  object-fit: contain;
+}
+
 .review-bar__eyebrow {
   margin: 0 0 var(--space-xs);
   color: var(--muted);

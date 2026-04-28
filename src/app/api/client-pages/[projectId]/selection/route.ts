@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClientPageProjectService } from '@/features/client-pages/server';
+import { createClientPageProjectService, createClientPagePublishService } from '@/features/client-pages/server';
 import { parseReplaceClientPageSelectionInput } from '@/features/client-pages/api/parsers';
 import { jsonBadRequest } from '@/features/client-pages/api/http';
 import { toClientPageProjectResponse } from '@/features/client-pages/api/responses';
@@ -18,8 +18,9 @@ export async function POST(
 
     const payload = parseReplaceClientPageSelectionInput(await request.json());
     const projectService = createClientPageProjectService();
+    const publishService = createClientPagePublishService();
     const project = await projectService.replaceSelection(projectId, payload);
-    return NextResponse.json(toClientPageProjectResponse(project));
+    return NextResponse.json(await toClientPageProjectResponse(project, publishService));
   } catch (error) {
     console.error('[client-pages] selection update failed', error);
     return jsonBadRequest(

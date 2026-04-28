@@ -7,7 +7,10 @@ import type { AspectRatioClass, CloudflareImage, DateFilter } from '@/components
 interface ClientPageCatalogFiltersProps {
   allImages: CloudflareImage[];
   namespace: string;
-  namespaceOptions: Array<{ value: string; label: string }>;
+  scopedImageCount: number;
+  totalImageCount: number;
+  namespaceFallbackNotice: string | null;
+  namespaceOptions: Array<{ value: string; label: string; disabled?: boolean }>;
   selectedFolder: string;
   folderOptions: Array<{ value: string; label: string }>;
   selectedTag: string;
@@ -20,6 +23,7 @@ interface ClientPageCatalogFiltersProps {
   semanticError: string | null;
   hasSemanticFilter: boolean;
   onNamespaceChange: (value: string) => void;
+  onShowAllNamespaces: () => void;
   onFolderChange: (value: string) => void;
   onTagChange: (value: string) => void;
   onSearchTermChange: (value: string) => void;
@@ -36,6 +40,9 @@ const controlClassName =
 export function ClientPageCatalogFilters({
   allImages,
   namespace,
+  scopedImageCount,
+  totalImageCount,
+  namespaceFallbackNotice,
   namespaceOptions,
   selectedFolder,
   folderOptions,
@@ -49,6 +56,7 @@ export function ClientPageCatalogFilters({
   semanticError,
   hasSemanticFilter,
   onNamespaceChange,
+  onShowAllNamespaces,
   onFolderChange,
   onTagChange,
   onSearchTermChange,
@@ -66,6 +74,11 @@ export function ClientPageCatalogFilters({
           <p className="mt-1 text-sm text-stone-600">
             Browse existing Photarium assets, then add or remove them from this client page.
           </p>
+          <p className="mt-2 text-xs font-mono text-stone-500">
+            {namespace === '__all__'
+              ? `Showing ${totalImageCount} assets across all namespaces.`
+              : `Showing ${scopedImageCount} assets in namespace "${namespace}" out of ${totalImageCount} total.`}
+          </p>
         </div>
         <button
           type="button"
@@ -75,6 +88,19 @@ export function ClientPageCatalogFilters({
           Clear filters
         </button>
       </div>
+
+      {namespaceFallbackNotice ? (
+        <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+          <div>{namespaceFallbackNotice}</div>
+          <button
+            type="button"
+            onClick={onShowAllNamespaces}
+            className="mt-2 rounded-md border border-amber-300 px-3 py-2 text-xs font-mono text-amber-900 hover:bg-amber-100"
+          >
+            Keep showing all namespaces
+          </button>
+        </div>
+      ) : null}
 
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <label className="block">
@@ -93,12 +119,17 @@ export function ClientPageCatalogFilters({
           <span className="mb-1 block text-[11px] font-mono uppercase tracking-[0.18em] text-stone-500">
             Namespace
           </span>
-          <MonoSelect
+          <select
             value={namespace}
-            options={namespaceOptions}
-            onChange={onNamespaceChange}
-            className="w-full"
-          />
+            onChange={(event) => onNamespaceChange(event.target.value)}
+            className={controlClassName}
+          >
+            {namespaceOptions.map((option) => (
+              <option key={option.value} value={option.value} disabled={option.disabled}>
+                {option.label}
+              </option>
+            ))}
+          </select>
         </label>
 
         <label className="block">

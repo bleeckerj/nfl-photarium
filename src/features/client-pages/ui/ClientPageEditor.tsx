@@ -1,12 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useToast } from '@/components/Toast';
 import type { CloudflareImage } from '@/components/gallery/types';
 import { dedupeImageIds } from '../utils/imageIds';
 import type { ClientPageProjectRecord } from '../types';
-import { clientPageApi } from './api';
+import { clientPageApi, type ClientSiteSummary } from './api';
 import { ClientPageMetadataForm } from './ClientPageMetadataForm';
 import { ClientPagePublishPanel } from './ClientPagePublishPanel';
 import { ClientPageSelectionPanel } from './ClientPageSelectionPanel';
@@ -49,6 +49,7 @@ export function ClientPageEditor({ initialProject, initialShareUrl }: ClientPage
   const [project, setProject] = useState(initialProject);
   const [shareUrl, setShareUrl] = useState<string | null>(initialShareUrl);
   const [catalogImages, setCatalogImages] = useState<CloudflareImage[]>([]);
+  const [clientSites, setClientSites] = useState<ClientSiteSummary[]>([]);
   const [metadataBusy, setMetadataBusy] = useState(false);
   const [selectionBusy, setSelectionBusy] = useState(false);
   const [publishBusy, setPublishBusy] = useState(false);
@@ -59,6 +60,15 @@ export function ClientPageEditor({ initialProject, initialShareUrl }: ClientPage
     () => buildSelectedImages(project.selectedImageIds, catalogImages),
     [catalogImages, project.selectedImageIds]
   );
+
+  useEffect(() => {
+    clientPageApi
+      .listClientSites()
+      .then(setClientSites)
+      .catch(() => {
+        // Non-fatal; project metadata can still be edited without the site lookup.
+      });
+  }, []);
 
   const replaceSelection = async (selectedImageIds: string[]) => {
     try {
@@ -93,7 +103,7 @@ export function ClientPageEditor({ initialProject, initialShareUrl }: ClientPage
               <ClientPageStatusBadge status={project.status} />
             </div>
             <p className="mt-2 max-w-3xl text-sm text-stone-600">
-              Manage explicit membership for this client page, then publish or revise it in the shared public worker.
+              Manage explicit membership for this client page, link it to a dedicated client site, then publish or revise it in that deployed worker.
             </p>
           </div>
           <div className="text-right text-xs font-mono text-stone-500">
@@ -107,6 +117,7 @@ export function ClientPageEditor({ initialProject, initialShareUrl }: ClientPage
         <div className="space-y-6">
           <ClientPageMetadataForm
             project={project}
+            clientSites={clientSites}
             busy={metadataBusy}
             onSave={async (payload) => {
               try {

@@ -28,6 +28,8 @@ type FfprobeStream = {
   r_frame_rate?: string;
   nb_frames?: string;
   duration?: string;
+  width?: number;
+  height?: number;
 };
 
 type FfprobeFormat = {
@@ -44,6 +46,8 @@ export type VideoFrameProbeResult = {
   fps: number;
   frameCount: number;
   exactFrameCount: boolean;
+  width?: number;
+  height?: number;
 };
 
 export type VideoFramePreview = {
@@ -187,6 +191,8 @@ export const probeVideoSource = async (
     fps,
     frameCount: Math.max(1, Math.round(rawFrameCount)),
     exactFrameCount,
+    width: parsePositiveNumber(stream.width),
+    height: parsePositiveNumber(stream.height),
   };
 };
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AspectRatioClass, CloudflareImage, DateFilter } from '@/components/gallery/types';
 import { getDateKeyRangeMs } from '@/components/gallery/dateFilter';
 import { buildNamespaceOptions, getUniqueFolders, getUniqueTags } from '@/components/gallery/utils';
@@ -56,8 +56,10 @@ export function useClientPageCatalog(initialNamespace = '__all__') {
   const [semanticQuery, setSemanticQuery] = useState('');
   const [semanticMatchIds, setSemanticMatchIds] = useState<Set<string> | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
+  const [namespaceFallbackNotice, setNamespaceFallbackNotice] = useState<string | null>(null);
+  const [hasAutoAdjustedInitialNamespace, setHasAutoAdjustedInitialNamespace] = useState(false);
 
-  useEffect(() => {
+  const loadCatalog = useCallback(async () => {
     let active = true;
     const load = async () => {
       setLoading(true);
@@ -79,16 +81,53 @@ export function useClientPageCatalog(initialNamespace = '__all__') {
         }
       }
     };
-    load();
+
+    await load();
     return () => {
       active = false;
     };
   }, []);
 
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    void loadCatalog().then((nextCleanup) => {
+      cleanup = nextCleanup;
+    });
+
+    return () => {
+      cleanup?.();
+    };
+  }, [loadCatalog, initialNamespace]);
+
+  useEffect(() => {
+    setNamespace(initialNamespace);
+    setNamespaceFallbackNotice(null);
+    setHasAutoAdjustedInitialNamespace(false);
+  }, [initialNamespace]);
+
   const scopedImages = useMemo(
     () => images.filter((image) => matchesNamespace(image, namespace)),
     [images, namespace]
   );
+
+  useEffect(() => {
+    if (loading || hasAutoAdjustedInitialNamespace) return;
+    if (namespace === '__all__') {
+      setHasAutoAdjustedInitialNamespace(true);
+      return;
+    }
+    if (images.length === 0) return;
+    if (scopedImages.length > 0) {
+      setHasAutoAdjustedInitialNamespace(true);
+      return;
+    }
+
+    setNamespace('__all__');
+    setNamespaceFallbackNotice(
+      `No assets were found in namespace "${namespace}". Showing all namespaces instead.`
+    );
+    setHasAutoAdjustedInitialNamespace(true);
+  }, [hasAutoAdjustedInitialNamespace, images.length, loading, namespace, scopedImages.length]);
 
   const filteredImages = useMemo(() => {
     const baseFiltered = filterImagesForGallery(scopedImages, {
@@ -172,15 +211,19 @@ export function useClientPageCatalog(initialNamespace = '__all__') {
     setSemanticQuery('');
     setSemanticMatchIds(null);
     setSemanticError(null);
-    setNamespace(initialNamespace);
+    setNamespace('__all__');
+    setNamespaceFallbackNotice(null);
   };
 
   return {
     images,
+    scopedImages,
     loading,
     error,
     namespace,
     setNamespace,
+    namespaceFallbackNotice,
+    setNamespaceFallbackNotice,
     selectedFolder,
     setSelectedFolder,
     selectedTag,

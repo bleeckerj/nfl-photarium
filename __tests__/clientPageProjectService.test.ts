@@ -21,7 +21,14 @@ class InMemoryClientPageProjectStore implements ClientPageProjectStore {
 
 describe('ClientPageProjectService', () => {
   it('creates draft projects with default policies and explicit metadata', async () => {
-    const service = new ClientPageProjectService(new InMemoryClientPageProjectStore());
+    const registeredNamespaces: string[][] = [];
+    const service = new ClientPageProjectService(
+      new InMemoryClientPageProjectStore(),
+      undefined,
+      async (namespaces) => {
+        registeredNamespaces.push(namespaces);
+      }
+    );
 
     const project = await service.createProject({
       title: '  Client Review  ',
@@ -37,6 +44,27 @@ describe('ClientPageProjectService', () => {
     expect(project.selectedImageIds).toEqual([]);
     expect(project.sourceNamespaces).toEqual(['campaign-a', 'campaign-b']);
     expect(project.accessPolicy.mode).toBe('secret-link');
+    expect(registeredNamespaces).toEqual([['campaign-a', 'campaign-b']]);
+  });
+
+  it('registers updated source namespaces when project metadata changes', async () => {
+    const store = new InMemoryClientPageProjectStore();
+    const registeredNamespaces: string[][] = [];
+    const service = new ClientPageProjectService(
+      store,
+      undefined,
+      async (namespaces) => {
+        registeredNamespaces.push(namespaces);
+      }
+    );
+
+    const created = await service.createProject({ title: 'Review set' });
+    const updated = await service.updateProject(created.id, {
+      sourceNamespaces: ['andsons-a', 'andsons-a', 'andsons-b'],
+    });
+
+    expect(updated.sourceNamespaces).toEqual(['andsons-a', 'andsons-b']);
+    expect(registeredNamespaces).toEqual([[], ['andsons-a', 'andsons-b']]);
   });
 
   it('replaces selection with a deduped explicit membership list', async () => {
