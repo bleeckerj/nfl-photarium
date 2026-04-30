@@ -13,6 +13,7 @@ import { listImageFamilyIds } from '@/server/imageFamily';
 import { upsertRegistryNamespace } from '@/server/namespaceRegistry';
 import { validateParentAssignmentForExistingImage } from '@/server/parentValidation';
 import { patchImageExtrasRecord } from '@/server/imageExtras';
+import { mergeUserTagsPreservingSystemTags } from '@/utils/systemTags';
 
 const MAX_CLOUDFLARE_TEXT_MIRROR_CHARS = 160;
 
@@ -219,7 +220,10 @@ export async function PATCH(
       }
 
       if (flags.tags) {
-        metadata.tags = cleanTags;
+        metadata.tags = mergeUserTagsPreservingSystemTags(
+          Array.isArray(existingMeta.tags) ? existingMeta.tags : [],
+          cleanTags
+        );
       }
 
       // Extras-only fields stay in local extras storage, not Cloudflare metadata.

@@ -6,6 +6,7 @@
  */
 
 import { EXCLUDE_CLIP_TAG, EXCLUDE_COLOR_TAG, EXCLUDE_ALL_SEARCH_TAG } from '@/utils/searchExclusion';
+import { getUserVisibleTags } from '@/utils/systemTags';
 import type { CloudflareImage, DuplicateGroup, DuplicateReason, SelectOption } from './types';
 
 /**
@@ -140,7 +141,7 @@ export const getUniqueFolders = (images: CloudflareImage[]): string[] => {
 export const getUniqueTags = (images: CloudflareImage[]): string[] => {
   const tags = Array.from(
     new Set(images.flatMap(img =>
-      Array.isArray(img.tags) ? img.tags.filter(tag => tag && tag.trim()) : []
+      getUserVisibleTags(img.tags)
     ))
   );
   return tags.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));

@@ -1,7 +1,9 @@
 import { useCallback } from 'react';
 import type { CloudflareImage } from '../types';
+import { getUserVisibleTags, mergeUserTagsPreservingSystemTags } from '@/utils/systemTags';
 
 interface UseGalleryItemActionsOptions {
+  images: CloudflareImage[];
   setImages: React.Dispatch<React.SetStateAction<CloudflareImage[]>>;
   toastPush: (message: string) => void;
   setAltLoadingMap: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
@@ -16,6 +18,7 @@ interface UseGalleryItemActionsOptions {
 }
 
 export const useGalleryItemActions = ({
+  images,
   setImages,
   toastPush,
   setAltLoadingMap,
@@ -128,7 +131,7 @@ export const useGalleryItemActions = ({
     setEditingImage(image.id);
     setEditFolderSelect(image.folder || '');
     setNewEditFolder('');
-    setEditTags(image.tags ? image.tags.join(', ') : '');
+    setEditTags(getUserVisibleTags(image.tags).join(', '));
   }, [setEditingImage, setEditFolderSelect, setNewEditFolder, setEditTags]);
 
   const cancelEdit = useCallback(() => {
@@ -143,6 +146,9 @@ export const useGalleryItemActions = ({
       const finalFolder = editFolderSelect === '__create__'
         ? (newEditFolder.trim() || undefined)
         : (editFolderSelect === '' ? undefined : editFolderSelect);
+      const target = images.find(img => img.id === imageId);
+      const userTags = editTags.trim() ? editTags.split(',').map(t => t.trim()).filter(Boolean) : [];
+      const finalTags = mergeUserTagsPreservingSystemTags(target?.tags, userTags);
 
       const response = await fetch(`/api/images/${imageId}/update`, {
         method: 'PATCH',
@@ -151,7 +157,7 @@ export const useGalleryItemActions = ({
         },
         body: JSON.stringify({
           folder: finalFolder,
-          tags: editTags.trim() ? editTags.split(',').map(t => t.trim()) : []
+          tags: finalTags
         })
       });
 
@@ -161,7 +167,7 @@ export const useGalleryItemActions = ({
             ? { 
                 ...img, 
                 folder: finalFolder,
-                tags: editTags.trim() ? editTags.split(',').map(t => t.trim()) : []
+                tags: finalTags
               }
             : img
         ));
@@ -173,7 +179,7 @@ export const useGalleryItemActions = ({
       console.error('Failed to update image:', error);
       alert('Failed to update image metadata');
     }
-  }, [cancelEdit, editFolderSelect, editTags, newEditFolder, setImages]);
+  }, [cancelEdit, editFolderSelect, editTags, images, newEditFolder, setImages]);
 
   return {
     deleteImage,

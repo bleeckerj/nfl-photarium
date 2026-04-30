@@ -22,6 +22,7 @@ export type GalleryReturnFilters = {
   onlyCanonical: boolean;
   onlyWithVariants: boolean;
   showMotionAssetsOnly: boolean;
+  showFavoritesOnly: boolean;
   showDuplicatesOnly: boolean;
   showBrokenOnly: boolean;
   showComfyOnly: boolean;
@@ -144,6 +145,7 @@ const normalizeFilters = (value: unknown): GalleryReturnFilters | null => {
     onlyCanonical: Boolean(raw.onlyCanonical),
     onlyWithVariants: Boolean(raw.onlyWithVariants),
     showMotionAssetsOnly: Boolean(raw.showMotionAssetsOnly),
+    showFavoritesOnly: Boolean(raw.showFavoritesOnly),
     showDuplicatesOnly: Boolean(raw.showDuplicatesOnly),
     showBrokenOnly: Boolean(raw.showBrokenOnly),
     showComfyOnly: Boolean(raw.showComfyOnly),

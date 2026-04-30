@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { filterImagesForGallery, GalleryImage, isLikelySourceSearchTerm } from '@/utils/galleryFilter';
+import { FAVORITE_TAG } from '@/utils/systemTags';
 
 let uniqueCounter = 0;
 const makeImage = (overrides: Partial<GalleryImage> = {}): GalleryImage => ({
@@ -133,5 +134,20 @@ describe('filterImagesForGallery', () => {
     expect(isLikelySourceSearchTerm('1476850850478690358')).toBe(true);
     expect(isLikelySourceSearchTerm('https://discord.com/channels/1/2/1476850850478690358')).toBe(true);
     expect(isLikelySourceSearchTerm('retro kiosk')).toBe(false);
+  });
+
+  it('filters to favorites only', () => {
+    const result = filterImagesForGallery([
+      makeImage({ id: 'favorite', tags: ['client', FAVORITE_TAG] }),
+      makeImage({ id: 'ordinary', tags: ['client'] }),
+    ], {
+      selectedFolder: 'all',
+      selectedTag: '',
+      searchTerm: '',
+      onlyCanonical: false,
+      showFavoritesOnly: true,
+    });
+
+    expect(result.map((img) => img.id)).toEqual(['favorite']);
   });
 });

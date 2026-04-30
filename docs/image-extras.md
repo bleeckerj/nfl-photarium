@@ -47,7 +47,7 @@ Example shape:
   "altText": "...optional...",
   "promptThis": {
     "prompt": "...",
-    "model": "gpt-4o",
+    "model": "gpt-5.5",
     "provider": "openai",
     "createdAt": "2026-01-28T00:00:00.000Z",
     "updatedAt": "2026-01-28T00:00:00.000Z"

@@ -24,6 +24,7 @@ interface UseGalleryFiltersOptions {
     respectAspectRatio: boolean;
     onlyWithVariants: boolean;
     showMotionAssetsOnly?: boolean;
+    showFavoritesOnly?: boolean;
     showDuplicatesOnly: boolean;
     showBrokenOnly: boolean;
     showComfyOnly?: boolean;
@@ -56,6 +57,8 @@ interface UseGalleryFiltersReturn {
   setOnlyWithVariants: (value: boolean) => void;
   showMotionAssetsOnly: boolean;
   setShowMotionAssetsOnly: (value: boolean) => void;
+  showFavoritesOnly: boolean;
+  setShowFavoritesOnly: (value: boolean) => void;
   showDuplicatesOnly: boolean;
   setShowDuplicatesOnly: (value: boolean) => void;
   showBrokenOnly: boolean;
@@ -127,6 +130,7 @@ export function useGalleryFilters({
   const [respectAspectRatio, setRespectAspectRatio] = useState(initialPreferences.respectAspectRatio);
   const [onlyWithVariants, setOnlyWithVariants] = useState(initialPreferences.onlyWithVariants);
   const [showMotionAssetsOnly, setShowMotionAssetsOnly] = useState(Boolean(initialPreferences.showMotionAssetsOnly));
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(Boolean(initialPreferences.showFavoritesOnly));
   const [showDuplicatesOnly, setShowDuplicatesOnly] = useState(initialPreferences.showDuplicatesOnly);
   const [showBrokenOnly, setShowBrokenOnly] = useState(initialPreferences.showBrokenOnly);
   const [showComfyOnly, setShowComfyOnly] = useState(Boolean(initialPreferences.showComfyOnly));
@@ -245,8 +249,9 @@ export function useGalleryFilters({
       onlyCanonical,
       hiddenFolders,
       hiddenTags,
+      showFavoritesOnly,
     });
-  }, [images, selectedFolder, selectedTag, searchTerm, onlyCanonical, hiddenFolders, hiddenTags]);
+  }, [images, selectedFolder, selectedTag, searchTerm, onlyCanonical, hiddenFolders, hiddenTags, showFavoritesOnly]);
 
   // Duplicate groups
   const duplicateGroups = useMemo(() => computeDuplicateGroups(baseFilteredImages), [baseFilteredImages]);
@@ -354,6 +359,7 @@ export function useGalleryFilters({
     respectAspectRatio ||
     onlyWithVariants ||
     showMotionAssetsOnly ||
+    showFavoritesOnly ||
     showDuplicatesOnly ||
     showBrokenOnly ||
     showComfyOnly ||
@@ -373,6 +379,7 @@ export function useGalleryFilters({
     setRespectAspectRatio(false);
     setOnlyWithVariants(false);
     setShowMotionAssetsOnly(false);
+    setShowFavoritesOnly(false);
     setShowDuplicatesOnly(false);
     setShowBrokenOnly(false);
     setShowComfyOnly(false);
@@ -457,6 +464,7 @@ export function useGalleryFilters({
     searchTerm,
     onlyWithVariants,
     showMotionAssetsOnly,
+    showFavoritesOnly,
     showDuplicatesOnly,
     showBrokenOnly,
     showComfyOnly,
@@ -489,6 +497,8 @@ export function useGalleryFilters({
     setOnlyWithVariants,
     showMotionAssetsOnly,
     setShowMotionAssetsOnly,
+    showFavoritesOnly,
+    setShowFavoritesOnly,
     showDuplicatesOnly,
     setShowDuplicatesOnly,
     showBrokenOnly,

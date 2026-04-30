@@ -9,6 +9,23 @@ function parseForce(request: NextRequest): boolean {
   return fromQuery === '1' || fromQuery === 'true';
 }
 
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+async function parseJsonObjectBody(request: NextRequest): Promise<Record<string, unknown> | null> {
+  if (!request.headers.get('content-type')?.includes('application/json')) {
+    return null;
+  }
+
+  try {
+    const body = await request.json();
+    return isJsonObject(body) ? body : null;
+  } catch {
+    return null;
+  }
+}
+
 function pickPublicVariant(variants: unknown): string | undefined {
   if (!Array.isArray(variants)) return undefined;
   return variants.find((variant) => typeof variant === 'string' && variant.includes('public')) || variants.find((variant) => typeof variant === 'string');
@@ -59,10 +76,11 @@ function buildPromptThisUserText(options: {
 
   return [
     'You are a prompt engineer for text-to-image models (Stable Diffusion / ComfyUI / Midjourney-like).',
-    'Create ONE high-quality, production-ready prompt that recreates the uploaded image as closely as possible.',
-    'Be specific about subject, setting, composition, camera/framing, lighting, visual style (e.g. line illustration? oil painting? watercolor, vintage photograph?), visual texture, materials, color palette, and mood. Specify the visual style clearly — whether it is a line illustration, oil painting, watercolor, vintage photograph, etc. The medium greatly influences the final image, so be precise.',
-    'Avoid mentioning file formats, "alt text", or "this image". Do not use markdown.',
-    'Return ONLY the prompt text (no labels, no lists). Keep it under 1500 characters.',
+    'Create ONE highly detailed, production-ready prompt that recreates the uploaded image as closely as possible. This is not a caption; it should be a dense generative prompt with enough specificity for another model to rebuild the image.',
+    'Describe concrete visual evidence from the image in rich detail: subject identity and count, poses, expressions, wardrobe, props, setting, foreground/background, composition, crop, perspective, camera angle, lens/framing cues, lighting direction, shadows, color palette, textures, materials, surface wear, typography/logos/text if visible, mood, era, style, medium, rendering/photographic qualities, and any distinctive imperfections or artifacts.',
+    'Preserve specific observable details over generic adjectives. Name the visual medium clearly, such as line illustration, oil painting, watercolor, 3D render, product photo, vintage photograph, phone snapshot, editorial portrait, screenshot, UI mockup, or other visible style. Do not invent hidden context that is not visible, but include reasonable visual descriptors needed to reproduce what can be seen.',
+    'Write as one flowing prompt paragraph, using semicolons or comma-separated clauses where useful. Avoid markdown, labels, bullet points, file formats, "alt text", and phrases like "this image".',
+    'Return ONLY the prompt text. Aim for 1200-3000 characters when the image has enough detail; shorter is acceptable only for very simple images.',
     contextSegments.length ? `Context:\n${contextSegments.join('\n')}` : null
   ]
     .filter(Boolean)
@@ -75,7 +93,7 @@ async function generatePromptFromOpenAI(imageUrl: string, userText: string) {
     return { ok: false as const, status: 500, payload: { error: 'OpenAI API key not configured' } };
   }
 
-  const promptModel = process.env.OPENAI_PROMPT_MODEL || 'gpt-4o';
+  const promptModel = process.env.OPENAI_PROMPT_MODEL || 'gpt-5.5';
 
   const openAiResponse = await fetch(OPENAI_API_URL, {
     method: 'POST',
@@ -85,13 +103,12 @@ async function generatePromptFromOpenAI(imageUrl: string, userText: string) {
     },
     body: JSON.stringify({
       model: promptModel,
-      temperature: 0.4,
-      max_tokens: 1600,
+      max_tokens: 2600,
       messages: [
         {
           role: 'system',
           content:
-            'You write concise, high-signal prompts for generative image models. You are concrete, visual, and avoid fluff.'
+            'You write richly detailed, high-signal prompts for generative image models. You are concrete, visual, exhaustive about observable details, and avoid filler.'
         },
         {
           role: 'user',
@@ -162,14 +179,7 @@ export async function POST(
 
     const forceFromQuery = parseForce(request);
 
-    let body: any = null;
-    if (request.headers.get('content-type')?.includes('application/json')) {
-      try {
-        body = await request.json();
-      } catch {
-        body = null;
-      }
-    }
+    const body = await parseJsonObjectBody(request);
 
     const force = Boolean(body?.force) || forceFromQuery;
     const existingPromptFromClient = typeof body?.existingPrompt === 'string' ? body.existingPrompt : undefined;
@@ -253,14 +263,7 @@ export async function PATCH(
       return NextResponse.json({ error: 'Image ID is required' }, { status: 400 });
     }
 
-    let body: any = null;
-    if (request.headers.get('content-type')?.includes('application/json')) {
-      try {
-        body = await request.json();
-      } catch {
-        body = null;
-      }
-    }
+    const body = await parseJsonObjectBody(request);
 
     if (!Object.prototype.hasOwnProperty.call(body ?? {}, 'prompt')) {
       return NextResponse.json({ error: 'Missing prompt' }, { status: 400 });

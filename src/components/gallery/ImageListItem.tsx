@@ -9,13 +9,14 @@
 import React from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { Trash2, Copy, ExternalLink, Sparkles, Layers, AlertTriangle } from 'lucide-react';
+import { Trash2, Copy, ExternalLink, Sparkles, Layers, AlertTriangle, Star } from 'lucide-react';
 import { ColorSwatches } from '@/components/ColorSwatches';
 import { getCloudflareImageUrl, getCloudflareDownloadUrl } from '@/utils/imageUtils';
 import { formatBytes } from '@/utils/formatBytes';
 import { AspectRatioDisplay } from './AspectRatioDisplay';
 import { isSvgImage } from './utils';
 import type { CloudflareImage, ColorMetadata } from './types';
+import { getUserVisibleTags, hasFavoriteTag } from '@/utils/systemTags';
 
 interface ImageListItemProps {
   image: CloudflareImage;
@@ -28,12 +29,14 @@ interface ImageListItemProps {
   colorMetadata?: ColorMetadata;
   altLoading: boolean;
   displayNameLoading: boolean;
+  favoriteLoading?: boolean;
   // Actions
   onToggleSelection: (imageId: string) => void;
   onStartEdit: (image: CloudflareImage) => void;
   onDelete: (imageId: string) => void;
   onGenerateAlt: (imageId: string) => void;
   onGenerateDisplayName: (imageId: string) => void;
+  onToggleFavorite?: (imageId: string) => void;
   onCopyUrl: (imageId: string) => void;
   onCopyNamespace: (namespace: string) => void;
   onSelectColor?: (hex: string) => void;
@@ -70,11 +73,13 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
   colorMetadata,
   altLoading,
   displayNameLoading,
+  favoriteLoading = false,
   onToggleSelection,
   onStartEdit,
   onDelete,
   onGenerateAlt,
   onGenerateDisplayName,
+  onToggleFavorite,
   onCopyUrl,
   onCopyNamespace,
   onSelectColor,
@@ -99,6 +104,8 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
   const detailHref = isVideoAsset
     ? `/videos/${image.id}${hrefSuffix ?? ''}`
     : `/images/${image.id}${hrefSuffix ?? ''}`;
+  const visibleTags = getUserVisibleTags(image.tags);
+  const favorite = hasFavoriteTag(image.tags);
   const handleDragStart = (event: React.DragEvent) => {
     if (onDragStart) {
       onDragStart(event, image);
@@ -238,8 +245,8 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
         <div className="text-[0.7em] font-mono text-gray-500">
           <AspectRatioDisplay imageId={image.id} aspectRatio={image.aspectRatio} />
         </div>
-        {image.tags && image.tags.length > 0 ? (
-          <p className="text-[0.7em] font-mono text-gray-500">🏷️ {image.tags.join(', ')}</p>
+        {visibleTags.length > 0 ? (
+          <p className="text-[0.7em] font-mono text-gray-500">🏷️ {visibleTags.join(', ')}</p>
         ) : (
           <p className="text-[0.7em] font-mono text-gray-400">🏷️ [no tags]</p>
         )}
@@ -291,6 +298,24 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
       </div>
 
       <div className="flex space-x-2">
+        {!isVideoAsset && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleFavorite?.(image.id);
+            }}
+            disabled={favoriteLoading}
+            className={`p-2 transition-colors cursor-pointer transition-transform transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 ${
+              favorite
+                ? 'text-amber-600 hover:text-amber-700 focus:ring-amber-300'
+                : 'text-gray-400 hover:text-amber-600 focus:ring-amber-300'
+            }`}
+            title={favorite ? 'Remove from favorites' : 'Add to favorites'}
+            aria-label={favorite ? 'Remove from favorites' : 'Add to favorites'}
+          >
+            <Star className={`h-[12px] w-[12px] ${favorite ? 'fill-current' : ''}`} />
+          </button>
+        )}
         <button
           onClick={(e) => {
             e.stopPropagation();

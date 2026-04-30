@@ -41,6 +41,8 @@ import {
 } from './gallery/returnState';
 import { parseCanonicalGalleryFocusFromSearch } from './gallery/focusNavigation';
 import { isLikelySourceSearchTerm } from '@/utils/galleryFilter';
+import { patchImageFavorite } from '@/services/imageMetadataService';
+import { getUserVisibleTags, hasFavoriteTag } from '@/utils/systemTags';
 
 interface CloudflareImage {
   id: string;
@@ -116,6 +118,7 @@ type StoredGalleryPreferences = {
   respectAspectRatio: boolean;
   onlyWithVariants: boolean;
   showMotionAssetsOnly: boolean;
+  showFavoritesOnly: boolean;
   showComfyOnly: boolean;
   embeddingFilter: EmbeddingFilter;
   selectedFolder: string;
@@ -260,6 +263,7 @@ export const getDefaultStoredPreferences = (): StoredGalleryPreferences => ({
   respectAspectRatio: false,
   onlyWithVariants: false,
   showMotionAssetsOnly: false,
+  showFavoritesOnly: false,
   showComfyOnly: false,
   embeddingFilter: 'none',
   selectedFolder: 'all',
@@ -302,6 +306,7 @@ export const getStoredPreferences = (
         respectAspectRatio?: boolean;
         onlyWithVariants?: boolean;
         showMotionAssetsOnly?: boolean;
+        showFavoritesOnly?: boolean;
         showComfyOnly?: boolean;
         selectedFolder?: string;
         selectedTag?: string;
@@ -333,6 +338,7 @@ export const getStoredPreferences = (
       next.respectAspectRatio = Boolean(parsed.respectAspectRatio);
       next.onlyWithVariants = Boolean(parsed.onlyWithVariants);
       next.showMotionAssetsOnly = Boolean(parsed.showMotionAssetsOnly);
+      next.showFavoritesOnly = Boolean(parsed.showFavoritesOnly);
       next.showComfyOnly = Boolean(parsed.showComfyOnly);
       next.selectedFolder = parsed.selectedFolder ?? 'all';
       next.selectedTag = parsed.selectedTag ?? '';
@@ -372,6 +378,7 @@ export const getStoredPreferences = (
     next.onlyCanonical = initialGalleryReturnState.filters.onlyCanonical;
     next.onlyWithVariants = initialGalleryReturnState.filters.onlyWithVariants;
     next.showMotionAssetsOnly = initialGalleryReturnState.filters.showMotionAssetsOnly;
+    next.showFavoritesOnly = Boolean(initialGalleryReturnState.filters.showFavoritesOnly);
     next.showDuplicatesOnly = initialGalleryReturnState.filters.showDuplicatesOnly;
     next.showBrokenOnly = initialGalleryReturnState.filters.showBrokenOnly;
     next.showComfyOnly = initialGalleryReturnState.filters.showComfyOnly;
@@ -789,6 +796,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [newEditFolder, setNewEditFolder] = useState<string>('');
   const [altLoadingMap, setAltLoadingMap] = useState<Record<string, boolean>>({});
   const [displayNameLoadingMap, setDisplayNameLoadingMap] = useState<Record<string, boolean>>({});
+  const [favoriteLoadingMap, setFavoriteLoadingMap] = useState<Record<string, boolean>>({});
   
   // Hover preview state
   const [hoveredImage, setHoveredImage] = useState<string | null>(null);
@@ -1357,6 +1365,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     setOnlyWithVariants,
     showMotionAssetsOnly,
     setShowMotionAssetsOnly,
+    showFavoritesOnly,
+    setShowFavoritesOnly,
     showComfyOnly,
     setShowComfyOnly,
     showDuplicatesOnly,
@@ -1414,6 +1424,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       respectAspectRatio: storedPreferencesRef.current.respectAspectRatio,
       onlyWithVariants: storedPreferencesRef.current.onlyWithVariants,
       showMotionAssetsOnly: storedPreferencesRef.current.showMotionAssetsOnly ?? false,
+      showFavoritesOnly: storedPreferencesRef.current.showFavoritesOnly ?? false,
       showComfyOnly: storedPreferencesRef.current.showComfyOnly ?? false,
       embeddingFilter: storedPreferencesRef.current.embeddingFilter ?? 'none',
       showDuplicatesOnly: storedPreferencesRef.current.showDuplicatesOnly ?? false,
@@ -1495,6 +1506,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           onlyCanonical,
           onlyWithVariants,
           showMotionAssetsOnly,
+          showFavoritesOnly,
           showDuplicatesOnly,
           showBrokenOnly,
           showComfyOnly,
@@ -1537,6 +1549,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     selectedFolder,
     selectedTag,
     showMotionAssetsOnly,
+    showFavoritesOnly,
     showBrokenOnly,
     showComfyOnly,
     showDuplicatesOnly,
@@ -1715,6 +1728,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         variant: selectedVariant,
         onlyWithVariants,
         showMotionAssetsOnly,
+        showFavoritesOnly,
         showComfyOnly,
         selectedFolder,
         selectedTag,
@@ -1742,6 +1756,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     selectedVariant,
     onlyWithVariants,
     showMotionAssetsOnly,
+    showFavoritesOnly,
     showComfyOnly,
     selectedFolder,
     selectedTag,
@@ -1847,6 +1862,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   );
 
   const { deleteImage, generateAltTag, generateDisplayName, startEdit, cancelEdit, saveEdit } = useGalleryItemActions({
+    images,
     setImages,
     toastPush: toast.push,
     setAltLoadingMap,
@@ -1859,6 +1875,34 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     setNewEditFolder,
     setEditTags,
   });
+
+  const toggleFavorite = useCallback(async (imageId: string) => {
+    const target = images.find(img => img.id === imageId);
+    if (!target || target.assetType === 'video') {
+      return;
+    }
+
+    const nextFavorite = !hasFavoriteTag(target.tags);
+    setFavoriteLoadingMap(prev => ({ ...prev, [imageId]: true }));
+    try {
+      const { ok, payload } = await patchImageFavorite(imageId, nextFavorite);
+      if (!ok || !Array.isArray(payload.tags)) {
+        toast.push(payload.error || 'Failed to update favorite');
+        return;
+      }
+      setImages(prev => prev.map(img => (img.id === imageId ? { ...img, tags: payload.tags } : img)));
+      toast.push(nextFavorite ? 'Added to favorites' : 'Removed from favorites');
+    } catch (error) {
+      console.error('Failed to update favorite:', error);
+      toast.push('Failed to update favorite');
+    } finally {
+      setFavoriteLoadingMap(prev => {
+        const next = { ...prev };
+        delete next[imageId];
+        return next;
+      });
+    }
+  }, [images, setImages, toast]);
 
   const {
     applyBulkUpdates,
@@ -1931,7 +1975,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
 
   const uniqueTags = useMemo(() => {
     const tags = Array.from(
-      new Set(images.flatMap(img => Array.isArray(img.tags) ? img.tags.filter(tag => tag && tag.trim()) : []))
+      new Set(images.flatMap(img => getUserVisibleTags(img.tags)))
     );
     return tags.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
   }, [images]);
@@ -2076,6 +2120,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     embeddingPendingMap,
     altLoadingMap,
     displayNameLoadingMap,
+    favoriteLoadingMap,
     galleryReturnHrefSuffix,
     activeColorSearchHex: colorSearchHex,
     focusedGalleryAssetId,
@@ -2091,6 +2136,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     embeddingPendingMap,
     altLoadingMap,
     displayNameLoadingMap,
+    favoriteLoadingMap,
     galleryReturnHrefSuffix,
     colorSearchHex,
     focusedGalleryAssetId,
@@ -2398,6 +2444,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                 onShowVariationsOnlyChange={setOnlyWithVariants}
                 showMotionAssetsOnly={showMotionAssetsOnly}
                 onShowMotionAssetsOnlyChange={setShowMotionAssetsOnly}
+                showFavoritesOnly={showFavoritesOnly}
+                onShowFavoritesOnlyChange={setShowFavoritesOnly}
                 showComfyOnly={showComfyOnly}
                 onShowComfyOnlyChange={setShowComfyOnly}
                 showOnlyMissingEmbeddings={embeddingFilter !== 'none'}
@@ -2631,6 +2679,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             onDelete={deleteImage}
             onGenerateAlt={generateAltTag}
             onGenerateDisplayName={generateDisplayName}
+            onToggleFavorite={toggleFavorite}
             onMouseEnter={handleMouseEnter}
             onMouseMove={handleMouseMove}
             onMouseLeave={handleMouseLeave}
@@ -2643,6 +2692,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             onDelete={deleteImage}
             onGenerateAlt={generateAltTag}
             onGenerateDisplayName={generateDisplayName}
+            onToggleFavorite={toggleFavorite}
             onCopyUrl={handleOpenCopyMenu}
             onCopyNamespace={(ns) => { void copyToClipboard(ns, 'Namespace', toast.push); }}
             onSelectColor={handleSelectColor}

@@ -866,7 +866,7 @@ Content-Type: application/json
 
 ### Generate Prompt (PromptThis)
 
-Generate a text-to-image prompt that could recreate the image.
+Generate a detailed text-to-image prompt that could recreate the image.
 
 ```
 POST /api/images/{id}/prompt
@@ -879,7 +879,7 @@ GET /api/images/{id}/prompt?force=1
 {
   "imageId": "abc123",
   "prompt": "A minimalist product photograph of a ceramic vase, soft natural lighting from the left, neutral beige background, shallow depth of field, clean composition, modern aesthetic...",
-  "model": "gpt-4o",
+  "model": "gpt-5.5",
   "generatedAt": "2025-12-05T21:59:41.036Z"
 }
 ```

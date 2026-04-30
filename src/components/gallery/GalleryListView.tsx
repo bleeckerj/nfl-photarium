@@ -17,6 +17,7 @@ interface GalleryListViewProps {
   onDelete: (imageId: string) => void;
   onGenerateAlt: (imageId: string) => void;
   onGenerateDisplayName: (imageId: string) => void;
+  onToggleFavorite: (imageId: string) => void;
   onCopyUrl: (imageId: string) => void;
   onCopyNamespace: (namespace: string) => void;
   onSelectColor: (hex: string) => void;
@@ -34,6 +35,7 @@ export const GalleryListView: React.FC<GalleryListViewProps> = ({
   onDelete,
   onGenerateAlt,
   onGenerateDisplayName,
+  onToggleFavorite,
   onCopyUrl,
   onCopyNamespace,
   onSelectColor,
@@ -53,6 +55,7 @@ export const GalleryListView: React.FC<GalleryListViewProps> = ({
     colorMetadataMap,
     altLoadingMap,
     displayNameLoadingMap,
+    favoriteLoadingMap,
     galleryReturnHrefSuffix,
     focusedGalleryAssetId,
   } = filters;
@@ -74,12 +77,14 @@ export const GalleryListView: React.FC<GalleryListViewProps> = ({
             colorMetadata={colorMetadataMap[image.id] as ColorMetadata | undefined}
             altLoading={Boolean(altLoadingMap[image.id])}
             displayNameLoading={Boolean(displayNameLoadingMap[image.id])}
+            favoriteLoading={Boolean(favoriteLoadingMap[image.id])}
             isFocusedInGallery={focusedGalleryAssetId === image.id}
             onToggleSelection={onToggleSelection}
             onStartEdit={onStartEdit}
             onDelete={onDelete}
             onGenerateAlt={onGenerateAlt}
             onGenerateDisplayName={onGenerateDisplayName}
+            onToggleFavorite={onToggleFavorite}
             onCopyUrl={onCopyUrl}
             onCopyNamespace={onCopyNamespace}
             onSelectColor={onSelectColor}

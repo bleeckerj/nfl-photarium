@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import { patchImageMetadata } from '@/services/imageMetadataService';
+import { mergeUserTagsPreservingSystemTags } from '@/utils/systemTags';
 
 type BulkUpdateFailure = {
   id: string;
@@ -14,6 +15,16 @@ type VariationChild = {
   tags?: string[];
 };
 
+type VariationMetadataImage = VariationChild & {
+  filename: string;
+  uploaded: string;
+  variants?: string[];
+  parentId?: string;
+  description?: string;
+  altTag?: string;
+  folder?: string;
+};
+
 type Toast = {
   push: (message: string) => void;
 };
@@ -26,7 +37,7 @@ type UseBulkVariationMetadataParams = {
   effectiveParentFolder?: string;
   descriptionInput: string;
   altTextInput: string;
-  setAllImages: (updater: (prev: any[]) => any[]) => void;
+  setAllImages: (updater: (prev: VariationMetadataImage[]) => VariationMetadataImage[]) => void;
   toast: Toast;
   isMetadataLimitError: (message?: string) => boolean;
   formatFailureNames: (failures: BulkUpdateFailure[]) => string;
@@ -253,7 +264,7 @@ export function useBulkVariationMetadata({
             const nextTags =
               mode === 'append'
                 ? Array.from(new Set([...existingTags, ...parentTags].map((tag) => tag.trim()).filter(Boolean)))
-                : [...parentTags];
+                : mergeUserTagsPreservingSystemTags(existingTags, parentTags);
             try {
               const { ok, payload } = await patchImageMetadata(child.id, { tags: nextTags });
               if (!ok) {

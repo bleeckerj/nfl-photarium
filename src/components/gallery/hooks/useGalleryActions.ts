@@ -11,6 +11,12 @@ import type { CloudflareImage } from '../types';
 import { truncateMiddle } from '../utils';
 import { setEmbeddingPendingEntry } from '@/utils/embeddingPending';
 import { requestSemanticTags } from '@/services/imageAltDescriptionService';
+import { patchImageFavorite } from '@/services/imageMetadataService';
+import {
+  getUserVisibleTags,
+  hasFavoriteTag,
+  mergeUserTagsPreservingSystemTags,
+} from '@/utils/systemTags';
 
 const GALLERY_EDIT_DRAFT_KEY = 'galleryEditDraftV1';
 const GALLERY_EDIT_DRAFT_TTL_MS = 6 * 60 * 60 * 1000;
@@ -41,6 +47,8 @@ interface UseGalleryActionsReturn {
   altLoadingMap: Record<string, boolean>;
   generateDisplayName: (imageId: string) => Promise<void>;
   displayNameLoadingMap: Record<string, boolean>;
+  toggleFavorite: (imageId: string) => Promise<void>;
+  favoriteLoadingMap: Record<string, boolean>;
   
   // Edit modal state
   editingImage: string | null;
@@ -124,6 +132,7 @@ export function useGalleryActions({
   // ALT generation loading state
   const [altLoadingMap, setAltLoadingMap] = useState<Record<string, boolean>>({});
   const [displayNameLoadingMap, setDisplayNameLoadingMap] = useState<Record<string, boolean>>({});
+  const [favoriteLoadingMap, setFavoriteLoadingMap] = useState<Record<string, boolean>>({});
   
   // Edit modal state
   const [editingImage, setEditingImage] = useState<string | null>(null);
@@ -321,12 +330,42 @@ export function useGalleryActions({
     }
   }, [setImages, toast]);
 
+  const toggleFavorite = useCallback(async (imageId: string) => {
+    const target = images.find(img => img.id === imageId);
+    if (!target || target.assetType === 'video') {
+      return;
+    }
+
+    const nextFavorite = !hasFavoriteTag(target.tags);
+    setFavoriteLoadingMap(prev => ({ ...prev, [imageId]: true }));
+    try {
+      const { ok, payload } = await patchImageFavorite(imageId, nextFavorite);
+      if (!ok || !Array.isArray(payload.tags)) {
+        toast.push(payload.error || 'Failed to update favorite');
+        return;
+      }
+      setImages(prev => prev.map(img =>
+        img.id === imageId ? { ...img, tags: payload.tags } : img
+      ));
+      toast.push(nextFavorite ? 'Added to favorites' : 'Removed from favorites');
+    } catch (error) {
+      console.error('Failed to update favorite:', error);
+      toast.push('Failed to update favorite');
+    } finally {
+      setFavoriteLoadingMap(prev => {
+        const next = { ...prev };
+        delete next[imageId];
+        return next;
+      });
+    }
+  }, [images, setImages, toast]);
+
   // Edit modal operations
   const startEdit = useCallback((image: CloudflareImage) => {
     setEditingImage(image.id);
     setEditFolderSelect(image.folder || '');
     setNewEditFolder('');
-    setEditTags(image.tags ? image.tags.join(', ') : '');
+    setEditTags(getUserVisibleTags(image.tags).join(', '));
   }, []);
 
   const cancelEdit = useCallback(() => {
@@ -353,7 +392,8 @@ export function useGalleryActions({
       const tagsPayload = editTags.trim()
         ? editTags.split(',').map(t => t.trim()).filter(Boolean)
         : [];
-      const payload: Record<string, unknown> = { tags: tagsPayload };
+      const finalTags = mergeUserTagsPreservingSystemTags(target?.tags, tagsPayload);
+      const payload: Record<string, unknown> = { tags: finalTags };
       if (folderChanged) {
         payload.folder = finalFolder;
         payload.applyToFamily = true;
@@ -388,7 +428,7 @@ export function useGalleryActions({
           return {
             ...img,
             folder: inFamily ? (finalFolder || undefined) : img.folder,
-            tags: isTarget ? tagsPayload : img.tags,
+            tags: isTarget ? finalTags : img.tags,
           };
         }));
         cancelEdit();
@@ -409,10 +449,11 @@ export function useGalleryActions({
       return;
     }
 
-    const parsedBulkTags = options.tagsInput
-      .split(',')
-      .map(tag => tag.trim())
-      .filter(Boolean);
+      const parsedBulkTags = options.tagsInput
+        .split(',')
+        .map(tag => tag.trim())
+        .filter(Boolean)
+        .filter(tag => !tag.startsWith('_'));
 
     const hasTagChanges =
       options.applyTags &&
@@ -498,7 +539,8 @@ export function useGalleryActions({
 
             if (options.applyTags) {
               if (options.tagsMode === 'replace') {
-                payload.tags = options.tagsInput;
+                const target = imageById.get(id);
+                payload.tags = mergeUserTagsPreservingSystemTags(target?.tags, parsedBulkTags);
               } else if (options.tagsMode === 'ai') {
                 try {
                   const target = imageById.get(id);
@@ -590,7 +632,7 @@ export function useGalleryActions({
           let updatedTags = img.tags;
           if (options.applyTags && isSelected) {
             if (options.tagsMode === 'replace') {
-              updatedTags = parsedBulkTags;
+              updatedTags = mergeUserTagsPreservingSystemTags(img.tags, parsedBulkTags);
             } else if (options.tagsMode === 'ai') {
               const aiTags = generatedTags.get(img.id);
               if (aiTags) {
@@ -913,6 +955,8 @@ export function useGalleryActions({
     altLoadingMap,
     generateDisplayName,
     displayNameLoadingMap,
+    toggleFavorite,
+    favoriteLoadingMap,
     editingImage,
     editTags,
     setEditTags,

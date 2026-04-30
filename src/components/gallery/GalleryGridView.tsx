@@ -23,6 +23,7 @@ interface GalleryGridViewProps {
   onDelete: (imageId: string) => void;
   onGenerateAlt: (imageId: string) => void;
   onGenerateDisplayName: (imageId: string) => void;
+  onToggleFavorite: (imageId: string) => void;
   onMouseEnter: (imageId: string, event: React.MouseEvent) => void;
   onMouseMove: (imageId: string, event: React.MouseEvent) => void;
   onMouseLeave: () => void;
@@ -40,6 +41,7 @@ export const GalleryGridView: React.FC<GalleryGridViewProps> = ({
   onDelete,
   onGenerateAlt,
   onGenerateDisplayName,
+  onToggleFavorite,
   onMouseEnter,
   onMouseMove,
   onMouseLeave,
@@ -56,6 +58,7 @@ export const GalleryGridView: React.FC<GalleryGridViewProps> = ({
     embeddingPendingMap,
     altLoadingMap,
     displayNameLoadingMap,
+    favoriteLoadingMap,
     galleryReturnHrefSuffix,
     focusedGalleryAssetId,
   } = filters;
@@ -76,12 +79,14 @@ export const GalleryGridView: React.FC<GalleryGridViewProps> = ({
           embeddingPending={embeddingPendingMap[image.id]}
           altLoading={Boolean(altLoadingMap[image.id])}
           displayNameLoading={Boolean(displayNameLoadingMap[image.id])}
+          favoriteLoading={Boolean(favoriteLoadingMap[image.id])}
           isFocusedInGallery={focusedGalleryAssetId === image.id}
           onToggleSelection={onToggleSelection}
           onStartEdit={onStartEdit}
           onDelete={onDelete}
           onGenerateAlt={onGenerateAlt}
           onGenerateDisplayName={onGenerateDisplayName}
+          onToggleFavorite={onToggleFavorite}
           onCopyUrl={onToggleCopyMenu}
           onCopyNamespace={onCopyNamespace}
           onSelectColor={onSelectColor}

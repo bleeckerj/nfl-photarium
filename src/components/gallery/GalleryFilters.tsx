@@ -43,6 +43,8 @@ interface GalleryFiltersProps {
   onShowVariationsOnlyChange: (value: boolean) => void;
   showMotionAssetsOnly: boolean;
   onShowMotionAssetsOnlyChange: (value: boolean) => void;
+  showFavoritesOnly?: boolean;
+  onShowFavoritesOnlyChange?: (value: boolean) => void;
   showOnlyMissingEmbeddings: boolean;
   onShowOnlyMissingEmbeddingsChange: (value: boolean) => void;
   onlyCanonical: boolean;
@@ -82,6 +84,8 @@ export const GalleryFilters: React.FC<GalleryFiltersProps> = ({
   onShowVariationsOnlyChange,
   showMotionAssetsOnly,
   onShowMotionAssetsOnlyChange,
+  showFavoritesOnly = false,
+  onShowFavoritesOnlyChange,
   showOnlyMissingEmbeddings,
   onShowOnlyMissingEmbeddingsChange,
   onlyCanonical,
@@ -334,6 +338,18 @@ export const GalleryFilters: React.FC<GalleryFiltersProps> = ({
           />
           <span className="text-[0.65em] font-mono text-gray-700">
             Respect Aspect Ratio
+          </span>
+        </label>
+
+        <label className="flex items-center gap-1.5 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showFavoritesOnly}
+            onChange={(e) => onShowFavoritesOnlyChange?.(e.target.checked)}
+            className="rounded"
+          />
+          <span className="text-[0.65em] font-mono text-gray-700">
+            Favorites Only
           </span>
         </label>
 

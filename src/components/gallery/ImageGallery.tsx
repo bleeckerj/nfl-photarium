@@ -159,6 +159,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       setOnlyWithVariants,
       showComfyOnly,
       setShowComfyOnly,
+      showFavoritesOnly,
+      setShowFavoritesOnly,
       showDuplicatesOnly,
       setShowDuplicatesOnly,
       showBrokenOnly,
@@ -259,6 +261,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       bulkEmbeddingGenerating,
       generateDisplayName,
       displayNameLoadingMap,
+      toggleFavorite,
+      favoriteLoadingMap,
       applyBulkUpdates,
       deleteSelectedImages,
       generateEmbeddingsForSelected,
@@ -330,6 +334,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         respectAspectRatio,
         onlyWithVariants,
         showComfyOnly,
+        showFavoritesOnly,
         selectedFolder,
         selectedTag,
         searchTerm,
@@ -345,7 +350,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       });
     }, [
       selectedVariant, onlyCanonical, respectAspectRatio, onlyWithVariants,
-      showComfyOnly,
+      showComfyOnly, showFavoritesOnly,
       selectedFolder, selectedTag, searchTerm, viewMode, filtersCollapsed,
       showDuplicatesOnly, showBrokenOnly, pageSize, dateFilter, currentPage,
     ]);
@@ -668,6 +673,15 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             <label className="flex items-center gap-1">
               <input
                 type="checkbox"
+                checked={showFavoritesOnly}
+                onChange={(e) => setShowFavoritesOnly(e.target.checked)}
+                className="h-3 w-3"
+              />
+              favorites
+            </label>
+            <label className="flex items-center gap-1">
+              <input
+                type="checkbox"
                 checked={onlyCanonical}
                 onChange={(e) => setOnlyCanonical(e.target.checked)}
                 className="h-3 w-3"
@@ -891,11 +905,13 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                 embeddingPending={embeddingPendingMap[image.id]}
                 altLoading={altLoadingMap[image.id] ?? false}
                 displayNameLoading={displayNameLoadingMap[image.id] ?? false}
+                favoriteLoading={favoriteLoadingMap[image.id] ?? false}
                 onToggleSelection={toggleSelection}
                 onStartEdit={startEdit}
                 onDelete={handleDeleteConfirm}
                 onGenerateAlt={generateAltTag}
                 onGenerateDisplayName={generateDisplayName}
+                onToggleFavorite={toggleFavorite}
                 onCopyUrl={handleCopyUrl}
                 onCopyNamespace={handleCopyNamespace}
                 onSelectColor={() => {}}
@@ -921,11 +937,13 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                 colorMetadata={colorMetadataMap[image.id]}
                 altLoading={altLoadingMap[image.id] ?? false}
                 displayNameLoading={displayNameLoadingMap[image.id] ?? false}
+                favoriteLoading={favoriteLoadingMap[image.id] ?? false}
                 onToggleSelection={toggleSelection}
                 onStartEdit={startEdit}
                 onDelete={handleDeleteConfirm}
                 onGenerateAlt={generateAltTag}
                 onGenerateDisplayName={generateDisplayName}
+                onToggleFavorite={toggleFavorite}
                 onCopyUrl={handleCopyUrl}
                 onCopyNamespace={handleCopyNamespace}
                 onSelectColor={() => {}}

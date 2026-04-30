@@ -1,3 +1,5 @@
+import { hasFavoriteTag } from '@/utils/systemTags';
+
 export interface GalleryImage {
   id: string;
   assetType?: 'image' | 'video';
@@ -44,6 +46,7 @@ export interface GalleryFilterOptions {
   onlyCanonical: boolean;
   hiddenFolders?: string[];
   hiddenTags?: string[];
+  showFavoritesOnly?: boolean;
 }
 
 const normalize = (value?: string) => value?.toLowerCase() ?? '';
@@ -129,10 +132,11 @@ export const filterImagesForGallery = (
   images: GalleryImage[],
   options: GalleryFilterOptions
 ): GalleryImage[] => {
-  const { selectedFolder, selectedTag, searchTerm, onlyCanonical, hiddenFolders, hiddenTags } = options;
+  const { selectedFolder, selectedTag, searchTerm, onlyCanonical, hiddenFolders, hiddenTags, showFavoritesOnly } = options;
   return images.filter((image) => {
     if (!matchesFolderFilter(image, selectedFolder)) return false;
     if (!matchesTagFilter(image, selectedTag)) return false;
+    if (showFavoritesOnly && !hasFavoriteTag(image.tags)) return false;
     if (!matchesSearchFilter(image, searchTerm)) return false;
     if (onlyCanonical && image.parentId) return false;
     if (!matchesHiddenFolderFilter(image, hiddenFolders)) return false;

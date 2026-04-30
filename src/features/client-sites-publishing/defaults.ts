@@ -11,7 +11,7 @@ export const defaultClientSiteAccessPolicy: ClientSiteAccessPolicy = {
 
 export const defaultClientSiteVisibleTagPolicy: ClientSiteVisibleTagPolicy = {
   mode: 'prefix-filter',
-  hiddenPrefixes: ['x-', 'internal:'],
+  hiddenPrefixes: ['x-', 'internal:', '_'],
   hiddenExact: ['x-search', 'x-clip', 'x-color'],
 };
 
@@ -26,4 +26,3 @@ export const defaultClientSiteDownloadPresetPolicy: ClientSiteDownloadPresetPoli
   ],
   allowedOutputFormats: ['jpg', 'webp', 'png'],
 };
-

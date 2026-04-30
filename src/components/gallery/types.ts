@@ -93,6 +93,7 @@ export interface GalleryPreferences {
   respectAspectRatio: boolean;
   onlyWithVariants: boolean;
   showMotionAssetsOnly: boolean;
+  showFavoritesOnly: boolean;
   showComfyOnly: boolean;
   selectedFolder: string;
   selectedTag: string;
@@ -127,6 +128,7 @@ export interface GalleryViewFilters {
   embeddingPendingMap: Record<string, EmbeddingPendingEntry>;
   altLoadingMap: Record<string, boolean>;
   displayNameLoadingMap: Record<string, boolean>;
+  favoriteLoadingMap: Record<string, boolean>;
   galleryReturnHrefSuffix: string;
   activeColorSearchHex?: string | null;
   focusedGalleryAssetId?: string | null;

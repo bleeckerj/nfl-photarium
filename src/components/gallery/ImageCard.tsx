@@ -10,7 +10,7 @@
 import React from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { Trash2, Copy, ExternalLink, Sparkles, Layers, AlertTriangle } from 'lucide-react';
+import { Trash2, Copy, ExternalLink, Sparkles, Layers, AlertTriangle, Star } from 'lucide-react';
 import { getCloudflareImageUrl, getCloudflareDownloadUrl } from '@/utils/imageUtils';
 import { formatBytes } from '@/utils/formatBytes';
 import { ColorSwatches } from '@/components/ColorSwatches';
@@ -20,6 +20,7 @@ import { AspectRatioDisplay } from './AspectRatioDisplay';
 import { hasSearchExclusionTag, getExclusionTooltip, isSvgImage } from './utils';
 import type { CloudflareImage, ColorMetadata } from './types';
 import type { EmbeddingPendingEntry } from '@/utils/embeddingPending';
+import { getUserVisibleTags, hasFavoriteTag } from '@/utils/systemTags';
 
 interface ImageCardProps {
   image: CloudflareImage;
@@ -33,12 +34,14 @@ interface ImageCardProps {
   embeddingPending?: EmbeddingPendingEntry;
   altLoading: boolean;
   displayNameLoading: boolean;
+  favoriteLoading?: boolean;
   // Actions
   onToggleSelection: (imageId: string) => void;
   onStartEdit: (image: CloudflareImage) => void;
   onDelete: (imageId: string) => void;
   onGenerateAlt: (imageId: string) => void;
   onGenerateDisplayName: (imageId: string) => void;
+  onToggleFavorite?: (imageId: string) => void;
   onCopyUrl: (imageId: string) => void;
   onCopyNamespace: (namespace: string) => void;
   onSelectColor?: (hex: string) => void;
@@ -76,11 +79,13 @@ export const ImageCard: React.FC<ImageCardProps> = ({
   embeddingPending,
   altLoading,
   displayNameLoading,
+  favoriteLoading = false,
   onToggleSelection,
   onStartEdit,
   onDelete,
   onGenerateAlt,
   onGenerateDisplayName,
+  onToggleFavorite,
   onCopyUrl,
   onCopyNamespace,
   onSelectColor,
@@ -106,6 +111,8 @@ export const ImageCard: React.FC<ImageCardProps> = ({
   const detailHref = isVideoAsset
     ? `/videos/${image.id}${galleryReturnHrefSuffix ?? ''}`
     : `/images/${image.id}${galleryReturnHrefSuffix ?? ''}`;
+  const visibleTags = getUserVisibleTags(image.tags);
+  const favorite = hasFavoriteTag(image.tags);
 
   return (
     <div
@@ -279,10 +286,10 @@ export const ImageCard: React.FC<ImageCardProps> = ({
               )}
             </p>
             <AspectRatioDisplay imageId={image.id} aspectRatio={image.aspectRatio} />
-            {image.tags && image.tags.length > 0 ? (
+            {visibleTags.length > 0 ? (
               <p>
-                🏷️ {image.tags.slice(0, 2).join(', ')}
-                {image.tags.length > 2 ? '...' : ''}
+                🏷️ {visibleTags.slice(0, 2).join(', ')}
+                {visibleTags.length > 2 ? '...' : ''}
               </p>
             ) : (
               <p className="text-gray-400">🏷️ [no tags]</p>
@@ -339,7 +346,25 @@ export const ImageCard: React.FC<ImageCardProps> = ({
       </div>
 
       {/* Action bar */}
-      <div className="grid grid-cols-5 gap-1 p-1.5 bg-white border-b border-gray-200 z-30 mt-auto">
+      <div className={`grid ${isVideoAsset ? 'grid-cols-5' : 'grid-cols-6'} gap-1 p-1.5 bg-white border-b border-gray-200 z-30 mt-auto`}>
+        {!isVideoAsset && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleFavorite?.(image.id);
+            }}
+            disabled={favoriteLoading}
+            className={`h-8 w-full inline-flex items-center justify-center rounded-md border shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-offset-1 ${
+              favorite
+                ? 'border-amber-300 bg-amber-100 text-amber-700 hover:bg-amber-200 focus:ring-amber-300'
+                : 'border-gray-300 bg-white text-gray-500 hover:bg-gray-50 focus:ring-gray-300'
+            } disabled:opacity-50`}
+            title={favorite ? 'Remove from favorites' : 'Add to favorites'}
+            aria-label={favorite ? 'Remove from favorites' : 'Add to favorites'}
+          >
+            <Star className={`h-[12px] w-[12px] ${favorite ? 'fill-current' : ''}`} />
+          </button>
+        )}
         <button
           onClick={async (e) => {
             e.stopPropagation();

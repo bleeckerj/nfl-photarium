@@ -190,4 +190,42 @@ describe('PATCH /api/images/:id/update', () => {
       expect.objectContaining({ description: longDescription })
     );
   });
+
+  it('preserves hidden system tags when replacing user tags', async () => {
+    const mockFetch = vi.spyOn(globalThis, 'fetch');
+
+    mockFetch
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: {
+              id: 'child',
+              filename: 'child.png',
+              uploaded: '2026-02-01T00:00:00.000Z',
+              variants: ['https://example.com/public'],
+              meta: JSON.stringify({ tags: ['old', '_favorite_'] }),
+            },
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ result: {} }),
+          { status: 200 }
+        )
+      );
+
+    const request = createRequest({ tags: ['hero'] });
+    const response = await PATCH(request, { params: Promise.resolve({ id: 'child' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.tags).toEqual(['hero', '_favorite_']);
+
+    const patchCall = mockFetch.mock.calls[1];
+    const submittedBody = patchCall?.[1]?.body;
+    const parsed = JSON.parse(String(submittedBody));
+    expect(parsed.metadata.tags).toEqual(['hero', '_favorite_']);
+  });
 });

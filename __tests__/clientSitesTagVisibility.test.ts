@@ -5,7 +5,7 @@ import { filterVisibleTags } from '@/features/client-sites-publishing/tagVisibil
 describe('client site visible tag filtering', () => {
   it('removes hidden prefixes and exact hidden tags', () => {
     const visibleTags = filterVisibleTags(
-      ['portrait', 'x-search', 'internal:ops', 'client-review'],
+      ['portrait', 'x-search', 'internal:ops', '_favorite_', 'client-review'],
       defaultClientSiteVisibleTagPolicy
     );
 

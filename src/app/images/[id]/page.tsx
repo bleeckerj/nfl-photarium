@@ -37,6 +37,7 @@ import { buildCanonicalGalleryHref } from '@/components/gallery/focusNavigation'
 
 import { AltTextEditor } from '@/components/image-detail/AltTextEditor';
 import { CloudflareMetadataHeader } from '@/components/image-detail/CloudflareMetadataHeader';
+import { FavoriteToggle } from '@/components/image-detail/FavoriteToggle';
 import {
   IMAGE_DETAIL_DRAFT_KEY_PREFIX,
   LEGACY_IMAGE_DETAIL_DRAFT_KEY_PREFIX,
@@ -72,7 +73,12 @@ import { useShareLinks } from '@/hooks/useShareLinks';
 import { patchParentAssignment as patchParentAssignmentService } from '@/services/parentAssignmentService';
 import { usePersistentShareBaseUrl } from '@/hooks/usePersistentShareBaseUrl';
 import { requestSemanticTags } from '@/services/imageAltDescriptionService';
-import { patchImageMetadata } from '@/services/imageMetadataService';
+import { patchImageFavorite, patchImageMetadata } from '@/services/imageMetadataService';
+import {
+  getUserVisibleTags,
+  hasFavoriteTag,
+  mergeUserTagsPreservingSystemTags,
+} from '@/utils/systemTags';
 import {
   getFreshGalleryReturnState,
   hasFreshGalleryReturnState,
@@ -225,6 +231,13 @@ const mergeUniqueTags = (existingTags: string[], incomingTags: string[]) => {
   });
   return Array.from(merged.values());
 };
+
+const parseUserTagsInput = (value: string) =>
+  value
+    .split(',')
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+    .filter((tag) => !tag.startsWith('_'));
 
 const mergeUniqueImagesById = (base: CloudflareImage[], incoming: CloudflareImage[]) => {
   const merged = new Map<string, CloudflareImage>();
@@ -385,6 +398,7 @@ export default function ImageDetailPage() {
   const [displayNameInput, setDisplayNameInput] = useState('');
   const [tagGenerationCount, setTagGenerationCount] = useState(6);
   const [tagGenerationLoading, setTagGenerationLoading] = useState(false);
+  const [favoriteLoading, setFavoriteLoading] = useState(false);
   const [clearExif, setClearExif] = useState(false);
   const { shareBaseUrl, setShareBaseUrl } = usePersistentShareBaseUrl();
   const [embeddingGenerating, setEmbeddingGenerating] = useState(false);
@@ -436,7 +450,7 @@ export default function ImageDetailPage() {
     setImage(found);
     if (found) {
       setFolderSelect(found.folder || '');
-      setTagsInput(Array.isArray(found.tags) ? found.tags.join(', ') : '');
+      setTagsInput(getUserVisibleTags(found.tags).join(', '));
       setDescriptionInput(resolveInitialDescription(extrasForCurrentImage, found));
       setAltTextInput(resolveInitialAltText(extrasForCurrentImage, found));
       setOriginalUrlInput(found.originalUrl || '');
@@ -455,7 +469,7 @@ export default function ImageDetailPage() {
             const parsed = JSON.parse(raw) as Partial<ImageDetailDraft>;
             if (shouldRestoreImageDetailDraft(parsed) && draftAppliedRef.current !== found.id) {
               if (typeof parsed.folderSelect === 'string') setFolderSelect(parsed.folderSelect);
-              if (typeof parsed.tagsInput === 'string') setTagsInput(parsed.tagsInput);
+              if (typeof parsed.tagsInput === 'string') setTagsInput(parseUserTagsInput(parsed.tagsInput).join(', '));
               if (typeof parsed.descriptionInput === 'string') setDescriptionInput(parsed.descriptionInput);
               if (typeof parsed.altTextInput === 'string') setAltTextInput(parsed.altTextInput);
               if (typeof parsed.originalUrlInput === 'string') setOriginalUrlInput(parsed.originalUrlInput);
@@ -545,6 +559,29 @@ export default function ImageDetailPage() {
       toast.push(message);
     } finally {
       setEmbeddingGenerating(false);
+    }
+  }, [id, image, toast]);
+
+  const handleToggleFavorite = useCallback(async () => {
+    if (!image || !id || image.assetType === 'video') {
+      return;
+    }
+    const nextFavorite = !hasFavoriteTag(image.tags);
+    setFavoriteLoading(true);
+    try {
+      const { ok, payload } = await patchImageFavorite(id, nextFavorite);
+      if (!ok || !Array.isArray(payload.tags)) {
+        toast.push(payload.error || 'Failed to update favorite');
+        return;
+      }
+      setImage(prev => (prev && prev.id === id ? { ...prev, tags: payload.tags } : prev));
+      setAllImages(prev => prev.map(entry => (entry.id === id ? { ...entry, tags: payload.tags } : entry)));
+      toast.push(nextFavorite ? 'Added to favorites' : 'Removed from favorites');
+    } catch (error) {
+      console.error('Failed to update favorite:', error);
+      toast.push('Failed to update favorite');
+    } finally {
+      setFavoriteLoading(false);
     }
   }, [id, image, toast]);
 
@@ -655,6 +692,8 @@ export default function ImageDetailPage() {
     toast
   });
 
+  const visibleImageTags = useMemo(() => getUserVisibleTags(image?.tags), [image?.tags]);
+
   const {
     childUploadItems,
     appendChildUploadFiles,
@@ -678,7 +717,7 @@ export default function ImageDetailPage() {
   } = useVariationUpload({
     imageId: typeof id === 'string' ? id : undefined,
     imageFolder: image?.folder,
-    imageTags: image?.tags,
+    imageTags: visibleImageTags,
     imageNamespace: image?.namespace,
     refreshImageList,
     toast
@@ -1075,12 +1114,7 @@ export default function ImageDetailPage() {
       folderSelect === '__create__'
         ? newFolderInput.trim() || undefined
         : folderSelect?.trim() || undefined;
-    const finalTags = tagsInput
-      ? tagsInput
-          .split(',')
-          .map((t) => t.trim())
-          .filter(Boolean)
-      : [];
+    const finalTags = mergeUserTagsPreservingSystemTags(image?.tags, parseUserTagsInput(tagsInput));
     const baseMetadata: Record<string, unknown> = {
       folder: image?.folder,
       tags: image?.tags ?? [],
@@ -1241,10 +1275,7 @@ export default function ImageDetailPage() {
     if (!tagsInput) {
       return [];
     }
-    return tagsInput
-      .split(',')
-      .map((tag) => tag.trim())
-      .filter(Boolean);
+    return parseUserTagsInput(tagsInput);
   }, [tagsInput]);
 
   const exifEntries = useMemo(() => {
@@ -1335,9 +1366,9 @@ export default function ImageDetailPage() {
       return true;
     }
     const inputTags = tagsInput
-      ? tagsInput.split(',').map((tag) => tag.trim()).filter(Boolean)
+      ? parseUserTagsInput(tagsInput)
       : [];
-    const imageTags = Array.isArray(image.tags) ? image.tags : [];
+    const imageTags = getUserVisibleTags(image.tags);
     const normalizeTags = (tags: string[]) => [...tags].map((tag) => tag.trim()).filter(Boolean).sort();
     const normalizedInputTags = normalizeTags(inputTags);
     const normalizedImageTags = normalizeTags(imageTags);
@@ -1884,7 +1915,7 @@ export default function ImageDetailPage() {
     }
     setFolderSelect(image.folder || '');
     setNewFolderInput('');
-    setTagsInput(image.tags ? image.tags.join(', ') : '');
+    setTagsInput(getUserVisibleTags(image.tags).join(', '));
     setDescriptionInput(resolveInitialDescription(extrasRecord, image));
     setAltTextInput(resolveInitialAltText(extrasRecord, image));
     setOriginalUrlInput(image.originalUrl || '');
@@ -1906,7 +1937,7 @@ export default function ImageDetailPage() {
       const cleanedSourceUrl = cleanString(sourceUrlInput);
       const payload: Record<string, unknown> = {
         folder: finalFolder,
-        tags: tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(Boolean) : [],
+        tags: mergeUserTagsPreservingSystemTags(image.tags, parseUserTagsInput(tagsInput)),
         description: descriptionInput,
         originalUrl: cleanedOriginalUrl ?? '',
         sourceUrl: cleanedSourceUrl ?? '',
@@ -1958,7 +1989,7 @@ export default function ImageDetailPage() {
         setImage(prev => prev ? ({
           ...prev,
           folder: body.folder,
-          tags: body.tags,
+          tags: Array.isArray(body.tags) ? body.tags : mergeUserTagsPreservingSystemTags(image.tags, parseUserTagsInput(tagsInput)),
           description: descriptionInput,
           originalUrl: body.originalUrl,
           sourceUrl: body.sourceUrl,
@@ -2003,25 +2034,23 @@ export default function ImageDetailPage() {
         toast.push(payload?.error || 'Failed to generate semantic tags');
         return;
       }
-      const existingTags = tagsInput
-        .split(',')
-        .map((tag) => tag.trim())
-        .filter(Boolean);
+      const existingTags = parseUserTagsInput(tagsInput);
       const mergedTags = mergeUniqueTags(existingTags, payload.tags);
+      const finalTags = mergeUserTagsPreservingSystemTags(image?.tags, mergedTags);
       const appendedCount = Math.max(0, mergedTags.length - existingTags.length);
       if (appendedCount === 0) {
         toast.push('No new semantic tags to add');
         return;
       }
-      const saveResult = await patchImageMetadata(id, { tags: mergedTags });
+      const saveResult = await patchImageMetadata(id, { tags: finalTags });
       if (!saveResult.ok) {
         toast.push(saveResult.payload?.error || 'Failed to save semantic tags');
         return;
       }
       const nextTagsInput = mergedTags.join(', ');
       setTagsInput(nextTagsInput);
-      setImage((prev) => (prev && prev.id === id ? { ...prev, tags: mergedTags } : prev));
-      setAllImages((prev) => prev.map((entry) => (entry.id === id ? { ...entry, tags: mergedTags } : entry)));
+      setImage((prev) => (prev && prev.id === id ? { ...prev, tags: finalTags } : prev));
+      setAllImages((prev) => prev.map((entry) => (entry.id === id ? { ...entry, tags: finalTags } : entry)));
       toast.push(`Appended ${appendedCount} semantic tag${appendedCount === 1 ? '' : 's'} and saved`);
     } catch (error) {
       console.error('Failed to generate semantic tags:', error);
@@ -2029,7 +2058,7 @@ export default function ImageDetailPage() {
     } finally {
       setTagGenerationLoading(false);
     }
-  }, [id, tagGenerationCount, tagsInput, toast]);
+  }, [id, image?.tags, tagGenerationCount, tagsInput, toast]);
 
   const toggleVariationSelection = useCallback((variationId: string) => {
     setSelectedVariationIds((prev) => {
@@ -2905,6 +2934,16 @@ export default function ImageDetailPage() {
           </div>
 
           <div id="image-metadata-section" className="space-y-4">
+            {image.assetType !== 'video' && (
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-mono text-gray-600">Favorite status</p>
+                <FavoriteToggle
+                  favorite={hasFavoriteTag(image.tags)}
+                  loading={favoriteLoading}
+                  onToggle={handleToggleFavorite}
+                />
+              </div>
+            )}
             <CloudflareMetadataHeader
               metadataByteSize={metadataByteSize}
               metadataPrunedByteSize={metadataPrunedByteSize}
@@ -3284,7 +3323,7 @@ export default function ImageDetailPage() {
                   childUploadFolder={childUploadFolder}
                   childUploadTags={childUploadTags}
                   fallbackFolder={image.folder || ''}
-                  fallbackTags={image.tags || []}
+                  fallbackTags={visibleImageTags}
                   childUploadItems={childUploadItems}
                   onUpdateSelectedFilename={updateChildUploadFilename}
                   onClearSelectedFiles={clearChildUploadFiles}

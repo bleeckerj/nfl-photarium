@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import type { CloudflareImage } from '../types';
 import { truncateMiddle } from '@/components/gallery/utils';
 import { requestSemanticTags } from '@/services/imageAltDescriptionService';
+import { mergeUserTagsPreservingSystemTags } from '@/utils/systemTags';
 
 interface UseGalleryBulkActionsOptions {
   images: CloudflareImage[];
@@ -105,7 +106,8 @@ export const useGalleryBulkActions = ({
     const parsedBulkTags = bulkTagsInput
       .split(',')
       .map(tag => tag.trim())
-      .filter(Boolean);
+      .filter(Boolean)
+      .filter(tag => !tag.startsWith('_'));
     const aiTagCount = Math.min(12, Math.max(1, Number.parseInt(bulkTagsAiCount, 10) || 6));
     const hasTagChanges =
       bulkApplyTags &&
@@ -142,7 +144,8 @@ export const useGalleryBulkActions = ({
           }
           if (bulkApplyTags) {
             if (bulkTagsMode === 'replace') {
-              payload.tags = bulkTagsInput;
+              const target = imageById.get(id);
+              payload.tags = mergeUserTagsPreservingSystemTags(target?.tags, parsedBulkTags);
             } else if (bulkTagsMode === 'ai') {
               const target = imageById.get(id);
               if (target?.assetType === 'video') {
@@ -275,7 +278,7 @@ export const useGalleryBulkActions = ({
           let updatedTags = img.tags;
           if (bulkApplyTags) {
             if (bulkTagsMode === 'replace') {
-              updatedTags = parsedBulkTags;
+              updatedTags = mergeUserTagsPreservingSystemTags(img.tags, parsedBulkTags);
             } else if (bulkTagsMode === 'ai') {
               updatedTags = generatedTags.get(img.id) ?? updatedTags;
             } else if (parsedBulkTags.length > 0) {
