@@ -89,9 +89,11 @@ export function useVariationUpload({
 
       for (const item of childUploadItems) {
         const resolvedFilename = resolveUploadFilename(item.filename, item.file.name);
+        const displayName = item.filename.trim() || undefined;
         const { ok, payload } = await uploadVariationFile({
           file: item.file,
           filename: resolvedFilename,
+          displayName,
           folder: defaultFolder || undefined,
           tags: defaultTags || undefined,
           namespace: resolvedNamespace,
@@ -159,10 +161,12 @@ export function useVariationUpload({
       const defaultFolder = childUploadFolder.trim();
       const defaultTags = childUploadTags.trim();
       const resolvedFilename = resolveUploadFilename(childUploadUrlFilename, trimmedUrl);
+      const displayName = childUploadUrlFilename.trim() || undefined;
 
       const { ok, payload } = await uploadVariationUrl({
         url: trimmedUrl,
         filename: resolvedFilename === trimmedUrl ? undefined : resolvedFilename,
+        displayName,
         folder: defaultFolder || undefined,
         tags: defaultTags || undefined,
         namespace: resolvedNamespace,

@@ -116,6 +116,16 @@ export interface ColorMetadata {
   averageColor?: string;
 }
 
+export interface GalleryFamilySummary {
+  imageId: string;
+  rootId: string;
+  parentId?: string;
+  parentAssetType?: 'image' | 'video';
+  isVariant: boolean;
+  variantCount: number;
+  childIds: string[];
+}
+
 export interface GalleryViewFilters {
   images: CloudflareImage[];
   selectedVariant: string;
@@ -124,6 +134,7 @@ export interface GalleryViewFilters {
   selectedImageIds: Set<string>;
   duplicateIds: Set<string>;
   childrenMap: Record<string, CloudflareImage[]>;
+  familySummaryMap: Record<string, GalleryFamilySummary>;
   colorMetadataMap: Record<string, ColorMetadata>;
   embeddingPendingMap: Record<string, EmbeddingPendingEntry>;
   altLoadingMap: Record<string, boolean>;

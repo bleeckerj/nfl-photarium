@@ -38,6 +38,10 @@ const nextConfig = {
       },
     ],
   },
+  experimental: {
+    // /api/upload accepts archives up to 500 MB and optimizes oversized source images server-side.
+    proxyClientMaxBodySize: '500mb',
+  },
   // Allow cross-origin requests from local network IPs
   allowedDevOrigins: [
     '192.168.86.150',

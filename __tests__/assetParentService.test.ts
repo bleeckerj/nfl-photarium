@@ -184,6 +184,50 @@ describe('assignAssetParent', () => {
     expect(result.parentId).toBe('video-root');
     expect(result.canonicalParentId).toBe('video-root');
   });
+
+  it('clears image parent metadata and cached parentId when detaching a child', async () => {
+    listCatalogAssetsMock.mockResolvedValue([
+      {
+        id: 'parent-old',
+        assetType: 'image',
+        filename: 'parent.png',
+        uploaded: '2026-03-01T00:00:00.000Z',
+      },
+      {
+        id: 'child-image',
+        assetType: 'image',
+        filename: 'child.webp',
+        uploaded: '2026-03-01T00:00:00.000Z',
+        parentId: 'parent-old',
+      },
+    ]);
+    getCachedImagesMock.mockResolvedValue([
+      {
+        id: 'child-image',
+        filename: 'child.webp',
+        uploaded: '2026-03-01T00:00:00.000Z',
+        variants: [],
+        tags: [],
+        parentId: 'parent-old',
+      },
+    ]);
+
+    const result = await assignAssetParent('child-image', '');
+
+    const patchCall = vi.mocked(global.fetch).mock.calls[0];
+    const submittedBody = patchCall?.[1]?.body;
+    const parsed = JSON.parse(String(submittedBody));
+
+    expect(parsed.metadata.variationParentId).toBe('');
+    expect(upsertCachedImageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'child-image',
+        parentId: undefined,
+      })
+    );
+    expect(result.parentId).toBeUndefined();
+    expect(result.canonicalParentId).toBeUndefined();
+  });
 });
 
 describe('setAssetParentDirectlyWithAssets', () => {

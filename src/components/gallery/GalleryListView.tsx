@@ -52,6 +52,7 @@ export const GalleryListView: React.FC<GalleryListViewProps> = ({
     selectedImageIds,
     duplicateIds,
     childrenMap,
+    familySummaryMap,
     colorMetadataMap,
     altLoadingMap,
     displayNameLoadingMap,
@@ -74,6 +75,7 @@ export const GalleryListView: React.FC<GalleryListViewProps> = ({
             isDuplicate={duplicateIds.has(image.id)}
             hrefSuffix={galleryReturnHrefSuffix}
             variationChildren={variationChildren}
+            familySummary={familySummaryMap[image.id]}
             colorMetadata={colorMetadataMap[image.id] as ColorMetadata | undefined}
             altLoading={Boolean(altLoadingMap[image.id])}
             displayNameLoading={Boolean(displayNameLoadingMap[image.id])}

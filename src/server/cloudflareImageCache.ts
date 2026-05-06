@@ -173,7 +173,10 @@ const saveMetadataOverrides = async (): Promise<void> => {
   }
 };
 
-const buildMetadataOverride = (image: CachedCloudflareImage): CloudflareMetadata => {
+const buildMetadataOverride = (
+  image: CachedCloudflareImage,
+  options?: { clearParentId?: boolean }
+): CloudflareMetadata => {
   const override: CloudflareMetadata = {};
   const assign = <K extends keyof CloudflareMetadata>(key: K, value: CloudflareMetadata[K]) => {
     if (value !== undefined) {
@@ -194,7 +197,7 @@ const buildMetadataOverride = (image: CachedCloudflareImage): CloudflareMetadata
   assign('generatedBy', image.generatedBy);
   assign('comfyMetadataDetected', image.comfyMetadataDetected);
   assign('comfyMetadataSource', image.comfyMetadataSource);
-  assign('variationParentId', image.parentId);
+  assign('variationParentId', options?.clearParentId ? '' : image.parentId);
   assign('duplicateFamilyOverride', image.duplicateFamilyOverride);
   assign('linkedAssetId', image.linkedAssetId);
   assign('variationSort', image.variationSort);
@@ -210,6 +213,10 @@ const mergeMetadata = (base: CloudflareMetadata, override?: CloudflareMetadata) 
   if (!override) return base;
   const merged = { ...base } as CloudflareMetadata;
   Object.entries(override).forEach(([key, value]) => {
+    if (key === 'variationParentId') {
+      merged.variationParentId = typeof value === 'string' ? value : undefined;
+      return;
+    }
     if (merged[key as keyof CloudflareMetadata] === undefined && value !== undefined) {
       merged[key as keyof CloudflareMetadata] = value as CloudflareMetadata[keyof CloudflareMetadata];
     }
@@ -921,6 +928,10 @@ export const upsertCachedImage = (image: CachedCloudflareImage) => {
   }
   const existing = cacheState.map.get(image.id);
   const mergedImage = mergeCachedImageRecord(existing, image);
+  const shouldPersistClearedParent =
+    Boolean(existing?.parentId) &&
+    Object.prototype.hasOwnProperty.call(image, 'parentId') &&
+    image.parentId === undefined;
 
   cacheState.map.set(mergedImage.id, mergedImage);
   const index = cacheState.images.findIndex(item => item.id === image.id);
@@ -932,7 +943,13 @@ export const upsertCachedImage = (image: CachedCloudflareImage) => {
   cacheState.lastFetched = Date.now();
 
   void loadMetadataOverrides().then(() => {
-    const override = buildMetadataOverride(mergedImage);
+    const existingOverride = metadataOverrides.get(mergedImage.id);
+    const shouldPreserveClearedParent =
+      existingOverride?.variationParentId === '' &&
+      !mergedImage.parentId;
+    const override = buildMetadataOverride(mergedImage, {
+      clearParentId: shouldPersistClearedParent || shouldPreserveClearedParent,
+    });
     if (Object.keys(override).length) {
       metadataOverrides.set(mergedImage.id, override);
       saveMetadataOverrides().catch(() => {});

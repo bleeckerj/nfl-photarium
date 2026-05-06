@@ -16,6 +16,7 @@ import { PageImportControls } from "@/features/page-import/components/PageImport
 import { PageImportQueue } from "@/features/page-import/components/PageImportQueue";
 import type { UploaderQueueItem } from "@/features/page-import/types";
 import { unselectAttemptedQueuedItems } from "@/features/page-import/utils/queueSelection";
+import { uploadFormDataWithRetry } from "@/services/uploadRequestService";
 
 interface UploadedImage {
   id: string;
@@ -1216,48 +1217,23 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
 
       // Helper to upload with retry logic
       const uploadWithRetry = async (
-        formData: FormData, 
-        retryCount = 0
+        formData: FormData
       ): Promise<{ response: Response; result: unknown }> => {
-        const response = await fetch("/api/upload", {
-          method: "POST",
-          body: formData,
+        return uploadFormDataWithRetry("/api/upload", formData, {
+          maxRetries: MAX_RETRIES,
+          retryDelayMs: RETRY_DELAY_MS,
+          rateLimitDelayMs: RATE_LIMIT_DELAY_MS,
         });
-
-        const result = await response.json();
-        
-        // Check for rate limiting or server errors that warrant retry
-        if (!response.ok && retryCount < MAX_RETRIES) {
-          const errorMessage = typeof result?.error === 'string' ? result.error.toLowerCase() : '';
-          const isRateLimit = response.status === 429 || errorMessage.includes('rate limit');
-          const isServerError = response.status >= 500;
-          const isTimeout = errorMessage.includes('timeout');
-          
-          if (isRateLimit || isServerError || isTimeout) {
-            const waitTime = isRateLimit ? RATE_LIMIT_DELAY_MS : RETRY_DELAY_MS;
-            await delay(waitTime);
-            return uploadWithRetry(formData, retryCount + 1);
-          }
-        }
-        
-        return { response, result };
       };
 
       const uploadVideoWithRetry = async (
-        formData: FormData,
-        retryCount = 0
+        formData: FormData
       ): Promise<{ response: Response; result: unknown }> => {
-        const response = await fetch('/api/import/page/upload-video', {
-          method: 'POST',
-          body: formData,
+        return uploadFormDataWithRetry('/api/import/page/upload-video', formData, {
+          maxRetries: MAX_RETRIES,
+          retryDelayMs: RETRY_DELAY_MS,
+          rateLimitDelayMs: RATE_LIMIT_DELAY_MS,
         });
-
-        const result = await response.json();
-        if (!response.ok && retryCount < MAX_RETRIES && response.status >= 500) {
-          await delay(RETRY_DELAY_MS);
-          return uploadVideoWithRetry(formData, retryCount + 1);
-        }
-        return { response, result };
       };
 
       // Create initial entries for all files
@@ -1517,9 +1493,12 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
           }
         } catch (uploadError) {
           console.error("Upload error:", uploadError);
+          const errorMessage = uploadError instanceof Error && uploadError.message
+            ? uploadError.message
+            : "Network error";
           setUploadedImages((prev) =>
             prev.map((img) =>
-              img.id === imageId ? { ...img, status: "error", error: "Network error" } : img
+              img.id === imageId ? { ...img, status: "error", error: errorMessage } : img
             )
           );
         }

@@ -7,7 +7,13 @@
 
 import { EXCLUDE_CLIP_TAG, EXCLUDE_COLOR_TAG, EXCLUDE_ALL_SEARCH_TAG } from '@/utils/searchExclusion';
 import { getUserVisibleTags } from '@/utils/systemTags';
-import type { CloudflareImage, DuplicateGroup, DuplicateReason, SelectOption } from './types';
+import type {
+  CloudflareImage,
+  DuplicateGroup,
+  DuplicateReason,
+  GalleryFamilySummary,
+  SelectOption,
+} from './types';
 
 /**
  * Check if an image has any search exclusion tags
@@ -72,6 +78,8 @@ export const truncateMiddle = (value: string, max = 64): string => {
   return `${value.slice(0, head)}…${value.slice(value.length - tail)}`;
 };
 
+export const formatShortAssetId = (value: string): string => value.slice(0, 8);
+
 /**
  * Check if an image is an SVG
  */
@@ -123,6 +131,31 @@ export const buildChildrenMap = (images: CloudflareImage[]): Record<string, Clou
     }
   });
   return map;
+};
+
+export const buildFamilySummaryMap = (images: CloudflareImage[]): Record<string, GalleryFamilySummary> => {
+  const byId = new Map(images.map(image => [image.id, image]));
+  const childrenMap = buildChildrenMap(images);
+  const summaries: Record<string, GalleryFamilySummary> = {};
+
+  images.forEach((image) => {
+    const parentId = image.parentId || undefined;
+    const rootId = parentId || image.id;
+    const childIds = (childrenMap[rootId] || []).map(child => child.id);
+    const parent = parentId ? byId.get(parentId) : undefined;
+
+    summaries[image.id] = {
+      imageId: image.id,
+      rootId,
+      parentId,
+      parentAssetType: parent?.assetType,
+      isVariant: Boolean(parentId),
+      variantCount: childIds.length,
+      childIds,
+    };
+  });
+
+  return summaries;
 };
 
 /**

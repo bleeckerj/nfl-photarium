@@ -4,6 +4,7 @@ import type { AspectRatioClass, DateFilter, EmbeddingFilter } from './types';
 
 export const GALLERY_RETURN_STATE_KEY = 'galleryReturnStateV1';
 export const GALLERY_RETURN_SNAPSHOT_KEY = 'galleryReturnSnapshotV1';
+export const DETAIL_ASSET_SEED_KEY = 'detailAssetSeedV1';
 export const GALLERY_RETURN_TTL_MS = 10 * 60 * 1000;
 export const GALLERY_RETURN_STATE_VERSION = 2;
 
@@ -56,6 +57,18 @@ type GalleryReturnStateLegacy = {
   selectedImageId?: string;
   resultIds?: string[];
   resultAssets?: GalleryReturnResultAsset[];
+};
+
+type DetailAssetSeedState = {
+  savedAt?: number;
+  namespace?: string;
+  asset?: unknown;
+};
+
+export type DetailAssetSeed<TAsset extends { id: string } = { id: string }> = {
+  savedAt: number;
+  namespace: string;
+  asset: TAsset;
 };
 
 export type NormalizedGalleryReturnState = {
@@ -229,4 +242,78 @@ export const saveGalleryReturnState = (
 export const clearGalleryReturnState = (): void => {
   if (typeof window === 'undefined') return;
   window.sessionStorage.removeItem(GALLERY_RETURN_STATE_KEY);
+};
+
+const isSeedAssetRecord = (value: unknown): value is Record<string, unknown> & { id: string } => {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.id === 'string' && record.id.length > 0;
+};
+
+const parseRawDetailAssetSeed = (): DetailAssetSeedState | null => {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const raw = window.sessionStorage.getItem(DETAIL_ASSET_SEED_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed as DetailAssetSeedState;
+  } catch {
+    return null;
+  }
+};
+
+export const saveDetailAssetSeed = <TAsset extends { id: string; assetType?: AssetType }>(
+  asset: TAsset,
+  namespace: string,
+  savedAt = Date.now()
+): void => {
+  if (typeof window === 'undefined') return;
+  window.sessionStorage.setItem(
+    DETAIL_ASSET_SEED_KEY,
+    JSON.stringify({
+      savedAt,
+      namespace,
+      asset,
+    } satisfies DetailAssetSeedState)
+  );
+};
+
+export const getFreshDetailAssetSeed = <TAsset extends { id: string } = { id: string }>(options: {
+  id?: string | null;
+  assetType?: AssetType;
+  namespace?: string;
+  now?: number;
+}): DetailAssetSeed<TAsset> | null => {
+  const parsed = parseRawDetailAssetSeed();
+  if (!parsed) return null;
+
+  const savedAt = typeof parsed.savedAt === 'number' ? parsed.savedAt : 0;
+  const now = options.now ?? Date.now();
+  const freshEnough = !savedAt || now - savedAt < GALLERY_RETURN_TTL_MS;
+  if (!freshEnough) return null;
+
+  const namespace = typeof parsed.namespace === 'string' ? parsed.namespace : '';
+  if (typeof options.namespace === 'string' && namespace !== options.namespace) {
+    return null;
+  }
+
+  if (!isSeedAssetRecord(parsed.asset)) return null;
+  if (options.id && parsed.asset.id !== options.id) return null;
+  if (options.assetType) {
+    const actualType = parsed.asset.assetType === 'video' ? 'video' : 'image';
+    if (actualType !== options.assetType) return null;
+  }
+
+  return {
+    savedAt,
+    namespace,
+    asset: parsed.asset as TAsset,
+  };
+};
+
+export const clearDetailAssetSeed = (): void => {
+  if (typeof window === 'undefined') return;
+  window.sessionStorage.removeItem(DETAIL_ASSET_SEED_KEY);
 };

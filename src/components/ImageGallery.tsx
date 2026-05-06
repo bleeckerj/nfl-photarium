@@ -6,7 +6,7 @@ import MonoSelect from './MonoSelect';
 import GalleryCommandBar from './GalleryCommandBar';
 import FolderManagerButton from './FolderManagerButton';
 import { GalleryFilters } from './gallery/GalleryFilters';
-import { type DateFilter, type EmbeddingFilter, type GridSize } from './gallery/types';
+import { type AspectRatioClass, type DateFilter, type EmbeddingFilter, type GalleryFamilySummary, type GridSize } from './gallery/types';
 import { getMultipleImageUrls, IMAGE_VARIANTS } from '@/utils/imageUtils';
 import { setDragPayloadForImage } from '@/utils/imageDrag';
 import { copyToClipboard, formatCopyPayload } from '@/utils/clipboard';
@@ -36,6 +36,7 @@ import {
   getFreshGalleryReturnState,
   GALLERY_RETURN_SNAPSHOT_KEY,
   GALLERY_RETURN_TTL_MS,
+  saveDetailAssetSeed,
   saveGalleryReturnState as persistGalleryReturnState,
   type NormalizedGalleryReturnState,
 } from './gallery/returnState';
@@ -150,18 +151,57 @@ type VideoMetaState = {
   truncated: boolean;
 } | null;
 
+type GalleryServerPagination = {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
+
+type GalleryServerFacets = {
+  folders: Array<{ value: string; count: number }>;
+  tags: Array<{ value: string; count: number }>;
+};
+
+type GalleryDuplicateSummary = {
+  groupCount: number;
+  imageCount: number;
+  pageDuplicateIds: string[];
+};
+
+type GalleryServerQueryState = {
+  page: number;
+  pageSize: number;
+  search: string;
+  folder: string;
+  tag: string;
+  onlyCanonical: boolean;
+  onlyWithVariants: boolean;
+  favorites: boolean;
+  duplicates: boolean;
+  comfy: boolean;
+  embedding: EmbeddingFilter;
+  aspectRatioFilters: AspectRatioClass[];
+  dateFilter: DateFilter | null;
+  hiddenFolders: string[];
+  hiddenTags: string[];
+  showMotionAssetsOnly: boolean;
+};
+
 export const buildGalleryImagesUrl = ({
   forceRefresh = false,
   namespace,
   videoLimitOverride,
   includeExtrasForGallery = false,
   showMotionAssetsOnly = false,
+  serverQuery,
 }: {
   forceRefresh?: boolean;
   namespace?: string;
   videoLimitOverride?: number | null;
   includeExtrasForGallery?: boolean;
   showMotionAssetsOnly?: boolean;
+  serverQuery?: GalleryServerQueryState;
 }) => {
   const params = new URLSearchParams();
   if (forceRefresh) {
@@ -183,8 +223,26 @@ export const buildGalleryImagesUrl = ({
   if (showMotionAssetsOnly) {
     params.set('mediaFilter', 'animated');
   }
-  const query = params.toString();
-  return query ? `/api/images?${query}` : '/api/images';
+  if (serverQuery) {
+    params.set('page', String(serverQuery.page));
+    params.set('pageSize', String(serverQuery.pageSize));
+    if (serverQuery.search.trim()) params.set('search', serverQuery.search.trim());
+    if (serverQuery.folder && serverQuery.folder !== 'all') params.set('folder', serverQuery.folder);
+    if (serverQuery.tag) params.set('tag', serverQuery.tag);
+    if (serverQuery.onlyCanonical) params.set('onlyCanonical', '1');
+    if (serverQuery.onlyWithVariants) params.set('onlyWithVariants', '1');
+    if (serverQuery.favorites) params.set('favorites', '1');
+    if (serverQuery.duplicates) params.set('duplicates', '1');
+    if (serverQuery.comfy) params.set('comfy', '1');
+    if (serverQuery.embedding !== 'none') params.set('embedding', serverQuery.embedding);
+    if (serverQuery.aspectRatioFilters.length) params.set('aspectRatioClasses', serverQuery.aspectRatioFilters.join(','));
+    if (serverQuery.dateFilter?.startDate) params.set('dateStart', serverQuery.dateFilter.startDate);
+    if (serverQuery.dateFilter?.endDate) params.set('dateEnd', serverQuery.dateFilter.endDate);
+    if (serverQuery.hiddenFolders.length) params.set('hiddenFolders', serverQuery.hiddenFolders.join(','));
+    if (serverQuery.hiddenTags.length) params.set('hiddenTags', serverQuery.hiddenTags.join(','));
+  }
+  const queryString = params.toString();
+  return queryString ? `/api/images?${queryString}` : '/api/images';
 };
 
 let galleryWarmCache: GalleryWarmCacheState | null = null;
@@ -611,6 +669,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     isLikelySourceSearchTerm(storedPreferencesRef.current.searchTerm ?? '')
   );
   const [videoMeta, setVideoMeta] = useState<VideoMetaState>(null);
+  const [serverPagination, setServerPagination] = useState<GalleryServerPagination | null>(null);
+  const [serverFacets, setServerFacets] = useState<GalleryServerFacets | null>(null);
+  const [serverFamilySummaryMap, setServerFamilySummaryMap] = useState<Record<string, GalleryFamilySummary>>({});
+  const [serverDuplicateSummary, setServerDuplicateSummary] = useState<GalleryDuplicateSummary | null>(null);
   const [videoResultsNotice, setVideoResultsNotice] = useState<string | null>(null);
   const [colorSearchHex, setColorSearchHex] = useState<string | null>(
     normalizeColorSearchHex(storedPreferencesRef.current.colorSearchHex ?? null)
@@ -812,6 +874,25 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const initialLoadLoggedRef = useRef(false);
   const videoAutoExpandPageRef = useRef<number | null>(null);
   const showMotionAssetsOnlyRef = useRef(storedPreferencesRef.current.showMotionAssetsOnly ?? false);
+  const galleryServerQueryRef = useRef<GalleryServerQueryState>({
+    page: storedPreferencesRef.current.currentPage ?? 1,
+    pageSize: storedPreferencesRef.current.pageSize ?? DEFAULT_PAGE_SIZE,
+    search: storedPreferencesRef.current.searchTerm ?? '',
+    folder: storedPreferencesRef.current.selectedFolder ?? 'all',
+    tag: storedPreferencesRef.current.selectedTag ?? '',
+    onlyCanonical: storedPreferencesRef.current.onlyCanonical,
+    onlyWithVariants: storedPreferencesRef.current.onlyWithVariants,
+    favorites: storedPreferencesRef.current.showFavoritesOnly ?? false,
+    duplicates: storedPreferencesRef.current.showDuplicatesOnly ?? false,
+    comfy: storedPreferencesRef.current.showComfyOnly ?? false,
+    embedding: storedPreferencesRef.current.embeddingFilter ?? 'none',
+    aspectRatioFilters: storedPreferencesRef.current.aspectRatioFilters ?? [],
+    dateFilter: storedPreferencesRef.current.dateFilter ?? null,
+    hiddenFolders: storedPreferencesRef.current.hiddenFolders ?? [],
+    hiddenTags: storedPreferencesRef.current.hiddenTags ?? [],
+    showMotionAssetsOnly: storedPreferencesRef.current.showMotionAssetsOnly ?? false,
+  });
+  const didInitServerQueryFetchRef = useRef(false);
   const PERF_LOGGING_ENABLED = process.env.NODE_ENV !== 'production';
 
   const scrollToUploader = useCallback(() => {
@@ -890,6 +971,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         videoLimitOverride,
         includeExtrasForGallery,
         showMotionAssetsOnly: showMotionAssetsOnlyRef.current,
+        serverQuery: galleryServerQueryRef.current,
       });
       const response = await fetch(url, { signal: controller.signal });
       const data = await response.json();
@@ -903,6 +985,24 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           return true;
         });
         setImages(uniqueImages);
+        const nextPagination = data?.pagination;
+        setServerPagination(
+          nextPagination &&
+            typeof nextPagination.page === 'number' &&
+            typeof nextPagination.pageSize === 'number' &&
+            typeof nextPagination.total === 'number' &&
+            typeof nextPagination.totalPages === 'number'
+            ? {
+                page: nextPagination.page,
+                pageSize: nextPagination.pageSize,
+                total: nextPagination.total,
+                totalPages: nextPagination.totalPages,
+              }
+            : null
+        );
+        setServerFacets(data?.facets && typeof data.facets === 'object' ? data.facets : null);
+        setServerFamilySummaryMap(data?.familySummaryMap && typeof data.familySummaryMap === 'object' ? data.familySummaryMap : {});
+        setServerDuplicateSummary(data?.duplicateSummary && typeof data.duplicateSummary === 'object' ? data.duplicateSummary : null);
         const responseVideoMeta = data?.videoMeta as
           | { truncated?: boolean; returned?: number; totalScoped?: number; limit?: number; enabled?: boolean }
           | undefined;
@@ -936,7 +1036,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           const serverTiming = response.headers.get('server-timing') ?? 'n/a';
           const stageTiming = data?.timings ? JSON.stringify(data.timings) : '{}';
           console.info(
-            `[GalleryPerf] /api/images ${Math.round(elapsedMs)}ms (silent=${silent}, refresh=${forceRefresh}, count=${uniqueImages.length}) server_timing=${serverTiming} stages=${stageTiming}`
+            `[GalleryPerf] /api/images ${Math.round(elapsedMs)}ms (silent=${silent}, refresh=${forceRefresh}, count=${uniqueImages.length}, total=${data?.pagination?.total ?? uniqueImages.length}) server_timing=${serverTiming} stages=${stageTiming}`
           );
         }
         if (syncNamespaces || forceRefresh) {
@@ -962,9 +1062,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     if (!PERF_LOGGING_ENABLED) return;
     const elapsedMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - initialLoadStartedAtRef.current;
     console.info(
-      `[GalleryPerf] initial_render ${Math.round(elapsedMs)}ms (images=${images.length}, returningFromDetail=${returningFromDetailRef.current})`
+      `[GalleryPerf] initial_render ${Math.round(elapsedMs)}ms (images=${images.length}, total=${serverPagination?.total ?? images.length}, returningFromDetail=${returningFromDetailRef.current})`
     );
-  }, [images.length, loading, PERF_LOGGING_ENABLED]);
+  }, [images.length, loading, PERF_LOGGING_ENABLED, serverPagination]);
 
   const handleFoldersChanged = async () => {
     await fetchImages({ silent: true });
@@ -1022,21 +1122,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     }
     if (deferInitialFetchRef.current) {
       deferInitialFetchRef.current = false;
-      const useIdleCallback = typeof window !== 'undefined' && 'requestIdleCallback' in window;
-      const scheduled = useIdleCallback
-        ? window.requestIdleCallback(() => {
-            fetchImages({ silent: true });
-          })
-        : window.setTimeout(() => {
-            fetchImages({ silent: true });
-          }, 250);
-      return () => {
-        if (useIdleCallback && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
-          window.cancelIdleCallback(scheduled);
-        } else {
-          window.clearTimeout(scheduled as number);
-        }
-      };
+      if (PERF_LOGGING_ENABLED) {
+        console.info('[GalleryPerf] skipped_return_fetch using restored snapshot');
+      }
+      return;
     }
     const shouldSilentFetch = initialSilentFetchRef.current;
     initialSilentFetchRef.current = false;
@@ -1393,6 +1482,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     duplicateGroups,
     duplicateIds,
     childrenMap,
+    familySummaryMap,
     hasActiveFilters,
     clearFilters,
     currentPage,
@@ -1416,6 +1506,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     scrollGalleryToTop,
   } = useGalleryFilters({
     images: galleryImages,
+    familySourceImages: imagesWithPrompts,
+    serverPagination: colorSearchHex ? null : serverPagination,
+    serverFamilySummaryMap: colorSearchHex ? undefined : serverFamilySummaryMap,
+    serverDuplicateIds: colorSearchHex ? undefined : serverDuplicateSummary?.pageDuplicateIds,
     initialPreferences: {
       selectedFolder: storedPreferencesRef.current.selectedFolder ?? 'all',
       selectedTag: storedPreferencesRef.current.selectedTag ?? '',
@@ -1466,18 +1560,65 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     setIncludeExtrasForGallery(shouldIncludeExtrasForSearch);
   }, [includeExtrasForGallery, shouldIncludeExtrasForSearch]);
 
+  const serverGalleryQuery = useMemo<GalleryServerQueryState>(
+    () => ({
+      page: currentPage,
+      pageSize,
+      search: searchTerm,
+      folder: selectedFolder,
+      tag: selectedTag,
+      onlyCanonical,
+      onlyWithVariants,
+      favorites: showFavoritesOnly,
+      duplicates: showDuplicatesOnly,
+      comfy: showComfyOnly,
+      embedding: embeddingFilter,
+      aspectRatioFilters,
+      dateFilter,
+      hiddenFolders,
+      hiddenTags,
+      showMotionAssetsOnly,
+    }),
+    [
+      aspectRatioFilters,
+      currentPage,
+      dateFilter,
+      embeddingFilter,
+      hiddenFolders,
+      hiddenTags,
+      onlyCanonical,
+      onlyWithVariants,
+      pageSize,
+      searchTerm,
+      selectedFolder,
+      selectedTag,
+      showComfyOnly,
+      showDuplicatesOnly,
+      showFavoritesOnly,
+      showMotionAssetsOnly,
+    ]
+  );
+  const serverGalleryQueryKey = useMemo(() => JSON.stringify(serverGalleryQuery), [serverGalleryQuery]);
+
   useEffect(() => {
-    if (showMotionAssetsOnlyRef.current === showMotionAssetsOnly) return;
-    showMotionAssetsOnlyRef.current = showMotionAssetsOnly;
+    galleryServerQueryRef.current = serverGalleryQuery;
+    showMotionAssetsOnlyRef.current = serverGalleryQuery.showMotionAssetsOnly;
+    if (!didInitServerQueryFetchRef.current) {
+      didInitServerQueryFetchRef.current = true;
+      return;
+    }
     void fetchImages({ silent: true });
-  }, [showMotionAssetsOnly, fetchImages]);
+  }, [fetchImages, serverGalleryQueryKey, serverGalleryQuery]);
 
   const uniqueFolders = useMemo(() => {
+    if (serverFacets?.folders) {
+      return serverFacets.folders.map((entry) => entry.value);
+    }
     const folderNames = images
       .map(img => img.folder?.trim())
       .filter((folder): folder is string => Boolean(folder));
     return Array.from(new Set(folderNames)).sort((a, b) => a.localeCompare(b));
-  }, [images]);
+  }, [images, serverFacets]);
   const visibleFolders = useMemo(
     () => uniqueFolders.filter(folder => !hiddenFolders.includes(folder)),
     [uniqueFolders, hiddenFolders]
@@ -1486,15 +1627,19 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const saveGalleryReturnState = useCallback((imageId: string) => {
     if (typeof window === 'undefined') return;
     try {
-      const resultIds = filteredImages.map((img) => img.id);
+      const resultIds = pageImages.map((img) => img.id);
       const savedAt = Date.now();
+      const selectedAsset = filteredImages.find((img) => img.id === imageId) ?? pageImages.find((img) => img.id === imageId);
+      if (selectedAsset) {
+        saveDetailAssetSeed(selectedAsset, namespace ?? '', savedAt);
+      }
       persistGalleryReturnState({
         scrollY: window.scrollY,
         namespace: namespace ?? '',
         savedAt,
         selectedImageId: imageId,
         resultIds,
-        resultAssets: filteredImages.map((img) => ({
+        resultAssets: pageImages.map((img) => ({
           id: img.id,
           assetType: img.assetType === 'video' ? 'video' : 'image',
         })),
@@ -1970,15 +2115,18 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     setBulkEditOpen(false);
   }, [setBulkEditOpen]);
 
-  const duplicateGroupCount = duplicateGroups.length;
-  const duplicateImageCount = duplicateIds.size;
+  const duplicateGroupCount = serverDuplicateSummary?.groupCount ?? duplicateGroups.length;
+  const duplicateImageCount = serverDuplicateSummary?.imageCount ?? duplicateIds.size;
 
   const uniqueTags = useMemo(() => {
+    if (serverFacets?.tags) {
+      return serverFacets.tags.map((entry) => entry.value);
+    }
     const tags = Array.from(
       new Set(images.flatMap(img => getUserVisibleTags(img.tags)))
     );
     return tags.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-  }, [images]);
+  }, [images, serverFacets]);
 
   const showLastUploaded = useCallback(() => {
     if (!sortedImages.length) {
@@ -2116,6 +2264,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     selectedImageIds,
     duplicateIds,
     childrenMap,
+    familySummaryMap,
     colorMetadataMap,
     embeddingPendingMap,
     altLoadingMap,
@@ -2132,6 +2281,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     selectedImageIds,
     duplicateIds,
     childrenMap,
+    familySummaryMap,
     colorMetadataMap,
     embeddingPendingMap,
     altLoadingMap,
@@ -2210,6 +2360,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const backupAgeLabel = backupAgeDays !== null ? `${backupAgeDays.toFixed(1)}d old` : '—';
   const backupTimeLabel = backupInfo ? backupInfo.date.toLocaleString() : '—';
   const backupSizeLabel = backupInfo ? backupInfo.sizeHuman : '—';
+  const serverPagedResultCount = colorSearchHex ? null : serverPagination?.total ?? null;
+  const galleryResultCount = serverPagedResultCount ?? filteredWithVariants.length;
+  const galleryTotalCount = serverPagedResultCount ?? images.length;
 
   if (loading) {
     return (
@@ -2233,8 +2386,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         className="sticky top-0 z-[3000] -m-6 mb-6 overflow-visible rounded-t-lg border-b border-gray-100 bg-white/95 backdrop-blur"
       >
         <GalleryCompactHeader
-          filteredCount={filteredWithVariants.length}
-          totalCount={images.length}
+          filteredCount={galleryResultCount}
+          totalCount={galleryTotalCount}
           pageIndex={pageIndex}
           totalPages={totalPages}
           namespaceLabel={namespaceLabel}
@@ -2301,7 +2454,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             <span className="text-red-700">Search failed: {colorSearchError}</span>
           )}
           {!colorSearchLoading && !colorSearchError && (
-            <span>{filteredWithVariants.length.toLocaleString()} result{filteredWithVariants.length === 1 ? '' : 's'}</span>
+            <span>{galleryResultCount.toLocaleString()} result{galleryResultCount === 1 ? '' : 's'}</span>
           )}
           <button
             type="button"
@@ -2341,8 +2494,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             onAvailabilityChange={setSemanticSearchAvailable}
           />
           <LegacyTopBar
-            filteredCount={filteredWithVariants.length}
-            totalCount={images.length}
+            filteredCount={galleryResultCount}
+            totalCount={galleryTotalCount}
             namespaceLabel={namespaceLabel}
             namespace={namespace}
             showPagination={showPagination}
@@ -2647,16 +2800,16 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             </svg>
           </div>
           <p className="text-gray-500">
-            {images.length === 0 ? 'No images uploaded yet' : 'No images match your filters'}
+            {galleryTotalCount === 0 ? 'No images uploaded yet' : 'No images match your filters'}
           </p>
           <p className="text-[0.7em] font-mono text-gray-400">
-            {images.length === 0
+            {galleryTotalCount === 0
               ? 'Upload some images to see them here'
               : colorSearchHex
                 ? 'Try a different swatch or clear the active color search'
                 : 'Try adjusting your search or filters'}
           </p>
-          {images.length > 0 && (hasActiveFilters || Boolean(colorSearchHex)) && (
+          {galleryTotalCount > 0 && (hasActiveFilters || Boolean(colorSearchHex)) && (
             <button
               onClick={handleClearFilters}
               className="mt-3 px-3 py-1 text-[0.7em] font-mono border border-gray-200 rounded-md hover:bg-gray-100 transition"

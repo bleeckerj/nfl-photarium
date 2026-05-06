@@ -258,50 +258,76 @@ export async function GET(
       return NextResponse.json({ error: 'Image ID is required' }, { status: 400 });
     }
 
+    const forceRefresh = request.nextUrl.searchParams.get('refresh') === '1';
+    const includeVectorMeta = request.nextUrl.searchParams.get('includeVectorMeta') === '1';
+    const includeBlockingEnrichment = request.nextUrl.searchParams.get('enrich') === '1';
     let baseImage: CachedCloudflareImage | undefined;
     let shouldPersistResponseImage = false;
 
-    const cloudflareStartedAt = performance.now();
-    try {
-      const image = await fetchCloudflareImage(imageId);
-      timings.cloudflare_fetch = mark(performance.now() - cloudflareStartedAt);
-      diagnostics.source = 'cloudflare';
-      baseImage = transformApiImageToCached(image);
-      shouldPersistResponseImage = true;
-    } catch (error) {
-      timings.cloudflare_fetch = mark(performance.now() - cloudflareStartedAt);
-      diagnostics.cloudflare_error = error instanceof Error ? error.message : String(error);
-
+    if (!forceRefresh) {
       const cacheStartedAt = performance.now();
-      const cached = await getCachedImage(imageId);
+      baseImage = await getCachedImage(imageId);
       timings.cache_lookup = mark(performance.now() - cacheStartedAt);
-
-      if (!cached) {
-        throw error;
+      if (baseImage) {
+        diagnostics.source = 'cache';
       }
+    }
 
-      diagnostics.source = 'cache';
-      diagnostics.cloudflare_fallback = true;
-      baseImage = cached;
+    if (!baseImage || forceRefresh) {
+      const cloudflareStartedAt = performance.now();
+      try {
+        const image = await fetchCloudflareImage(imageId);
+        timings.cloudflare_fetch = mark(performance.now() - cloudflareStartedAt);
+        diagnostics.source = 'cloudflare';
+        diagnostics.refresh = forceRefresh;
+        baseImage = transformApiImageToCached(image);
+        shouldPersistResponseImage = true;
+      } catch (error) {
+        timings.cloudflare_fetch = mark(performance.now() - cloudflareStartedAt);
+        diagnostics.cloudflare_error = error instanceof Error ? error.message : String(error);
+
+        if (forceRefresh) {
+          const cacheStartedAt = performance.now();
+          const cached = await getCachedImage(imageId);
+          timings.cache_lookup = mark(performance.now() - cacheStartedAt);
+          if (cached) {
+            diagnostics.source = 'cache';
+            diagnostics.cloudflare_fallback = true;
+            baseImage = cached;
+          }
+        }
+
+        if (!baseImage) {
+          throw error;
+        }
+      }
     }
 
     let responseImage = baseImage;
-    const animatedProbeStartedAt = performance.now();
-    responseImage = await enrichAnimatedState(responseImage);
-    timings.animated_probe = mark(performance.now() - animatedProbeStartedAt);
-    if (responseImage !== baseImage) {
-      shouldPersistResponseImage = true;
-    }
-
-    try {
-      const vectorStartedAt = performance.now();
-      responseImage = await enrichWithVectorMetadata(responseImage);
-      timings.vector_enrich = mark(performance.now() - vectorStartedAt);
+    if (includeBlockingEnrichment || forceRefresh) {
+      const animatedProbeStartedAt = performance.now();
+      responseImage = await enrichAnimatedState(responseImage);
+      timings.animated_probe = mark(performance.now() - animatedProbeStartedAt);
       if (responseImage !== baseImage) {
         shouldPersistResponseImage = true;
       }
-    } catch (error) {
-      console.warn('[SingleImage] Vector metadata enrichment failed:', { imageId, error });
+    } else {
+      diagnostics.animated_probe_deferred = shouldProbeAnimatedState(responseImage);
+    }
+
+    if (includeVectorMeta || includeBlockingEnrichment) {
+      try {
+        const vectorStartedAt = performance.now();
+        responseImage = await enrichWithVectorMetadata(responseImage);
+        timings.vector_enrich = mark(performance.now() - vectorStartedAt);
+        if (responseImage !== baseImage) {
+          shouldPersistResponseImage = true;
+        }
+      } catch (error) {
+        console.warn('[SingleImage] Vector metadata enrichment failed:', { imageId, error });
+      }
+    } else {
+      diagnostics.vector_enrich_deferred = true;
     }
 
     diagnostics.had_known_size = typeof readKnownSize(responseImage) === 'number';

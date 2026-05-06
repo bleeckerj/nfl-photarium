@@ -373,7 +373,7 @@ export const GalleryFilters: React.FC<GalleryFiltersProps> = ({
             className="rounded"
           />
           <span className="text-[0.65em] font-mono text-gray-700">
-            Variations Only
+            Parents With Variants
           </span>
         </label>
 

@@ -80,6 +80,7 @@ import {
   mergeUserTagsPreservingSystemTags,
 } from '@/utils/systemTags';
 import {
+  getFreshDetailAssetSeed,
   getFreshGalleryReturnState,
   hasFreshGalleryReturnState,
 } from '@/components/gallery/returnState';
@@ -249,6 +250,24 @@ const mergeUniqueImagesById = (base: CloudflareImage[], incoming: CloudflareImag
   return Array.from(merged.values());
 };
 
+const mergeFamilyContextImages = (
+  base: CloudflareImage[],
+  incoming: CloudflareImage[],
+  familyRootId?: string
+) => {
+  if (!familyRootId) {
+    return mergeUniqueImagesById(base, incoming);
+  }
+
+  const incomingIds = new Set(incoming.map((entry) => entry.id));
+  const pruned = base.filter((entry) => {
+    const isKnownFamilyMember = entry.id === familyRootId || entry.parentId === familyRootId;
+    return !isKnownFamilyMember || incomingIds.has(entry.id);
+  });
+
+  return mergeUniqueImagesById(pruned, incoming);
+};
+
 const sortFamilyMembers = (items: CloudflareImage[]) => {
   const hasSort = items.some((item) => Number.isFinite(item.variationSort));
   if (!hasSort) {
@@ -310,6 +329,7 @@ export default function ImageDetailPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const detailNavigationStartedAtRef = useRef(getNow());
   const rawId = params?.id;
   const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const galleryPageParam = searchParams.get('gpage');
@@ -331,8 +351,16 @@ export default function ImageDetailPage() {
     return serialized ? `?${serialized}` : '';
   }, [galleryColorParam, galleryNamespaceParam, galleryPageParam, hasGalleryNamespaceParam]);
 
-  const [image, setImage] = useState<CloudflareImage | null>(null);
-  const [loading, setLoading] = useState(true);
+  const initialDetailSeedRef = useRef(
+    getFreshDetailAssetSeed<CloudflareImage>({
+      id,
+      assetType: 'image',
+      namespace: galleryNamespaceParam,
+    })?.asset ?? null
+  );
+  const seededInputAppliedRef = useRef(false);
+  const [image, setImage] = useState<CloudflareImage | null>(initialDetailSeedRef.current);
+  const [loading, setLoading] = useState(!initialDetailSeedRef.current);
   const [familyLoaded, setFamilyLoaded] = useState(false);
   const toast = useToast();
   const [galleryResultIds, setGalleryResultIds] = useState<string[]>([]);
@@ -358,7 +386,9 @@ export default function ImageDetailPage() {
     router.push('/');
   }, [galleryColorParam, galleryNamespaceParam, galleryPageParam, router]);
 
-  const [allImages, setAllImages] = useState<CloudflareImage[]>([]);
+  const [allImages, setAllImages] = useState<CloudflareImage[]>(
+    initialDetailSeedRef.current ? [initialDetailSeedRef.current] : []
+  );
   const [fallbackParentImage, setFallbackParentImage] = useState<CloudflareImage | null>(null);
   const [reassignParentId, setReassignParentId] = useState('');
   const [adoptImageId, setAdoptImageId] = useState('');
@@ -429,6 +459,7 @@ export default function ImageDetailPage() {
   const [rotatedAsset, setRotatedAsset] = useState<{ id: string; url: string; info?: string } | null>(null);
   const draftAppliedRef = useRef<string | null>(null);
   const candidatePoolLoadedRef = useRef(false);
+  const candidatePoolRequestedRef = useRef(false);
 
   const [semanticSearchAllNamespaces, setSemanticSearchAllNamespaces] = useState(false);
 
@@ -495,9 +526,9 @@ export default function ImageDetailPage() {
     }
   }, [extrasRecord]);
 
-  const mergeContextImages = useCallback((imagesData: CloudflareImage[]) => {
+  const mergeContextImages = useCallback((imagesData: CloudflareImage[], familyRootId?: string) => {
     setAllImages((prev) => {
-      const nextImages = mergeUniqueImagesById(prev, imagesData);
+      const nextImages = mergeFamilyContextImages(prev, imagesData, familyRootId);
       const folders = Array.from(
         new Set(
           nextImages
@@ -509,6 +540,43 @@ export default function ImageDetailPage() {
       return nextImages;
     });
   }, []);
+
+  useEffect(() => {
+    const seed = getFreshDetailAssetSeed<CloudflareImage>({
+      id,
+      assetType: 'image',
+      namespace: galleryNamespaceParam,
+    })?.asset ?? null;
+    initialDetailSeedRef.current = seed;
+    seededInputAppliedRef.current = false;
+    detailNavigationStartedAtRef.current = getNow();
+    setLoading(!seed);
+    setFamilyLoaded(false);
+    setImage(seed);
+    setAllImages(seed ? [seed] : []);
+    setUniqueFolders(seed?.folder ? [seed.folder] : []);
+    setFallbackParentImage(null);
+    candidatePoolLoadedRef.current = false;
+    candidatePoolRequestedRef.current = false;
+    if (seed) {
+      logDetailPerf('seed:loaded', detailNavigationStartedAtRef.current, {
+        imageId: seed.id,
+        namespace: seed.namespace ?? null,
+      });
+    }
+  }, [galleryNamespaceParam, id]);
+
+  useEffect(() => {
+    const seed = initialDetailSeedRef.current;
+    if (!seed || seededInputAppliedRef.current) return;
+    seededInputAppliedRef.current = true;
+    syncImageState(seed);
+    mergeContextImages([seed]);
+    setLoading(false);
+    logDetailPerf('seed:applied', detailNavigationStartedAtRef.current, {
+      imageId: seed.id,
+    });
+  }, [mergeContextImages, syncImageState]);
 
 
   const generateEmbeddings = useCallback(async () => {
@@ -590,16 +658,6 @@ export default function ImageDetailPage() {
   }, [image?.id, image?.parentId]);
 
   useEffect(() => {
-    setLoading(true);
-    setFamilyLoaded(false);
-    setImage(null);
-    setAllImages([]);
-    setUniqueFolders([]);
-    setFallbackParentImage(null);
-    candidatePoolLoadedRef.current = false;
-  }, [id]);
-
-  useEffect(() => {
     if (typeof window === 'undefined') return;
     const stored = window.localStorage.getItem('imageNamespace');
     const envDefault = process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || '';
@@ -663,7 +721,9 @@ export default function ImageDetailPage() {
           ...(Array.isArray(familyData?.familyAssets) ? familyData.familyAssets : []),
           ...(Array.isArray(familyData?.candidateAssets) ? familyData.candidateAssets : []),
         ] as CloudflareImage[];
-        mergeContextImages(incoming);
+        const familyRootId =
+          typeof familyData?.familyRootId === 'string' ? familyData.familyRootId : undefined;
+        mergeContextImages(incoming, familyRootId);
         if (Array.isArray(familyData?.candidateAssets)) {
           candidatePoolLoadedRef.current = true;
         }
@@ -679,6 +739,41 @@ export default function ImageDetailPage() {
       console.error('Failed to refresh images', error);
     }
   }, [buildFamilyContextUrl, id, mergeContextImages, syncImageState]);
+
+  const fetchCandidatePool = useCallback(async () => {
+    if (!id || candidatePoolLoadedRef.current || candidatePoolRequestedRef.current) {
+      return;
+    }
+
+    candidatePoolRequestedRef.current = true;
+    const startedAt = getNow();
+    try {
+      const response = await fetch(buildFamilyContextUrl({ includeCandidates: true }));
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(typeof data?.error === 'string' ? data.error : 'Failed to fetch candidate assets');
+      }
+
+      const incoming = [
+        ...(Array.isArray(data?.familyAssets) ? data.familyAssets : []),
+        ...(Array.isArray(data?.candidateAssets) ? data.candidateAssets : []),
+      ] as CloudflareImage[];
+      const familyRootId = typeof data?.familyRootId === 'string' ? data.familyRootId : undefined;
+      mergeContextImages(incoming, familyRootId);
+      if (Array.isArray(data?.candidateAssets)) {
+        candidatePoolLoadedRef.current = true;
+      }
+      setFamilyLoaded(true);
+      logDetailPerf('candidateFetch:total', startedAt, {
+        serverTiming: response.headers.get('server-timing'),
+        diagnostics: data?.diagnostics ?? null,
+        candidateCount: Array.isArray(data?.candidateAssets) ? data.candidateAssets.length : 0,
+      });
+    } catch (error) {
+      candidatePoolRequestedRef.current = false;
+      console.warn('Failed to fetch adoptable candidates', error);
+    }
+  }, [buildFamilyContextUrl, id, mergeContextImages]);
 
   const {
     parentActionLoading,
@@ -743,7 +838,9 @@ export default function ImageDetailPage() {
     (async () => {
       const startedAt = getNow();
       try {
-        setLoading(true);
+        if (!initialDetailSeedRef.current) {
+          setLoading(true);
+        }
         if (!id) {
           return;
         }
@@ -806,58 +903,6 @@ export default function ImageDetailPage() {
     })();
     return () => {
       mounted = false;
-    };
-  }, [buildFamilyContextUrl, id, mergeContextImages]);
-
-  useEffect(() => {
-    if (!id) return;
-    let mounted = true;
-    candidatePoolLoadedRef.current = false;
-    const useIdleCallback = typeof window !== 'undefined' && 'requestIdleCallback' in window;
-    const scheduler = useIdleCallback
-      ? window.requestIdleCallback(async () => {
-          try {
-            const startedAt = getNow();
-            const res = await fetch(buildFamilyContextUrl({ includeCandidates: true }));
-            const data = await res.json();
-            if (!mounted || !res.ok) return;
-            const candidates = Array.isArray(data.candidateAssets) ? (data.candidateAssets as CloudflareImage[]) : [];
-            mergeContextImages(candidates);
-            candidatePoolLoadedRef.current = true;
-            logDetailPerf('candidateFetch:total', startedAt, {
-              serverTiming: res.headers.get('server-timing'),
-              diagnostics: data?.diagnostics ?? null,
-              candidateCount: candidates.length,
-            });
-          } catch (error) {
-            console.error('Failed to fetch candidate assets', error);
-          }
-        })
-      : window.setTimeout(async () => {
-          try {
-            const startedAt = getNow();
-            const res = await fetch(buildFamilyContextUrl({ includeCandidates: true }));
-            const data = await res.json();
-            if (!mounted || !res.ok) return;
-            const candidates = Array.isArray(data.candidateAssets) ? (data.candidateAssets as CloudflareImage[]) : [];
-            mergeContextImages(candidates);
-            candidatePoolLoadedRef.current = true;
-            logDetailPerf('candidateFetch:total', startedAt, {
-              serverTiming: res.headers.get('server-timing'),
-              diagnostics: data?.diagnostics ?? null,
-              candidateCount: candidates.length,
-            });
-          } catch (error) {
-            console.error('Failed to fetch candidate assets', error);
-          }
-        }, 0);
-    return () => {
-      mounted = false;
-      if (useIdleCallback && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
-        window.cancelIdleCallback(scheduler);
-      } else {
-        window.clearTimeout(scheduler as number);
-      }
     };
   }, [buildFamilyContextUrl, id, mergeContextImages]);
 
@@ -927,6 +972,33 @@ export default function ImageDetailPage() {
     excludeId: id
   });
   const resolvedParentImage = parentImage ?? fallbackParentImage;
+
+  useEffect(() => {
+    if (!familyLoaded) return;
+    if (!adoptSearch.trim() && !adoptFolderFilter && !adoptAssetTypeFilter) return;
+    void fetchCandidatePool();
+  }, [adoptAssetTypeFilter, adoptFolderFilter, adoptSearch, familyLoaded, fetchCandidatePool]);
+
+  useEffect(() => {
+    if (!familyLoaded) return;
+    if (candidatePoolLoadedRef.current || candidatePoolRequestedRef.current) return;
+
+    const loadCandidates = () => {
+      void fetchCandidatePool();
+    };
+
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      const idleId = window.requestIdleCallback(loadCandidates, { timeout: 1500 });
+      return () => {
+        if ('cancelIdleCallback' in window) {
+          window.cancelIdleCallback(idleId);
+        }
+      };
+    }
+
+    const timeoutId = window.setTimeout(loadCandidates, 750);
+    return () => window.clearTimeout(timeoutId);
+  }, [familyLoaded, fetchCandidatePool, id]);
 
   useEffect(() => {
     const parentId = image?.parentId;
@@ -2119,6 +2191,15 @@ export default function ImageDetailPage() {
       setChildDetachingId(childId);
       try {
         await patchParentAssignment(childId, '');
+        setAllImages((prev) =>
+          prev.map((entry) => (entry.id === childId ? { ...entry, parentId: undefined } : entry))
+        );
+        setSelectedVariationIds((prev) => {
+          const next = new Set(prev);
+          next.delete(childId);
+          return next;
+        });
+        setVariationPage(1);
         toast.push('Variation detached');
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to detach variation';

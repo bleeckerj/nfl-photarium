@@ -27,6 +27,9 @@ vi.mock('next/link', () => ({
     React.createElement('a', { href, ...props }, children),
 }));
 
+type ElementWithChildren = React.ReactElement<{ children?: React.ReactNode }>;
+type ClickableElement = React.ReactElement<{ onClick: () => void }>;
+
 describe('ColorSwatches', () => {
   it('renders nothing when no colors are provided', () => {
     const markup = renderToStaticMarkup(React.createElement(ColorSwatches, {}));
@@ -73,11 +76,11 @@ describe('ColorSwatches', () => {
       averageColor: '#abcdef',
       showLabels: true,
       onSelectColor,
-    }) as any;
-    const groups = React.Children.toArray(tree.props.children) as any[];
-    const averageGroup = groups[0] as any;
-    const averageChildren = React.Children.toArray(averageGroup.props.children) as any[];
-    const averageButton = averageChildren[0] as any;
+    }) as ElementWithChildren;
+    const groups = React.Children.toArray(tree.props.children) as ElementWithChildren[];
+    const averageGroup = groups[0];
+    const averageChildren = React.Children.toArray(averageGroup.props.children) as ClickableElement[];
+    const averageButton = averageChildren[0];
 
     averageButton.props.onClick();
 
@@ -89,11 +92,11 @@ describe('ColorSwatches', () => {
     const tree = ColorSwatches({
       dominantColors: ['#111111', '#222222'],
       onSelectColor,
-    }) as any;
-    const groups = React.Children.toArray(tree.props.children) as any[];
-    const paletteGroup = groups[0] as any;
-    const paletteChildren = React.Children.toArray(paletteGroup.props.children) as any[];
-    const secondButton = paletteChildren[1] as any;
+    }) as ElementWithChildren;
+    const groups = React.Children.toArray(tree.props.children) as ElementWithChildren[];
+    const paletteGroup = groups[0];
+    const paletteChildren = React.Children.toArray(paletteGroup.props.children) as ClickableElement[];
+    const secondButton = paletteChildren[1];
 
     secondButton.props.onClick();
 
@@ -219,5 +222,135 @@ describe('gallery swatch integration', () => {
 
     expect(markup).toContain('avg #405060');
     expect(markup).toContain('#bbbbbb');
+  });
+
+  it('renders root-side variation counts from family summaries in the grid card', () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(ImageCard, {
+        image: baseImage,
+        selectedVariant: 'public',
+        respectAspectRatio: false,
+        isSelected: false,
+        bulkSelectionMode: false,
+        isDuplicate: false,
+        variationChildren: [],
+        familySummary: {
+          imageId: 'img-1',
+          rootId: 'img-1',
+          isVariant: false,
+          variantCount: 3,
+          childIds: ['child-1', 'child-2', 'child-3'],
+        },
+        altLoading: false,
+        displayNameLoading: false,
+        onToggleSelection: vi.fn(),
+        onStartEdit: vi.fn(),
+        onDelete: vi.fn(),
+        onGenerateAlt: vi.fn(),
+        onGenerateDisplayName: vi.fn(),
+        onCopyUrl: vi.fn(),
+        onCopyNamespace: vi.fn(),
+        onBeforeNavigate: vi.fn(),
+        onMouseEnter: vi.fn(),
+        onMouseMove: vi.fn(),
+        onMouseLeave: vi.fn(),
+      })
+    );
+
+    expect(markup).toContain('3 variations');
+  });
+
+  it('renders child-side parent annunciation and link in the grid card', () => {
+    const parentId = 'abf11cf5-3a00-48b4-dd94-1568c3ca9c00';
+    const markup = renderToStaticMarkup(
+      React.createElement(ImageCard, {
+        image: {
+          ...baseImage,
+          id: 'child-1',
+          parentId,
+        },
+        selectedVariant: 'public',
+        respectAspectRatio: false,
+        isSelected: false,
+        bulkSelectionMode: false,
+        isDuplicate: false,
+        variationChildren: [],
+        familySummary: {
+          imageId: 'child-1',
+          rootId: parentId,
+          parentId,
+          parentAssetType: 'image',
+          isVariant: true,
+          variantCount: 3,
+          childIds: ['child-1', 'child-2', 'child-3'],
+        },
+        galleryReturnHrefSuffix: '?from=gallery',
+        altLoading: false,
+        displayNameLoading: false,
+        onToggleSelection: vi.fn(),
+        onStartEdit: vi.fn(),
+        onDelete: vi.fn(),
+        onGenerateAlt: vi.fn(),
+        onGenerateDisplayName: vi.fn(),
+        onCopyUrl: vi.fn(),
+        onCopyNamespace: vi.fn(),
+        onBeforeNavigate: vi.fn(),
+        onMouseEnter: vi.fn(),
+        onMouseMove: vi.fn(),
+        onMouseLeave: vi.fn(),
+      })
+    );
+
+    expect(markup).toContain(`title="Variant of parent ${parentId}"`);
+    expect(markup).toContain('Variant of abf11cf5');
+    expect(markup).toContain(`href="/images/${parentId}?from=gallery"`);
+    expect(markup).not.toContain('3 variations');
+  });
+
+  it('renders child-side parent annunciation and link in the list item', () => {
+    const parentId = 'abf11cf5-3a00-48b4-dd94-1568c3ca9c00';
+    const markup = renderToStaticMarkup(
+      React.createElement(ImageListItem, {
+        image: {
+          ...baseImage,
+          id: 'child-1',
+          parentId,
+        },
+        selectedVariant: 'public',
+        isSelected: false,
+        bulkSelectionMode: false,
+        isDuplicate: false,
+        hrefSuffix: '?from=gallery',
+        variationChildren: [],
+        familySummary: {
+          imageId: 'child-1',
+          rootId: parentId,
+          parentId,
+          parentAssetType: 'image',
+          isVariant: true,
+          variantCount: 2,
+          childIds: ['child-1', 'child-2'],
+        },
+        altLoading: false,
+        displayNameLoading: false,
+        onToggleSelection: vi.fn(),
+        onStartEdit: vi.fn(),
+        onDelete: vi.fn(),
+        onGenerateAlt: vi.fn(),
+        onGenerateDisplayName: vi.fn(),
+        onCopyUrl: vi.fn(),
+        onCopyNamespace: vi.fn(),
+        onBeforeNavigate: vi.fn(),
+        onDragStart: vi.fn(),
+        onMouseEnter: vi.fn(),
+        onMouseMove: vi.fn(),
+        onMouseLeave: vi.fn(),
+      })
+    );
+
+    expect(markup).toContain(`title="Variant of parent ${parentId}"`);
+    expect(markup).toContain('Variant of abf11cf5');
+    expect(markup).toContain(`href="/images/${parentId}?from=gallery"`);
+    expect(markup).not.toContain('2 variations');
   });
 });

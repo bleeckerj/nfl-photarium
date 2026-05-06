@@ -151,7 +151,7 @@ describe('gallery toolbar components', () => {
     expect(markup).not.toContain('>Last<');
   });
 
-  it('renders the motion assets checkbox in the filter row', () => {
+  it('renders the updated gallery filter labels', () => {
     const markup = renderToStaticMarkup(
       React.createElement(GalleryFilters, {
         searchTerm: '',
@@ -192,5 +192,7 @@ describe('gallery toolbar components', () => {
     );
 
     expect(markup).toContain('Motion Assets Only');
+    expect(markup).toContain('Parents With Variants');
+    expect(markup).not.toContain('Variations Only');
   });
 });

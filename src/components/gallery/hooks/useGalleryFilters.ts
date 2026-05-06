@@ -9,13 +9,29 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { filterImagesForGallery } from '@/utils/galleryFilter';
 import { loadHiddenFolders, loadHiddenTags, persistHiddenFolders, persistHiddenTags } from '../storage';
-import { computeDuplicateGroups, buildChildrenMap, formatDateRangeLabel } from '../utils';
+import { computeDuplicateGroups, buildChildrenMap, buildFamilySummaryMap, formatDateRangeLabel } from '../utils';
 import { DEFAULT_PAGE_SIZE } from '../constants';
 import { getDateKeyRangeMs } from '../dateFilter';
-import type { CloudflareImage, DateFilter, EmbeddingFilter, DuplicateGroup, AspectRatioClass } from '../types';
+import type {
+  CloudflareImage,
+  DateFilter,
+  EmbeddingFilter,
+  DuplicateGroup,
+  AspectRatioClass,
+  GalleryFamilySummary,
+} from '../types';
 
 interface UseGalleryFiltersOptions {
   images: CloudflareImage[];
+  familySourceImages?: CloudflareImage[];
+  serverPagination?: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  } | null;
+  serverFamilySummaryMap?: Record<string, GalleryFamilySummary>;
+  serverDuplicateIds?: string[];
   initialPreferences: {
     selectedFolder: string;
     selectedTag: string;
@@ -89,6 +105,7 @@ interface UseGalleryFiltersReturn {
   duplicateGroups: DuplicateGroup[];
   duplicateIds: Set<string>;
   childrenMap: Record<string, CloudflareImage[]>;
+  familySummaryMap: Record<string, GalleryFamilySummary>;
   hasActiveFilters: boolean;
   clearFilters: () => void;
 
@@ -117,10 +134,14 @@ interface UseGalleryFiltersReturn {
 
 export function useGalleryFilters({
   images,
+  familySourceImages,
   initialPreferences,
   brokenImageIds,
   isLoading = false,
   returningFromDetailRef,
+  serverPagination,
+  serverFamilySummaryMap,
+  serverDuplicateIds,
 }: UseGalleryFiltersOptions): UseGalleryFiltersReturn {
   // Filter state
   const [selectedFolder, setSelectedFolder] = useState(initialPreferences.selectedFolder);
@@ -237,8 +258,20 @@ export function useGalleryFilters({
     return true;
   }, [hiddenTags]);
 
-  // Children map
-  const childrenMap = useMemo(() => buildChildrenMap(images), [images]);
+  const familyImages = familySourceImages ?? images;
+  const isServerPaged = Boolean(serverPagination);
+
+  // Family maps are built from the full loaded set when the catalog is loaded
+  // client-side. In server-paged mode the API returns page-local summaries
+  // computed against the full catalog.
+  const childrenMap = useMemo(
+    () => buildChildrenMap(isServerPaged ? images : familyImages),
+    [familyImages, images, isServerPaged]
+  );
+  const familySummaryMap = useMemo(
+    () => (isServerPaged ? (serverFamilySummaryMap ?? {}) : buildFamilySummaryMap(familyImages)),
+    [familyImages, isServerPaged, serverFamilySummaryMap]
+  );
 
   // Base filtered images
   const baseFilteredImages = useMemo(() => {
@@ -256,13 +289,20 @@ export function useGalleryFilters({
   // Duplicate groups
   const duplicateGroups = useMemo(() => computeDuplicateGroups(baseFilteredImages), [baseFilteredImages]);
   
-  const duplicateIds = useMemo(() => {
+  const computedDuplicateIds = useMemo(() => {
     const ids = new Set<string>();
     duplicateGroups.forEach(group => {
       group.items.forEach(image => ids.add(image.id));
     });
     return ids;
   }, [duplicateGroups]);
+
+  const duplicateIds = useMemo(() => {
+    if (isServerPaged && serverDuplicateIds) {
+      return new Set(serverDuplicateIds);
+    }
+    return computedDuplicateIds;
+  }, [computedDuplicateIds, isServerPaged, serverDuplicateIds]);
 
   // Filter pipeline
   const duplicateFilteredImages = useMemo(() => {
@@ -322,13 +362,11 @@ export function useGalleryFilters({
 
   const filteredWithVariants = useMemo(() => {
     if (!onlyWithVariants) return aspectRatioFilteredImages;
-    const parentIdsWithChildren = new Set(
-      Object.entries(childrenMap)
-        .filter(([, value]) => (value?.length ?? 0) > 0)
-        .map(([key]) => key)
-    );
-    return aspectRatioFilteredImages.filter(image => parentIdsWithChildren.has(image.id));
-  }, [aspectRatioFilteredImages, onlyWithVariants, childrenMap]);
+    return aspectRatioFilteredImages.filter(image => {
+      const summary = familySummaryMap[image.id];
+      return !summary?.isVariant && (summary?.variantCount ?? 0) > 0;
+    });
+  }, [aspectRatioFilteredImages, onlyWithVariants, familySummaryMap]);
 
   const sortedImages = useMemo(() => {
     return [...filteredWithVariants].sort(
@@ -398,23 +436,32 @@ export function useGalleryFilters({
     });
   }, []);
 
-  const totalPages = Math.max(1, Math.ceil(filteredImages.length / pageSize));
-  const pageIndex = Math.min(currentPage, totalPages);
+  const totalPages = serverPagination
+    ? Math.max(1, serverPagination.totalPages)
+    : Math.max(1, Math.ceil(filteredImages.length / pageSize));
+  const pageIndex = serverPagination
+    ? Math.min(Math.max(1, currentPage), totalPages)
+    : Math.min(currentPage, totalPages);
   const pageSliceStart = (pageIndex - 1) * pageSize;
-  const pageImages = filteredImages.slice(pageSliceStart, pageSliceStart + pageSize);
-  const showPagination = filteredImages.length > pageSize;
-  const hasResults = filteredImages.length > 0;
+  const pageImages = serverPagination
+    ? filteredImages
+    : filteredImages.slice(pageSliceStart, pageSliceStart + pageSize);
+  const showPagination = serverPagination
+    ? serverPagination.total > pageSize
+    : filteredImages.length > pageSize;
+  const hasResults = serverPagination ? serverPagination.total > 0 : filteredImages.length > 0;
 
   const currentPageRangeLabel = useMemo(() => formatDateRangeLabel(pageImages), [pageImages]);
 
   const getPageDateRangeLabel = useCallback(
     (pageNumber: number) => {
       if (pageNumber < 1 || pageNumber > totalPages) return null;
+      if (serverPagination) return null;
       const startIndex = (pageNumber - 1) * pageSize;
       const slice = filteredImages.slice(startIndex, startIndex + pageSize);
       return formatDateRangeLabel(slice);
     },
-    [filteredImages, pageSize, totalPages]
+    [filteredImages, pageSize, serverPagination, totalPages]
   );
 
   const prevPageRangeLabel = useMemo(
@@ -525,6 +572,7 @@ export function useGalleryFilters({
     duplicateGroups,
     duplicateIds,
     childrenMap,
+    familySummaryMap,
     hasActiveFilters,
     clearFilters,
     currentPage,

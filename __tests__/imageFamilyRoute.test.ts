@@ -139,4 +139,82 @@ describe('GET /api/images/:id/family', () => {
     expect(response.status).toBe(200);
     expect(candidateIds).toEqual(['candidate-a']);
   });
+
+  it('excludes a detached former child from the old parent family', async () => {
+    getCachedImagesMock.mockResolvedValue([
+      {
+        id: 'parent',
+        filename: 'parent.jpg',
+        namespace: 'alpha',
+        uploaded: '2026-02-20T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/parent/public'],
+        tags: [],
+      },
+      {
+        id: 'detached-child',
+        filename: 'detached-child.jpg',
+        namespace: 'alpha',
+        uploaded: '2026-02-20T00:05:00.000Z',
+        variants: ['https://imagedelivery.net/hash/detached-child/public'],
+        tags: [],
+      },
+      {
+        id: 'attached-child',
+        filename: 'attached-child.jpg',
+        namespace: 'alpha',
+        parentId: 'parent',
+        uploaded: '2026-02-20T00:06:00.000Z',
+        variants: ['https://imagedelivery.net/hash/attached-child/public'],
+        tags: [],
+      },
+    ]);
+    listVideoAssetRecordsWithSyncMock.mockResolvedValue([]);
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/images/parent/family'),
+      { params: Promise.resolve({ id: 'parent' }) }
+    );
+    const payload = await response.json();
+    const ids = payload.familyAssets.map((entry: { id: string }) => entry.id);
+
+    expect(response.status).toBe(200);
+    expect(payload.familyRootId).toBe('parent');
+    expect(ids).toEqual(expect.arrayContaining(['parent', 'attached-child']));
+    expect(ids).not.toContain('detached-child');
+  });
+
+  it('treats a detached child as its own family root', async () => {
+    getCachedImagesMock.mockResolvedValue([
+      {
+        id: 'parent',
+        filename: 'parent.jpg',
+        namespace: 'alpha',
+        uploaded: '2026-02-20T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/parent/public'],
+        tags: [],
+      },
+      {
+        id: 'detached-child',
+        filename: 'detached-child.jpg',
+        namespace: 'alpha',
+        uploaded: '2026-02-20T00:05:00.000Z',
+        variants: ['https://imagedelivery.net/hash/detached-child/public'],
+        tags: [],
+      },
+    ]);
+    listVideoAssetRecordsWithSyncMock.mockResolvedValue([]);
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/images/detached-child/family'),
+      { params: Promise.resolve({ id: 'detached-child' }) }
+    );
+    const payload = await response.json();
+    const ids = payload.familyAssets.map((entry: { id: string }) => entry.id);
+
+    expect(response.status).toBe(200);
+    expect(payload.familyRootId).toBe('detached-child');
+    expect(ids).toEqual(['detached-child']);
+    expect(payload.parent).toEqual(expect.objectContaining({ id: 'detached-child' }));
+    expect(payload.children).toEqual([]);
+  });
 });

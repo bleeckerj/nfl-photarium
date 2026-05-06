@@ -3,6 +3,7 @@ import { getCachedImages, getCacheStats } from '@/server/cloudflareImageCache';
 import { batchGetAspectMetadata, batchGetColorMetadata, isVectorSearchAvailable } from '@/server/vectorSearch';
 import { listVideoAssetRecordsWithSync } from '@/server/videoCatalogStorage';
 import { getImageExtrasRecords } from '@/server/imageExtras';
+import { queryGalleryAssets, type GalleryQueryFilters } from '@/server/galleryQuery';
 
 type ListableImage = {
   id: string;
@@ -119,6 +120,34 @@ const matchesMediaFilter = (asset: ScopedAsset, mediaFilter: string | null) => {
   return isExplicitAnimatedWebpImage(asset);
 };
 
+const parseBooleanParam = (value: string | null) => value === '1' || value === 'true';
+
+const parseCsvParam = (value: string | null): string[] =>
+  value
+    ? value
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+    : [];
+
+const parseAspectClasses = (value: string | null): Array<'horizontal' | 'vertical' | 'square'> =>
+  parseCsvParam(value).filter(
+    (entry): entry is 'horizontal' | 'vertical' | 'square' =>
+      entry === 'horizontal' || entry === 'vertical' || entry === 'square'
+  );
+
+const parseEmbeddingFilter = (value: string | null): GalleryQueryFilters['embedding'] => {
+  if (
+    value === 'missing-clip' ||
+    value === 'missing-color' ||
+    value === 'missing-any' ||
+    value === 'missing-both'
+  ) {
+    return value;
+  }
+  return 'none';
+};
+
 function toListableImage(image: Record<string, unknown>): ListableImage {
   const rawDimensions = image.dimensions as { width?: unknown; height?: unknown } | undefined;
   const width = typeof rawDimensions?.width === 'number' ? rawDimensions.width : undefined;
@@ -199,6 +228,20 @@ export async function GET(request: NextRequest) {
     const aspectRatioClass = request.nextUrl.searchParams.get('aspectRatioClass')?.trim();
     const aspectRatio = request.nextUrl.searchParams.get('aspectRatio')?.trim();
     const mediaFilter = request.nextUrl.searchParams.get('mediaFilter')?.trim().toLowerCase() || null;
+    const search = request.nextUrl.searchParams.get('search')?.trim() || '';
+    const folder = request.nextUrl.searchParams.get('folder')?.trim() || '';
+    const tag = request.nextUrl.searchParams.get('tag')?.trim() || '';
+    const onlyCanonical = parseBooleanParam(request.nextUrl.searchParams.get('onlyCanonical'));
+    const onlyWithVariants = parseBooleanParam(request.nextUrl.searchParams.get('onlyWithVariants'));
+    const favorites = parseBooleanParam(request.nextUrl.searchParams.get('favorites'));
+    const duplicates = parseBooleanParam(request.nextUrl.searchParams.get('duplicates'));
+    const comfy = parseBooleanParam(request.nextUrl.searchParams.get('comfy'));
+    const embedding = parseEmbeddingFilter(request.nextUrl.searchParams.get('embedding'));
+    const aspectRatioClasses = parseAspectClasses(request.nextUrl.searchParams.get('aspectRatioClasses'));
+    const dateStart = request.nextUrl.searchParams.get('dateStart')?.trim() || '';
+    const dateEnd = request.nextUrl.searchParams.get('dateEnd')?.trim() || '';
+    const hiddenFolders = parseCsvParam(request.nextUrl.searchParams.get('hiddenFolders'));
+    const hiddenTags = parseCsvParam(request.nextUrl.searchParams.get('hiddenTags'));
     const namespaceParam = request.nextUrl.searchParams.get('namespace');
     const videoLimitParam = request.nextUrl.searchParams.get('videoLimit');
     const pageParam = request.nextUrl.searchParams.get('page');
@@ -347,13 +390,14 @@ export async function GET(request: NextRequest) {
     }
     
     const enrichedImageMap = new Map(imagesWithEmbeddings.map((image) => [image.id, image]));
-    let finalImages = scopedAssets.map((asset) => {
+    const finalAssetsBeforeQuery = scopedAssets.map((asset) => {
       if ('assetType' in asset && asset.assetType === 'video') {
         return asset;
       }
       return enrichedImageMap.get(asset.id) ?? asset;
     });
-    if (aspectRatioClass || aspectRatio) {
+    let finalImages = finalAssetsBeforeQuery;
+    if ((aspectRatioClass || aspectRatio) && aspectRatioClasses.length === 0) {
       finalImages = finalImages.filter((image) => {
         const entry = image as Record<string, unknown>;
         if (entry.assetType === 'video') {
@@ -388,14 +432,54 @@ export async function GET(request: NextRequest) {
     const pageSize = Number.isFinite(parsedPageSize) && parsedPageSize > 0
       ? Math.min(500, Math.floor(parsedPageSize))
       : 60;
-    const totalBeforePagination = finalImages.length;
-    if (hasPagination) {
-      const startIndex = (page - 1) * pageSize;
-      finalImages = finalImages.slice(startIndex, startIndex + pageSize);
+    const hasGalleryQueryParams = Boolean(
+      search ||
+      folder ||
+      tag ||
+      onlyCanonical ||
+      onlyWithVariants ||
+      favorites ||
+      duplicates ||
+      comfy ||
+      embedding !== 'none' ||
+      aspectRatioClasses.length > 0 ||
+      dateStart ||
+      dateEnd ||
+      hiddenFolders.length > 0 ||
+      hiddenTags.length > 0
+    );
+    const queryResult = hasPagination || hasGalleryQueryParams
+      ? await markStage('gallery_query', () =>
+          queryGalleryAssets(
+            finalImages as never,
+            {
+              search,
+              folder,
+              tag,
+              onlyCanonical,
+              onlyWithVariants,
+              favorites,
+              duplicates,
+              comfy,
+              embedding,
+              aspectRatioClasses,
+              dateStart,
+              dateEnd,
+              hiddenFolders,
+              hiddenTags,
+            },
+            page,
+            hasPagination ? pageSize : Math.max(1, finalImages.length)
+          )
+        )
+      : null;
+    const totalBeforePagination = queryResult?.total ?? finalImages.length;
+    if (queryResult && (hasPagination || hasGalleryQueryParams)) {
+      finalImages = queryResult.images;
     }
     diagnostics.pagination_enabled = hasPagination;
-    diagnostics.page = hasPagination ? page : null;
-    diagnostics.page_size = hasPagination ? pageSize : null;
+    diagnostics.page = hasPagination && queryResult ? queryResult.page : null;
+    diagnostics.page_size = hasPagination && queryResult ? queryResult.pageSize : null;
     diagnostics.total_before_pagination = totalBeforePagination;
 
     const imageIdsForExtras = finalImages
@@ -451,12 +535,15 @@ export async function GET(request: NextRequest) {
       diagnostics,
       includeVectorMeta,
       includeExtras,
+      facets: queryResult?.facets ?? null,
+      familySummaryMap: queryResult?.familySummaryMap ?? {},
+      duplicateSummary: queryResult?.duplicateSummary ?? null,
       pagination: hasPagination
         ? {
-            page,
-            pageSize,
+            page: queryResult?.page ?? page,
+            pageSize: queryResult?.pageSize ?? pageSize,
             total: totalBeforePagination,
-            totalPages: Math.max(1, Math.ceil(totalBeforePagination / pageSize)),
+            totalPages: queryResult?.totalPages ?? Math.max(1, Math.ceil(totalBeforePagination / pageSize)),
           }
         : null,
     };

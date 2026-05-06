@@ -54,6 +54,7 @@ const inferAssetTypeFromUrl = (value: string): VariationAssetType => {
 const buildFormData = (params: {
   file: File;
   filename?: string;
+  displayName?: string;
   folder?: string;
   tags?: string;
   namespace?: string;
@@ -62,6 +63,7 @@ const buildFormData = (params: {
   const formData = new FormData();
   formData.append('file', params.file);
   if (params.filename) formData.append('filename', params.filename);
+  if (params.displayName) formData.append('displayName', params.displayName);
   if (params.folder) formData.append('folder', params.folder);
   if (params.tags) formData.append('tags', params.tags);
   if (params.namespace) formData.append('namespace', params.namespace);
@@ -105,6 +107,7 @@ const base64ToFile = (base64: string, filename: string, mimeType: string) => {
 export const uploadVariationFile = async (params: {
   file: File;
   filename?: string;
+  displayName?: string;
   folder?: string;
   tags?: string;
   namespace?: string;
@@ -125,6 +128,7 @@ export const uploadVariationFile = async (params: {
 export const uploadVariationUrl = async (params: {
   url: string;
   filename?: string;
+  displayName?: string;
   folder?: string;
   tags?: string;
   namespace?: string;
@@ -140,6 +144,7 @@ export const uploadVariationUrl = async (params: {
         ? {
             url: params.url,
             filename: params.filename || undefined,
+            displayName: params.displayName || undefined,
             folder: params.folder || undefined,
             tags: params.tags || undefined,
             namespace: params.namespace || undefined,
@@ -152,6 +157,7 @@ export const uploadVariationUrl = async (params: {
                 clientId: `child-url-${Date.now()}`,
                 url: params.url,
                 filename: params.filename || undefined,
+                displayName: params.displayName || undefined,
                 folder: params.folder || undefined,
                 tags: params.tags || undefined,
                 namespace: params.namespace || undefined,

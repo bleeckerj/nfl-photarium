@@ -17,8 +17,8 @@ import { ColorSwatches } from '@/components/ColorSwatches';
 import { EmbeddingStatusDot } from '@/components/EmbeddingStatusIcon';
 import { SearchExclusionIcon } from './icons';
 import { AspectRatioDisplay } from './AspectRatioDisplay';
-import { hasSearchExclusionTag, getExclusionTooltip, isSvgImage } from './utils';
-import type { CloudflareImage, ColorMetadata } from './types';
+import { hasSearchExclusionTag, getExclusionTooltip, isSvgImage, formatShortAssetId } from './utils';
+import type { CloudflareImage, ColorMetadata, GalleryFamilySummary } from './types';
 import type { EmbeddingPendingEntry } from '@/utils/embeddingPending';
 import { getUserVisibleTags, hasFavoriteTag } from '@/utils/systemTags';
 
@@ -30,6 +30,7 @@ interface ImageCardProps {
   bulkSelectionMode: boolean;
   isDuplicate: boolean;
   variationChildren?: CloudflareImage[];
+  familySummary?: GalleryFamilySummary;
   colorMetadata?: ColorMetadata;
   embeddingPending?: EmbeddingPendingEntry;
   altLoading: boolean;
@@ -75,6 +76,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
   bulkSelectionMode,
   isDuplicate,
   variationChildren,
+  familySummary,
   colorMetadata,
   embeddingPending,
   altLoading,
@@ -113,6 +115,12 @@ export const ImageCard: React.FC<ImageCardProps> = ({
     : `/images/${image.id}${galleryReturnHrefSuffix ?? ''}`;
   const visibleTags = getUserVisibleTags(image.tags);
   const favorite = hasFavoriteTag(image.tags);
+  const isVariant = familySummary?.isVariant ?? Boolean(image.parentId);
+  const variationCount = familySummary?.variantCount ?? variationChildren?.length ?? 0;
+  const parentId = familySummary?.parentId ?? image.parentId;
+  const parentDetailHref = parentId && familySummary?.parentAssetType
+    ? `${familySummary.parentAssetType === 'video' ? '/videos' : '/images'}/${parentId}${galleryReturnHrefSuffix ?? ''}`
+    : undefined;
 
   return (
     <div
@@ -294,10 +302,25 @@ export const ImageCard: React.FC<ImageCardProps> = ({
             ) : (
               <p className="text-gray-400">🏷️ [no tags]</p>
             )}
-            {variationChildren && variationChildren.length > 0 && (
+            {!isVariant && variationCount > 0 && (
               <p className="text-[0.6rem] text-blue-600 flex items-center gap-1" title="Has variations">
                 <Layers className="h-3.5 w-3.5" />
-                {variationChildren.length} variation{variationChildren.length > 1 ? 's' : ''}
+                {variationCount} variation{variationCount > 1 ? 's' : ''}
+              </p>
+            )}
+            {parentId && (
+              <p
+                className="text-[0.6rem] text-indigo-600 flex items-center gap-1"
+                title={`Variant of parent ${parentId}`}
+              >
+                <Layers className="h-3.5 w-3.5" />
+                {parentDetailHref ? (
+                  <Link href={parentDetailHref} className="hover:underline" prefetch={false}>
+                    Variant of {formatShortAssetId(parentId)}
+                  </Link>
+                ) : (
+                  <span>Variant of {formatShortAssetId(parentId)}</span>
+                )}
               </p>
             )}
             {/* Color metadata display */}

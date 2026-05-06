@@ -182,6 +182,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       duplicateGroups,
       duplicateIds,
       childrenMap,
+      familySummaryMap,
       hasActiveFilters,
       clearFilters,
     } = useGalleryFilters({
@@ -901,6 +902,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                 bulkSelectionMode={bulkSelectionMode}
                 isDuplicate={duplicateIds.has(image.id)}
                 variationChildren={childrenMap[image.id]}
+                familySummary={familySummaryMap[image.id]}
                 colorMetadata={colorMetadataMap[image.id]}
                 embeddingPending={embeddingPendingMap[image.id]}
                 altLoading={altLoadingMap[image.id] ?? false}
@@ -934,6 +936,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
                 bulkSelectionMode={bulkSelectionMode}
                 isDuplicate={duplicateIds.has(image.id)}
                 variationChildren={childrenMap[image.id]}
+                familySummary={familySummaryMap[image.id]}
                 colorMetadata={colorMetadataMap[image.id]}
                 altLoading={altLoadingMap[image.id] ?? false}
                 displayNameLoading={displayNameLoadingMap[image.id] ?? false}

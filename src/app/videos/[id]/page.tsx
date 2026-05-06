@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
@@ -24,7 +24,7 @@ import {
   buildVideoDetailShareUrl,
   generateQrDataUrl,
 } from '@/services/shareLinkService';
-import { hasFreshGalleryReturnState } from '@/components/gallery/returnState';
+import { getFreshDetailAssetSeed, hasFreshGalleryReturnState } from '@/components/gallery/returnState';
 
 import { useVariationUpload } from '@/hooks/useVariationUpload';
 import { usePersistentShareBaseUrl } from '@/hooks/usePersistentShareBaseUrl';
@@ -125,6 +125,56 @@ type AssetRecord = {
   videoPreviewUrl?: string;
 };
 
+type FamilyContextResponse = {
+  familyAssets?: AssetRecord[];
+  candidateAssets?: AssetRecord[];
+  timings?: Record<string, number>;
+  diagnostics?: Record<string, unknown>;
+};
+
+const getNow = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+const DETAIL_PERF_LOGGING_ENABLED = process.env.NODE_ENV !== 'production';
+
+const logVideoDetailPerf = (
+  label: string,
+  startedAt: number,
+  extra?: Record<string, unknown>
+) => {
+  if (!DETAIL_PERF_LOGGING_ENABLED) return;
+  const elapsedMs = Math.round(getNow() - startedAt);
+  console.info(`[VideoDetailPerf] ${label} ${elapsedMs}ms`, extra ?? {});
+};
+
+const mergeUniqueAssetsById = (base: AssetRecord[], incoming: AssetRecord[]) => {
+  const merged = new Map<string, AssetRecord>();
+  base.forEach((entry) => merged.set(entry.id, entry));
+  incoming.forEach((entry) => {
+    const existing = merged.get(entry.id);
+    merged.set(entry.id, existing ? { ...existing, ...entry } : entry);
+  });
+  return Array.from(merged.values());
+};
+
+const videoRecordFromSeed = (asset: AssetRecord): VideoRecord => ({
+  id: asset.id,
+  assetType: 'video',
+  filename: asset.filename,
+  displayName: asset.displayName || asset.filename,
+  uploaded: asset.uploaded,
+  parentId: asset.parentId,
+  variationSort: asset.variationSort,
+  streamUid: '',
+  playbackUrl: asset.videoPlaybackUrl,
+  hlsUrl: asset.videoHlsUrl,
+  thumbnailUrl: asset.videoThumbnailUrl,
+  previewUrl: asset.videoPreviewUrl,
+  videoStatus: 'ready',
+  folder: asset.folder,
+  tags: asset.tags ?? [],
+  description: asset.description,
+  namespace: asset.namespace,
+});
+
 type VariationDraft = {
   id: string;
   filename: string;
@@ -185,7 +235,6 @@ type DownloadProbeState = {
 };
 
 const MAX_OUTPUT_MB_DEFAULT = 10;
-const DETAIL_VIDEO_LIST_LIMIT = 5000;
 const PRESET_MAP = {
   preview: { maxWidth: '640', maxOutputMb: '2', fps: '8' },
   balanced: { maxWidth: '960', maxOutputMb: '6', fps: '12' },
@@ -263,25 +312,10 @@ const sortFamilyAssets = (items: AssetRecord[]) => {
   });
 };
 
-const buildAssetsListUrl = (namespace?: string, includeFamilyFor?: string) => {
-  const base = (() => {
-    if (namespace === '') return '/api/images?namespace=__none__';
-    if (namespace) return `/api/images?namespace=${encodeURIComponent(namespace)}`;
-    return '/api/images';
-  })();
-
-  const [path, query] = base.split('?');
-  const params = new URLSearchParams(query || '');
-  params.set('videoLimit', String(DETAIL_VIDEO_LIST_LIMIT));
-  if (includeFamilyFor) {
-    params.set('includeFamilyFor', includeFamilyFor);
-  }
-  return `${path}?${params.toString()}`;
-};
-
 export default function VideoDetailPage() {
   const params = useParams();
   const search = useSearchParams();
+  const detailNavigationStartedAtRef = useRef(getNow());
   const rawId = params?.id;
   const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const toast = useToast();
@@ -300,12 +334,28 @@ export default function VideoDetailPage() {
     return `/?gpage=${encodeURIComponent(galleryPageParam)}&gns=${encodeURIComponent(galleryNamespaceParam)}`;
   }, [galleryNamespaceParam, galleryPageParam, preferSessionReturn]);
 
-  const [video, setVideo] = useState<VideoRecord | null>(null);
-  const [allAssets, setAllAssets] = useState<AssetRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  const initialDetailSeed = useMemo(
+    () =>
+      getFreshDetailAssetSeed<AssetRecord>({
+        id,
+        assetType: 'video',
+        namespace: galleryNamespaceParam,
+      })?.asset ?? null,
+    [galleryNamespaceParam, id]
+  );
+  const [video, setVideo] = useState<VideoRecord | null>(
+    initialDetailSeed ? videoRecordFromSeed(initialDetailSeed) : null
+  );
+  const [allAssets, setAllAssets] = useState<AssetRecord[]>(
+    initialDetailSeed ? [initialDetailSeed] : []
+  );
+  const [loading, setLoading] = useState(!initialDetailSeed);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [autoRefreshStream, setAutoRefreshStream] = useState(true);
+  const [candidateAssetsLoaded, setCandidateAssetsLoaded] = useState(false);
+  const [candidateAssetsLoading, setCandidateAssetsLoading] = useState(false);
+  const [candidateAssetsRequested, setCandidateAssetsRequested] = useState(false);
 
   const [folderInput, setFolderInput] = useState('');
   const [tagsInput, setTagsInput] = useState('');
@@ -432,24 +482,87 @@ export default function VideoDetailPage() {
     };
   }, []);
 
-  const fetchAssets = useCallback(async (namespace?: string, includeFamilyFor?: string) => {
-    const response = await fetch(buildAssetsListUrl(namespace, includeFamilyFor), { cache: 'no-store' });
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload?.error || 'Failed to load assets');
+  useEffect(() => {
+    detailNavigationStartedAtRef.current = getNow();
+    setCandidateAssetsLoaded(false);
+    setCandidateAssetsLoading(false);
+    setCandidateAssetsRequested(false);
+    setError(null);
+    if (!initialDetailSeed) {
+      setVideo(null);
+      setAllAssets([]);
+      setLoading(true);
+      return;
     }
-    const assets = Array.isArray(payload?.images)
-      ? payload.images.filter((entry: unknown): entry is AssetRecord => Boolean(entry && typeof entry === 'object'))
+
+    const seededVideo = videoRecordFromSeed(initialDetailSeed);
+    setVideo(seededVideo);
+    setAllAssets([initialDetailSeed]);
+    setFolderInput(seededVideo.folder || '');
+    setTagsInput(Array.isArray(seededVideo.tags) ? seededVideo.tags.join(', ') : '');
+    setDescriptionInput(seededVideo.description || '');
+    setDisplayNameInput(seededVideo.displayName || seededVideo.filename || '');
+    setOriginalUrlInput(seededVideo.originalUrl || '');
+    setSourceUrlInput(seededVideo.sourceUrl || '');
+    setNamespaceInput(seededVideo.namespace || '');
+    setLoading(false);
+    logVideoDetailPerf('seed:loaded', detailNavigationStartedAtRef.current, {
+      videoId: seededVideo.id,
+      namespace: seededVideo.namespace ?? null,
+    });
+  }, [initialDetailSeed, id]);
+
+  const fetchFamilyContext = useCallback(async (targetId: string, includeCandidates = false) => {
+    const startedAt = getNow();
+    const params = new URLSearchParams();
+    if (includeCandidates) {
+      params.set('includeCandidates', '1');
+    }
+    const query = params.toString();
+    const response = await fetch(
+      `/api/images/${encodeURIComponent(targetId)}/family${query ? `?${query}` : ''}`,
+      { cache: 'no-store' }
+    );
+    const payload = (await response.json()) as FamilyContextResponse & { error?: string };
+    if (!response.ok) {
+      throw new Error(payload?.error || 'Failed to load family context');
+    }
+    const familyAssets = Array.isArray(payload.familyAssets) ? payload.familyAssets : [];
+    const candidateAssets = includeCandidates && Array.isArray(payload.candidateAssets)
+      ? payload.candidateAssets
       : [];
-    setAllAssets(assets);
+    const assets = [...familyAssets, ...candidateAssets];
+    setAllAssets((prev) => mergeUniqueAssetsById(prev, assets));
+    if (includeCandidates) {
+      setCandidateAssetsLoaded(true);
+    }
+    logVideoDetailPerf(includeCandidates ? 'candidatesFetch:total' : 'familyFetch:total', startedAt, {
+      serverTiming: response.headers.get('server-timing'),
+      familyCount: familyAssets.length,
+      candidateCount: candidateAssets.length,
+      diagnostics: payload.diagnostics ?? null,
+    });
     return assets;
   }, []);
 
+  const fetchCandidateAssets = useCallback(async () => {
+    if (!id || candidateAssetsLoaded || candidateAssetsLoading || candidateAssetsRequested) return;
+    setCandidateAssetsRequested(true);
+    setCandidateAssetsLoading(true);
+    try {
+      await fetchFamilyContext(id, true);
+    } catch (error) {
+      console.warn('Failed to fetch video adoptable candidates', error);
+    } finally {
+      setCandidateAssetsLoading(false);
+    }
+  }, [candidateAssetsLoaded, candidateAssetsLoading, candidateAssetsRequested, fetchFamilyContext, id]);
+
   const fetchVideo = useCallback(async (forceRefresh = false) => {
     if (!id) return;
+    const startedAt = getNow();
     setError(null);
     if (forceRefresh) setRefreshing(true);
-    else setLoading(true);
     try {
       const response = await fetch(
         `/api/videos/${id}${forceRefresh ? '?refresh=1' : ''}`,
@@ -468,15 +581,21 @@ export default function VideoDetailPage() {
       setOriginalUrlInput(record.originalUrl || '');
       setSourceUrlInput(record.sourceUrl || '');
       setNamespaceInput(record.namespace || '');
-
-      await fetchAssets(record.namespace ?? galleryNamespaceParam, record.id);
+      setLoading(false);
+      logVideoDetailPerf('primaryFetch:total', startedAt, {
+        videoId: record.id,
+        serverTiming: response.headers.get('server-timing'),
+      });
+      void fetchFamilyContext(record.id, false).catch((error) => {
+        console.warn('Failed to fetch video family context', error);
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load video');
-    } finally {
       setLoading(false);
+    } finally {
       setRefreshing(false);
     }
-  }, [fetchAssets, galleryNamespaceParam, id]);
+  }, [fetchFamilyContext, id]);
 
   const refreshAll = useCallback(async () => {
     await fetchVideo(true);
@@ -485,6 +604,19 @@ export default function VideoDetailPage() {
   useEffect(() => {
     void fetchVideo(false);
   }, [fetchVideo]);
+
+  useEffect(() => {
+    if (candidateAssetsLoaded || candidateAssetsRequested) return;
+    if (!adoptSearch.trim() && !adoptFolderFilter && !adoptAssetTypeFilter) return;
+    void fetchCandidateAssets();
+  }, [
+    adoptAssetTypeFilter,
+    adoptFolderFilter,
+    adoptSearch,
+    candidateAssetsLoaded,
+    candidateAssetsRequested,
+    fetchCandidateAssets,
+  ]);
 
   useEffect(() => {
     if (!autoRefreshStream) return;

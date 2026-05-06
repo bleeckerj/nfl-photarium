@@ -14,8 +14,8 @@ import { ColorSwatches } from '@/components/ColorSwatches';
 import { getCloudflareImageUrl, getCloudflareDownloadUrl } from '@/utils/imageUtils';
 import { formatBytes } from '@/utils/formatBytes';
 import { AspectRatioDisplay } from './AspectRatioDisplay';
-import { isSvgImage } from './utils';
-import type { CloudflareImage, ColorMetadata } from './types';
+import { formatShortAssetId, isSvgImage } from './utils';
+import type { CloudflareImage, ColorMetadata, GalleryFamilySummary } from './types';
 import { getUserVisibleTags, hasFavoriteTag } from '@/utils/systemTags';
 
 interface ImageListItemProps {
@@ -26,6 +26,7 @@ interface ImageListItemProps {
   isDuplicate: boolean;
   hrefSuffix?: string;
   variationChildren?: CloudflareImage[];
+  familySummary?: GalleryFamilySummary;
   colorMetadata?: ColorMetadata;
   altLoading: boolean;
   displayNameLoading: boolean;
@@ -70,6 +71,7 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
   isDuplicate,
   hrefSuffix,
   variationChildren,
+  familySummary,
   colorMetadata,
   altLoading,
   displayNameLoading,
@@ -106,6 +108,12 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
     : `/images/${image.id}${hrefSuffix ?? ''}`;
   const visibleTags = getUserVisibleTags(image.tags);
   const favorite = hasFavoriteTag(image.tags);
+  const isVariant = familySummary?.isVariant ?? Boolean(image.parentId);
+  const variationCount = familySummary?.variantCount ?? variationChildren?.length ?? 0;
+  const parentId = familySummary?.parentId ?? image.parentId;
+  const parentDetailHref = parentId && familySummary?.parentAssetType
+    ? `${familySummary.parentAssetType === 'video' ? '/videos' : '/images'}/${parentId}${hrefSuffix ?? ''}`
+    : undefined;
   const handleDragStart = (event: React.DragEvent) => {
     if (onDragStart) {
       onDragStart(event, image);
@@ -258,10 +266,25 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
         >
           {image.altTag ? `📝 ${image.altTag}` : 'No ALT text yet'}
         </p>
-        {variationChildren && variationChildren.length > 0 && (
+        {!isVariant && variationCount > 0 && (
           <p className="text-[0.7em] font-mono text-blue-600 flex items-center gap-1 mt-1" title="Has variations">
             <Layers className="h-3.5 w-3.5" />
-            {variationChildren.length} variation{variationChildren.length > 1 ? 's' : ''}
+            {variationCount} variation{variationCount > 1 ? 's' : ''}
+          </p>
+        )}
+        {parentId && (
+          <p
+            className="text-[0.7em] font-mono text-indigo-600 flex items-center gap-1 mt-1"
+            title={`Variant of parent ${parentId}`}
+          >
+            <Layers className="h-3.5 w-3.5" />
+            {parentDetailHref ? (
+              <Link href={parentDetailHref} className="hover:underline" prefetch={false}>
+                Variant of {formatShortAssetId(parentId)}
+              </Link>
+            ) : (
+              <span>Variant of {formatShortAssetId(parentId)}</span>
+            )}
           </p>
         )}
         <ColorSwatches

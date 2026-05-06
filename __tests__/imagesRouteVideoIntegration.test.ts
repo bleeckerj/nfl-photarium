@@ -527,6 +527,64 @@ describe('GET /api/images video integration', () => {
     });
   });
 
+  it('returns page-sized server gallery query payloads with facets and summaries', async () => {
+    getCachedImagesMock.mockResolvedValue([
+      {
+        id: 'img-parent',
+        filename: 'blue-chair.jpg',
+        displayName: 'Blue chair',
+        folder: 'editorial',
+        uploaded: '2026-02-20T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/img-parent/public'],
+        tags: ['hero'],
+      },
+      {
+        id: 'img-child',
+        filename: 'blue-chair-variant.jpg',
+        folder: 'editorial',
+        parentId: 'img-parent',
+        uploaded: '2026-02-19T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/img-child/public'],
+        tags: ['detail'],
+      },
+      {
+        id: 'img-archive',
+        filename: 'archive.jpg',
+        folder: 'archive',
+        uploaded: '2026-02-18T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/img-archive/public'],
+        tags: ['hero'],
+      },
+    ]);
+    listVideoAssetRecordsWithSyncMock.mockResolvedValue([]);
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/images?page=1&pageSize=1&search=blue&folder=editorial&onlyWithVariants=1')
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.images).toHaveLength(1);
+    expect(payload.images[0].id).toBe('img-parent');
+    expect(payload.pagination).toEqual({
+      page: 1,
+      pageSize: 1,
+      total: 1,
+      totalPages: 1,
+    });
+    expect(payload.facets.folders).toEqual([
+      { value: 'archive', count: 1 },
+      { value: 'editorial', count: 2 },
+    ]);
+    expect(payload.familySummaryMap['img-parent']).toEqual(
+      expect.objectContaining({
+        isVariant: false,
+        variantCount: 1,
+        childIds: ['img-child'],
+      })
+    );
+  });
+
   it('reports pagination totals after mediaFilter=animated is applied', async () => {
     getCachedImagesMock.mockResolvedValue([
       {

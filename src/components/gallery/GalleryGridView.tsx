@@ -54,6 +54,7 @@ export const GalleryGridView: React.FC<GalleryGridViewProps> = ({
     selectedImageIds,
     duplicateIds,
     childrenMap,
+    familySummaryMap,
     colorMetadataMap,
     embeddingPendingMap,
     altLoadingMap,
@@ -75,6 +76,7 @@ export const GalleryGridView: React.FC<GalleryGridViewProps> = ({
           bulkSelectionMode={bulkSelectionMode}
           isDuplicate={duplicateIds.has(image.id)}
           variationChildren={childrenMap[image.id]}
+          familySummary={familySummaryMap[image.id]}
           colorMetadata={colorMetadataMap[image.id]}
           embeddingPending={embeddingPendingMap[image.id]}
           altLoading={Boolean(altLoadingMap[image.id])}

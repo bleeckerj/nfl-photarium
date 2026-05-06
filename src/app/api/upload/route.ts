@@ -241,7 +241,7 @@ export async function POST(request: NextRequest) {
       if (file.size > MAX_ZIP_BYTES) {
         logIssue('Rejected oversized zip upload', { filename: file.name, bytes: file.size, limit: MAX_ZIP_BYTES });
         return NextResponse.json(
-          { error: 'Zip file size must be less than 100MB' },
+          { error: 'Archive file size must be 500MB or less' },
           { status: 400 }
         );
       }

@@ -13,6 +13,8 @@ describe('variationUploadService', () => {
 
     const result = await uploadVariationFile({
       file: new File(['image'], 'photo.png', { type: 'image/png' }),
+      filename: 'custom-name.png',
+      displayName: 'custom-name',
       namespace: 'ns-a',
       parentId: 'parent-1',
     });
@@ -21,6 +23,9 @@ describe('variationUploadService', () => {
       '/api/upload',
       expect.objectContaining({ method: 'POST', body: expect.any(FormData) })
     );
+    const body = fetchMock.mock.calls[0]?.[1]?.body as FormData;
+    expect(body.get('filename')).toBe('custom-name.png');
+    expect(body.get('displayName')).toBe('custom-name');
     expect(result.ok).toBe(true);
     expect(result.payload.results).toEqual([{ id: 'img-1', url: 'https://cdn.example.com/img-1' }]);
   });
@@ -70,6 +75,8 @@ describe('variationUploadService', () => {
 
     const result = await uploadVariationUrl({
       url: 'https://cdn.example.com/photo.png',
+      filename: 'custom-name.png',
+      displayName: 'custom-name',
       namespace: 'ns-a',
       parentId: 'parent-1',
     });
@@ -78,6 +85,11 @@ describe('variationUploadService', () => {
       '/api/import/page/upload',
       expect.objectContaining({ method: 'POST', headers: { 'Content-Type': 'application/json' } })
     );
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      items: Array<{ filename?: string; displayName?: string }>;
+    };
+    expect(body.items[0]?.filename).toBe('custom-name.png');
+    expect(body.items[0]?.displayName).toBe('custom-name');
     expect(result.ok).toBe(true);
     expect(result.payload.results).toEqual([{ id: 'img-2', url: 'https://cdn.example.com/img-2' }]);
   });
@@ -89,6 +101,8 @@ describe('variationUploadService', () => {
 
     const result = await uploadVariationUrl({
       url: 'https://cdn.example.com/clip.webm',
+      filename: 'custom-clip.webm',
+      displayName: 'custom-clip',
       namespace: 'ns-a',
       parentId: 'parent-1',
     });
@@ -97,6 +111,12 @@ describe('variationUploadService', () => {
       '/api/import/page/upload-video',
       expect.objectContaining({ method: 'POST', headers: { 'Content-Type': 'application/json' } })
     );
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      filename?: string;
+      displayName?: string;
+    };
+    expect(body.filename).toBe('custom-clip.webm');
+    expect(body.displayName).toBe('custom-clip');
     expect(result.ok).toBe(true);
     expect(result.payload.results).toEqual([
       { id: 'vid-2', url: 'https://videodelivery.net/stream-2/iframe' }

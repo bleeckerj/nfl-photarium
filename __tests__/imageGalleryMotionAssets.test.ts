@@ -64,6 +64,34 @@ describe('ImageGallery motion assets helpers', () => {
     ).toBe('/api/images?namespace=studio&includeExtras=1');
   });
 
+  it('adds server-backed gallery pagination and filter params', () => {
+    expect(
+      buildGalleryImagesUrl({
+        namespace: 'studio',
+        serverQuery: {
+          page: 2,
+          pageSize: 60,
+          search: 'blue chair',
+          folder: 'editorial',
+          tag: 'hero',
+          onlyCanonical: true,
+          onlyWithVariants: true,
+          favorites: true,
+          duplicates: true,
+          comfy: true,
+          embedding: 'missing-any',
+          aspectRatioFilters: ['horizontal'],
+          dateFilter: { startDate: '2026-01-01', endDate: '2026-01-31' },
+          hiddenFolders: ['Archive'],
+          hiddenTags: ['private'],
+          showMotionAssetsOnly: false,
+        },
+      })
+    ).toBe(
+      '/api/images?namespace=studio&page=2&pageSize=60&search=blue+chair&folder=editorial&tag=hero&onlyCanonical=1&onlyWithVariants=1&favorites=1&duplicates=1&comfy=1&embedding=missing-any&aspectRatioClasses=horizontal&dateStart=2026-01-01&dateEnd=2026-01-31&hiddenFolders=Archive&hiddenTags=private'
+    );
+  });
+
   it('restores the stored motion-assets preference from localStorage', () => {
     const { localStorage } = installWindow();
     localStorage.setItem(

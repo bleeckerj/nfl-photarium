@@ -104,7 +104,7 @@ describe('GET /api/images/:id embedding status', () => {
 
   it('enriches cached images with Redis embedding metadata before responding', async () => {
     const response = await GET(
-      new NextRequest('http://localhost/api/images/img-1'),
+      new NextRequest('http://localhost/api/images/img-1?includeVectorMeta=1'),
       { params: Promise.resolve({ id: 'img-1' }) }
     );
     const payload = await response.json();
@@ -150,7 +150,7 @@ describe('GET /api/images/:id embedding status', () => {
     });
 
     const response = await GET(
-      new NextRequest('http://localhost/api/images/img-anim'),
+      new NextRequest('http://localhost/api/images/img-anim?enrich=1'),
       { params: Promise.resolve({ id: 'img-anim' }) }
     );
     const payload = await response.json();
@@ -166,7 +166,49 @@ describe('GET /api/images/:id embedding status', () => {
     );
   });
 
-  it('prefers live Cloudflare metadata over stale cached image details', async () => {
+  it('uses cached image details by default without blocking on Cloudflare', async () => {
+    getCachedImageMock.mockResolvedValueOnce({
+      id: 'img-live',
+      filename: 'photo.jpg',
+      uploaded: '2026-03-20T00:00:00.000Z',
+      variants: ['https://imagedelivery.net/hash/img-live/public'],
+      tags: [],
+      namespace: undefined,
+      hasClipEmbedding: false,
+      hasColorEmbedding: false,
+    });
+    fetchCloudflareImageMock.mockResolvedValueOnce({
+      id: 'img-live',
+      filename: 'photo.jpg',
+      uploaded: '2026-03-20T00:00:00.000Z',
+      variants: ['https://imagedelivery.net/hash/img-live/public'],
+      meta: JSON.stringify({
+        namespace: 'cf-midjourney',
+        tags: [],
+      }),
+    });
+    batchGetColorMetadataMock.mockResolvedValueOnce(new Map());
+    batchGetAspectMetadataMock.mockResolvedValueOnce(new Map());
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/images/img-live'),
+      { params: Promise.resolve({ id: 'img-live' }) }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(fetchCloudflareImageMock).not.toHaveBeenCalled();
+    expect(getCachedImageMock).toHaveBeenCalledWith('img-live');
+    expect(payload.diagnostics).toEqual(
+      expect.objectContaining({
+        source: 'cache',
+        vector_enrich_deferred: true,
+      })
+    );
+    expect(payload.image.namespace).toBeUndefined();
+  });
+
+  it('refreshes from Cloudflare when explicitly requested', async () => {
     getCachedImageMock.mockResolvedValueOnce({
       id: 'img-live',
       filename: 'photo.jpg',
@@ -201,7 +243,7 @@ describe('GET /api/images/:id embedding status', () => {
     batchGetAspectMetadataMock.mockResolvedValueOnce(new Map());
 
     const response = await GET(
-      new NextRequest('http://localhost/api/images/img-live'),
+      new NextRequest('http://localhost/api/images/img-live?refresh=1'),
       { params: Promise.resolve({ id: 'img-live' }) }
     );
     const payload = await response.json();
