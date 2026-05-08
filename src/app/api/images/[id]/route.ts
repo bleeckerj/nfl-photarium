@@ -18,6 +18,7 @@ import {
   deleteVideoAssetRecord,
   getVideoAssetRecord,
 } from '@/server/videoCatalogStorage';
+import { getImageExtrasRecord } from '@/server/imageExtras';
 
 const pickVariantUrl = (variants: string[] | undefined): string | undefined => {
   if (!Array.isArray(variants) || variants.length === 0) return undefined;
@@ -159,6 +160,20 @@ const enrichWithVectorMetadata = async (
       ? { width: aspect.width, height: aspect.height }
       : image.dimensions,
   };
+};
+
+const applyExtrasTextMetadata = async (image: CachedCloudflareImage) => {
+  const extras = await getImageExtrasRecord(image.id);
+  if (!extras) return image;
+
+  const next = { ...image };
+  if (Object.prototype.hasOwnProperty.call(extras, 'description')) {
+    next.description = extras.description;
+  }
+  if (Object.prototype.hasOwnProperty.call(extras, 'altText')) {
+    next.altTag = extras.altText;
+  }
+  return next;
 };
 
 export async function DELETE(
@@ -344,9 +359,13 @@ export async function GET(
       });
     }
 
+    const extrasStartedAt = performance.now();
+    const responseImageWithExtras = await applyExtrasTextMetadata(responseImage);
+    timings.extras_load = mark(performance.now() - extrasStartedAt);
+
     timings.total = mark(performance.now() - startedAt);
     const response = NextResponse.json({
-      image: { ...responseImage, fileSizeBytes: responseImage.size ?? null },
+      image: { ...responseImageWithExtras, fileSizeBytes: responseImageWithExtras.size ?? null },
       timings,
       diagnostics,
     });

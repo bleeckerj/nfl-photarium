@@ -542,6 +542,7 @@ export async function GET(request: NextRequest) {
         ? {
             page: queryResult?.page ?? page,
             pageSize: queryResult?.pageSize ?? pageSize,
+            scopeTotal: queryResult?.scopeTotal ?? diagnostics.pre_pagination_count,
             total: totalBeforePagination,
             totalPages: queryResult?.totalPages ?? Math.max(1, Math.ceil(totalBeforePagination / pageSize)),
           }

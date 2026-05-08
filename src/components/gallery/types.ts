@@ -188,8 +188,6 @@ export interface BulkEditState {
 // Image card actions
 export interface ImageCardActions {
   onDelete: (imageId: string) => Promise<void>;
-  onGenerateAlt: (imageId: string) => Promise<void>;
-  onGenerateDisplayName: (imageId: string) => Promise<void>;
   onStartEdit: (image: CloudflareImage) => void;
   onCopyUrl: (imageId: string) => void;
   onToggleSelection: (imageId: string) => void;

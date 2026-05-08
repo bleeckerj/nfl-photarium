@@ -13,6 +13,9 @@ interface UseGallerySelectionOptions {
   images: CloudflareImage[];
   duplicateGroups: DuplicateGroup[];
   duplicateIds: Set<string>;
+  serverDuplicateIds?: string[];
+  serverDuplicateIdsExcludingNewest?: string[];
+  serverDuplicateIdsExcludingOldest?: string[];
   bulkSelectionMode?: boolean;
   setBulkSelectionMode?: (value: boolean) => void;
 }
@@ -33,6 +36,9 @@ export function useGallerySelection({
   images,
   duplicateGroups,
   duplicateIds,
+  serverDuplicateIds,
+  serverDuplicateIdsExcludingNewest,
+  serverDuplicateIdsExcludingOldest,
   bulkSelectionMode: bulkSelectionModeOverride,
   setBulkSelectionMode: setBulkSelectionModeOverride,
 }: UseGallerySelectionOptions): UseGallerySelectionReturn {
@@ -55,15 +61,20 @@ export function useGallerySelection({
     setSelectedImageIds(prev => {
       if (!prev.size) return prev;
       const validIds = new Set(images.map(img => img.id));
+      const preservedIds = new Set([
+        ...(serverDuplicateIds ?? []),
+        ...(serverDuplicateIdsExcludingNewest ?? []),
+        ...(serverDuplicateIdsExcludingOldest ?? []),
+      ]);
       const next = new Set<string>();
       prev.forEach(id => {
-        if (validIds.has(id)) {
+        if (validIds.has(id) || preservedIds.has(id)) {
           next.add(id);
         }
       });
       return next;
     });
-  }, [images]);
+  }, [images, serverDuplicateIds, serverDuplicateIdsExcludingNewest, serverDuplicateIdsExcludingOldest]);
 
   const toggleSelection = useCallback((imageId: string) => {
     setSelectedImageIds(prev => {
@@ -90,18 +101,26 @@ export function useGallerySelection({
   }, []);
 
   const selectDuplicateImages = useCallback(() => {
-    if (!duplicateIds.size) return false;
+    const ids = serverDuplicateIds?.length ? serverDuplicateIds : Array.from(duplicateIds);
+    if (!ids.length) return false;
     setBulkSelectionMode(true);
     setSelectedImageIds(prev => {
       const next = new Set(prev);
-      duplicateIds.forEach(id => next.add(id));
+      ids.forEach(id => next.add(id));
       return next;
     });
     return true;
-  }, [duplicateIds]);
+  }, [duplicateIds, serverDuplicateIds, setBulkSelectionMode]);
 
   const selectDuplicatesKeepSingle = useCallback(
     (strategy: 'newest' | 'oldest') => {
+      const serverIds =
+        strategy === 'newest' ? serverDuplicateIdsExcludingNewest : serverDuplicateIdsExcludingOldest;
+      if (serverIds?.length) {
+        setBulkSelectionMode(true);
+        setSelectedImageIds(new Set(serverIds));
+        return true;
+      }
       if (!duplicateGroups.length) return false;
       
       const idsToKeep = new Set<string>();
@@ -130,7 +149,7 @@ export function useGallerySelection({
       });
       return true;
     },
-    [duplicateGroups]
+    [duplicateGroups, serverDuplicateIdsExcludingNewest, serverDuplicateIdsExcludingOldest, setBulkSelectionMode]
   );
 
   return {

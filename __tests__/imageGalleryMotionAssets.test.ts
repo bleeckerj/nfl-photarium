@@ -4,6 +4,7 @@ import {
   getDefaultStoredPreferences,
   getStoredPreferences,
 } from '@/components/ImageGallery';
+import { buildCanonicalGalleryHref } from '@/components/gallery/focusNavigation';
 import {
   getFreshGalleryReturnState,
   saveGalleryReturnState,
@@ -142,5 +143,92 @@ describe('ImageGallery motion assets helpers', () => {
 
     expect(restoredState?.filters?.showMotionAssetsOnly).toBe(true);
     expect(prefs.showMotionAssetsOnly).toBe(true);
+  });
+
+  it('neutralizes restrictive stored filters for canonical gallery focus mode', () => {
+    const { localStorage } = installWindow('?gns=__all__&focus=img-1');
+    localStorage.setItem(
+      'galleryPreferences',
+      JSON.stringify({
+        ...getDefaultStoredPreferences(),
+        searchTerm: 'needle',
+        selectedFolder: 'archive',
+        selectedTag: 'private',
+        onlyCanonical: true,
+        onlyWithVariants: true,
+        showMotionAssetsOnly: true,
+        showFavoritesOnly: true,
+        showDuplicatesOnly: true,
+        showBrokenOnly: true,
+        showComfyOnly: true,
+        embeddingFilter: 'missing-any',
+        aspectRatioFilters: ['horizontal'],
+        hiddenFolders: ['Hidden'],
+        hiddenTags: ['private'],
+        dateFilter: { startDate: '2026-01-01', endDate: '2026-01-31' },
+        currentPage: 42,
+        pageSize: 120,
+        viewMode: 'list',
+      })
+    );
+    saveGalleryReturnState({
+      namespace: '__all__',
+      savedAt: Date.now(),
+      scrollY: 0,
+      selectedImageId: 'img-1',
+      resultIds: ['img-1'],
+      resultAssets: [{ id: 'img-1', assetType: 'image' }],
+      filters: {
+        searchTerm: 'return-state-search',
+        colorSearchHex: '#ffffff',
+        selectedFolder: 'return-folder',
+        selectedTag: 'return-tag',
+        onlyCanonical: true,
+        onlyWithVariants: true,
+        showMotionAssetsOnly: true,
+        showFavoritesOnly: true,
+        showDuplicatesOnly: true,
+        showBrokenOnly: true,
+        showComfyOnly: true,
+        embeddingFilter: 'missing-any',
+        aspectRatioFilters: ['vertical'],
+        dateFilter: { startDate: '2026-03-01', endDate: '2026-03-02' },
+        hiddenFolders: ['ReturnHidden'],
+        hiddenTags: ['return-private'],
+        pageSize: 60,
+        currentPage: 9,
+      },
+    });
+
+    const restoredState = getFreshGalleryReturnState('__all__');
+    const prefs = getStoredPreferences('__all__', restoredState, { neutralizeFilters: true });
+
+    expect(prefs).toMatchObject({
+      searchTerm: '',
+      colorSearchHex: null,
+      selectedFolder: 'all',
+      selectedTag: '',
+      onlyCanonical: false,
+      onlyWithVariants: false,
+      showMotionAssetsOnly: false,
+      showFavoritesOnly: false,
+      showDuplicatesOnly: false,
+      showBrokenOnly: false,
+      showComfyOnly: false,
+      embeddingFilter: 'none',
+      aspectRatioFilters: [],
+      hiddenFolders: [],
+      hiddenTags: [],
+      dateFilter: null,
+      currentPage: 1,
+    });
+    expect(prefs.pageSize).toBe(120);
+    expect(prefs.viewMode).toBe('list');
+  });
+
+  it('builds all-namespace canonical gallery focus hrefs', () => {
+    expect(buildCanonicalGalleryHref({ assetId: 'img-1', namespace: '__all__' })).toBe(
+      '/?gns=__all__&focus=img-1'
+    );
   });
 });

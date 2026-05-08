@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cleanString, parseCloudflareMetadata } from '@/utils/cloudflareMetadata';
+import { getImageExtrasRecord, patchImageExtrasRecord } from '@/server/imageExtras';
 
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
+
+const appendGeneratedDescription = (current: string | undefined, generated: string) => {
+  const base = typeof current === 'string' ? current.trim() : '';
+  return base ? `${base}\n\n${generated}` : generated;
+};
 
 export async function POST(
   request: NextRequest,
@@ -74,6 +80,7 @@ export async function POST(
     }
 
     const parsedMeta = parseCloudflareMetadata(image.meta);
+    const extrasRecord = await getImageExtrasRecord(imageId);
     const contextSegments: string[] = [];
     const filename = cleanString(image.filename || (parsedMeta.filename as string));
     if (filename) {
@@ -89,8 +96,10 @@ export async function POST(
     if (tags) {
       contextSegments.push(`Tags: ${tags}`);
     }
-    const storedDescription = cleanString(parsedMeta.description as string);
-    if (storedDescription) {
+    const hasClientWorkingCopy = existingDescriptionFromClient !== undefined;
+    const storedDescription =
+      cleanString(extrasRecord?.description) ?? cleanString(parsedMeta.description as string);
+    if (!hasClientWorkingCopy && storedDescription) {
       contextSegments.push(`Stored description: ${storedDescription}`);
     }
     const clientDraft = cleanString(existingDescriptionFromClient);
@@ -165,7 +174,13 @@ export async function POST(
       );
     }
 
-    return NextResponse.json({ description });
+    const persistedDescription = appendGeneratedDescription(
+      hasClientWorkingCopy ? existingDescriptionFromClient : storedDescription,
+      description
+    );
+    await patchImageExtrasRecord(imageId, { description: persistedDescription });
+
+    return NextResponse.json({ description, persistedDescription, saved: true });
   } catch (error) {
     console.error('Description generation error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

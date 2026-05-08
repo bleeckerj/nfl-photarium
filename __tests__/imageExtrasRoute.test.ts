@@ -89,4 +89,27 @@ describe('PATCH /api/images/:id/extras', () => {
       })
     );
   });
+
+  it('clears description only when explicitly passed null or an empty string', async () => {
+    const untouchedRequest = createPatchRequest({ altText: 'Alt text' });
+    await PATCH(untouchedRequest, { params: Promise.resolve({ id: 'img_1' }) });
+    expect(patchImageExtrasRecordMock).toHaveBeenLastCalledWith(
+      'img_1',
+      expect.not.objectContaining({ description: expect.anything() })
+    );
+
+    const nullRequest = createPatchRequest({ description: null });
+    await PATCH(nullRequest, { params: Promise.resolve({ id: 'img_1' }) });
+    expect(patchImageExtrasRecordMock).toHaveBeenLastCalledWith(
+      'img_1',
+      expect.objectContaining({ description: undefined })
+    );
+
+    const emptyRequest = createPatchRequest({ description: '' });
+    await PATCH(emptyRequest, { params: Promise.resolve({ id: 'img_1' }) });
+    expect(patchImageExtrasRecordMock).toHaveBeenLastCalledWith(
+      'img_1',
+      expect.objectContaining({ description: undefined })
+    );
+  });
 });

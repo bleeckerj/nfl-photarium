@@ -154,6 +154,7 @@ type VideoMetaState = {
 type GalleryServerPagination = {
   page: number;
   pageSize: number;
+  scopeTotal?: number;
   total: number;
   totalPages: number;
 };
@@ -167,6 +168,9 @@ type GalleryDuplicateSummary = {
   groupCount: number;
   imageCount: number;
   pageDuplicateIds: string[];
+  allDuplicateIds?: string[];
+  duplicateIdsExcludingNewest?: string[];
+  duplicateIdsExcludingOldest?: string[];
 };
 
 type GalleryServerQueryState = {
@@ -347,7 +351,8 @@ export const getDefaultStoredPreferences = (): StoredGalleryPreferences => ({
 
 export const getStoredPreferences = (
   namespace: string | undefined,
-  initialGalleryReturnState: NormalizedGalleryReturnState | null
+  initialGalleryReturnState: NormalizedGalleryReturnState | null,
+  options: { neutralizeFilters?: boolean } = {}
 ): StoredGalleryPreferences => {
   if (typeof window === 'undefined') {
     return getDefaultStoredPreferences();
@@ -428,6 +433,10 @@ export const getStoredPreferences = (
     console.warn('Failed to parse gallery preferences', error);
   }
 
+  if (options.neutralizeFilters) {
+    return neutralizeStoredPreferenceFilters(next);
+  }
+
   if (initialGalleryReturnState?.filters) {
     next.searchTerm = initialGalleryReturnState.filters.searchTerm;
     next.colorSearchHex = initialGalleryReturnState.filters.colorSearchHex ?? null;
@@ -477,6 +486,29 @@ export const getStoredPreferences = (
   return next;
 };
 
+export const neutralizeStoredPreferenceFilters = (
+  preferences: StoredGalleryPreferences
+): StoredGalleryPreferences => ({
+  ...preferences,
+  searchTerm: '',
+  colorSearchHex: null,
+  selectedFolder: 'all',
+  selectedTag: '',
+  onlyCanonical: false,
+  onlyWithVariants: false,
+  showMotionAssetsOnly: false,
+  showFavoritesOnly: false,
+  showComfyOnly: false,
+  showDuplicatesOnly: false,
+  showBrokenOnly: false,
+  embeddingFilter: 'none',
+  aspectRatioFilters: [],
+  hiddenFolders: [],
+  hiddenTags: [],
+  dateFilter: null,
+  currentPage: 1,
+});
+
 
 
 const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
@@ -488,7 +520,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     initialFocusTargetRef.current ? null : getFreshGalleryReturnState()
   );
   const storedPreferencesRef = useRef(
-    getStoredPreferences(namespace, initialGalleryReturnStateRef.current)
+    getStoredPreferences(namespace, initialGalleryReturnStateRef.current, {
+      neutralizeFilters: Boolean(initialFocusTargetRef.current),
+    })
   );
 
   const initialReturningFromDetail = (() => {
@@ -995,6 +1029,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             ? {
                 page: nextPagination.page,
                 pageSize: nextPagination.pageSize,
+                scopeTotal:
+                  typeof nextPagination.scopeTotal === 'number'
+                    ? nextPagination.scopeTotal
+                    : undefined,
                 total: nextPagination.total,
                 totalPages: nextPagination.totalPages,
               }
@@ -1552,7 +1590,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     focusCanonicalizedRef.current = true;
     clearFilters();
     clearColorSearch();
-    setFocusNotice(null);
+    setFocusNotice('Showing full gallery order across all namespaces; filters were cleared for this focused asset.');
   }, [clearColorSearch, clearFilters, namespace]);
 
   useEffect(() => {
@@ -1981,6 +2019,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     images,
     duplicateGroups,
     duplicateIds,
+    serverDuplicateIds: serverDuplicateSummary?.allDuplicateIds,
+    serverDuplicateIdsExcludingNewest: serverDuplicateSummary?.duplicateIdsExcludingNewest,
+    serverDuplicateIdsExcludingOldest: serverDuplicateSummary?.duplicateIdsExcludingOldest,
     bulkSelectionMode,
     setBulkSelectionMode,
   });
@@ -1999,8 +2040,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       }
       toast.push(
         strategy === 'newest'
-          ? 'Selected duplicates (keeping newest copy per filename)'
-          : 'Selected duplicates (keeping oldest copy per filename)'
+          ? 'Selected duplicates (keeping newest copy per duplicate group)'
+          : 'Selected duplicates (keeping oldest copy per duplicate group)'
       );
     },
     [selectDuplicatesKeepSingleBase, toast]
@@ -2362,7 +2403,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const backupSizeLabel = backupInfo ? backupInfo.sizeHuman : '—';
   const serverPagedResultCount = colorSearchHex ? null : serverPagination?.total ?? null;
   const galleryResultCount = serverPagedResultCount ?? filteredWithVariants.length;
-  const galleryTotalCount = serverPagedResultCount ?? images.length;
+  const galleryTotalCount =
+    !colorSearchHex && serverPagination?.scopeTotal !== undefined
+      ? serverPagination.scopeTotal
+      : serverPagedResultCount ?? images.length;
 
   if (loading) {
     return (
@@ -2830,8 +2874,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             onToggleCopyMenu={handleOpenCopyMenu}
             onStartEdit={startEdit}
             onDelete={deleteImage}
-            onGenerateAlt={generateAltTag}
-            onGenerateDisplayName={generateDisplayName}
             onToggleFavorite={toggleFavorite}
             onMouseEnter={handleMouseEnter}
             onMouseMove={handleMouseMove}

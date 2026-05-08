@@ -10,7 +10,7 @@
 import React from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { Trash2, Copy, ExternalLink, Sparkles, Layers, AlertTriangle, Star } from 'lucide-react';
+import { Trash2, Copy, ExternalLink, Layers, AlertTriangle, Star } from 'lucide-react';
 import { getCloudflareImageUrl, getCloudflareDownloadUrl } from '@/utils/imageUtils';
 import { formatBytes } from '@/utils/formatBytes';
 import { ColorSwatches } from '@/components/ColorSwatches';
@@ -33,15 +33,11 @@ interface ImageCardProps {
   familySummary?: GalleryFamilySummary;
   colorMetadata?: ColorMetadata;
   embeddingPending?: EmbeddingPendingEntry;
-  altLoading: boolean;
-  displayNameLoading: boolean;
   favoriteLoading?: boolean;
   // Actions
   onToggleSelection: (imageId: string) => void;
   onStartEdit: (image: CloudflareImage) => void;
   onDelete: (imageId: string) => void;
-  onGenerateAlt: (imageId: string) => void;
-  onGenerateDisplayName: (imageId: string) => void;
   onToggleFavorite?: (imageId: string) => void;
   onCopyUrl: (imageId: string) => void;
   onCopyNamespace: (namespace: string) => void;
@@ -79,14 +75,10 @@ export const ImageCard: React.FC<ImageCardProps> = ({
   familySummary,
   colorMetadata,
   embeddingPending,
-  altLoading,
-  displayNameLoading,
   favoriteLoading = false,
   onToggleSelection,
   onStartEdit,
   onDelete,
-  onGenerateAlt,
-  onGenerateDisplayName,
   onToggleFavorite,
   onCopyUrl,
   onCopyNamespace,
@@ -334,42 +326,10 @@ export const ImageCard: React.FC<ImageCardProps> = ({
             />
           </div>
         </div>
-        <div className="pt-2">
-          {!isVideoAsset && (
-            <div className="inline-flex w-full rounded-md overflow-hidden border border-gray-900">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onGenerateAlt(image.id);
-                }}
-                disabled={altLoading}
-                className="flex-1 inline-flex items-center justify-center gap-2 bg-gray-900 text-white px-2 py-1.5 text-[0.6rem] transition hover:bg-black disabled:opacity-50"
-                title="Generate ALT text"
-                aria-label="Generate ALT text"
-              >
-                <Sparkles className="text-[0.8rem] h-3.5 w-3.5" />
-                {altLoading ? 'Generating ALT...' : image.altTag ? 'Refresh ALT' : 'Gen ALT text'}
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onGenerateDisplayName(image.id);
-                }}
-                disabled={displayNameLoading}
-                className="flex-1 inline-flex items-center justify-center gap-2 bg-gray-800 text-white px-2 py-1.5 text-[0.6rem] transition hover:bg-gray-900 disabled:opacity-50 border-l border-gray-700"
-                title="Generate display name"
-                aria-label="Generate display name"
-              >
-                <Sparkles className="text-[0.8rem] h-3.5 w-3.5" />
-                {displayNameLoading ? 'Generating…' : 'Gen DSP name'}
-              </button>
-            </div>
-          )}
-        </div>
       </div>
 
       {/* Action bar */}
-      <div className={`grid ${isVideoAsset ? 'grid-cols-5' : 'grid-cols-6'} gap-1 p-1.5 bg-white border-b border-gray-200 z-30 mt-auto`}>
+      <div className={`grid ${isVideoAsset ? 'grid-cols-5' : 'grid-cols-3'} gap-1.5 p-2 bg-white border-b border-gray-200 z-30 mt-auto`}>
         {!isVideoAsset && (
           <button
             onClick={(e) => {
@@ -377,7 +337,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
               onToggleFavorite?.(image.id);
             }}
             disabled={favoriteLoading}
-            className={`h-8 w-full inline-flex items-center justify-center rounded-md border shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-offset-1 ${
+            className={`h-9 w-full inline-flex items-center justify-center rounded-md border shadow-sm transition-colors focus:outline-none focus:ring-1 focus:ring-offset-1 ${
               favorite
                 ? 'border-amber-300 bg-amber-100 text-amber-700 hover:bg-amber-200 focus:ring-amber-300'
                 : 'border-gray-300 bg-white text-gray-500 hover:bg-gray-50 focus:ring-gray-300'
@@ -397,7 +357,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
               console.error('Failed to copy image ID', error);
             }
           }}
-          className="h-8 w-full inline-flex items-center justify-center rounded-md bg-black text-white text-[0.55rem] font-semibold tracking-wide shadow-sm transition-colors hover:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-black/40"
+          className="h-9 w-full inline-flex items-center justify-center rounded-md bg-black text-white text-[0.55rem] font-semibold tracking-wide shadow-sm transition-colors hover:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-black/40"
           title="Copy image ID"
           aria-label="Copy image ID"
         >
@@ -408,7 +368,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
             e.stopPropagation();
             onCopyUrl(image.id);
           }}
-          className="h-8 w-full inline-flex items-center justify-center rounded-md bg-black text-white shadow-sm transition-colors hover:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-black/40"
+          className="h-9 w-full inline-flex items-center justify-center rounded-md bg-black text-white shadow-sm transition-colors hover:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-black/40"
           title="Copy URL"
           aria-label="Copy URL"
         >
@@ -416,7 +376,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
         </button>
         <button
           onClick={() => window.open(isVideoAsset ? `/videos/${image.id}` : `/images/${image.id}`, '_blank')}
-          className="h-8 w-full inline-flex items-center justify-center rounded-md bg-black text-white shadow-sm transition-colors hover:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-black/40"
+          className="h-9 w-full inline-flex items-center justify-center rounded-md bg-black text-white shadow-sm transition-colors hover:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-black/40"
           title={isVideoAsset ? "Open video detail" : "Open in new tab"}
           aria-label={isVideoAsset ? "Open video detail" : "Open in new tab"}
         >
@@ -424,7 +384,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
         </button>
         <button
           onClick={() => onStartEdit(image)}
-          className="h-8 w-full inline-flex items-center justify-center rounded-md bg-black text-white shadow-sm transition-colors hover:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-black/40"
+          className="h-9 w-full inline-flex items-center justify-center rounded-md bg-black text-white shadow-sm transition-colors hover:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-black/40"
           title="Edit folder/tags"
           aria-label="Edit folder/tags"
         >
@@ -439,7 +399,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
         </button>
         <button
           onClick={() => onDelete(image.id)}
-          className="h-8 w-full inline-flex items-center justify-center rounded-md border border-red-300 bg-white text-red-600 shadow-sm transition-colors hover:bg-red-50 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-red-300"
+          className="h-9 w-full inline-flex items-center justify-center rounded-md border border-red-300 bg-white text-red-600 shadow-sm transition-colors hover:bg-red-50 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-red-300"
           title={isVideoAsset ? "Delete video" : "Delete image"}
           aria-label={isVideoAsset ? "Delete video" : "Delete image"}
         >

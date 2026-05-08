@@ -54,6 +54,7 @@ export type GalleryQueryFacets = {
 
 export type GalleryQueryResult<T extends GalleryQueryAsset> = {
   images: T[];
+  scopeTotal: number;
   total: number;
   totalPages: number;
   page: number;
@@ -64,6 +65,9 @@ export type GalleryQueryResult<T extends GalleryQueryAsset> = {
     groupCount: number;
     imageCount: number;
     pageDuplicateIds: string[];
+    allDuplicateIds: string[];
+    duplicateIdsExcludingNewest: string[];
+    duplicateIdsExcludingOldest: string[];
   };
 };
 
@@ -198,6 +202,7 @@ export const queryGalleryAssets = <T extends GalleryQueryAsset>(
   page: number,
   pageSize: number
 ): GalleryQueryResult<T> => {
+  const scopeTotal = assets.length;
   const familySummaryMapAll = buildFamilySummaryMap(assets as never);
   const facetBase = assets.filter((asset) => matchesHidden(asset, filters.hiddenFolders, filters.hiddenTags));
   const facets = buildFacets(facetBase);
@@ -222,6 +227,23 @@ export const queryGalleryAssets = <T extends GalleryQueryAsset>(
   const duplicateGroups = computeDuplicateGroups(baseFiltered as never);
   const duplicateIds = new Set<string>();
   duplicateGroups.forEach((group) => group.items.forEach((asset) => duplicateIds.add(asset.id)));
+  const selectDuplicateIdsKeeping = (strategy: 'newest' | 'oldest') => {
+    const ids = new Set<string>();
+    duplicateGroups.forEach((group) => {
+      const sorted = [...group.items].sort((a, b) => {
+        const aUploaded = Date.parse(a.uploaded ?? '');
+        const bUploaded = Date.parse(b.uploaded ?? '');
+        const aTime = Number.isFinite(aUploaded) ? aUploaded : 0;
+        const bTime = Number.isFinite(bUploaded) ? bUploaded : 0;
+        return strategy === 'newest' ? bTime - aTime : aTime - bTime;
+      });
+      const keepId = sorted[0]?.id;
+      group.items.forEach((asset) => {
+        if (asset.id !== keepId) ids.add(asset.id);
+      });
+    });
+    return Array.from(ids);
+  };
 
   const duplicateFiltered = filters.duplicates
     ? baseFiltered.filter((asset) => duplicateIds.has(asset.id))
@@ -242,6 +264,7 @@ export const queryGalleryAssets = <T extends GalleryQueryAsset>(
 
   return {
     images,
+    scopeTotal,
     total,
     totalPages,
     page: pageIndex,
@@ -252,6 +275,9 @@ export const queryGalleryAssets = <T extends GalleryQueryAsset>(
       groupCount: duplicateGroups.length,
       imageCount: duplicateIds.size,
       pageDuplicateIds,
+      allDuplicateIds: Array.from(duplicateIds),
+      duplicateIdsExcludingNewest: selectDuplicateIdsKeeping('newest'),
+      duplicateIdsExcludingOldest: selectDuplicateIdsKeeping('oldest'),
     },
   };
 };

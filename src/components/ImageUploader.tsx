@@ -247,6 +247,7 @@ const base64ToFile = (base64: string, filename: string, mimeType: string) => {
 const MAX_BYTES = 10 * 1024 * 1024;
 const VIDEO_REMOTE_UPLOAD_CONCURRENCY = 2;
 const QUEUE_RENDER_LIMIT = 250;
+const UPLOADER_GALLERY_SUMMARY_PAGE_SIZE = 500;
 const NAMESPACE_REQUIRED_UPLOAD_ERROR = 'Select a specific namespace before uploading. "All namespaces" and "(no namespace)" are browse-only for uploads.';
 
 const isZipFile = (file: File) => (
@@ -341,6 +342,21 @@ const runWithConcurrency = async <T,>(
   });
 
   await Promise.all(runners);
+};
+
+const buildUploaderGallerySummaryUrl = (namespace?: string) => {
+  const params = new URLSearchParams({
+    page: '1',
+    pageSize: String(UPLOADER_GALLERY_SUMMARY_PAGE_SIZE),
+  });
+  if (namespace === '') {
+    params.set('namespace', '__none__');
+  } else if (namespace === '__all__') {
+    params.set('namespace', '__all__');
+  } else if (namespace && namespace !== '__all__') {
+    params.set('namespace', namespace);
+  }
+  return `/api/images?${params.toString()}`;
 };
 
 const renderBitmapToBlob = (bitmap: ImageBitmap, width: number, height: number, type: string, quality: number) =>
@@ -525,6 +541,7 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
   const embeddingQueueRef = useRef<Array<{ id: string; clip: boolean; color: boolean }>>([]);
   const embeddingWorkerRef = useRef(false);
   const activeUploadOpsRef = useRef(0);
+  const galleryRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const setSourceUrlIfEmpty = useCallback((value: string) => {
     if (!sourceUrl.trim()) {
@@ -586,6 +603,30 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
       error,
       updatedAt: new Date().toISOString()
     });
+  }, []);
+
+  const notifyGalleryUploaded = useCallback((delayMs = 0) => {
+    if (!onImageUploaded) return;
+    if (galleryRefreshTimerRef.current) {
+      clearTimeout(galleryRefreshTimerRef.current);
+      galleryRefreshTimerRef.current = null;
+    }
+    if (delayMs <= 0) {
+      onImageUploaded();
+      return;
+    }
+    galleryRefreshTimerRef.current = setTimeout(() => {
+      galleryRefreshTimerRef.current = null;
+      onImageUploaded();
+    }, delayMs);
+  }, [onImageUploaded]);
+
+  useEffect(() => {
+    return () => {
+      if (galleryRefreshTimerRef.current) {
+        clearTimeout(galleryRefreshTimerRef.current);
+      }
+    };
   }, []);
 
   const beginUploadActivity = useCallback(() => {
@@ -756,9 +797,6 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
               : img
           )
         );
-        if (onImageUploaded) {
-          onImageUploaded();
-        }
       } catch (error) {
         updateEmbeddingPending(
           job.id,
@@ -782,7 +820,7 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     }
 
     embeddingWorkerRef.current = false;
-  }, [onImageUploaded, updateEmbeddingPending]);
+  }, [updateEmbeddingPending]);
 
   const enqueueEmbedding = useCallback((imageId: string, clip: boolean, color: boolean) => {
     if (!clip && !color) return;
@@ -1075,16 +1113,22 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
   // Fetch existing folders from images endpoint and merge with local presets
   const fetchFolders = useCallback(async () => {
     try {
-      const resp = await fetch("/api/images");
+      const resp = await fetch(buildUploaderGallerySummaryUrl(namespace));
       const data = await resp.json();
       if (resp.ok && Array.isArray(data.images)) {
-        const fetched: string[] = Array.from(
+        const facetFolders = Array.isArray(data?.facets?.folders)
+          ? data.facets.folders
+              .map((entry: { value?: unknown }) => (typeof entry.value === 'string' ? entry.value.trim() : ''))
+              .filter((folder: string): folder is string => Boolean(folder))
+          : [];
+        const imageFolders: string[] = Array.from(
           new Set(
             (data.images as GalleryImageSummary[])
               .map((img) => (img.folder ?? '').trim())
               .filter((folder): folder is string => Boolean(folder))
           )
         );
+        const fetched = facetFolders.length > 0 ? facetFolders : imageFolders;
 
         setFolders((prev: string[]) =>
           Array.from(new Set<string>([...prev, ...fetched]))
@@ -1097,7 +1141,7 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     } catch (err) {
       console.warn("Failed to fetch folders for uploader", err);
     }
-  }, []);
+  }, [namespace]);
 
   // Load folders on mount
   useEffect(() => {
@@ -1505,14 +1549,14 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
       }
 
       endUploadActivity();
+      if (uploadedAny) {
+        notifyGalleryUploaded();
+      }
 
       // Refresh available folders after upload (new folder may have been added by server)
-      try {
-        await fetchFolders();
-      } catch (e) {
-        // ignore - non-critical
+      void fetchFolders().catch((e) => {
         console.warn("Failed to refresh folders after upload", e);
-      }
+      });
 
       // Clear form inputs after successful upload
       setSelectedFolder("");
@@ -1522,13 +1566,8 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
       setOriginalUrl("");
       setSourceUrl("");
       setSelectedParentId("");
-      if (onImageUploaded && uploadedAny) {
-        setTimeout(() => {
-          onImageUploaded();
-        }, 500);
-      }
     },
-    [resolveFolder, tags, description, originalUrl, sourceUrl, uploadNamespace, selectedParentId, onImageUploaded, fetchFolders, formatUploadErrorMessage, embedClipOnUpload, embedColorOnUpload, enqueueEmbedding, omitOriginalUrl, markNamespaceUploadFailures, beginUploadActivity, endUploadActivity]
+    [resolveFolder, tags, description, originalUrl, sourceUrl, uploadNamespace, selectedParentId, notifyGalleryUploaded, fetchFolders, formatUploadErrorMessage, embedClipOnUpload, embedColorOnUpload, enqueueEmbedding, omitOriginalUrl, markNamespaceUploadFailures, beginUploadActivity, endUploadActivity]
   );
 
   const uploadRemoteFiles = useCallback(
@@ -1818,10 +1857,8 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
           });
         }
 
-        if (onImageUploaded && resultList.length > 0) {
-          setTimeout(() => {
-            onImageUploaded();
-          }, 500);
+        if (resultList.length > 0) {
+          notifyGalleryUploaded();
         }
       } catch (error) {
         console.error('Remote upload error:', error);
@@ -1834,11 +1871,9 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
         );
       } finally {
         endUploadActivity();
-        try {
-          await fetchFolders();
-        } catch (e) {
+        void fetchFolders().catch((e) => {
           console.warn("Failed to refresh folders after upload", e);
-        }
+        });
         setSelectedFolder("");
         setNewFolder("");
         setTags("found");
@@ -1848,7 +1883,7 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
         setSelectedParentId("");
       }
     },
-    [resolveFolder, tags, description, originalUrl, sourceUrl, uploadNamespace, selectedParentId, onImageUploaded, fetchFolders, embedClipOnUpload, embedColorOnUpload, enqueueEmbedding, omitOriginalUrl, pageImportAllowInsecure, pageImportCookieHeader, markNamespaceUploadFailures, beginUploadActivity, endUploadActivity]
+    [resolveFolder, tags, description, originalUrl, sourceUrl, uploadNamespace, selectedParentId, notifyGalleryUploaded, fetchFolders, embedClipOnUpload, embedColorOnUpload, enqueueEmbedding, omitOriginalUrl, pageImportAllowInsecure, pageImportCookieHeader, pageImportIncludeSmallAssets, markNamespaceUploadFailures, beginUploadActivity, endUploadActivity]
   );
 
   // Handle drag and drop - either queue or upload immediately
@@ -2472,11 +2507,7 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
         }
       ]);
 
-      if (onImageUploaded) {
-        setTimeout(() => {
-          onImageUploaded();
-        }, 500);
-      }
+      notifyGalleryUploaded();
     } catch (err) {
       console.error('Create animation failed', err);
       setAnimateError(err instanceof Error ? err.message : 'Failed to create animation');

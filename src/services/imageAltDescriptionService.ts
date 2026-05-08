@@ -7,6 +7,8 @@ type AltTagResponse = {
 
 type DescriptionResponse = {
   description?: string;
+  persistedDescription?: string;
+  saved?: boolean;
   error?: string;
 };
 

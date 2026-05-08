@@ -27,7 +27,75 @@
 - `photarium_generate_alt`
 - `photarium_generate_description`
 - `photarium_generate_prompt`
+- `photarium_generate_image`
+- `photarium_generate_from_references`
+- `photarium_semantic_merge`
 - `photarium_concepts`
+
+### Image Generation
+
+The image generation tools call OpenAI image generation from the Photarium MCP server and upload generated outputs back into Photarium. They require `OPENAI_API_KEY` in the MCP server environment.
+
+- `photarium_generate_image` creates a new image from a text prompt.
+- `photarium_generate_from_references` creates a new image from a prompt plus Photarium image IDs or direct image URLs.
+- `photarium_semantic_merge` semantically blends multiple source images into a new generated image. It is synthesis, not exact compositing.
+
+All three tools support `dryRun: true` for request-shape testing without OpenAI or upload side effects.
+
+Example text-to-image dry run:
+
+```json
+{
+  "prompt": "A calm product photograph of a countertop espresso machine in a contemporary kitchen",
+  "dryRun": true,
+  "outputFormat": "png",
+  "namespace": "generated-test",
+  "folder": "mcp-smoke"
+}
+```
+
+Example reference generation:
+
+```json
+{
+  "prompt": "Create a premium appliance-ad image using the first source for brand tone and the second source for product form.",
+  "references": [
+    {
+      "imageId": "brand-reference-id",
+      "role": "brand_reference",
+      "instructions": "Use color and tone only; do not reproduce exact logo geometry."
+    },
+    {
+      "imageId": "product-reference-id",
+      "role": "subject_reference"
+    }
+  ],
+  "namespace": "generated-images",
+  "folder": "reference-generations"
+}
+```
+
+Example semantic merge:
+
+```json
+{
+  "mergeBrief": "Blend the refined kitchen mood of the first source with the industrial design language of the second source.",
+  "sources": [
+    { "imageId": "style-source-id", "role": "style_reference" },
+    { "imageId": "object-source-id", "role": "subject_reference" }
+  ],
+  "tags": ["generated", "semantic-merge"]
+}
+```
+
+Testing checklist:
+
+1. `cd mcp-server && npm run build`
+2. From the repo root, run `npm test -- photariumMcp`
+3. Use `dryRun: true` for all three tools and confirm the returned payload includes the expected `mode`, OpenAI endpoint, output format, upload target, and source provenance.
+4. For live smoke tests, set `PHOTARIUM_BASE_URL` and `OPENAI_API_KEY`, use a dedicated test namespace/folder, and verify the uploaded result has prompt provenance.
+5. For reference tests, include both raster and SVG Photarium images and confirm SVG sources are rasterized with a warning.
+6. For semantic merge tests, confirm the result is conceptually blended and not treated as exact logo or pixel placement.
 
 ## System
 - `photarium_vector_status`

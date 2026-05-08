@@ -42,6 +42,12 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
+import {
+  generatePhotariumImage,
+  generatePhotariumImageFromReferences,
+  type ImageGenerationSettings,
+  type ImageReferenceInput,
+} from './image-generation.js';
 
 // Configuration
 const BASE_URL = process.env.PHOTARIUM_BASE_URL || 'http://localhost:3000';
@@ -3237,6 +3243,113 @@ export const LEGACY_TOOLS: Tool[] = [
     },
   },
   {
+    name: 'photarium_generate_image',
+    description:
+      'Generate an image from a text prompt using OpenAI image generation, upload the result to Photarium, and store prompt provenance.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'Text-to-image prompt.' },
+        model: { type: 'string', description: 'OpenAI image model. Defaults to PHOTARIUM_OPENAI_IMAGE_MODEL or gpt-image-1.5.' },
+        size: { type: 'string', description: 'Image size, e.g. 1024x1024, 1536x1024, 1024x1536, or auto when supported.' },
+        quality: { type: 'string', description: 'Image quality, e.g. low, medium, high, or auto.' },
+        outputFormat: { type: 'string', enum: ['png', 'jpeg', 'jpg', 'webp'], description: 'Output image format. Defaults to png.' },
+        background: { type: 'string', enum: ['transparent', 'opaque', 'auto'], description: 'Background behavior for GPT image models.' },
+        filename: { type: 'string', description: 'Optional filename for the uploaded generated image.' },
+        namespace: { type: 'string', description: 'Photarium namespace for the generated image.' },
+        folder: { type: 'string', description: 'Photarium folder for the generated image.' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tags to apply to the generated image.' },
+        description: { type: 'string', description: 'Description to store on the generated image.' },
+        displayName: { type: 'string', description: 'Display name hint for the generated image filename.' },
+        dryRun: { type: 'boolean', description: 'If true, return the planned OpenAI/upload request without generating or uploading.' },
+      },
+      required: ['prompt'],
+    },
+  },
+  {
+    name: 'photarium_generate_from_references',
+    description:
+      'Generate a new image from a prompt and one or more Photarium images or URLs used as visual references. This is generative reference use, not exact compositing.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'Prompt describing the desired generated image.' },
+        references: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              imageId: { type: 'string', description: 'Photarium image ID to use as a reference.' },
+              url: { type: 'string', description: 'Direct image URL to use as a reference.' },
+              role: {
+                type: 'string',
+                enum: ['style_reference', 'subject_reference', 'composition_reference', 'brand_reference', 'logo_reference', 'semantic_source'],
+                description: 'How the reference image should guide generation.',
+              },
+              instructions: { type: 'string', description: 'Reference-specific instructions.' },
+            },
+          },
+          description: 'Reference images. Each entry must include imageId or url.',
+        },
+        model: { type: 'string', description: 'OpenAI image model. Defaults to PHOTARIUM_OPENAI_IMAGE_MODEL or gpt-image-1.5.' },
+        size: { type: 'string', description: 'Image size, e.g. 1024x1024, 1536x1024, 1024x1536, or auto when supported.' },
+        quality: { type: 'string', description: 'Image quality, e.g. low, medium, high, or auto.' },
+        outputFormat: { type: 'string', enum: ['png', 'jpeg', 'jpg', 'webp'], description: 'Output image format. Defaults to png.' },
+        background: { type: 'string', enum: ['transparent', 'opaque', 'auto'], description: 'Background behavior for GPT image models.' },
+        filename: { type: 'string', description: 'Optional filename for the uploaded generated image.' },
+        namespace: { type: 'string', description: 'Photarium namespace for the generated image.' },
+        folder: { type: 'string', description: 'Photarium folder for the generated image.' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tags to apply to the generated image.' },
+        description: { type: 'string', description: 'Description to store on the generated image.' },
+        displayName: { type: 'string', description: 'Display name hint for the generated image filename.' },
+        dryRun: { type: 'boolean', description: 'If true, return the planned OpenAI/upload request without generating or uploading.' },
+      },
+      required: ['prompt', 'references'],
+    },
+  },
+  {
+    name: 'photarium_semantic_merge',
+    description:
+      'Generate a new image by semantically merging multiple Photarium images or URLs. This synthesizes visual/conceptual traits and does not preserve exact placement, exact logos, or pixels.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mergeBrief: { type: 'string', description: 'Description of how the source images should be semantically merged.' },
+        prompt: { type: 'string', description: 'Optional additional output prompt or constraints.' },
+        sources: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              imageId: { type: 'string', description: 'Photarium image ID to use as a semantic source.' },
+              url: { type: 'string', description: 'Direct image URL to use as a semantic source.' },
+              role: {
+                type: 'string',
+                enum: ['style_reference', 'subject_reference', 'composition_reference', 'brand_reference', 'logo_reference', 'semantic_source'],
+                description: 'How the source should guide the semantic merge.',
+              },
+              instructions: { type: 'string', description: 'Source-specific semantic merge instructions.' },
+            },
+          },
+          description: 'Source images. Each entry must include imageId or url.',
+        },
+        model: { type: 'string', description: 'OpenAI image model. Defaults to PHOTARIUM_OPENAI_IMAGE_MODEL or gpt-image-1.5.' },
+        size: { type: 'string', description: 'Image size, e.g. 1024x1024, 1536x1024, 1024x1536, or auto when supported.' },
+        quality: { type: 'string', description: 'Image quality, e.g. low, medium, high, or auto.' },
+        outputFormat: { type: 'string', enum: ['png', 'jpeg', 'jpg', 'webp'], description: 'Output image format. Defaults to png.' },
+        background: { type: 'string', enum: ['transparent', 'opaque', 'auto'], description: 'Background behavior for GPT image models.' },
+        filename: { type: 'string', description: 'Optional filename for the uploaded generated image.' },
+        namespace: { type: 'string', description: 'Photarium namespace for the generated image.' },
+        folder: { type: 'string', description: 'Photarium folder for the generated image.' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tags to apply to the generated image.' },
+        description: { type: 'string', description: 'Description to store on the generated image.' },
+        displayName: { type: 'string', description: 'Display name hint for the generated image filename.' },
+        dryRun: { type: 'boolean', description: 'If true, return the planned OpenAI/upload request without generating or uploading.' },
+      },
+      required: ['mergeBrief', 'sources'],
+    },
+  },
+  {
     name: 'photarium_prompt_get',
     description: 'Get the stored PromptThis record (if any) for an image.',
     inputSchema: {
@@ -4516,6 +4629,61 @@ export async function handleLegacyToolCall(name: string, args: Record<string, un
       case 'photarium_generate_prompt': {
         const { imageId, force, existingPrompt } = args as { imageId: string; force?: boolean; existingPrompt?: string };
         const result = await generatePrompt(imageId, { force, existingPrompt });
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'photarium_generate_image': {
+        const result = await generatePhotariumImage(
+          { downloadOriginalImageById, uploadFileBase64 },
+          args as unknown as ImageGenerationSettings
+        );
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'photarium_generate_from_references': {
+        const { references, ...settings } = args as unknown as ImageGenerationSettings & { references: ImageReferenceInput[] };
+        const result = await generatePhotariumImageFromReferences(
+          { downloadOriginalImageById, uploadFileBase64 },
+          settings,
+          references,
+          'reference_generate'
+        );
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'photarium_semantic_merge': {
+        const { sources, mergeBrief, prompt, ...settings } = args as unknown as ImageGenerationSettings & {
+          sources: ImageReferenceInput[];
+          mergeBrief: string;
+        };
+        const mergedPrompt = [mergeBrief, normalizeManualPrompt(prompt)].filter(Boolean).join('\n\n');
+        const result = await generatePhotariumImageFromReferences(
+          { downloadOriginalImageById, uploadFileBase64 },
+          { ...settings, prompt: mergedPrompt },
+          sources.map((source) => ({ role: 'semantic_source', ...source })),
+          'semantic_merge'
+        );
         return {
           content: [
             {

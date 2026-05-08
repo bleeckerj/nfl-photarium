@@ -68,8 +68,8 @@ describe('queryGalleryAssets', () => {
   it('returns duplicate summaries and filters duplicate mode server-side', () => {
     const result = queryGalleryAssets(
       [
-        asset({ id: 'dupe-1', originalUrlNormalized: 'https://example.com/a.jpg', contentHash: hash }),
-        asset({ id: 'dupe-2', originalUrlNormalized: 'https://example.com/a.jpg', contentHash: hash }),
+        asset({ id: 'dupe-1', originalUrlNormalized: 'https://example.com/a.jpg', contentHash: hash, uploaded: '2026-01-01T00:00:00.000Z' }),
+        asset({ id: 'dupe-2', originalUrlNormalized: 'https://example.com/a.jpg', contentHash: hash, uploaded: '2026-01-02T00:00:00.000Z' }),
         asset({ id: 'unique', originalUrlNormalized: 'https://example.com/b.jpg', contentHash: 'b'.repeat(64) }),
       ],
       { duplicates: true },
@@ -77,10 +77,33 @@ describe('queryGalleryAssets', () => {
       60
     );
 
-    expect(result.images.map((image) => image.id)).toEqual(['dupe-1', 'dupe-2']);
+    expect(result.images.map((image) => image.id)).toEqual(['dupe-2', 'dupe-1']);
     expect(result.duplicateSummary.groupCount).toBe(1);
     expect(result.duplicateSummary.imageCount).toBe(2);
-    expect(result.duplicateSummary.pageDuplicateIds).toEqual(['dupe-1', 'dupe-2']);
+    expect(result.duplicateSummary.pageDuplicateIds).toEqual(['dupe-2', 'dupe-1']);
+    expect(result.duplicateSummary.allDuplicateIds).toEqual(['dupe-1', 'dupe-2']);
+    expect(result.duplicateSummary.duplicateIdsExcludingNewest).toEqual(['dupe-1']);
+    expect(result.duplicateSummary.duplicateIdsExcludingOldest).toEqual(['dupe-2']);
+  });
+
+  it('returns global duplicate selection ids even when duplicate assets are off page', () => {
+    const result = queryGalleryAssets(
+      [
+        asset({ id: 'new-visible', uploaded: '2026-01-04T00:00:00.000Z' }),
+        asset({ id: 'older-dupe', originalUrlNormalized: 'https://example.com/a.jpg', contentHash: hash, uploaded: '2026-01-02T00:00:00.000Z' }),
+        asset({ id: 'newer-dupe', originalUrlNormalized: 'https://example.com/a.jpg', contentHash: hash, uploaded: '2026-01-03T00:00:00.000Z' }),
+      ],
+      {},
+      1,
+      1
+    );
+
+    expect(result.images.map((image) => image.id)).toEqual(['new-visible']);
+    expect(result.duplicateSummary.groupCount).toBe(1);
+    expect(result.duplicateSummary.pageDuplicateIds).toEqual([]);
+    expect(result.duplicateSummary.allDuplicateIds).toEqual(['older-dupe', 'newer-dupe']);
+    expect(result.duplicateSummary.duplicateIdsExcludingNewest).toEqual(['older-dupe']);
+    expect(result.duplicateSummary.duplicateIdsExcludingOldest).toEqual(['newer-dupe']);
   });
 
   it('returns page-local family summaries computed from the full catalog', () => {
@@ -101,5 +124,23 @@ describe('queryGalleryAssets', () => {
       variantCount: 1,
       childIds: ['child'],
     });
+  });
+
+  it('filters upload dates while preserving the unfiltered scope total', () => {
+    const result = queryGalleryAssets(
+      [
+        asset({ id: 'newer', uploaded: '2026-02-03T12:00:00.000Z' }),
+        asset({ id: 'match-end', uploaded: '2026-02-02T23:59:59.999Z' }),
+        asset({ id: 'match-start', uploaded: '2026-02-01T00:00:00.000Z' }),
+        asset({ id: 'older', uploaded: '2026-01-31T23:59:59.999Z' }),
+      ],
+      { dateStart: '2026-02-01', dateEnd: '2026-02-02' },
+      1,
+      60
+    );
+
+    expect(result.images.map((image) => image.id)).toEqual(['match-end', 'match-start']);
+    expect(result.total).toBe(2);
+    expect(result.scopeTotal).toBe(4);
   });
 });

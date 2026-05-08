@@ -1287,15 +1287,14 @@ export default function ImageDetailPage() {
   }, [galleryNamespaceParam, image?.namespace, router]);
   const handleShowInGalleryOrder = useCallback(() => {
     if (!id) return;
-    const targetNamespace = image?.namespace ?? galleryNamespaceParam;
     router.push(
       buildCanonicalGalleryHref({
         assetId: id,
-        namespace: targetNamespace,
+        namespace: '__all__',
       }),
       { scroll: false }
     );
-  }, [galleryNamespaceParam, id, image?.namespace, router]);
+  }, [id, router]);
 
   const commitNavigation = useCallback((href: string, targetId?: string | null) => {
     lastUserNavIntentRef.current = Date.now();
@@ -1404,6 +1403,7 @@ export default function ImageDetailPage() {
     setAltTextInput,
     setImage,
     setAllImages,
+    setExtrasRecord: (updater) => setExtrasRecord((prev) => updater(prev)),
     toast
   });
 
@@ -2027,27 +2027,12 @@ export default function ImageDetailPage() {
       });
       const body = await res.json() as CloudflareImage | { error: string };
       if (res.ok && !('error' in body)) {
-        // Also save description/altText to Image Extras (primary storage)
-        try {
-          await fetch(`/api/images/${id}/extras`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              description: descriptionInput || null,
-              altText: cleanString(altTextInput) || null,
-            }),
-          });
-          // Update local extras record
-          setExtrasRecord(prev => ({
-            ...prev,
-            imageId: id,
-            description: descriptionInput || undefined,
-            altText: cleanString(altTextInput) || undefined,
-          }));
-        } catch (extrasErr) {
-          console.error('Failed to save to Image Extras', extrasErr);
-          // Continue anyway - Cloudflare metadata was saved
-        }
+        setExtrasRecord(prev => ({
+          ...prev,
+          imageId: id,
+          description: descriptionInput || undefined,
+          altText: cleanString(altTextInput) || undefined,
+        }));
         toast.push('Metadata updated');
         if (typeof window !== 'undefined') {
           try {

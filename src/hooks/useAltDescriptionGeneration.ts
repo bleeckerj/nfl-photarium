@@ -14,6 +14,12 @@ type ImageLike = {
   displayName?: string;
 };
 
+type TextExtrasLike = {
+  imageId?: string;
+  description?: string;
+  altText?: string;
+};
+
 type UseAltDescriptionGenerationParams = {
   imageId?: string;
   descriptionInput: string;
@@ -23,6 +29,7 @@ type UseAltDescriptionGenerationParams = {
   setAltTextInput: (value: string) => void;
   setImage: Dispatch<SetStateAction<ImageLike | null>>;
   setAllImages: Dispatch<SetStateAction<ImageLike[]>>;
+  setExtrasRecord?: (updater: (prev: TextExtrasLike | null) => TextExtrasLike) => void;
   toast: Toast;
 };
 
@@ -35,6 +42,7 @@ export function useAltDescriptionGeneration({
   setAltTextInput,
   setImage,
   setAllImages,
+  setExtrasRecord,
   toast
 }: UseAltDescriptionGenerationParams) {
   const [altLoadingMap, setAltLoadingMap] = useState<Record<string, boolean>>({});
@@ -134,29 +142,38 @@ export function useAltDescriptionGeneration({
         const base = typeof current === 'string' ? current : '';
         return base.trim() ? `${base}\n\n${generatedText}` : generatedText;
       };
-      setDescriptionInput(prev => appendText(prev));
+      const persistedText =
+        typeof payload.persistedDescription === 'string'
+          ? payload.persistedDescription
+          : appendText(descriptionInput);
+      setDescriptionInput(persistedText);
       setImage(prev => {
         if (!prev || prev.id !== imageId) {
           return prev;
         }
         return {
           ...prev,
-          description: appendText(prev.description)
+          description: persistedText
         };
       });
       setAllImages(prev =>
         prev.map(img =>
-          img.id === imageId ? { ...img, description: appendText(img.description) } : img
+          img.id === imageId ? { ...img, description: persistedText } : img
         )
       );
-      toast.push('Generated description appended (Save to persist)');
+      setExtrasRecord?.(prev => ({
+        ...prev,
+        imageId,
+        description: persistedText
+      }));
+      toast.push('Generated description appended and saved');
     } catch (error) {
       console.error('Failed to generate description:', error);
       toast.push('Failed to generate description');
     } finally {
       setDescriptionGenerating(false);
     }
-  }, [descriptionInput, imageId, setAllImages, setDescriptionInput, setImage, toast]);
+  }, [descriptionInput, imageId, setAllImages, setDescriptionInput, setExtrasRecord, setImage, toast]);
 
   const generateDisplayName = useCallback(async () => {
     if (!imageId) {

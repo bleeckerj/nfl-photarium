@@ -21,8 +21,6 @@ interface GalleryGridViewProps {
   onToggleCopyMenu: (imageId: string) => void;
   onStartEdit: (image: CloudflareImage) => void;
   onDelete: (imageId: string) => void;
-  onGenerateAlt: (imageId: string) => void;
-  onGenerateDisplayName: (imageId: string) => void;
   onToggleFavorite: (imageId: string) => void;
   onMouseEnter: (imageId: string, event: React.MouseEvent) => void;
   onMouseMove: (imageId: string, event: React.MouseEvent) => void;
@@ -39,8 +37,6 @@ export const GalleryGridView: React.FC<GalleryGridViewProps> = ({
   onToggleCopyMenu,
   onStartEdit,
   onDelete,
-  onGenerateAlt,
-  onGenerateDisplayName,
   onToggleFavorite,
   onMouseEnter,
   onMouseMove,
@@ -57,8 +53,6 @@ export const GalleryGridView: React.FC<GalleryGridViewProps> = ({
     familySummaryMap,
     colorMetadataMap,
     embeddingPendingMap,
-    altLoadingMap,
-    displayNameLoadingMap,
     favoriteLoadingMap,
     galleryReturnHrefSuffix,
     focusedGalleryAssetId,
@@ -79,15 +73,11 @@ export const GalleryGridView: React.FC<GalleryGridViewProps> = ({
           familySummary={familySummaryMap[image.id]}
           colorMetadata={colorMetadataMap[image.id]}
           embeddingPending={embeddingPendingMap[image.id]}
-          altLoading={Boolean(altLoadingMap[image.id])}
-          displayNameLoading={Boolean(displayNameLoadingMap[image.id])}
           favoriteLoading={Boolean(favoriteLoadingMap[image.id])}
           isFocusedInGallery={focusedGalleryAssetId === image.id}
           onToggleSelection={onToggleSelection}
           onStartEdit={onStartEdit}
           onDelete={onDelete}
-          onGenerateAlt={onGenerateAlt}
-          onGenerateDisplayName={onGenerateDisplayName}
           onToggleFavorite={onToggleFavorite}
           onCopyUrl={onToggleCopyMenu}
           onCopyNamespace={onCopyNamespace}

@@ -113,6 +113,68 @@ describe('Photarium MCP transports', () => {
     const result = await client.listTools();
     expect(result.tools.some((tool: { name: string }) => tool.name === 'photarium_search')).toBe(true);
     expect(result.tools.some((tool: { name: string }) => tool.name === 'photarium_create_folder')).toBe(true);
+    expect(result.tools.some((tool: { name: string }) => tool.name === 'photarium_generate_image')).toBe(true);
+    expect(result.tools.some((tool: { name: string }) => tool.name === 'photarium_generate_from_references')).toBe(true);
+    expect(result.tools.some((tool: { name: string }) => tool.name === 'photarium_semantic_merge')).toBe(true);
+  });
+
+  it('image generation tools support dry-run contract checks without network calls', async () => {
+    const { app } = await setupTestApp();
+
+    const generateResult = await app.executor.invoke(
+      'photarium_generate_image',
+      {
+        prompt: 'A quiet product photo of a ceramic mug',
+        dryRun: true,
+        outputFormat: 'png',
+        namespace: 'test-generated',
+        folder: 'mcp-dry-run',
+        tags: ['mcp', 'dry-run'],
+      },
+      { transport: 'stdio' },
+    );
+    expect(generateResult.isError).not.toBe(true);
+    const generatePayload = JSON.parse(generateResult.content[0]?.text || '{}');
+    expect(generatePayload).toMatchObject({
+      dryRun: true,
+      mode: 'text_to_image',
+      request: {
+        endpoint: '/images/generations',
+        body: {
+          prompt: 'A quiet product photo of a ceramic mug',
+          output_format: 'png',
+        },
+      },
+      upload: {
+        namespace: 'test-generated',
+        folder: 'mcp-dry-run',
+        tags: ['mcp', 'dry-run'],
+      },
+    });
+
+    const mergeResult = await app.executor.invoke(
+      'photarium_semantic_merge',
+      {
+        mergeBrief: 'Blend the first image mood with the second image subject language.',
+        prompt: 'Keep the result quiet and editorial.',
+        dryRun: true,
+        outputFormat: 'webp',
+        sources: [
+          { imageId: 'img-style', role: 'style_reference', instructions: 'Use lighting and restraint.' },
+          { url: 'https://example.com/source.png', role: 'subject_reference', instructions: 'Use product silhouette only.' },
+        ],
+      },
+      { transport: 'stdio' },
+    );
+    expect(mergeResult.isError).not.toBe(true);
+    const mergePayload = JSON.parse(mergeResult.content[0]?.text || '{}');
+    expect(mergePayload.mode).toBe('semantic_merge');
+    expect(mergePayload.request.endpoint).toBe('/images/edits');
+    expect(mergePayload.request.body.output_format).toBe('webp');
+    expect(mergePayload.request.body.prompt).toContain('Semantic merge instruction');
+    expect(mergePayload.sources).toHaveLength(2);
+    expect(mergePayload.sources[0]).toMatchObject({ imageId: 'img-style', role: 'style_reference' });
+    expect(mergePayload.sources[1]).toMatchObject({ url: 'https://example.com/source.png', role: 'subject_reference' });
   });
 
   it('stdio call_tool uses the shared executor and validator', async () => {

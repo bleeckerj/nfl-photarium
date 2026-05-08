@@ -47,6 +47,9 @@ MCP (Model Context Protocol) server that exposes the full Photarium API surface 
 - `photarium_generate_alt`
 - `photarium_generate_description`
 - `photarium_generate_prompt`
+- `photarium_generate_image`
+- `photarium_generate_from_references`
+- `photarium_semantic_merge`
 - `photarium_concepts`
 
 
@@ -100,6 +103,19 @@ Set the base URL of your Photarium instance:
 
 ```bash
 export PHOTARIUM_BASE_URL=http://localhost:3000
+```
+
+Image generation tools also require an OpenAI API key in the MCP server environment:
+
+```bash
+export OPENAI_API_KEY=your_api_key_here
+```
+
+Optional image generation settings:
+
+```bash
+export PHOTARIUM_OPENAI_IMAGE_MODEL=gpt-image-1.5
+export OPENAI_API_BASE_URL=https://api.openai.com/v1
 ```
 
 Optional HTTP proxy settings (disabled by default):
@@ -193,6 +209,9 @@ Once connected, you can ask the AI:
 - "Describe this image in detail"
 - "What text-to-image prompt would recreate this photo?"
 - "What are the semantic qualities of this image?"
+- "Generate a new product image from this prompt and store it in the `generated` namespace"
+- "Use image abc123 as a style reference and image def456 as a subject reference for a new generated image"
+- "Semantically merge these two images into a new visual direction without exact logo placement"
 
 **Upload & Management:**
 - "Upload this image URL to the 'editorial' namespace"
@@ -287,6 +306,125 @@ Returns scores like:
 - playful ↔ serious
 - bright ↔ dark
 - organic ↔ artificial
+
+### photarium_generate_image
+
+Generate a new image from text and upload it back into Photarium. The tool stores generation provenance in the uploaded image prompt record.
+
+```json
+{
+  "prompt": "A refined product photograph of a countertop espresso machine in a calm contemporary kitchen",
+  "size": "1536x1024",
+  "quality": "high",
+  "outputFormat": "png",
+  "namespace": "generated-images",
+  "folder": "kitchen-ai",
+  "tags": ["generated", "product-ad"],
+  "description": "Generated KitchenAI espresso-machine ad concept"
+}
+```
+
+Use `dryRun: true` to validate the request shape without calling OpenAI or uploading:
+
+```json
+{
+  "prompt": "A quiet product image of a ceramic mug",
+  "dryRun": true
+}
+```
+
+### photarium_generate_from_references
+
+Generate a new image from a prompt plus one or more Photarium image IDs or direct image URLs. References are generative guidance, not exact placement.
+
+```json
+{
+  "prompt": "Create a premium kitchen-appliance advertisement with a calm editorial mood",
+  "references": [
+    {
+      "imageId": "5a2d51d8-25f9-44c1-b7f8-86c3a874c800",
+      "role": "brand_reference",
+      "instructions": "Use the color and brand tone as loose direction; do not reproduce the mark exactly."
+    },
+    {
+      "url": "https://example.com/source-product.png",
+      "role": "subject_reference",
+      "instructions": "Use the product category and silhouette as inspiration."
+    }
+  ],
+  "namespace": "generated-images",
+  "folder": "reference-generations",
+  "tags": ["generated", "reference"]
+}
+```
+
+Supported reference roles:
+
+- `style_reference`
+- `subject_reference`
+- `composition_reference`
+- `brand_reference`
+- `logo_reference`
+- `semantic_source`
+
+SVG or otherwise unsupported Photarium source images are rasterized to PNG before being sent as image inputs.
+
+### photarium_semantic_merge
+
+Generate a new image by semantically merging multiple source images. This is for synthesis of mood, visual language, subject matter, material cues, or brand direction. It does not preserve exact logos, pixels, or layout.
+
+```json
+{
+  "mergeBrief": "Blend the premium appliance-ad mood of the first source with the industrial-design language of the second source.",
+  "prompt": "Keep the result photorealistic, domestic, refined, and suitable for editorial ad placement.",
+  "sources": [
+    {
+      "imageId": "source-style-id",
+      "role": "style_reference"
+    },
+    {
+      "imageId": "source-product-id",
+      "role": "subject_reference"
+    }
+  ],
+  "outputFormat": "webp",
+  "namespace": "generated-images",
+  "folder": "semantic-merges",
+  "tags": ["generated", "semantic-merge"]
+}
+```
+
+If you need exact placement, for example placing an exact logo over a generated image, use a deterministic compositing workflow outside `photarium_semantic_merge`.
+
+## Testing Image Generation Tools
+
+Recommended validation sequence:
+
+1. Build the MCP server:
+
+   ```bash
+   cd mcp-server
+   npm run build
+   ```
+
+2. Run the MCP-related tests from the repository root:
+
+   ```bash
+   npm test -- photariumMcp
+   ```
+
+3. Verify dry-run behavior through the built executor. This does not call OpenAI or upload:
+
+   ```bash
+   cd mcp-server
+   node -e "import('./dist/app.js').then(async ({createPhotariumMcpApp}) => { const app = createPhotariumMcpApp(); const result = await app.executor.invoke('photarium_generate_image', {prompt:'dry run product photo', dryRun:true}, {transport:'stdio'}); console.log(result.content[0].text); })"
+   ```
+
+4. For live smoke testing, start Photarium locally, set `PHOTARIUM_BASE_URL` and `OPENAI_API_KEY`, then call `photarium_generate_image` with a low-cost prompt and a dedicated test namespace/folder such as `generated-test/mcp-smoke`.
+
+5. Test reference handling with one raster Photarium image ID and one SVG Photarium image ID. Confirm the returned provenance lists source IDs, roles, and any rasterization warning.
+
+6. Test semantic merge with two existing image IDs. Confirm the result is uploaded as a new image and the stored prompt record includes `mode: "semantic_merge"` and source provenance.
 
 ### photarium_backup
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Calendar, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import type { DateFilter } from '@/components/gallery/types';
 import { formatDateFilterLabel, normalizeDateRange, parseDateKey, toDateKey } from '@/components/gallery/dateFilter';
 
@@ -60,6 +60,14 @@ const collectYearOptions = (
   years.add(fallbackYear - 1);
   years.add(fallbackYear + 1);
   return Array.from(years).sort((a, b) => a - b);
+};
+
+export const resolveDraftDateFilter = (
+  startDate: string | null,
+  endDate: string | null
+): DateFilter | null => {
+  if (!startDate) return null;
+  return normalizeDateRange({ startDate, endDate: endDate || startDate });
 };
 
 export default function DateNavigator({
@@ -138,11 +146,10 @@ export default function DateNavigator({
 
   const monthLabel = `${MONTH_NAMES[viewMonth]} ${viewYear}`;
 
-  const selectedRange = useMemo(() => {
-    if (!draftStartDate) return null;
-    const endDate = draftEndDate || draftStartDate;
-    return normalizeDateRange({ startDate: draftStartDate, endDate });
-  }, [draftEndDate, draftStartDate]);
+  const selectedRange = useMemo(
+    () => resolveDraftDateFilter(draftStartDate, draftEndDate),
+    [draftEndDate, draftStartDate]
+  );
 
   const applyDraftRange = () => {
     if (!selectedRange) {
@@ -172,6 +179,22 @@ export default function DateNavigator({
     }
   };
 
+  const handleStartInputChange = (value: string) => {
+    const nextStart = value || null;
+    setDraftStartDate(nextStart);
+    if (nextStart) {
+      const parsed = parseDateKey(nextStart);
+      if (parsed) {
+        setViewYear(parsed.getFullYear());
+        setViewMonth(parsed.getMonth());
+      }
+    }
+  };
+
+  const handleEndInputChange = (value: string) => {
+    setDraftEndDate(value || null);
+  };
+
   const moveMonth = (delta: number) => {
     const next = new Date(viewYear, viewMonth + delta, 1);
     setViewYear(next.getFullYear());
@@ -180,18 +203,36 @@ export default function DateNavigator({
 
   return (
     <div id="date-navigator-container" className="relative" ref={rootRef}>
-      <button
-        type="button"
-        onClick={() => setIsOpen((prev) => !prev)}
-        className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-2 py-1 text-[0.65rem] font-mono text-gray-700 hover:bg-gray-50"
-        title="Filter by upload date or date range"
-      >
-        <Calendar className="h-3.5 w-3.5 text-gray-500" />
-        <span className="max-w-[180px] truncate">{formatDateFilterLabel(normalizedCurrent)}</span>
-      </button>
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setIsOpen((prev) => !prev)}
+          className="inline-flex items-center gap-2 rounded-md border border-gray-300 bg-white px-2 py-1 text-[0.65rem] font-mono text-gray-700 hover:bg-gray-50"
+          title="Filter by upload date or date range"
+        >
+          <Calendar className="h-3.5 w-3.5 text-gray-500" />
+          <span className="max-w-[180px] truncate">
+            {normalizedCurrent ? 'Edit date filter' : 'Filter by date'}
+          </span>
+        </button>
+        {normalizedCurrent && (
+          <span className="inline-flex max-w-[260px] items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-1 text-[0.62rem] font-mono text-blue-800">
+            <span className="truncate">Date: {formatDateFilterLabel(normalizedCurrent)}</span>
+            <button
+              type="button"
+              onClick={clearRange}
+              className="rounded-full p-0.5 text-blue-700 hover:bg-blue-100"
+              aria-label="Clear date filter"
+              title="Clear date filter"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </span>
+        )}
+      </div>
 
       {isOpen && (
-        <div className="absolute right-0 top-full z-[4000] mt-2 w-[276px] rounded-lg border border-gray-200 bg-white p-3 shadow-xl">
+        <div className="absolute right-0 top-full z-[4000] mt-2 w-[316px] rounded-lg border border-gray-200 bg-white p-3 shadow-xl">
           <div className="flex items-center justify-between">
             <button
               type="button"
@@ -235,6 +276,27 @@ export default function DateNavigator({
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <label className="flex flex-col gap-1 text-[0.6rem] font-mono text-gray-500">
+              Start date
+              <input
+                type="date"
+                value={draftStartDate ?? ''}
+                onChange={(event) => handleStartInputChange(event.target.value)}
+                className="rounded border border-gray-300 bg-white px-2 py-1 text-[0.65rem] font-mono text-gray-700"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-[0.6rem] font-mono text-gray-500">
+              End date
+              <input
+                type="date"
+                value={draftEndDate ?? ''}
+                onChange={(event) => handleEndInputChange(event.target.value)}
+                className="rounded border border-gray-300 bg-white px-2 py-1 text-[0.65rem] font-mono text-gray-700"
+              />
+            </label>
           </div>
 
           <div className="mt-2 grid grid-cols-7 gap-1 text-center text-[0.6rem] font-mono text-gray-500">
@@ -305,7 +367,7 @@ export default function DateNavigator({
               disabled={!draftStartDate}
               className="rounded border border-blue-600 bg-blue-600 px-2 py-1 text-[0.62rem] font-mono text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Apply
+              Apply date filter
             </button>
           </div>
         </div>

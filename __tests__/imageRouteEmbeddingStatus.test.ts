@@ -10,6 +10,7 @@ const {
   isVectorSearchAvailableMock,
   batchGetColorMetadataMock,
   batchGetAspectMetadataMock,
+  getImageExtrasRecordMock,
 } = vi.hoisted(() => ({
   getCachedImageMock: vi.fn(),
   transformApiImageToCachedMock: vi.fn(),
@@ -19,6 +20,7 @@ const {
   isVectorSearchAvailableMock: vi.fn(),
   batchGetColorMetadataMock: vi.fn(),
   batchGetAspectMetadataMock: vi.fn(),
+  getImageExtrasRecordMock: vi.fn(),
 }));
 
 vi.mock('@/server/cloudflareImageCache', () => ({
@@ -58,6 +60,10 @@ vi.mock('@/server/videoCatalogStorage', () => ({
   getVideoAssetRecord: vi.fn(),
 }));
 
+vi.mock('@/server/imageExtras', () => ({
+  getImageExtrasRecord: getImageExtrasRecordMock,
+}));
+
 import { GET } from '@/app/api/images/[id]/route';
 
 describe('GET /api/images/:id embedding status', () => {
@@ -95,6 +101,7 @@ describe('GET /api/images/:id embedding status', () => {
         }],
       ])
     );
+    getImageExtrasRecordMock.mockResolvedValue(null);
     probeAnimatedImageFromOriginalBlobMock.mockResolvedValue({
       contentType: 'image/webp',
       format: 'webp',
@@ -261,6 +268,44 @@ describe('GET /api/images/:id embedding status', () => {
       expect.objectContaining({
         id: 'img-live',
         namespace: 'cf-midjourney',
+      })
+    );
+  });
+
+  it('overlays extras-backed description and alt text in single-image responses', async () => {
+    getCachedImageMock.mockResolvedValueOnce({
+      id: 'img-with-extras',
+      filename: 'photo.jpg',
+      uploaded: '2026-03-20T00:00:00.000Z',
+      variants: ['https://imagedelivery.net/hash/img-with-extras/public'],
+      tags: [],
+      description: 'Cloudflare fallback description',
+      altTag: 'Cloudflare fallback alt',
+      hasClipEmbedding: false,
+      hasColorEmbedding: false,
+    });
+    getImageExtrasRecordMock.mockResolvedValueOnce({
+      schemaVersion: 1,
+      imageId: 'img-with-extras',
+      description: 'Durable extras description',
+      altText: 'Durable extras alt',
+      createdAt: '2026-05-06T00:00:00.000Z',
+      updatedAt: '2026-05-06T00:00:00.000Z',
+    });
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/images/img-with-extras'),
+      { params: Promise.resolve({ id: 'img-with-extras' }) }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.image.description).toBe('Durable extras description');
+    expect(payload.image.altTag).toBe('Durable extras alt');
+    expect(upsertCachedImageMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'img-with-extras',
+        description: 'Durable extras description',
       })
     );
   });
