@@ -248,7 +248,7 @@ const MAX_BYTES = 10 * 1024 * 1024;
 const VIDEO_REMOTE_UPLOAD_CONCURRENCY = 2;
 const QUEUE_RENDER_LIMIT = 250;
 const UPLOADER_GALLERY_SUMMARY_PAGE_SIZE = 500;
-const NAMESPACE_REQUIRED_UPLOAD_ERROR = 'Select a specific namespace before uploading. "All namespaces" and "(no namespace)" are browse-only for uploads.';
+const NAMESPACE_REQUIRED_UPLOAD_ERROR = 'Select a specific namespace before uploading. "All namespaces" is browse-only for uploads.';
 
 const isZipFile = (file: File) => (
   file.type === 'application/zip' ||
@@ -350,7 +350,7 @@ const buildUploaderGallerySummaryUrl = (namespace?: string) => {
     pageSize: String(UPLOADER_GALLERY_SUMMARY_PAGE_SIZE),
   });
   if (namespace === '') {
-    params.set('namespace', '__none__');
+    params.set('namespace', process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || 'cf-default');
   } else if (namespace === '__all__') {
     params.set('namespace', '__all__');
   } else if (namespace && namespace !== '__all__') {
@@ -492,7 +492,7 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
   const [embedColorOnUpload, setEmbedColorOnUpload] = useState(true);
   const [selectedFolder, setSelectedFolder] = useState<string>("");
   const [newFolder, setNewFolder] = useState<string>("");
-  const [tags, setTags] = useState<string>("found");
+  const [tags, setTags] = useState<string>("");
   const [description, setDescription] = useState<string>("");
   const [originalUrl, setOriginalUrl] = useState<string>("");
   const [omitOriginalUrl, setOmitOriginalUrl] = useState(false);
@@ -888,7 +888,6 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
 
     const options = [
       { value: '__all__', label: 'All namespaces' },
-      { value: '', label: '(no namespace)' },
     ];
 
     defaults.forEach((value) => options.push({ value, label: `${value} (default)` }));
@@ -1561,7 +1560,7 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
       // Clear form inputs after successful upload
       setSelectedFolder("");
       setNewFolder("");
-      setTags("found");
+      setTags("");
       setDescription("");
       setOriginalUrl("");
       setSourceUrl("");
@@ -1876,7 +1875,7 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
         });
         setSelectedFolder("");
         setNewFolder("");
-        setTags("found");
+        setTags("");
         setDescription("");
         setOriginalUrl("");
         setSourceUrl("");
@@ -2731,7 +2730,7 @@ A long list of filenames is not user friendly and essentially useless for select
         )}>
           {uploadNamespace
             ? `Uploads will go to "${uploadNamespace}".`
-            : 'Select a specific namespace before uploading. "All namespaces" and "(no namespace)" remain browse-only here.'}
+            : 'Select a specific namespace before uploading. "All namespaces" remains browse-only here.'}
         </p>
       </div>
 

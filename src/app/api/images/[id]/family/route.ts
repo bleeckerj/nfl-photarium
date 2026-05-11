@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCachedImages } from '@/server/cloudflareImageCache';
 import { listVideoAssetRecordsWithSync } from '@/server/videoCatalogStorage';
+import {
+  buildVariantAssignmentCandidates,
+  listAvailableVariantAssignmentAssets,
+} from '@/utils/variantAssignmentCandidates';
 
 type FamilyAsset = {
   id: string;
@@ -39,12 +43,6 @@ type FamilyAsset = {
 };
 
 const mark = (value: number) => Number(value.toFixed(1));
-
-const matchesNamespace = (assetNamespace: string | undefined, namespace: string | null) => {
-  if (namespace === null) return true;
-  if (namespace === '') return !assetNamespace;
-  return assetNamespace === namespace;
-};
 
 const toFamilyAsset = (image: Record<string, unknown>): FamilyAsset => {
   const rawDimensions = image.dimensions as { width?: unknown; height?: unknown } | undefined;
@@ -183,16 +181,15 @@ export async function GET(
       : [];
 
     const candidatesStartedAt = performance.now();
-    const candidateAssets = includeCandidates
-      ? uniqueById(
-          allAssets.filter((asset) => {
-            if (!matchesNamespace(asset.namespace, namespace)) return false;
-            if (asset.parentId) return false;
-            if (asset.id === familyRootId) return false;
-            return true;
-          })
-        )
+    const assignmentCandidates = includeCandidates
+      ? buildVariantAssignmentCandidates({
+          assets: allAssets,
+          currentAssetId: target.id,
+          familyRootId,
+          namespace,
+        })
       : [];
+    const candidateAssets = listAvailableVariantAssignmentAssets(assignmentCandidates);
     if (includeCandidates) {
       timings.candidates_collect = mark(performance.now() - candidatesStartedAt);
     }
@@ -201,6 +198,8 @@ export async function GET(
     diagnostics.children_count = children.length;
     diagnostics.siblings_count = siblings.length;
     diagnostics.candidates_count = candidateAssets.length;
+    diagnostics.assignment_candidates_count = assignmentCandidates.length;
+    diagnostics.unavailable_candidates_count = assignmentCandidates.length - candidateAssets.length;
     diagnostics.include_candidates = includeCandidates;
 
     timings.total = mark(performance.now() - startedAt);
@@ -213,6 +212,7 @@ export async function GET(
       children,
       familyAssets,
       candidateAssets,
+      assignmentCandidates,
       timings,
       diagnostics,
     });

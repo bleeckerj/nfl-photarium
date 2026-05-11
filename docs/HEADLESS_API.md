@@ -97,7 +97,7 @@ GET /api/images
 | Param | Type | Description |
 |-------|------|-------------|
 | `refresh` | `"1"` | Force cache refresh |
-| `namespace` | string | Filter by namespace. Use `__all__` for all, `__none__` for no namespace |
+| `namespace` | string | Filter by namespace. Use `__all__` for all. `__none__` is reserved for migration/debug audits of legacy assets missing namespace metadata |
 | `aspectRatioClass` | `"square"` \| `"horizontal"` \| `"vertical"` | Filter by aspect ratio class |
 | `aspectRatio` | string | Filter by exact aspect ratio (e.g., `"16:9"`) |
 | `mediaFilter` | `"animated"` | Return only motion-oriented assets: videos plus explicit animated-WebP image derivatives |
@@ -568,7 +568,7 @@ Content-Type: application/json
 | `query` | string | Search query (text) or hex color |
 | `imageId` | string | Source image ID (for image-based search) |
 | `limit` | number | Max results (default: 48, max: 100) |
-| `namespace` | string \| null | Namespace filter (`__all__` for all, `__none__` for none) |
+| `namespace` | string \| null | Namespace filter (`__all__` for all; `__none__` only for migration/debug audits) |
 
 **Examples:**
 

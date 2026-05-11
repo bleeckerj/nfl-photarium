@@ -98,7 +98,7 @@ export const useGalleryBulkActions = ({
     return Array.from(merged.values());
   }, []);
 
-  const applyBulkUpdates = useCallback(async () => {
+  const applyBulkUpdates = useCallback(async (options?: { namespaceOverride?: string }) => {
     if (!selectedCount) {
       toastPush('No images selected');
       return;
@@ -115,9 +115,14 @@ export const useGalleryBulkActions = ({
     const hasDisplayNameChanges = bulkApplyDisplayName;
     const descriptionAppendText = bulkDescriptionAppendInput.trim();
     const hasDescriptionChanges = bulkApplyDescription && descriptionAppendText.length > 0;
+    const effectiveBulkNamespace = (options?.namespaceOverride ?? bulkNamespaceInput).trim();
     const hasNamespaceChanges = bulkApplyNamespace;
     if (!bulkApplyFolder && !hasTagChanges && !hasDisplayNameChanges && !hasDescriptionChanges && !hasNamespaceChanges) {
       toastPush('Choose at least one field to update');
+      return;
+    }
+    if (hasNamespaceChanges && !effectiveBulkNamespace) {
+      toastPush('Choose a namespace to move selected images');
       return;
     }
     setBulkUpdating(true);
@@ -221,7 +226,7 @@ export const useGalleryBulkActions = ({
               : descriptionAppendText;
           }
           if (bulkApplyNamespace) {
-            payload.namespace = bulkNamespaceInput.trim() || '';
+            payload.namespace = effectiveBulkNamespace;
           }
           if (!Object.keys(payload).length) {
             return null;
@@ -302,7 +307,7 @@ export const useGalleryBulkActions = ({
               ? `${(img.description || '').trim()}\n\n${descriptionAppendText}`
               : descriptionAppendText)
             : img.description;
-          const updatedNamespace = bulkApplyNamespace ? (bulkNamespaceInput.trim() || undefined) : img.namespace;
+          const updatedNamespace = bulkApplyNamespace ? effectiveBulkNamespace : img.namespace;
 
           return {
             ...img,

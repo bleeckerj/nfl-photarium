@@ -234,7 +234,7 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
         <p className="text-[0.7em] font-mono text-gray-500">📦 {fileSizeLabel}</p>
         <p className="text-[0.7em] font-mono text-gray-500">📁 {image.folder ? image.folder : '[none]'}</p>
         <p className="text-[0.7em] font-mono text-gray-500 flex items-center gap-1">
-          <span>🧭 {image.namespace ? image.namespace : '[none]'}</span>
+          <span>🧭 {image.namespace ? image.namespace : 'Missing namespace'}</span>
           {image.namespace && (
             <button
               type="button"

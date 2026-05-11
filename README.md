@@ -424,12 +424,12 @@ Automatically upload images from a folder:
 npm run watch:drop-off
 ```
 
-Watches `./drop-off`, uploads to the `drop-off` folder with tag `found`. Configure with env vars:
+Watches `./drop-off`, uploads to the `drop-off` folder, and applies tags only when configured. Configure with env vars:
 
 ```env
 DROP_OFF_DIR=/path/to/watch
 DROP_OFF_FOLDER=drop-off
-DROP_OFF_TAGS=found
+DROP_OFF_TAGS=archive,source
 ```
 
 ---

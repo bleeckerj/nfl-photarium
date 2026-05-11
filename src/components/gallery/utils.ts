@@ -237,7 +237,6 @@ export const buildNamespaceOptions = (
 
   const options: SelectOption[] = [
     { value: '__all__', label: 'All namespaces' },
-    { value: '', label: '(no namespace)' },
   ];
 
   if (defaults.size > 0) {

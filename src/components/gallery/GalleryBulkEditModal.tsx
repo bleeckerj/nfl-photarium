@@ -54,6 +54,7 @@ interface GalleryBulkEditModalProps {
   bulkNamespaceInput: string;
   onBulkNamespaceInputChange: (value: string) => void;
   registryNamespaces: string[];
+  onRegisterNamespace: (namespace: string, description?: string) => Promise<boolean>;
   bulkAnimateFps: string;
   onBulkAnimateFpsChange: (value: string) => void;
   bulkAnimateTouched: boolean;
@@ -66,7 +67,7 @@ interface GalleryBulkEditModalProps {
   bulkAnimateError: string | null;
   bulkUpdating: boolean;
   onCreateAnimation: () => void;
-  onApply: () => void;
+  onApply: (options?: { namespaceOverride?: string }) => void | Promise<void>;
   onClose: () => void;
 }
 
@@ -104,6 +105,7 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
   bulkNamespaceInput,
   onBulkNamespaceInputChange,
   registryNamespaces,
+  onRegisterNamespace,
   bulkAnimateFps,
   onBulkAnimateFpsChange,
   onBulkAnimateTouchedChange,
@@ -133,6 +135,11 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
   const [selectionSize, setSelectionSize] = useState('w=900');
   const [sharedAltText, setSharedAltText] = useState('');
   const [copyingSelectionPayload, setCopyingSelectionPayload] = useState(false);
+  const [creatingNamespace, setCreatingNamespace] = useState(false);
+  const [namespaceNameInput, setNamespaceNameInput] = useState('');
+  const [namespaceDescriptionInput, setNamespaceDescriptionInput] = useState('');
+  const [namespaceError, setNamespaceError] = useState<string | null>(null);
+  const [registeringNamespace, setRegisteringNamespace] = useState(false);
 
   const buildSelectionPayload = () => {
     const normalizedSharedAltText = sharedAltText.trim();
@@ -168,6 +175,11 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
     return JSON.stringify(previewItems, null, 2);
   }, [selectedImages, selectionSize, sharedAltText]);
 
+  const namespaceOptions = useMemo(
+    () => registryNamespaces.map(ns => ({ value: ns, label: ns })),
+    [registryNamespaces]
+  );
+
   const handleCopySelectionPayload = async () => {
     setCopyingSelectionPayload(true);
     try {
@@ -175,6 +187,42 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
     } finally {
       setCopyingSelectionPayload(false);
     }
+  };
+
+  const handleApply = async () => {
+    setNamespaceError(null);
+    if (!bulkApplyNamespace) {
+      await onApply();
+      return;
+    }
+
+    if (creatingNamespace) {
+      const namespaceName = namespaceNameInput.trim();
+      if (!namespaceName || namespaceName === '__all__' || namespaceName === '__none__') {
+        setNamespaceError('Enter a non-empty namespace name.');
+        return;
+      }
+
+      setRegisteringNamespace(true);
+      try {
+        const registered = await onRegisterNamespace(namespaceName, namespaceDescriptionInput);
+        if (!registered) {
+          setNamespaceError('Could not create namespace.');
+          return;
+        }
+        onBulkNamespaceInputChange(namespaceName);
+        await onApply({ namespaceOverride: namespaceName });
+      } finally {
+        setRegisteringNamespace(false);
+      }
+      return;
+    }
+
+    if (!bulkNamespaceInput.trim()) {
+      setNamespaceError('Choose a namespace before applying.');
+      return;
+    }
+    await onApply();
   };
 
   return (
@@ -414,19 +462,60 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
           </label>
           {bulkApplyNamespace && (
             <div className="space-y-2">
-              <MonoSelect
-                value={bulkNamespaceInput}
-                onChange={onBulkNamespaceInputChange}
-                options={[
-                  { value: '', label: '[none]' },
-                  ...registryNamespaces.map(ns => ({ value: ns, label: ns }))
-                ]}
-                className="w-full"
-                placeholder="[none]"
-                size="sm"
-              />
+              <div className="flex flex-wrap items-center gap-3 text-[0.6rem]">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="bulk-namespace-mode"
+                    checked={!creatingNamespace}
+                    onChange={() => setCreatingNamespace(false)}
+                    className="h-3 w-3"
+                  />
+                  Existing
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="bulk-namespace-mode"
+                    checked={creatingNamespace}
+                    onChange={() => setCreatingNamespace(true)}
+                    className="h-3 w-3"
+                  />
+                  Create new
+                </label>
+              </div>
+              {creatingNamespace ? (
+                <div className="space-y-2">
+                  <input
+                    type="text"
+                    value={namespaceNameInput}
+                    onChange={(e) => setNamespaceNameInput(e.target.value)}
+                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    placeholder="Namespace name"
+                  />
+                  <textarea
+                    value={namespaceDescriptionInput}
+                    onChange={(e) => setNamespaceDescriptionInput(e.target.value)}
+                    className="w-full border border-gray-300 rounded px-3 py-2"
+                    placeholder="Namespace description (optional)"
+                    rows={3}
+                  />
+                </div>
+              ) : (
+                <MonoSelect
+                  value={bulkNamespaceInput}
+                  onChange={onBulkNamespaceInputChange}
+                  options={namespaceOptions}
+                  className="w-full"
+                  placeholder="Choose namespace"
+                  size="sm"
+                />
+              )}
+              {namespaceError && (
+                <p className="text-[0.6rem] text-red-600">{namespaceError}</p>
+              )}
               <p className="text-[0.6rem] text-gray-500">
-                Move selected images to a different namespace. Empty clears the namespace.
+                Move selected images to a selected or newly created namespace.
               </p>
             </div>
           )}
@@ -527,16 +616,16 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
           <button
             onClick={onClose}
             className="px-4 py-2 border border-gray-300 rounded-md"
-            disabled={bulkUpdating}
+            disabled={bulkUpdating || registeringNamespace}
           >
             Cancel
           </button>
           <button
-            onClick={onApply}
-            disabled={bulkUpdating}
+            onClick={handleApply}
+            disabled={bulkUpdating || registeringNamespace}
             className="px-4 py-2 bg-blue-600 text-white rounded-md disabled:opacity-50"
           >
-            {bulkUpdating ? 'Updating…' : 'Apply changes'}
+            {bulkUpdating || registeringNamespace ? 'Updating…' : 'Apply changes'}
           </button>
         </div>
       </div>

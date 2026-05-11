@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { buildParentReassignmentState } from '@/hooks/parentReassignmentUtils';
+import type { VariantAssignmentCandidate } from '@/utils/variantAssignmentCandidates';
 
 export type ParentReassignmentImage = {
   id: string;
@@ -28,6 +29,7 @@ export function useParentReassignment({
 }): {
   parentImage: ParentReassignmentImage | null;
   adoptableImages: ParentReassignmentImage[];
+  assignmentCandidates: VariantAssignmentCandidate<ParentReassignmentImage>[];
   reassignParentOptions: ParentOption[];
 } {
   const state = useMemo(
@@ -43,6 +45,7 @@ export function useParentReassignment({
   return {
     parentImage: state.parentImage,
     adoptableImages: state.adoptableImages,
+    assignmentCandidates: state.assignmentCandidates,
     reassignParentOptions: state.reassignParentOptions,
   };
 }

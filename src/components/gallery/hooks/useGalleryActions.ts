@@ -465,6 +465,10 @@ export function useGalleryActions({
       toast.push('Choose at least one field to update');
       return;
     }
+    if (hasNamespaceChanges && !options.namespaceInput.trim()) {
+      toast.push('Choose a namespace to move selected images');
+      return;
+    }
 
     setBulkUpdating(true);
     try {
@@ -519,7 +523,7 @@ export function useGalleryActions({
           familyPayload.folder = folderValue ?? '';
         }
         if (options.applyNamespace) {
-          familyPayload.namespace = namespaceValue ?? '';
+          familyPayload.namespace = namespaceValue;
         }
 
         for (const id of familyTargets.values()) {

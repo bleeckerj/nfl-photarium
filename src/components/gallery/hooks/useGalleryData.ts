@@ -63,7 +63,7 @@ export function useGalleryData({ namespace, refreshTrigger }: UseGalleryDataOpti
       }
       params.set('includeVectorMeta', '1');
       if (namespace === '') {
-        params.set('namespace', '__none__');
+        params.set('namespace', process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || 'cf-default');
       } else if (namespace === '__all__') {
         params.set('namespace', '__all__');
       } else if (namespace && namespace !== '__all__') {

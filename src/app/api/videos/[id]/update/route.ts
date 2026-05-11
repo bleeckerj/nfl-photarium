@@ -42,6 +42,12 @@ const normalizeNamespace = (value?: string) => {
   return cleaned;
 };
 
+const isInvalidNamespaceUpdate = (value: unknown) => {
+  if (typeof value !== 'string') return true;
+  const cleaned = cleanString(value);
+  return !cleaned || cleaned === '__all__' || cleaned === '__none__' || cleaned === 'undefined';
+};
+
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -87,6 +93,9 @@ export async function PATCH(
     }
 
     if (hasOwn(bodyRecord, 'namespace')) {
+      if (isInvalidNamespaceUpdate(body.namespace)) {
+        return NextResponse.json({ error: 'A non-empty namespace is required.' }, { status: 400 });
+      }
       const nextNamespace = normalizeNamespace(typeof body.namespace === 'string' ? body.namespace : undefined);
       patch.namespace = nextNamespace;
       if (nextNamespace) {

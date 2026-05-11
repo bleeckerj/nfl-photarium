@@ -51,12 +51,13 @@ import { ExifSection } from '@/components/image-detail/ExifSection';
 import { OriginalUrlSection } from '@/components/image-detail/OriginalUrlSection';
 import { ShareSection } from '@/components/image-detail/ShareSection';
 import { SourceUrlSection } from '@/components/image-detail/SourceUrlSection';
+import { NamespaceMoveSection } from '@/components/image-detail/NamespaceMoveSection';
 import { VariantLinksSection } from '@/components/image-detail/VariantLinksSection';
 import { VariationsSection } from '@/components/image-detail/VariationsSection';
 import { AdoptVariationSection } from '@/components/image-detail/AdoptVariationSection';
 import { UploadVariationSection } from '@/components/image-detail/UploadVariationSection';
 import { VARIATION_UPLOAD_ACCEPT } from '@/components/image-detail/variationUploadConfig';
-import { ParentInfoSection } from '@/components/image-detail/ParentInfoSection';
+import { VariantLockedState } from '@/components/image-detail/ParentInfoSection';
 import {
   hasDirtyTextMetadata,
   resolveInitialAltText,
@@ -74,6 +75,7 @@ import { patchParentAssignment as patchParentAssignmentService } from '@/service
 import { usePersistentShareBaseUrl } from '@/hooks/usePersistentShareBaseUrl';
 import { requestSemanticTags } from '@/services/imageAltDescriptionService';
 import { patchImageFavorite, patchImageMetadata } from '@/services/imageMetadataService';
+import type { VariantAssignmentCandidate } from '@/utils/variantAssignmentCandidates';
 import {
   getUserVisibleTags,
   hasFavoriteTag,
@@ -148,6 +150,26 @@ interface CloudflareImage {
   dominantColors?: string[];
   averageColor?: string;
 }
+
+type ImageAssignmentCandidate = VariantAssignmentCandidate<CloudflareImage>;
+
+const extractAssignmentCandidateAssets = (data: unknown): CloudflareImage[] => {
+  const payload = data as { assignmentCandidates?: ImageAssignmentCandidate[] } | null;
+  if (!Array.isArray(payload?.assignmentCandidates)) {
+    return [];
+  }
+
+  const assets: CloudflareImage[] = [];
+  payload.assignmentCandidates.forEach((candidate) => {
+    if (candidate.asset?.id) {
+      assets.push(candidate.asset);
+    }
+    if (candidate.parentAsset?.id) {
+      assets.push(candidate.parentAsset);
+    }
+  });
+  return assets;
+};
 
 const DEFAULT_LIST_VARIANT = 'full';
 const VARIANT_DIMENSIONS = new Map(IMAGE_VARIANTS.map(variant => [variant.name, variant.width]));
@@ -443,6 +465,8 @@ export default function ImageDetailPage() {
   const [extrasLoading, setExtrasLoading] = useState(false);
   const [shareVariant, setShareVariant] = useState('large');
   const [namespace, setNamespace] = useState('');
+  const [registryNamespaces, setRegistryNamespaces] = useState<string[]>([]);
+  const [namespaceMoving, setNamespaceMoving] = useState(false);
   const [saving, setSaving] = useState(false);
   const [embeddingPendingMap, setEmbeddingPendingMap] = useState<Record<string, EmbeddingPendingEntry>>({});
   const [uniqueFolders, setUniqueFolders] = useState<string[]>([]);
@@ -460,6 +484,7 @@ export default function ImageDetailPage() {
   const draftAppliedRef = useRef<string | null>(null);
   const candidatePoolLoadedRef = useRef(false);
   const candidatePoolRequestedRef = useRef(false);
+  const metadataDraftDirtyRef = useRef(false);
 
   const [semanticSearchAllNamespaces, setSemanticSearchAllNamespaces] = useState(false);
 
@@ -478,19 +503,23 @@ export default function ImageDetailPage() {
   const syncImageState = useCallback((found: CloudflareImage | null) => {
     const extrasForCurrentImage =
       found && extrasRecord?.imageId === found.id ? extrasRecord : null;
+    const preserveMetadataInputs =
+      Boolean(found && image?.id === found.id && metadataDraftDirtyRef.current);
     setImage(found);
     if (found) {
-      setFolderSelect(found.folder || '');
-      setTagsInput(getUserVisibleTags(found.tags).join(', '));
-      setDescriptionInput(resolveInitialDescription(extrasForCurrentImage, found));
-      setAltTextInput(resolveInitialAltText(extrasForCurrentImage, found));
-      setOriginalUrlInput(found.originalUrl || '');
-      setSourceUrlInput(found.sourceUrl || '');
-      setDisplayNameInput(found.displayName || found.filename || '');
+      if (!preserveMetadataInputs) {
+        setFolderSelect(found.folder || '');
+        setTagsInput(getUserVisibleTags(found.tags).join(', '));
+        setDescriptionInput(resolveInitialDescription(extrasForCurrentImage, found));
+        setAltTextInput(resolveInitialAltText(extrasForCurrentImage, found));
+        setOriginalUrlInput(found.originalUrl || '');
+        setSourceUrlInput(found.sourceUrl || '');
+        setDisplayNameInput(found.displayName || found.filename || '');
+      }
       setReassignParentId(found.parentId || '');
       setClearExif(false);
 
-      if (typeof window !== 'undefined') {
+      if (!preserveMetadataInputs && typeof window !== 'undefined') {
         const draftKey = `${IMAGE_DETAIL_DRAFT_KEY_PREFIX}${found.id}`;
         const legacyDraftKey = `${LEGACY_IMAGE_DETAIL_DRAFT_KEY_PREFIX}${found.id}`;
         try {
@@ -524,7 +553,7 @@ export default function ImageDetailPage() {
       setDisplayNameInput('');
       setReassignParentId('');
     }
-  }, [extrasRecord]);
+  }, [extrasRecord, image?.id]);
 
   const mergeContextImages = useCallback((imagesData: CloudflareImage[], familyRootId?: string) => {
     setAllImages((prev) => {
@@ -660,9 +689,9 @@ export default function ImageDetailPage() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const stored = window.localStorage.getItem('imageNamespace');
-    const envDefault = process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || '';
+    const envDefault = process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || 'cf-default';
     if (stored === '__none__') {
-      setNamespace('');
+      setNamespace(envDefault);
     } else if (stored === '__all__') {
       setNamespace('__all__');
     } else {
@@ -689,6 +718,33 @@ export default function ImageDetailPage() {
   useEffect(() => {
     return subscribeEmbeddingPending(setEmbeddingPendingMap);
   }, []);
+
+  const loadRegistryNamespaces = useCallback(async () => {
+    try {
+      const response = await fetch('/api/namespaces', { cache: 'no-store' });
+      const payload = await response.json().catch(() => ({})) as { namespaces?: unknown };
+      if (!response.ok || !Array.isArray(payload.namespaces)) {
+        return;
+      }
+      setRegistryNamespaces(
+        payload.namespaces
+          .filter((entry): entry is string => typeof entry === 'string')
+          .map((entry) => entry.trim())
+          .filter((entry, index, values) =>
+            Boolean(entry) &&
+            entry !== '__all__' &&
+            entry !== '__none__' &&
+            values.indexOf(entry) === index
+          )
+      );
+    } catch (error) {
+      console.warn('Failed to load namespaces', error);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadRegistryNamespaces();
+  }, [loadRegistryNamespaces]);
 
   // Clear stale pending embedding status if the image already has embeddings
   useEffect(() => {
@@ -720,6 +776,7 @@ export default function ImageDetailPage() {
         const incoming = [
           ...(Array.isArray(familyData?.familyAssets) ? familyData.familyAssets : []),
           ...(Array.isArray(familyData?.candidateAssets) ? familyData.candidateAssets : []),
+          ...extractAssignmentCandidateAssets(familyData),
         ] as CloudflareImage[];
         const familyRootId =
           typeof familyData?.familyRootId === 'string' ? familyData.familyRootId : undefined;
@@ -740,6 +797,112 @@ export default function ImageDetailPage() {
     }
   }, [buildFamilyContextUrl, id, mergeContextImages, syncImageState]);
 
+  const registerDetailNamespace = useCallback(async (nextNamespace: string, description?: string) => {
+    const cleanNamespace = nextNamespace.trim();
+    if (!cleanNamespace || cleanNamespace === '__all__' || cleanNamespace === '__none__') {
+      toast.push('Enter a non-empty namespace name');
+      return false;
+    }
+
+    try {
+      const response = await fetch('/api/namespaces', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          namespace: cleanNamespace,
+          description: description?.trim() ?? '',
+        }),
+      });
+      const payload = await response.json().catch(() => ({})) as { namespaces?: unknown; error?: string };
+      if (!response.ok) {
+        toast.push(payload.error || 'Failed to create namespace');
+        return false;
+      }
+      if (Array.isArray(payload.namespaces)) {
+        setRegistryNamespaces(
+          payload.namespaces
+            .filter((entry): entry is string => typeof entry === 'string')
+            .map((entry) => entry.trim())
+            .filter((entry, index, values) =>
+              Boolean(entry) &&
+              entry !== '__all__' &&
+              entry !== '__none__' &&
+              values.indexOf(entry) === index
+            )
+        );
+      } else {
+        await loadRegistryNamespaces();
+      }
+      toast.push(`Created namespace ${cleanNamespace}`);
+      return true;
+    } catch (error) {
+      console.error('Failed to create namespace', error);
+      toast.push('Failed to create namespace');
+      return false;
+    }
+  }, [loadRegistryNamespaces, toast]);
+
+  const handleMoveFamilyNamespace = useCallback(async (nextNamespace: string) => {
+    if (!image || !id) {
+      return false;
+    }
+    const cleanNamespace = nextNamespace.trim();
+    if (!cleanNamespace || cleanNamespace === '__all__' || cleanNamespace === '__none__') {
+      toast.push('Choose a namespace to move this image family');
+      return false;
+    }
+    if (cleanNamespace === (image.namespace ?? '').trim()) {
+      toast.push('This image family is already in that namespace');
+      return false;
+    }
+
+    setNamespaceMoving(true);
+    try {
+      const response = await fetch(`/api/images/${encodeURIComponent(id)}/update`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          namespace: cleanNamespace,
+          applyToFamily: true,
+          applyToFamilyFields: ['namespace'],
+        }),
+      });
+      const payload = await response.json().catch(() => ({})) as {
+        updatedIds?: unknown;
+        namespace?: unknown;
+        error?: string;
+      };
+      if (!response.ok) {
+        toast.push(payload.error || 'Failed to move namespace');
+        return false;
+      }
+
+      const updatedIds = Array.isArray(payload.updatedIds)
+        ? payload.updatedIds.filter((entry): entry is string => typeof entry === 'string')
+        : [id];
+      const updatedIdSet = new Set(updatedIds);
+      setImage(prev => prev && updatedIdSet.has(prev.id) ? { ...prev, namespace: cleanNamespace } : prev);
+      setAllImages(prev =>
+        prev.map(entry => updatedIdSet.has(entry.id) ? { ...entry, namespace: cleanNamespace } : entry)
+      );
+      setRegistryNamespaces(prev => {
+        const next = new Set(prev);
+        next.add(cleanNamespace);
+        return Array.from(next).sort((left, right) => left.localeCompare(right));
+      });
+      toast.push(`Moved ${updatedIds.length} image${updatedIds.length === 1 ? '' : 's'} to ${cleanNamespace}`);
+      await refreshImageList();
+      await loadRegistryNamespaces();
+      return true;
+    } catch (error) {
+      console.error('Failed to move namespace', error);
+      toast.push('Failed to move namespace');
+      return false;
+    } finally {
+      setNamespaceMoving(false);
+    }
+  }, [id, image, loadRegistryNamespaces, refreshImageList, toast]);
+
   const fetchCandidatePool = useCallback(async () => {
     if (!id || candidatePoolLoadedRef.current || candidatePoolRequestedRef.current) {
       return;
@@ -757,6 +920,7 @@ export default function ImageDetailPage() {
       const incoming = [
         ...(Array.isArray(data?.familyAssets) ? data.familyAssets : []),
         ...(Array.isArray(data?.candidateAssets) ? data.candidateAssets : []),
+        ...extractAssignmentCandidateAssets(data),
       ] as CloudflareImage[];
       const familyRootId = typeof data?.familyRootId === 'string' ? data.familyRootId : undefined;
       mergeContextImages(incoming, familyRootId);
@@ -966,7 +1130,7 @@ export default function ImageDetailPage() {
     return image?.parentId ? siblingVariations : variationChildren;
   }, [image?.parentId, siblingVariations, variationChildren]);
 
-  const { parentImage, adoptableImages, reassignParentOptions } = useParentReassignment({
+  const { parentImage, assignmentCandidates, reassignParentOptions } = useParentReassignment({
     allImages,
     currentImage: image,
     excludeId: id
@@ -996,8 +1160,8 @@ export default function ImageDetailPage() {
       };
     }
 
-    const timeoutId = window.setTimeout(loadCandidates, 750);
-    return () => window.clearTimeout(timeoutId);
+    const timeoutId = globalThis.setTimeout(loadCandidates, 750);
+    return () => globalThis.clearTimeout(timeoutId);
   }, [familyLoaded, fetchCandidatePool, id]);
 
   useEffect(() => {
@@ -1080,15 +1244,15 @@ export default function ImageDetailPage() {
     Math.ceil(displayedVariations.length / variationPageSize)
   );
 
-  const filteredAdoptableImages = useMemo(() => {
-    const base = adoptableImages.filter((img) => {
+  const filteredAssignmentCandidates = useMemo(() => {
+    const base = assignmentCandidates.filter(({ asset }) => {
       if (!adoptFolderFilter) return true;
-      return (img.folder || '').toLowerCase() === adoptFolderFilter.toLowerCase();
+      return (asset.folder || '').toLowerCase() === adoptFolderFilter.toLowerCase();
     });
-    const typeFiltered = base.filter((img) => {
+    const typeFiltered = base.filter(({ asset }) => {
       if (!adoptAssetTypeFilter) return true;
-      if (adoptAssetTypeFilter === 'video') return isVideoAsset(img);
-      return !isVideoAsset(img);
+      if (adoptAssetTypeFilter === 'video') return isVideoAsset(asset);
+      return !isVideoAsset(asset);
     });
 
     if (!adoptSearch.trim()) {
@@ -1096,17 +1260,20 @@ export default function ImageDetailPage() {
     }
 
     const term = adoptSearch.toLowerCase();
-    return typeFiltered.filter((img) => {
-      if ((img.id || '').toLowerCase().includes(term)) {
+    return typeFiltered.filter(({ asset, parentAsset }) => {
+      if ((asset.id || '').toLowerCase().includes(term)) {
         return true;
       }
       const haystack = [
-        img.displayName,
-        img.filename,
-        img.folder,
-        img.description,
-        img.altTag,
-        ...(img.tags || []),
+        asset.displayName,
+        asset.filename,
+        asset.folder,
+        asset.description,
+        asset.altTag,
+        parentAsset?.displayName,
+        parentAsset?.filename,
+        parentAsset?.id,
+        ...(asset.tags || []),
       ]
         .filter(Boolean)
         .map(String)
@@ -1114,7 +1281,7 @@ export default function ImageDetailPage() {
         .toLowerCase();
       return haystack.includes(term);
     });
-  }, [adoptAssetTypeFilter, adoptSearch, adoptableImages, adoptFolderFilter]);
+  }, [adoptAssetTypeFilter, adoptSearch, assignmentCandidates, adoptFolderFilter]);
 
   const adoptAssetTypeOptions = useMemo(
     () => [
@@ -1125,11 +1292,11 @@ export default function ImageDetailPage() {
     []
   );
 
-  const totalAdoptPages = Math.max(1, Math.ceil(filteredAdoptableImages.length / ADOPT_PAGE_SIZE));
-  const pagedAdoptableImages = useMemo(() => {
+  const totalAdoptPages = Math.max(1, Math.ceil(filteredAssignmentCandidates.length / ADOPT_PAGE_SIZE));
+  const pagedAssignmentCandidates = useMemo(() => {
     const start = (adoptPage - 1) * ADOPT_PAGE_SIZE;
-    return filteredAdoptableImages.slice(start, start + ADOPT_PAGE_SIZE);
-  }, [filteredAdoptableImages, adoptPage]);
+    return filteredAssignmentCandidates.slice(start, start + ADOPT_PAGE_SIZE);
+  }, [filteredAssignmentCandidates, adoptPage]);
 
   useEffect(() => {
     setAdoptPage(1);
@@ -1161,6 +1328,27 @@ export default function ImageDetailPage() {
       })),
     []
   );
+
+  const detailNamespaceOptions = useMemo(() => {
+    const values = new Set<string>();
+    registryNamespaces.forEach((entry) => {
+      const trimmed = entry.trim();
+      if (trimmed && trimmed !== '__all__' && trimmed !== '__none__') {
+        values.add(trimmed);
+      }
+    });
+    allImages.forEach((entry) => {
+      const trimmed = entry.namespace?.trim();
+      if (trimmed && trimmed !== '__all__' && trimmed !== '__none__') {
+        values.add(trimmed);
+      }
+    });
+    const current = image?.namespace?.trim();
+    if (current && current !== '__all__' && current !== '__none__') {
+      values.add(current);
+    }
+    return Array.from(values).sort((left, right) => left.localeCompare(right));
+  }, [allImages, image?.namespace, registryNamespaces]);
 
   const originalDeliveryUrl = useMemo(
     () => (id ? getCloudflareImageUrl(id, 'original') : ''),
@@ -1490,6 +1678,9 @@ export default function ImageDetailPage() {
     originalUrlInput,
     tagsInput
   ]);
+  useEffect(() => {
+    metadataDraftDirtyRef.current = isMetadataDirty;
+  }, [isMetadataDirty]);
   const pendingAutoSave = useMemo(
     () =>
       saving ||
@@ -2054,7 +2245,17 @@ export default function ImageDetailPage() {
           altTag: cleanString(altTextInput) ?? '',
           exif: clearExif ? undefined : prev.exif  // Clear EXIF in local state if requested
         }) : prev);
-        await refreshImageList();
+        setAllImages(prev => prev.map(entry => entry.id === id ? {
+          ...entry,
+          folder: body.folder,
+          tags: Array.isArray(body.tags) ? body.tags : mergeUserTagsPreservingSystemTags(image.tags, parseUserTagsInput(tagsInput)),
+          description: descriptionInput,
+          originalUrl: body.originalUrl,
+          sourceUrl: body.sourceUrl,
+          displayName: body.displayName,
+          altTag: cleanString(altTextInput) ?? '',
+          exif: clearExif ? undefined : entry.exif
+        } : entry));
       } else {
         toast.push('error' in body ? body.error : 'Failed to update metadata');
       }
@@ -2075,7 +2276,6 @@ export default function ImageDetailPage() {
     newFolderInput,
     originalUrlInput,
     sourceUrlInput,
-    refreshImageList,
     tagsInput,
     toast
   ]);
@@ -2835,7 +3035,7 @@ export default function ImageDetailPage() {
             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
               <span>Uploaded {new Date(image.uploaded).toLocaleString()}</span>
               <span className="text-gray-300">•</span>
-              <span>Namespace {image.namespace || '[none]'}</span>
+              <span>Namespace {image.namespace || 'Missing namespace'}</span>
             </div>
             <ColorSwatches
               dominantColors={image.dominantColors}
@@ -2868,7 +3068,7 @@ export default function ImageDetailPage() {
                   <div className="mt-3 space-y-4">
                     <div className="flex items-center justify-between gap-3 rounded border border-gray-200 bg-white/60 px-3 py-2">
                       <div className="text-[11px] text-gray-600">
-                        Scope: {semanticSearchAllNamespaces ? 'All namespaces' : (namespace ? namespace : '[none]')}
+                        Scope: {semanticSearchAllNamespaces ? 'All namespaces' : (namespace || 'cf-default')}
                       </div>
                       <label className="flex items-center gap-2 text-[11px] text-gray-700 select-none">
                         <input
@@ -3046,6 +3246,14 @@ export default function ImageDetailPage() {
               <span className="text-gray-400">File size</span>
               <span className="text-gray-700">{detailFileSizeLabel}</span>
             </div>
+
+            <NamespaceMoveSection
+              currentNamespace={image.namespace}
+              namespaceOptions={detailNamespaceOptions}
+              moving={namespaceMoving}
+              onCreateNamespace={registerDetailNamespace}
+              onMove={handleMoveFamilyNamespace}
+            />
 
             <DescriptionEditor
               descriptionInput={descriptionInput}
@@ -3284,22 +3492,6 @@ export default function ImageDetailPage() {
             />
 
             <div className="space-y-4">
-              {resolvedParentImage && (
-                <ParentInfoSection
-                  parentImage={resolvedParentImage}
-                  parentActionLoading={parentActionLoading}
-                  reassignParentId={reassignParentId}
-                  setReassignParentId={setReassignParentId}
-                  reassignParentOptions={reassignParentOptions}
-                  currentParentId={image.parentId ?? ''}
-                  onDetach={handleDetachFromParent}
-                  onUpdateParent={handleReassignParent}
-                  getCloudflareImageUrl={getCloudflareImageUrl}
-                  onThumbMouseMove={handleThumbMouseMove}
-                  onThumbMouseLeave={handleThumbLeave}
-                />
-              )}
-
               <VariationsSection
                 isChildImage={isChildImage}
                 variationCount={variationCount}
@@ -3356,59 +3548,73 @@ export default function ImageDetailPage() {
                 variationPageSize={variationPageSize}
               />
 
-            {!image.parentId && (
-              <>
-                <AdoptVariationSection
-                  adoptSearch={adoptSearch}
-                  setAdoptSearch={setAdoptSearch}
-                  adoptFolderFilter={adoptFolderFilter}
-                  setAdoptFolderFilter={setAdoptFolderFilter}
-                  adoptFolderOptions={adoptFolderOptions}
-                  adoptAssetTypeFilter={adoptAssetTypeFilter}
-                  setAdoptAssetTypeFilter={setAdoptAssetTypeFilter}
-                  adoptAssetTypeOptions={adoptAssetTypeOptions}
-                  filteredAdoptableImages={filteredAdoptableImages}
-                  pagedAdoptableImages={pagedAdoptableImages}
-                  adoptPage={adoptPage}
-                  setAdoptPage={setAdoptPage}
-                  totalAdoptPages={totalAdoptPages}
-                  adoptPageSize={ADOPT_PAGE_SIZE}
-                  onHandleThumbMouseMove={handleThumbMouseMove}
-                  onHandleThumbLeave={handleThumbLeave}
-                  onHandleImageDragStart={handleImageDragStart}
-                  onAssignExistingAsChild={handleAssignExistingAsChild}
-                  onAssignExistingAsChildren={handleAssignExistingAsChildren}
-                  assigningId={assigningId}
-                  assigningBulk={assigningBulk}
-                />
+              {!image.parentId ? (
+                <>
+                  <AdoptVariationSection
+                    adoptSearch={adoptSearch}
+                    setAdoptSearch={setAdoptSearch}
+                    adoptFolderFilter={adoptFolderFilter}
+                    setAdoptFolderFilter={setAdoptFolderFilter}
+                    adoptFolderOptions={adoptFolderOptions}
+                    adoptAssetTypeFilter={adoptAssetTypeFilter}
+                    setAdoptAssetTypeFilter={setAdoptAssetTypeFilter}
+                    adoptAssetTypeOptions={adoptAssetTypeOptions}
+                    filteredAssignmentCandidates={filteredAssignmentCandidates}
+                    pagedAssignmentCandidates={pagedAssignmentCandidates}
+                    adoptPage={adoptPage}
+                    setAdoptPage={setAdoptPage}
+                    totalAdoptPages={totalAdoptPages}
+                    adoptPageSize={ADOPT_PAGE_SIZE}
+                    onHandleThumbMouseMove={handleThumbMouseMove}
+                    onHandleThumbLeave={handleThumbLeave}
+                    onHandleImageDragStart={handleImageDragStart}
+                    onAssignExistingAsChild={handleAssignExistingAsChild}
+                    onAssignExistingAsChildren={handleAssignExistingAsChildren}
+                    assigningId={assigningId}
+                    assigningBulk={assigningBulk}
+                  />
 
-                <UploadVariationSection
-                  getVariantDropzoneProps={getVariantDropzoneProps}
-                  getVariantInputProps={getVariantInputProps}
-                  isVariantDragActive={isVariantDragActive}
-                  childUploadFolder={childUploadFolder}
-                  childUploadTags={childUploadTags}
-                  fallbackFolder={image.folder || ''}
-                  fallbackTags={visibleImageTags}
-                  childUploadItems={childUploadItems}
-                  onUpdateSelectedFilename={updateChildUploadFilename}
-                  onClearSelectedFiles={clearChildUploadFiles}
-                  onUpload={handleChildUpload}
-                  childUploadLoading={childUploadLoading}
-                  childUploadUrl={childUploadUrl}
-                  childUploadUrlFilename={childUploadUrlFilename}
-                  onChildUploadUrlChange={setChildUploadUrl}
-                  onChildUploadUrlFilenameChange={setChildUploadUrlFilename}
-                  onUploadUrl={handleChildUploadByUrl}
-                  childUploadUrlLoading={childUploadUrlLoading}
-                  childImportUrl={childImportUrl}
-                  childImportLoading={childImportLoading}
-                  childImportError={childImportError}
-                  onChildImportUrlChange={setChildImportUrl}
-                  onImportFromUrl={handleImportFromUrl}
+                  <UploadVariationSection
+                    getVariantDropzoneProps={getVariantDropzoneProps}
+                    getVariantInputProps={getVariantInputProps}
+                    isVariantDragActive={isVariantDragActive}
+                    childUploadFolder={childUploadFolder}
+                    childUploadTags={childUploadTags}
+                    fallbackFolder={image.folder || ''}
+                    fallbackTags={visibleImageTags}
+                    childUploadItems={childUploadItems}
+                    onUpdateSelectedFilename={updateChildUploadFilename}
+                    onClearSelectedFiles={clearChildUploadFiles}
+                    onUpload={handleChildUpload}
+                    childUploadLoading={childUploadLoading}
+                    childUploadUrl={childUploadUrl}
+                    childUploadUrlFilename={childUploadUrlFilename}
+                    onChildUploadUrlChange={setChildUploadUrl}
+                    onChildUploadUrlFilenameChange={setChildUploadUrlFilename}
+                    onUploadUrl={handleChildUploadByUrl}
+                    childUploadUrlLoading={childUploadUrlLoading}
+                    childImportUrl={childImportUrl}
+                    childImportLoading={childImportLoading}
+                    childImportError={childImportError}
+                    onChildImportUrlChange={setChildImportUrl}
+                    onImportFromUrl={handleImportFromUrl}
+                  />
+                </>
+              ) : resolvedParentImage ? (
+                <VariantLockedState
+                  parentImage={resolvedParentImage}
+                  parentActionLoading={parentActionLoading}
+                  reassignParentId={reassignParentId}
+                  setReassignParentId={setReassignParentId}
+                  reassignParentOptions={reassignParentOptions}
+                  currentParentId={image.parentId ?? ''}
+                  onDetach={handleDetachFromParent}
+                  onUpdateParent={handleReassignParent}
+                  getCloudflareImageUrl={getCloudflareImageUrl}
+                  onThumbMouseMove={handleThumbMouseMove}
+                  onThumbMouseLeave={handleThumbLeave}
                 />
-              </>
-            )}
+              ) : null}
           </div>
         </div>
 

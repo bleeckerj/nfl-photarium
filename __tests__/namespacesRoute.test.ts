@@ -3,17 +3,17 @@ import { NextRequest } from 'next/server';
 import { GET, POST } from '@/app/api/namespaces/route';
 
 const {
-  listRegistryNamespacesMock,
+  listRegistryNamespaceDetailsMock,
   upsertRegistryNamespaceMock,
   getCachedImagesMock,
 } = vi.hoisted(() => ({
-  listRegistryNamespacesMock: vi.fn(),
+  listRegistryNamespaceDetailsMock: vi.fn(),
   upsertRegistryNamespaceMock: vi.fn(),
   getCachedImagesMock: vi.fn(),
 }));
 
 vi.mock('@/server/namespaceRegistry', () => ({
-  listRegistryNamespaces: listRegistryNamespacesMock,
+  listRegistryNamespaceDetails: listRegistryNamespaceDetailsMock,
   upsertRegistryNamespace: upsertRegistryNamespaceMock,
 }));
 
@@ -24,7 +24,10 @@ vi.mock('@/server/cloudflareImageCache', () => ({
 describe('/api/namespaces', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    listRegistryNamespacesMock.mockResolvedValue(['cf-default', 'new-space']);
+    listRegistryNamespaceDetailsMock.mockResolvedValue([
+      { name: 'cf-default', description: 'Default namespace' },
+      { name: 'new-space', description: '' },
+    ]);
     getCachedImagesMock.mockResolvedValue([
       { namespace: 'cf-default' },
       { namespace: '  discovered-space  ' },
@@ -41,25 +44,40 @@ describe('/api/namespaces', () => {
     expect(response.headers.get('Cache-Control')).toContain('no-store');
     expect(payload).toEqual({
       namespaces: ['cf-default', 'discovered-space', 'new-space'],
+      namespaceDetails: [
+        { name: 'cf-default', description: 'Default namespace' },
+        { name: 'discovered-space', description: '' },
+        { name: 'new-space', description: '' },
+      ],
     });
   });
 
-  it('registers a namespace and returns the refreshed list', async () => {
+  it('registers a namespace with a description and returns the refreshed list', async () => {
     const request = new NextRequest('http://localhost/api/namespaces', {
       method: 'POST',
-      body: JSON.stringify({ namespace: 'brand-new' }),
+      body: JSON.stringify({ namespace: 'brand-new', description: 'Brand assets' }),
       headers: { 'Content-Type': 'application/json' },
     });
 
-    listRegistryNamespacesMock.mockResolvedValueOnce(['brand-new', 'cf-default', 'new-space']);
+    listRegistryNamespaceDetailsMock.mockResolvedValueOnce([
+      { name: 'brand-new', description: 'Brand assets' },
+      { name: 'cf-default', description: 'Default namespace' },
+      { name: 'new-space', description: '' },
+    ]);
 
     const response = await POST(request);
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(upsertRegistryNamespaceMock).toHaveBeenCalledWith('brand-new');
+    expect(upsertRegistryNamespaceMock).toHaveBeenCalledWith('brand-new', 'Brand assets');
     expect(payload).toEqual({
       namespaces: ['brand-new', 'cf-default', 'discovered-space', 'new-space'],
+      namespaceDetails: [
+        { name: 'brand-new', description: 'Brand assets' },
+        { name: 'cf-default', description: 'Default namespace' },
+        { name: 'discovered-space', description: '' },
+        { name: 'new-space', description: '' },
+      ],
     });
   });
 

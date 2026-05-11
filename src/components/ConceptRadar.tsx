@@ -274,7 +274,7 @@ export function ConceptRadar({ imageId, className = '', size = 360, onImageClick
       const nsParam = (() => {
         if (namespace === '__all__') return null;
         if (searchAllNamespaces) return null;
-        if (!namespace) return '__none__';
+        if (!namespace) return 'cf-default';
         return namespace;
       })();
 

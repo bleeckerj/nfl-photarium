@@ -26,6 +26,8 @@ const toCloudflareTextMirror = (value?: string) => {
     : `${compact.slice(0, MAX_CLOUDFLARE_TEXT_MIRROR_CHARS)}…`;
 };
 
+const isReservedNamespace = (value: string) => value === '__all__' || value === '__none__';
+
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -132,6 +134,13 @@ export async function PATCH(
     const shouldApplyToFamily = applyToFamilyRequested && familyFieldSet.size > 0;
     const parentProvided = Object.prototype.hasOwnProperty.call(body, 'parentId');
     const cleanParentId = typeof parentId === 'string' ? parentId.trim() : '';
+
+    if (namespaceProvided && (!cleanNamespace || isReservedNamespace(cleanNamespace))) {
+      return NextResponse.json(
+        { error: 'A non-empty namespace is required.' },
+        { status: 400 }
+      );
+    }
 
     if (parentProvided) {
       const parentValidation = await validateParentAssignmentForExistingImage(imageId, cleanParentId);

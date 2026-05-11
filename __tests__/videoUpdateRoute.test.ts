@@ -88,7 +88,7 @@ describe('PATCH /api/videos/[id]/update', () => {
     expect(payload.displayName).toBe('My Clip');
   });
 
-  it('supports explicit clear semantics', async () => {
+  it('supports explicit clear semantics except namespace', async () => {
     const request = new NextRequest('http://localhost/api/videos/vid-1/update', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -99,7 +99,6 @@ describe('PATCH /api/videos/[id]/update', () => {
         displayName: '',
         originalUrl: '',
         sourceUrl: '',
-        namespace: '',
       }),
     });
 
@@ -114,9 +113,24 @@ describe('PATCH /api/videos/[id]/update', () => {
         displayName: undefined,
         originalUrl: undefined,
         sourceUrl: undefined,
-        namespace: undefined,
       })
     );
+    expect(upsertRegistryNamespaceMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects empty namespace updates', async () => {
+    const request = new NextRequest('http://localhost/api/videos/vid-1/update', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ namespace: '' }),
+    });
+
+    const response = await PATCH(request, createParams('vid-1'));
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe('A non-empty namespace is required.');
+    expect(updateVideoAssetRecordMock).not.toHaveBeenCalled();
     expect(upsertRegistryNamespaceMock).not.toHaveBeenCalled();
   });
 

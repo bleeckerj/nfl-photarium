@@ -5,6 +5,9 @@ import { PATCH } from '@/app/api/images/[id]/update/route';
 const {
   validateParentAssignmentForExistingImageMock,
   patchImageExtrasRecordMock,
+  upsertRegistryNamespaceMock,
+  getCachedImagesMock,
+  upsertCachedImageMock,
 } = vi.hoisted(() => ({
   validateParentAssignmentForExistingImageMock: vi.fn().mockResolvedValue({ ok: true }),
   patchImageExtrasRecordMock: vi.fn().mockResolvedValue({
@@ -13,6 +16,9 @@ const {
     updatedAt: new Date().toISOString(),
     createdAt: new Date().toISOString(),
   }),
+  upsertRegistryNamespaceMock: vi.fn(),
+  getCachedImagesMock: vi.fn(),
+  upsertCachedImageMock: vi.fn(),
 }));
 
 vi.mock('@/server/parentValidation', () => ({
@@ -21,6 +27,31 @@ vi.mock('@/server/parentValidation', () => ({
 
 vi.mock('@/server/imageExtras', () => ({
   patchImageExtrasRecord: patchImageExtrasRecordMock,
+}));
+
+vi.mock('@/server/namespaceRegistry', () => ({
+  upsertRegistryNamespace: upsertRegistryNamespaceMock,
+}));
+
+vi.mock('@/server/cloudflareImageCache', () => ({
+  getCachedImages: getCachedImagesMock,
+  upsertCachedImage: upsertCachedImageMock,
+  transformApiImageToCached: (image: { id: string; filename?: string; uploaded?: string; variants?: string[]; size?: number; meta?: unknown }) => {
+    const parsedMeta =
+      typeof image.meta === 'string'
+        ? JSON.parse(image.meta)
+        : image.meta && typeof image.meta === 'object'
+          ? image.meta
+          : {};
+    return {
+      id: image.id,
+      filename: image.filename ?? image.id,
+      uploaded: image.uploaded ?? '',
+      variants: image.variants ?? [],
+      size: image.size,
+      ...parsedMeta,
+    };
+  },
 }));
 
 const ORIGINAL_ENV = { ...process.env };
@@ -44,6 +75,9 @@ describe('PATCH /api/images/:id/update', () => {
       updatedAt: new Date().toISOString(),
       createdAt: new Date().toISOString(),
     });
+    upsertRegistryNamespaceMock.mockResolvedValue(undefined);
+    getCachedImagesMock.mockResolvedValue([]);
+    upsertCachedImageMock.mockReset();
     process.env = { ...ORIGINAL_ENV };
     process.env.CLOUDFLARE_ACCOUNT_ID = 'acct';
     process.env.CLOUDFLARE_API_TOKEN = 'token';
@@ -144,6 +178,68 @@ describe('PATCH /api/images/:id/update', () => {
     expect(parsed.metadata.variationParentId).toBe('');
     expect(payload.folder).toBeUndefined();
     expect(payload.tags).toEqual([]);
+  });
+
+  it('rejects empty namespace updates', async () => {
+    const mockFetch = vi.spyOn(globalThis, 'fetch');
+
+    const request = createRequest({ namespace: '' });
+    const response = await PATCH(request, { params: Promise.resolve({ id: 'child' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe('A non-empty namespace is required.');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('moves the whole image family to a namespace and registers it', async () => {
+    const mockFetch = vi.spyOn(globalThis, 'fetch');
+    getCachedImagesMock.mockResolvedValue([
+      { id: 'parent', parentId: undefined },
+      { id: 'child', parentId: 'parent' },
+      { id: 'unrelated', parentId: undefined },
+    ]);
+
+    const makeFetchResponse = (targetId: string, meta: Record<string, unknown>) =>
+      new Response(
+        JSON.stringify({
+          result: {
+            id: targetId,
+            filename: `${targetId}.png`,
+            uploaded: '2026-02-01T00:00:00.000Z',
+            variants: ['https://example.com/public'],
+            meta: JSON.stringify(meta),
+          },
+        }),
+        { status: 200 }
+      );
+
+    mockFetch
+      .mockResolvedValueOnce(makeFetchResponse('child', { namespace: 'old-space', variationParentId: 'parent' }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: {} }), { status: 200 }))
+      .mockResolvedValueOnce(makeFetchResponse('parent', { namespace: 'old-space' }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: {} }), { status: 200 }));
+
+    const request = createRequest({
+      namespace: 'new-space',
+      applyToFamily: true,
+      applyToFamilyFields: ['namespace'],
+    });
+    const response = await PATCH(request, { params: Promise.resolve({ id: 'parent' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.namespace).toBe('new-space');
+    expect(payload.updatedIds).toEqual(['child', 'parent']);
+    expect(upsertRegistryNamespaceMock).toHaveBeenCalledWith('new-space');
+
+    const patchBodies = [mockFetch.mock.calls[1], mockFetch.mock.calls[3]].map((call) =>
+      JSON.parse(String(call?.[1]?.body))
+    );
+    expect(patchBodies).toEqual([
+      expect.objectContaining({ metadata: expect.objectContaining({ namespace: 'new-space' }) }),
+      expect.objectContaining({ metadata: expect.objectContaining({ namespace: 'new-space' }) }),
+    ]);
   });
 
   it('stores long description in extras without writing it to Cloudflare metadata', async () => {

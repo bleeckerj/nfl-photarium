@@ -8,7 +8,7 @@ import { parseGalleryNamespaceFromSearch } from '@/components/gallery/focusNavig
 export default function Home() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const galleryRef = useRef<{ refreshImages: () => void }>(null);
-  const envDefaultNamespace = process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || '';
+  const envDefaultNamespace = process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || 'cf-default';
   // Keep the initial server/client render deterministic; hydrate from localStorage in an effect.
   const [namespace, setNamespace] = useState<string>(envDefaultNamespace);
 
@@ -18,16 +18,14 @@ export default function Home() {
     const stored = window.localStorage.getItem('imageNamespace');
     const nextNamespace =
       queryNamespace !== undefined
-        ? queryNamespace
+        ? (queryNamespace || envDefaultNamespace)
         : stored === '__none__'
-          ? ''
+          ? envDefaultNamespace
           : stored === '__all__'
             ? '__all__'
             : stored || envDefaultNamespace;
     if (queryNamespace !== undefined) {
-      if (nextNamespace === '') {
-        window.localStorage.setItem('imageNamespace', '__none__');
-      } else if (nextNamespace === '__all__') {
+      if (nextNamespace === '__all__') {
         window.localStorage.setItem('imageNamespace', '__all__');
       } else {
         window.localStorage.setItem('imageNamespace', nextNamespace);
@@ -38,15 +36,13 @@ export default function Home() {
 
   const handleNamespaceChange = (value: string) => {
     if (typeof window !== 'undefined') {
-      if (value === '') {
-        window.localStorage.setItem('imageNamespace', '__none__');
-      } else if (value === '__all__') {
+      if (value === '__all__') {
         window.localStorage.setItem('imageNamespace', '__all__');
       } else {
-        window.localStorage.setItem('imageNamespace', value);
+        window.localStorage.setItem('imageNamespace', value || envDefaultNamespace);
       }
     }
-    setNamespace(value);
+    setNamespace(value || envDefaultNamespace);
     // Gallery handles refresh via useEffect when namespace changes
   };
 

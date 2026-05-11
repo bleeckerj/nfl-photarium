@@ -144,7 +144,7 @@ export function SemanticNeighbors({
       const nsParam = (() => {
         if (namespace === '__all__') return null;
         if (searchAllNamespaces) return null;
-        if (!namespace) return '__none__';
+        if (!namespace) return 'cf-default';
         return namespace;
       })();
       const nsQuery = nsParam ? `&namespace=${encodeURIComponent(nsParam)}` : '';
@@ -181,7 +181,7 @@ export function SemanticNeighbors({
       const nsParam = (() => {
         if (namespace === '__all__') return null;
         if (searchAllNamespaces) return null;
-        if (!namespace) return '__none__';
+        if (!namespace) return 'cf-default';
         return namespace;
       })();
       const nsQuery = nsParam ? `&namespace=${encodeURIComponent(nsParam)}` : '';
@@ -212,7 +212,7 @@ export function SemanticNeighbors({
       const nsParam = (() => {
         if (namespace === '__all__') return null;
         if (searchAllNamespaces) return null;
-        if (!namespace) return '__none__';
+        if (!namespace) return 'cf-default';
         return namespace;
       })();
       const nsQuery = nsParam ? `&namespace=${encodeURIComponent(nsParam)}` : '';

@@ -44,7 +44,7 @@ export default function FolderManagerButton({
   const getNamespaceQuery = () => {
     if (namespace === undefined) return '';
     if (namespace === '__all__') return 'namespace=__all__';
-    if (namespace === '') return 'namespace=__none__';
+    if (namespace === '') return `namespace=${encodeURIComponent(process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || 'cf-default')}`;
     return `namespace=${encodeURIComponent(namespace)}`;
   };
 

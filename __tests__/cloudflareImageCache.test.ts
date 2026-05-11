@@ -103,4 +103,90 @@ describe('cloudflareImageCache parent overrides', () => {
       expect(overrides?.child?.variationParentId).toBe('');
     });
   });
+
+  it('uses the locally updated folder override while Cloudflare metadata is stale', async () => {
+    const {
+      clearAllCaches,
+      transformApiImageToCached,
+      upsertCachedImage,
+    } = await import('@/server/cloudflareImageCache');
+
+    await clearAllCaches();
+
+    upsertCachedImage({
+      id: 'image-1',
+      filename: 'image.jpg',
+      uploaded: '2026-03-01T00:00:00.000Z',
+      variants: [],
+      tags: [],
+      folder: 'folder-old',
+    });
+
+    upsertCachedImage({
+      id: 'image-1',
+      filename: 'image.jpg',
+      uploaded: '2026-03-01T00:00:00.000Z',
+      variants: [],
+      tags: [],
+      folder: 'folder-new',
+    });
+
+    await vi.waitFor(() => {
+      const overrides = store.get('cloudflare-metadata-overrides')?.data as Record<string, { folder?: string }> | undefined;
+      expect(overrides?.['image-1']?.folder).toBe('folder-new');
+    });
+
+    const transformed = transformApiImageToCached({
+      id: 'image-1',
+      filename: 'image.jpg',
+      uploaded: '2026-03-01T00:00:00.000Z',
+      variants: [],
+      meta: { folder: 'folder-old' },
+    });
+
+    expect(transformed.folder).toBe('folder-new');
+  });
+
+  it('persists a cleared folder override so stale Cloudflare metadata cannot restore the old folder', async () => {
+    const {
+      clearAllCaches,
+      transformApiImageToCached,
+      upsertCachedImage,
+    } = await import('@/server/cloudflareImageCache');
+
+    await clearAllCaches();
+
+    upsertCachedImage({
+      id: 'image-1',
+      filename: 'image.jpg',
+      uploaded: '2026-03-01T00:00:00.000Z',
+      variants: [],
+      tags: [],
+      folder: 'folder-old',
+    });
+
+    upsertCachedImage({
+      id: 'image-1',
+      filename: 'image.jpg',
+      uploaded: '2026-03-01T00:00:00.000Z',
+      variants: [],
+      tags: [],
+      folder: undefined,
+    });
+
+    await vi.waitFor(() => {
+      const overrides = store.get('cloudflare-metadata-overrides')?.data as Record<string, { folder?: string }> | undefined;
+      expect(overrides?.['image-1']?.folder).toBe('');
+    });
+
+    const transformed = transformApiImageToCached({
+      id: 'image-1',
+      filename: 'image.jpg',
+      uploaded: '2026-03-01T00:00:00.000Z',
+      variants: [],
+      meta: { folder: 'folder-old' },
+    });
+
+    expect(transformed.folder).toBeUndefined();
+  });
 });

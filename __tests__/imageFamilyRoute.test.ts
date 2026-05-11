@@ -119,6 +119,23 @@ describe('GET /api/images/:id/family', () => {
         tags: [],
       },
       {
+        id: 'other-parent',
+        filename: 'other-parent.jpg',
+        namespace: 'beta',
+        uploaded: '2026-02-20T00:06:30.000Z',
+        variants: ['https://imagedelivery.net/hash/other-parent/public'],
+        tags: [],
+      },
+      {
+        id: 'assigned-elsewhere',
+        filename: 'assigned-elsewhere.jpg',
+        namespace: 'alpha',
+        parentId: 'other-parent',
+        uploaded: '2026-02-20T00:06:45.000Z',
+        variants: ['https://imagedelivery.net/hash/assigned-elsewhere/public'],
+        tags: [],
+      },
+      {
         id: 'candidate-b',
         filename: 'candidate-b.jpg',
         namespace: 'beta',
@@ -135,9 +152,27 @@ describe('GET /api/images/:id/family', () => {
     );
     const payload = await response.json();
     const candidateIds = payload.candidateAssets.map((entry: { id: string }) => entry.id);
+    const assignmentCandidates = payload.assignmentCandidates as Array<{
+      asset: { id: string };
+      availability: string;
+      unavailableReason?: string;
+      parentAsset?: { id: string };
+    }>;
 
     expect(response.status).toBe(200);
     expect(candidateIds).toEqual(['candidate-a']);
+    expect(assignmentCandidates).toEqual([
+      expect.objectContaining({
+        asset: expect.objectContaining({ id: 'candidate-a' }),
+        availability: 'available',
+      }),
+      expect.objectContaining({
+        asset: expect.objectContaining({ id: 'assigned-elsewhere' }),
+        availability: 'unavailable',
+        unavailableReason: 'already-assigned',
+        parentAsset: expect.objectContaining({ id: 'other-parent' }),
+      }),
+    ]);
   });
 
   it('excludes a detached former child from the old parent family', async () => {

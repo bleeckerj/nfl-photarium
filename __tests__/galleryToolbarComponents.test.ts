@@ -29,7 +29,7 @@ describe('gallery toolbar components', () => {
     expect(markup).toContain('Hide controls');
   });
 
-  it('renders compact header namespace labels for all and none states', () => {
+  it('renders compact header namespace labels for all and missing states', () => {
     const allMarkup = renderToStaticMarkup(
       React.createElement(GalleryCompactHeader, {
         filteredCount: 12,
@@ -43,13 +43,13 @@ describe('gallery toolbar components', () => {
         onOpenSearch: vi.fn(),
       })
     );
-    const noneMarkup = renderToStaticMarkup(
+    const missingMarkup = renderToStaticMarkup(
       React.createElement(GalleryCompactHeader, {
         filteredCount: 12,
         totalCount: 40,
         pageIndex: 3,
         totalPages: 9,
-        namespaceLabel: '(no namespace)',
+        namespaceLabel: 'Missing namespace',
         controlsVisible: false,
         showSearchButton: false,
         onToggleControls: vi.fn(),
@@ -58,7 +58,7 @@ describe('gallery toolbar components', () => {
     );
 
     expect(allMarkup).toContain('Namespace: All namespaces');
-    expect(noneMarkup).toContain('Namespace: (no namespace)');
+    expect(missingMarkup).toContain('Namespace: Missing namespace');
   });
 
   it('omits the search chip when semantic search is unavailable', () => {

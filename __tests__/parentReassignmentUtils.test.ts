@@ -78,4 +78,76 @@ describe('buildParentReassignmentState', () => {
     expect(state.adoptableImages.map((asset) => asset.id)).toEqual(['same-root-ns']);
     expect(state.reassignParentOptions.map((option) => option.value)).toEqual(['', 'root', 'same-root-ns']);
   });
+
+  it('classifies already-assigned assets as unavailable candidates with parent context', () => {
+    const current = makeImage({
+      id: 'current',
+      filename: 'current.png',
+      uploaded: '2026-04-18T23:00:00.000Z',
+      namespace: 'alpha',
+    });
+    const otherParent = makeImage({
+      id: 'other-parent',
+      filename: 'other-parent.png',
+      uploaded: '2026-04-18T23:01:00.000Z',
+      namespace: 'alpha',
+    });
+    const assignedChild = makeImage({
+      id: 'assigned-child',
+      filename: 'assigned-child.png',
+      uploaded: '2026-04-18T23:02:00.000Z',
+      namespace: 'alpha',
+      parentId: otherParent.id,
+    });
+
+    const state = buildParentReassignmentState({
+      currentImage: current,
+      excludeId: current.id,
+      allImages: [current, otherParent, assignedChild],
+    });
+
+    expect(state.adoptableImages.map((asset) => asset.id)).toEqual(['other-parent']);
+    expect(state.assignmentCandidates).toEqual([
+      expect.objectContaining({
+        asset: expect.objectContaining({ id: 'other-parent' }),
+        availability: 'available',
+      }),
+      expect.objectContaining({
+        asset: expect.objectContaining({ id: 'assigned-child' }),
+        availability: 'unavailable',
+        unavailableReason: 'already-assigned',
+        parentAsset: expect.objectContaining({ id: 'other-parent' }),
+      }),
+    ]);
+  });
+
+  it('excludes current family members from assignment candidates', () => {
+    const current = makeImage({
+      id: 'current',
+      filename: 'current.png',
+      uploaded: '2026-04-18T23:00:00.000Z',
+      namespace: 'alpha',
+    });
+    const existingChild = makeImage({
+      id: 'existing-child',
+      filename: 'existing-child.png',
+      uploaded: '2026-04-18T23:01:00.000Z',
+      namespace: 'alpha',
+      parentId: current.id,
+    });
+    const available = makeImage({
+      id: 'available',
+      filename: 'available.png',
+      uploaded: '2026-04-18T23:02:00.000Z',
+      namespace: 'alpha',
+    });
+
+    const state = buildParentReassignmentState({
+      currentImage: current,
+      excludeId: current.id,
+      allImages: [current, existingChild, available],
+    });
+
+    expect(state.assignmentCandidates.map((candidate) => candidate.asset.id)).toEqual(['available']);
+  });
 });

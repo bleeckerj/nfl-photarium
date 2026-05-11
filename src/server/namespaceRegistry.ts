@@ -7,9 +7,21 @@ const RUNTIME_DATA_DIR = getPhotariumRuntimeDataDir();
 const REGISTRY_PATH = path.join(RUNTIME_DATA_DIR, 'namespace-registry.json');
 
 type NamespaceRegistryPayload = {
-  namespaces: string[];
+  namespaces: Array<string | NamespaceRegistryEntry>;
   updatedAt: string;
 };
+
+export type NamespaceRegistryEntry = {
+  name: string;
+  description: string;
+};
+
+const BUILT_IN_NAMESPACE_DETAILS: NamespaceRegistryEntry[] = [
+  {
+    name: 'cf-site-misc',
+    description: 'Miscellaneous images used across various websites.',
+  },
+];
 
 // Normalize input so registry only stores meaningful namespaces.
 const normalizeNamespace = (value?: string) => {
@@ -19,13 +31,48 @@ const normalizeNamespace = (value?: string) => {
   return trimmed;
 };
 
+const normalizeDescription = (value?: string) => (typeof value === 'string' ? value.trim() : '');
+
+const normalizeEntry = (entry: unknown): NamespaceRegistryEntry | null => {
+  if (typeof entry === 'string') {
+    const name = normalizeNamespace(entry);
+    return name ? { name, description: '' } : null;
+  }
+  if (!entry || typeof entry !== 'object') {
+    return null;
+  }
+  const record = entry as Record<string, unknown>;
+  const name = normalizeNamespace(typeof record.name === 'string' ? record.name : undefined);
+  if (!name) {
+    return null;
+  }
+  return {
+    name,
+    description: normalizeDescription(typeof record.description === 'string' ? record.description : undefined),
+  };
+};
+
+const normalizeEntries = (entries: unknown[]): NamespaceRegistryEntry[] => {
+  const byName = new Map<string, NamespaceRegistryEntry>();
+  entries.forEach((entry) => {
+    const normalized = normalizeEntry(entry);
+    if (!normalized) return;
+    const existing = byName.get(normalized.name);
+    byName.set(normalized.name, {
+      name: normalized.name,
+      description: normalized.description || existing?.description || '',
+    });
+  });
+  return Array.from(byName.values()).sort((left, right) => left.name.localeCompare(right.name));
+};
+
 // Reads the registry from disk; missing file yields an empty registry.
 const readRegistry = async (): Promise<NamespaceRegistryPayload> => {
   try {
     const raw = await fs.readFile(REGISTRY_PATH, 'utf8');
     const parsed = JSON.parse(raw);
     const namespaces = Array.isArray(parsed?.namespaces)
-      ? parsed.namespaces.filter((entry: unknown) => typeof entry === 'string')
+      ? parsed.namespaces
       : [];
     return {
       namespaces,
@@ -42,7 +89,7 @@ const readRegistry = async (): Promise<NamespaceRegistryPayload> => {
 // Writes the registry, ensuring stable sort + de-duplication.
 const writeRegistry = async (payload: NamespaceRegistryPayload) => {
   await fs.mkdir(path.dirname(REGISTRY_PATH), { recursive: true });
-  const normalized = Array.from(new Set(payload.namespaces.map((entry) => entry.trim()).filter(Boolean))).sort();
+  const normalized = normalizeEntries(payload.namespaces);
   const nextPayload: NamespaceRegistryPayload = {
     namespaces: normalized,
     updatedAt: payload.updatedAt
@@ -53,16 +100,29 @@ const writeRegistry = async (payload: NamespaceRegistryPayload) => {
 // Returns the current list for UI options.
 export const listRegistryNamespaces = async () => {
   const payload = await readRegistry();
-  return payload.namespaces;
+  return normalizeEntries([...BUILT_IN_NAMESPACE_DETAILS, ...payload.namespaces]).map((entry) => entry.name);
+};
+
+export const listRegistryNamespaceDetails = async () => {
+  const payload = await readRegistry();
+  return normalizeEntries([...BUILT_IN_NAMESPACE_DETAILS, ...payload.namespaces]);
 };
 
 // Adds a namespace if it is valid and not already in the registry.
-export const upsertRegistryNamespace = async (namespace?: string) => {
+export const upsertRegistryNamespace = async (namespace?: string, description?: string) => {
   const normalized = normalizeNamespace(namespace);
   if (!normalized) return;
   const payload = await readRegistry();
-  if (payload.namespaces.includes(normalized)) return;
-  payload.namespaces.push(normalized);
+  const entries = normalizeEntries(payload.namespaces);
+  const existing = entries.find((entry) => entry.name === normalized);
+  const nextDescription = normalizeDescription(description);
+  if (existing) {
+    if (!nextDescription || existing.description === nextDescription) return;
+    existing.description = nextDescription;
+  } else {
+    entries.push({ name: normalized, description: nextDescription });
+  }
+  payload.namespaces = entries;
   payload.updatedAt = new Date().toISOString();
   await writeRegistry(payload);
 };
@@ -74,15 +134,17 @@ export const upsertRegistryNamespaces = async (namespaces: string[]) => {
   if (!normalized.length) return;
 
   const payload = await readRegistry();
+  const entries = normalizeEntries(payload.namespaces);
   let didChange = false;
   normalized.forEach((namespace) => {
-    if (!payload.namespaces.includes(namespace)) {
-      payload.namespaces.push(namespace);
+    if (!entries.some((entry) => entry.name === namespace)) {
+      entries.push({ name: namespace, description: '' });
       didChange = true;
     }
   });
 
   if (!didChange) return;
+  payload.namespaces = entries;
   payload.updatedAt = new Date().toISOString();
   await writeRegistry(payload);
 };

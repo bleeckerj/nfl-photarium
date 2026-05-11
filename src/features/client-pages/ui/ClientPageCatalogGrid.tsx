@@ -93,7 +93,7 @@ export function ClientPageCatalogGrid({
                 <p className={metaClassName}>
                   {[
                     image.assetType === 'video' ? 'video' : 'image',
-                    image.namespace || '[none]',
+                    image.namespace || 'Missing namespace',
                     image.folder || 'no-folder',
                   ].join(' / ')}
                 </p>

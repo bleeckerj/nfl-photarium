@@ -20,6 +20,10 @@ import { copyToClipboard } from '@/utils/clipboard';
 import { getAssetCopyUrl } from '@/utils/assetUrls';
 import { cleanString } from '@/utils/cloudflareMetadata';
 import {
+  buildVariantAssignmentCandidates,
+  type VariantAssignmentCandidate,
+} from '@/utils/variantAssignmentCandidates';
+import {
   buildVideoDownloadShareUrl,
   buildVideoDetailShareUrl,
   generateQrDataUrl,
@@ -104,6 +108,8 @@ type VideoRecord = {
   }>;
 };
 
+const DEFAULT_NAMESPACE = process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || 'cf-default';
+
 type AssetRecord = {
   id: string;
   assetType?: 'image' | 'video';
@@ -128,8 +134,18 @@ type AssetRecord = {
 type FamilyContextResponse = {
   familyAssets?: AssetRecord[];
   candidateAssets?: AssetRecord[];
+  assignmentCandidates?: VariantAssignmentCandidate<AssetRecord>[];
   timings?: Record<string, number>;
   diagnostics?: Record<string, unknown>;
+};
+
+const extractAssignmentCandidateAssets = (payload: FamilyContextResponse): AssetRecord[] => {
+  if (!Array.isArray(payload.assignmentCandidates)) {
+    return [];
+  }
+  return payload.assignmentCandidates.flatMap((candidate) =>
+    [candidate.asset, candidate.parentAsset].filter((asset): asset is AssetRecord => Boolean(asset?.id))
+  );
 };
 
 const getNow = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -364,9 +380,7 @@ export default function VideoDetailPage() {
   const [originalUrlInput, setOriginalUrlInput] = useState('');
   const [sourceUrlInput, setSourceUrlInput] = useState('');
   const [namespaceInput, setNamespaceInput] = useState('');
-  const [namespaceOptions, setNamespaceOptions] = useState<Array<{ value: string; label: string }>>([
-    { value: '', label: '[none]' },
-  ]);
+  const [namespaceOptions, setNamespaceOptions] = useState<Array<{ value: string; label: string }>>([]);
   const [metadataSaving, setMetadataSaving] = useState(false);
 
   const [shareQrDataUrl, setShareQrDataUrl] = useState('');
@@ -453,8 +467,6 @@ export default function VideoDetailPage() {
     if (!current || seen.has(current)) return namespaceOptions;
     return [...namespaceOptions, { value: current, label: current }]
       .sort((a, b) => {
-        if (a.value === '') return -1;
-        if (b.value === '') return 1;
         return a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' });
       });
   }, [namespaceInput, namespaceOptions]);
@@ -468,12 +480,9 @@ export default function VideoDetailPage() {
         const discovered = Array.isArray(payload?.namespaces)
           ? payload.namespaces.filter((entry: unknown): entry is string => typeof entry === 'string' && entry.trim().length > 0)
           : [];
-        const options = [
-          { value: '', label: '[none]' },
-          ...Array.from(new Set<string>(discovered))
-            .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
-            .map((namespace) => ({ value: namespace, label: namespace })),
-        ];
+        const options = Array.from(new Set<string>(discovered))
+          .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
+          .map((namespace) => ({ value: namespace, label: namespace }));
         if (!cancelled) setNamespaceOptions(options);
       })
       .catch(() => {});
@@ -504,7 +513,7 @@ export default function VideoDetailPage() {
     setDisplayNameInput(seededVideo.displayName || seededVideo.filename || '');
     setOriginalUrlInput(seededVideo.originalUrl || '');
     setSourceUrlInput(seededVideo.sourceUrl || '');
-    setNamespaceInput(seededVideo.namespace || '');
+    setNamespaceInput(seededVideo.namespace || DEFAULT_NAMESPACE);
     setLoading(false);
     logVideoDetailPerf('seed:loaded', detailNavigationStartedAtRef.current, {
       videoId: seededVideo.id,
@@ -531,7 +540,8 @@ export default function VideoDetailPage() {
     const candidateAssets = includeCandidates && Array.isArray(payload.candidateAssets)
       ? payload.candidateAssets
       : [];
-    const assets = [...familyAssets, ...candidateAssets];
+    const assignmentCandidateAssets = includeCandidates ? extractAssignmentCandidateAssets(payload) : [];
+    const assets = [...familyAssets, ...candidateAssets, ...assignmentCandidateAssets];
     setAllAssets((prev) => mergeUniqueAssetsById(prev, assets));
     if (includeCandidates) {
       setCandidateAssetsLoaded(true);
@@ -580,7 +590,7 @@ export default function VideoDetailPage() {
       setDisplayNameInput(record.displayName || record.filename || '');
       setOriginalUrlInput(record.originalUrl || '');
       setSourceUrlInput(record.sourceUrl || '');
-      setNamespaceInput(record.namespace || '');
+      setNamespaceInput(record.namespace || DEFAULT_NAMESPACE);
       setLoading(false);
       logVideoDetailPerf('primaryFetch:total', startedAt, {
         videoId: record.id,
@@ -650,6 +660,7 @@ export default function VideoDetailPage() {
       folder: video.folder,
       description: video.description,
       tags: video.tags,
+      namespace: video.namespace,
       videoPlaybackUrl: video.playbackUrl,
       videoHlsUrl: video.hlsUrl,
       videoThumbnailUrl: video.thumbnailUrl,
@@ -661,16 +672,19 @@ export default function VideoDetailPage() {
     if (!video?.parentId) return null;
     return allAssets.find((asset) => asset.id === video.parentId) || null;
   }, [allAssets, video?.parentId]);
-  const adoptableImages = useMemo(() => {
-    return allAssets.filter((asset) => {
-      if (asset.parentId) return false;
-      if (asset.id === video?.id) return false;
-      return true;
-    });
-  }, [allAssets, video?.id]);
   const familyRootId = video?.parentId || video?.id || '';
   const familyRootAsset = video?.parentId ? parentImage : currentVideoAsset;
   const isCanonicalVideo = Boolean(video?.id) && !video?.parentId;
+  const assignmentCandidates = useMemo(
+    () =>
+      buildVariantAssignmentCandidates({
+        assets: allAssets,
+        currentAssetId: video?.id,
+        familyRootId,
+        namespace: familyRootAsset?.namespace || video?.namespace || DEFAULT_NAMESPACE,
+      }),
+    [allAssets, familyRootAsset?.namespace, familyRootId, video?.id, video?.namespace]
+  );
 
   const parentFamilyAssets = useMemo(() => {
     if (!familyRootId) return [];
@@ -713,13 +727,12 @@ export default function VideoDetailPage() {
     setSiblingPage((prev) => Math.min(prev, totalSiblingPages));
   }, [totalSiblingPages]);
 
-  const filteredAdoptableImages = useMemo(() => {
-    const candidates = adoptableImages.filter((asset) => asset.id !== familyRootId);
-    const folderFiltered = candidates.filter((asset) => {
+  const filteredAssignmentCandidates = useMemo(() => {
+    const folderFiltered = assignmentCandidates.filter(({ asset }) => {
       if (!adoptFolderFilter) return true;
       return (asset.folder || '').toLowerCase() === adoptFolderFilter.toLowerCase();
     });
-    const typeFiltered = folderFiltered.filter((asset) => {
+    const typeFiltered = folderFiltered.filter(({ asset }) => {
       if (!adoptAssetTypeFilter) return true;
       if (adoptAssetTypeFilter === 'video') return (asset.assetType || 'image') === 'video';
       return (asset.assetType || 'image') !== 'video';
@@ -727,7 +740,7 @@ export default function VideoDetailPage() {
 
     if (!adoptSearch.trim()) return typeFiltered;
     const term = adoptSearch.toLowerCase();
-    return typeFiltered.filter((asset) => {
+    return typeFiltered.filter(({ asset, parentAsset }) => {
       if ((asset.id || '').toLowerCase().includes(term)) return true;
       const haystack = [
         asset.displayName,
@@ -735,6 +748,9 @@ export default function VideoDetailPage() {
         asset.folder,
         asset.description,
         asset.altTag,
+        parentAsset?.displayName,
+        parentAsset?.filename,
+        parentAsset?.id,
         ...(asset.tags || []),
       ]
         .filter(Boolean)
@@ -743,14 +759,14 @@ export default function VideoDetailPage() {
         .toLowerCase();
       return haystack.includes(term);
     });
-  }, [adoptAssetTypeFilter, adoptFolderFilter, adoptSearch, adoptableImages, familyRootId]);
+  }, [adoptAssetTypeFilter, adoptFolderFilter, adoptSearch, assignmentCandidates]);
 
   const ADOPT_PAGE_SIZE = 12;
-  const totalAdoptPages = Math.max(1, Math.ceil(filteredAdoptableImages.length / ADOPT_PAGE_SIZE));
-  const pagedAdoptableImages = useMemo(() => {
+  const totalAdoptPages = Math.max(1, Math.ceil(filteredAssignmentCandidates.length / ADOPT_PAGE_SIZE));
+  const pagedAssignmentCandidates = useMemo(() => {
     const start = (adoptPage - 1) * ADOPT_PAGE_SIZE;
-    return filteredAdoptableImages.slice(start, start + ADOPT_PAGE_SIZE);
-  }, [adoptPage, filteredAdoptableImages]);
+    return filteredAssignmentCandidates.slice(start, start + ADOPT_PAGE_SIZE);
+  }, [adoptPage, filteredAssignmentCandidates]);
 
   useEffect(() => {
     setAdoptPage(1);
@@ -947,11 +963,16 @@ export default function VideoDetailPage() {
     setDisplayNameInput(video.displayName || video.filename || '');
     setOriginalUrlInput(video.originalUrl || '');
     setSourceUrlInput(video.sourceUrl || '');
-    setNamespaceInput(video.namespace || '');
+    setNamespaceInput(video.namespace || DEFAULT_NAMESPACE);
   }, [video]);
 
   const handleSaveMetadata = useCallback(async () => {
     if (!video?.id) return;
+    const nextNamespace = cleanString(namespaceInput);
+    if (!nextNamespace) {
+      toast.push('Choose a namespace before saving');
+      return;
+    }
     setMetadataSaving(true);
     try {
       const response = await fetch(`/api/videos/${video.id}/update`, {
@@ -964,7 +985,7 @@ export default function VideoDetailPage() {
           displayName: cleanString(displayNameInput) || '',
           originalUrl: cleanString(originalUrlInput) || '',
           sourceUrl: cleanString(sourceUrlInput) || '',
-          namespace: cleanString(namespaceInput) || '',
+          namespace: nextNamespace,
         }),
       });
       const payload = await response.json();
@@ -1554,7 +1575,7 @@ export default function VideoDetailPage() {
                 onChange={setNamespaceInput}
                 options={namespaceSelectOptions}
                 className="w-full"
-                placeholder="[none]"
+                placeholder="Choose namespace"
               />
             </label>
             <label className="space-y-1 text-xs text-gray-700">
@@ -1674,8 +1695,8 @@ export default function VideoDetailPage() {
               adoptAssetTypeFilter={adoptAssetTypeFilter}
               setAdoptAssetTypeFilter={setAdoptAssetTypeFilter}
               adoptAssetTypeOptions={adoptAssetTypeOptions}
-              filteredAdoptableImages={filteredAdoptableImages}
-              pagedAdoptableImages={pagedAdoptableImages}
+              filteredAssignmentCandidates={filteredAssignmentCandidates}
+              pagedAssignmentCandidates={pagedAssignmentCandidates}
               adoptPage={adoptPage}
               setAdoptPage={setAdoptPage}
               totalAdoptPages={totalAdoptPages}

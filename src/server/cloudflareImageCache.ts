@@ -155,7 +155,9 @@ const loadMetadataOverrides = async (): Promise<void> => {
     if (!cached?.data) return;
     Object.entries(cached.data).forEach(([id, meta]) => {
       if (meta && typeof meta === 'object') {
-        metadataOverrides.set(id, meta);
+        if (!metadataOverrides.has(id)) {
+          metadataOverrides.set(id, meta);
+        }
       }
     });
   } catch (error) {
@@ -175,7 +177,7 @@ const saveMetadataOverrides = async (): Promise<void> => {
 
 const buildMetadataOverride = (
   image: CachedCloudflareImage,
-  options?: { clearParentId?: boolean }
+  options?: { clearFolder?: boolean; clearParentId?: boolean }
 ): CloudflareMetadata => {
   const override: CloudflareMetadata = {};
   const assign = <K extends keyof CloudflareMetadata>(key: K, value: CloudflareMetadata[K]) => {
@@ -183,7 +185,7 @@ const buildMetadataOverride = (
       override[key] = value;
     }
   };
-  assign('folder', image.folder);
+  assign('folder', options?.clearFolder ? '' : image.folder);
   assign('tags', image.tags);
   assign('description', image.description);
   assign('originalUrl', image.originalUrl);
@@ -213,6 +215,10 @@ const mergeMetadata = (base: CloudflareMetadata, override?: CloudflareMetadata) 
   if (!override) return base;
   const merged = { ...base } as CloudflareMetadata;
   Object.entries(override).forEach(([key, value]) => {
+    if (key === 'folder') {
+      merged.folder = typeof value === 'string' ? value : undefined;
+      return;
+    }
     if (key === 'variationParentId') {
       merged.variationParentId = typeof value === 'string' ? value : undefined;
       return;
@@ -928,6 +934,10 @@ export const upsertCachedImage = (image: CachedCloudflareImage) => {
   }
   const existing = cacheState.map.get(image.id);
   const mergedImage = mergeCachedImageRecord(existing, image);
+  const shouldPersistClearedFolder =
+    Boolean(existing?.folder) &&
+    Object.prototype.hasOwnProperty.call(image, 'folder') &&
+    image.folder === undefined;
   const shouldPersistClearedParent =
     Boolean(existing?.parentId) &&
     Object.prototype.hasOwnProperty.call(image, 'parentId') &&
@@ -943,11 +953,16 @@ export const upsertCachedImage = (image: CachedCloudflareImage) => {
   cacheState.lastFetched = Date.now();
 
   void loadMetadataOverrides().then(() => {
+    const currentImage = cacheState.map.get(mergedImage.id);
+    if (!currentImage || currentImage !== mergedImage) {
+      return;
+    }
     const existingOverride = metadataOverrides.get(mergedImage.id);
     const shouldPreserveClearedParent =
       existingOverride?.variationParentId === '' &&
       !mergedImage.parentId;
     const override = buildMetadataOverride(mergedImage, {
+      clearFolder: shouldPersistClearedFolder,
       clearParentId: shouldPersistClearedParent || shouldPreserveClearedParent,
     });
     if (Object.keys(override).length) {

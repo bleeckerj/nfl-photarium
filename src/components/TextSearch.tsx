@@ -34,7 +34,7 @@ interface TextSearchProps {
   headerAction?: ReactNode;
   onImageClick?: (result: SearchResult) => void;
   initialQuery?: string;
-  // Current operating namespace from the gallery. Can be '', '__all__', or a namespace string.
+  // Current operating namespace from the gallery. Can be '__all__' or a namespace string.
   namespace?: string;
 }
 
@@ -100,8 +100,7 @@ const TextSearch = forwardRef<TextSearchRef, TextSearchProps>(function TextSearc
   const effectiveNamespaceFilter = (() => {
     if (namespace === '__all__') return null;
     if (searchAllNamespaces) return null;
-    if (!namespace) return '__none__';
-    return namespace;
+    return namespace || 'cf-default';
   })();
 
   // Load search history from localStorage
@@ -242,7 +241,7 @@ const TextSearch = forwardRef<TextSearchRef, TextSearchProps>(function TextSearc
       {namespace !== '__all__' && (
         <div className="mb-3 flex items-center justify-between gap-3">
           <div className="text-[10px] text-gray-300">
-            Scope: {effectiveNamespaceFilter === null ? 'All namespaces' : effectiveNamespaceFilter === '__none__' ? '[none]' : effectiveNamespaceFilter}
+            Scope: {effectiveNamespaceFilter === null ? 'All namespaces' : effectiveNamespaceFilter}
           </div>
           <label className="flex items-center gap-2 text-[10px] text-gray-200 select-none">
             <input

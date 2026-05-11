@@ -180,7 +180,7 @@ const main = async () => {
   const args = parseArgs();
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
   const apiToken = process.env.CLOUDFLARE_API_TOKEN;
-  const defaultNamespace = process.env.IMAGE_NAMESPACE || process.env.NEXT_PUBLIC_IMAGE_NAMESPACE;
+  const defaultNamespace = process.env.IMAGE_NAMESPACE || process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || 'cf-default';
   const namespace = (args.namespace || defaultNamespace || '').trim();
 
   if (!accountId || !apiToken) {

@@ -76,6 +76,7 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
   // Namespace state
   const [applyNamespace, setApplyNamespace] = useState(false);
   const [namespaceInput, setNamespaceInput] = useState('');
+  const [namespaceError, setNamespaceError] = useState<string | null>(null);
 
   // Animation state
   const [animateFps, setAnimateFps] = useState('2');
@@ -113,6 +114,11 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
 
   // Submit handler
   const handleApply = async () => {
+    setNamespaceError(null);
+    if (applyNamespace && !namespaceInput.trim()) {
+      setNamespaceError('Choose a namespace before applying.');
+      return;
+    }
     await onApply({
       applyFolder,
       folderMode,
@@ -379,13 +385,16 @@ export const BulkEditModal: React.FC<BulkEditModalProps> = ({
                 <MonoSelect
                   value={namespaceInput}
                   onChange={setNamespaceInput}
-                  options={[{ value: '', label: '[none]' }, ...namespaceOptions]}
+                  options={namespaceOptions}
                   className="w-full"
-                  placeholder="[none]"
+                  placeholder="Choose namespace"
                   size="sm"
                 />
+                {namespaceError && (
+                  <p className="text-[0.85em] text-red-600">{namespaceError}</p>
+                )}
                 <p className="text-[0.85em] text-gray-500">
-                  Move selected images to a different namespace. Empty clears the namespace.
+                  Move selected images to a selected namespace.
                 </p>
               </div>
             )}

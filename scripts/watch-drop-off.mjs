@@ -5,7 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 const DROP_OFF_DIR = process.env.DROP_OFF_DIR || path.join(process.cwd(), 'drop-off');
 const BASE_URL = process.env.DROP_OFF_BASE_URL || 'http://localhost:3000';
 const DROP_OFF_FOLDER = process.env.DROP_OFF_FOLDER || 'drop-off';
-const DROP_OFF_TAGS = process.env.DROP_OFF_TAGS || 'found';
+const DROP_OFF_TAGS = process.env.DROP_OFF_TAGS || '';
 const STATE_FILE =
   process.env.DROP_OFF_STATE_FILE || path.join(DROP_OFF_DIR, '.watcher-state.json');
 const PROCESS_EXISTING = process.env.DROP_OFF_PROCESS_EXISTING !== 'false';
@@ -106,7 +106,9 @@ const uploadImage = async (filePath) => {
   const formData = new FormData();
   formData.append('file', new Blob([buffer], { type: mimeType }), filename);
   formData.append('folder', DROP_OFF_FOLDER);
-  formData.append('tags', DROP_OFF_TAGS);
+  if (DROP_OFF_TAGS.trim()) {
+    formData.append('tags', DROP_OFF_TAGS);
+  }
   const response = await fetch(`${BASE_URL}/api/upload`, {
     method: 'POST',
     body: formData

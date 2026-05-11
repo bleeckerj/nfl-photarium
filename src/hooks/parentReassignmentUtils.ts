@@ -1,17 +1,18 @@
 import type { ParentOption, ParentReassignmentImage } from '@/hooks/useParentReassignment';
+import {
+  buildVariantAssignmentCandidates,
+  listAvailableVariantAssignmentAssets,
+  type VariantAssignmentCandidate,
+} from '@/utils/variantAssignmentCandidates';
 
 type ParentReassignmentState = {
   parentImage: ParentReassignmentImage | null;
   adoptableImages: ParentReassignmentImage[];
+  assignmentCandidates: VariantAssignmentCandidate<ParentReassignmentImage>[];
   reassignParentOptions: ParentOption[];
 };
 
 const normalizeNamespace = (value?: string) => (typeof value === 'string' ? value.trim() : '');
-
-const matchesNamespace = (assetNamespace: string | undefined, expectedNamespace: string) => {
-  const normalizedAssetNamespace = normalizeNamespace(assetNamespace);
-  return normalizedAssetNamespace === expectedNamespace;
-};
 
 const uniqueById = (assets: ParentReassignmentImage[]) => {
   const seen = new Set<string>();
@@ -40,12 +41,13 @@ export const buildParentReassignmentState = ({
   const familyRootId = parentId || currentImage?.id || '';
   const scopeNamespace = normalizeNamespace(parentImage?.namespace || currentImage?.namespace);
 
-  const canonicalCandidates = allImages.filter((img) => {
-    if (img.parentId) return false;
-    if (excludeId && img.id === excludeId) return false;
-    if (!matchesNamespace(img.namespace, scopeNamespace)) return false;
-    return true;
+  const assignmentCandidates = buildVariantAssignmentCandidates({
+    assets: allImages,
+    currentAssetId: excludeId,
+    familyRootId,
+    namespace: scopeNamespace,
   });
+  const canonicalCandidates = listAvailableVariantAssignmentAssets(assignmentCandidates);
 
   const parentCandidates = uniqueById(
     [
@@ -67,6 +69,7 @@ export const buildParentReassignmentState = ({
   return {
     parentImage,
     adoptableImages,
+    assignmentCandidates,
     reassignParentOptions,
   };
 };

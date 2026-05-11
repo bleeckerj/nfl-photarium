@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { listRegistryNamespaces, upsertRegistryNamespace } from '@/server/namespaceRegistry';
+import {
+  listRegistryNamespaceDetails,
+  upsertRegistryNamespace,
+  type NamespaceRegistryEntry,
+} from '@/server/namespaceRegistry';
 import { getCachedImages } from '@/server/cloudflareImageCache';
 
 export const dynamic = 'force-dynamic';
@@ -10,9 +14,14 @@ const NO_STORE_HEADERS = {
 };
 
 async function loadNamespaces() {
-  const namespaces = await listRegistryNamespaces();
+  const namespaceDetails = await listRegistryNamespaceDetails();
   const cachedImages = await getCachedImages();
   const discovered = new Set<string>();
+  const detailsByName = new Map<string, NamespaceRegistryEntry>();
+
+  namespaceDetails.forEach((entry) => {
+    detailsByName.set(entry.name, entry);
+  });
 
   cachedImages.forEach(image => {
     if (image.namespace) {
@@ -21,13 +30,23 @@ async function loadNamespaces() {
     }
   });
 
-  return Array.from(new Set([...namespaces, ...discovered])).sort();
+  discovered.forEach((name) => {
+    if (!detailsByName.has(name)) {
+      detailsByName.set(name, { name, description: '' });
+    }
+  });
+
+  const details = Array.from(detailsByName.values()).sort((left, right) => left.name.localeCompare(right.name));
+  return {
+    namespaces: details.map((entry) => entry.name),
+    namespaceDetails: details,
+  };
 }
 
 export async function GET() {
   try {
-    const namespaces = await loadNamespaces();
-    return NextResponse.json({ namespaces }, { headers: NO_STORE_HEADERS });
+    const payload = await loadNamespaces();
+    return NextResponse.json(payload, { headers: NO_STORE_HEADERS });
   } catch (error) {
     console.error('Fetch namespaces error:', error);
     return NextResponse.json(
@@ -41,6 +60,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => null);
     const namespace = typeof body?.namespace === 'string' ? body.namespace.trim() : '';
+    const description = typeof body?.description === 'string' ? body.description.trim() : '';
 
     if (!namespace || namespace === '__all__' || namespace === '__none__') {
       return NextResponse.json(
@@ -49,9 +69,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    await upsertRegistryNamespace(namespace);
-    const namespaces = await loadNamespaces();
-    return NextResponse.json({ namespaces }, { headers: NO_STORE_HEADERS });
+    await upsertRegistryNamespace(namespace, description);
+    const payload = await loadNamespaces();
+    return NextResponse.json(payload, { headers: NO_STORE_HEADERS });
   } catch (error) {
     console.error('Register namespace error:', error);
     return NextResponse.json(

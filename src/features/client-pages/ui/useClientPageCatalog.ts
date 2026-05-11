@@ -11,8 +11,7 @@ const PAGE_SIZE = 30;
 
 const matchesNamespace = (image: CloudflareImage, namespace: string) => {
   if (namespace === '__all__') return true;
-  if (namespace === '') return !image.namespace;
-  return image.namespace === namespace;
+  return image.namespace === (namespace || 'cf-default');
 };
 
 const matchesAspectRatio = (image: CloudflareImage, aspectRatio: AspectRatioClass | 'all') => {

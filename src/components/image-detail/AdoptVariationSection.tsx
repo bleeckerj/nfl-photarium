@@ -4,6 +4,7 @@ import Link from 'next/link';
 
 import MonoSelect from '@/components/MonoSelect';
 import { getAssetDetailPath, getAssetPreviewUrl, isVideoAsset } from '@/utils/assetUrls';
+import type { VariantAssignmentCandidate } from '@/utils/variantAssignmentCandidates';
 
 export interface ImageCandidateLike {
   id: string;
@@ -12,12 +13,15 @@ export interface ImageCandidateLike {
   displayName?: string;
   folder?: string;
   uploaded: string;
+  parentId?: string;
   videoPlaybackUrl?: string;
   videoHlsUrl?: string;
   videoThumbnailUrl?: string;
   videoPreviewUrl?: string;
   variants?: string[];
 }
+
+export type ImageAssignmentCandidateLike = VariantAssignmentCandidate<ImageCandidateLike>;
 
 export interface SelectOption {
   value: string;
@@ -35,8 +39,8 @@ export interface AdoptVariationSectionProps {
   setAdoptAssetTypeFilter: (value: '' | 'image' | 'video') => void;
   adoptAssetTypeOptions: SelectOption[];
 
-  filteredAdoptableImages: ImageCandidateLike[];
-  pagedAdoptableImages: ImageCandidateLike[];
+  filteredAssignmentCandidates: ImageAssignmentCandidateLike[];
+  pagedAssignmentCandidates: ImageAssignmentCandidateLike[];
 
   adoptPage: number;
   setAdoptPage: React.Dispatch<React.SetStateAction<number>>;
@@ -53,6 +57,9 @@ export interface AdoptVariationSectionProps {
   assigningBulk: boolean;
 }
 
+const getCandidateLabel = (candidate: ImageCandidateLike) =>
+  (candidate.displayName || '').trim() || candidate.filename || candidate.id;
+
 export function AdoptVariationSection(props: AdoptVariationSectionProps) {
   const {
     adoptSearch,
@@ -63,8 +70,8 @@ export function AdoptVariationSection(props: AdoptVariationSectionProps) {
     adoptAssetTypeFilter,
     setAdoptAssetTypeFilter,
     adoptAssetTypeOptions,
-    filteredAdoptableImages,
-    pagedAdoptableImages,
+    filteredAssignmentCandidates,
+    pagedAssignmentCandidates,
     adoptPage,
     setAdoptPage,
     totalAdoptPages,
@@ -80,11 +87,21 @@ export function AdoptVariationSection(props: AdoptVariationSectionProps) {
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
-  const selectedCount = selectedIds.length;
-
+  const availableCandidates = useMemo(
+    () => filteredAssignmentCandidates.filter((candidate) => candidate.availability === 'available'),
+    [filteredAssignmentCandidates]
+  );
+  const availableIds = useMemo(
+    () => new Set(availableCandidates.map((candidate) => candidate.asset.id)),
+    [availableCandidates]
+  );
+  const selectedAvailableIds = selectedIds.filter((id) => availableIds.has(id));
+  const selectedCount = selectedAvailableIds.length;
+  const availableCount = availableCandidates.length;
   const isBusy = assigningBulk || Boolean(assigningId);
 
   const toggleSelection = (candidateId: string) => {
+    if (!availableIds.has(candidateId)) return;
     setSelectedIds((prev) => {
       if (prev.includes(candidateId)) {
         return prev.filter((id) => id !== candidateId);
@@ -98,14 +115,18 @@ export function AdoptVariationSection(props: AdoptVariationSectionProps) {
   const selectAllOnPage = () => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      pagedAdoptableImages.forEach((candidate) => next.add(candidate.id));
+      pagedAssignmentCandidates.forEach((candidate) => {
+        if (candidate.availability === 'available') {
+          next.add(candidate.asset.id);
+        }
+      });
       return Array.from(next);
     });
   };
 
   const assignSelected = async () => {
-    if (selectedIds.length === 0) return;
-    await onAssignExistingAsChildren(selectedIds);
+    if (selectedAvailableIds.length === 0) return;
+    await onAssignExistingAsChildren(selectedAvailableIds);
     clearSelection();
   };
 
@@ -113,14 +134,14 @@ export function AdoptVariationSection(props: AdoptVariationSectionProps) {
     <div id="adopt-variation-section" className="space-y-3 border border-dashed rounded-lg p-3 bg-gray-50">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <label htmlFor="adopt-search" className="text-xs font-medium text-gray-700">
-          Adopt existing asset as a variation
+          Assign existing assets as variations
         </label>
         <input
           id="adopt-search"
           type="text"
           value={adoptSearch}
           onChange={(e) => setAdoptSearch(e.target.value)}
-          placeholder="Search by ID, display name, filename, folder, or tag"
+          placeholder="Search by ID, display name, filename, folder, tag, or parent"
           className="w-full sm:w-64 border border-gray-300 rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
       </div>
@@ -148,14 +169,15 @@ export function AdoptVariationSection(props: AdoptVariationSectionProps) {
           className="w-full sm:w-40"
           placeholder="All types"
         />
-        <div className="sm:ml-auto flex items-center gap-2 text-xs text-gray-600">
+        <div className="sm:ml-auto flex flex-wrap items-center gap-2 text-xs text-gray-600">
           <span className="font-mono">selected={selectedCount}</span>
+          <span className="font-mono">available={availableCount}</span>
           <button
             type="button"
             onClick={selectAllOnPage}
-            disabled={pagedAdoptableImages.length === 0}
+            disabled={isBusy || pagedAssignmentCandidates.every((candidate) => candidate.availability !== 'available')}
             className="px-2 py-1 border rounded disabled:opacity-50 bg-white hover:bg-gray-100"
-            title="Select all candidates visible on this page"
+            title="Select all available candidates visible on this page"
           >
             Select page
           </button>
@@ -173,45 +195,52 @@ export function AdoptVariationSection(props: AdoptVariationSectionProps) {
             onClick={() => void assignSelected()}
             disabled={selectedCount === 0 || isBusy}
             className="px-2 py-1 border rounded disabled:opacity-50 bg-green-600 text-white hover:bg-green-700"
-            title="Assign all selected assets as variations"
+            title="Assign all selected available assets as variations"
           >
-            {assigningBulk ? 'Assigning…' : `Assign selected (${selectedCount})`}
+            {assigningBulk ? 'Assigning...' : `Assign selected (${selectedCount})`}
           </button>
         </div>
       </div>
 
-      {filteredAdoptableImages.length === 0 ? (
-        <p className="text-xs text-gray-500">No canonical assets found. Upload a base image first.</p>
+      {filteredAssignmentCandidates.length === 0 ? (
+        <p className="text-xs text-gray-500">No assignment candidates found.</p>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {pagedAdoptableImages.map((candidate) => {
-            const primaryLabel = (candidate.displayName || '').trim() || candidate.filename || candidate.id;
+          {pagedAssignmentCandidates.map((candidateRow) => {
+            const candidate = candidateRow.asset;
+            const primaryLabel = getCandidateLabel(candidate);
             const showFilename = candidate.filename && candidate.filename !== primaryLabel;
-            const isSelected = selectedSet.has(candidate.id);
+            const isSelected = selectedSet.has(candidate.id) && availableIds.has(candidate.id);
             const thumbUrl = getAssetPreviewUrl(candidate, { imageVariant: 'w=300' });
             const hoverUrl = getAssetPreviewUrl(candidate, { imageVariant: 'w=600' }) || thumbUrl;
             const isVideo = isVideoAsset(candidate);
+            const isUnavailable = candidateRow.availability === 'unavailable';
+            const parentLabel = candidateRow.parentAsset
+              ? getCandidateLabel(candidateRow.parentAsset)
+              : candidate.parentId || 'another parent';
             const isAssigningThisRow =
               assigningId === candidate.id || (assigningBulk && selectedSet.has(candidate.id));
 
             return (
               <div
                 key={candidate.id}
-                className="flex items-center gap-3 p-2 border rounded-md bg-white"
+                className={`flex items-center gap-3 p-2 border rounded-md ${
+                  isUnavailable ? 'bg-gray-50 border-gray-200 opacity-70' : 'bg-white'
+                }`}
                 onMouseLeave={onHandleThumbLeave}
               >
                 <input
                   type="checkbox"
                   checked={isSelected}
                   onChange={() => toggleSelection(candidate.id)}
-                  disabled={isBusy}
+                  disabled={isBusy || isUnavailable}
                   className="h-4 w-4"
-                  title={isSelected ? 'Deselect' : 'Select for bulk assign'}
+                  title={isUnavailable ? 'Already assigned to a parent' : isSelected ? 'Deselect' : 'Select for bulk assign'}
                 />
                 <Link
                   href={getAssetDetailPath(candidate)}
                   prefetch={false}
-                  className="w-14 h-14 relative rounded overflow-hidden bg-gray-100 block"
+                  className="w-14 h-14 relative rounded overflow-hidden bg-gray-100 block shrink-0"
                   onMouseMove={(e) => {
                     if (!hoverUrl) return;
                     onHandleThumbMouseMove(
@@ -223,8 +252,14 @@ export function AdoptVariationSection(props: AdoptVariationSectionProps) {
                 >
                   {thumbUrl ? (
                     <Image
-                      draggable
-                      onDragStart={(e) => onHandleImageDragStart(e, candidate)}
+                      draggable={!isUnavailable}
+                      onDragStart={(e) => {
+                        if (isUnavailable) {
+                          e.preventDefault();
+                          return;
+                        }
+                        onHandleImageDragStart(e, candidate);
+                      }}
                       src={thumbUrl}
                       alt={primaryLabel || (isVideo ? 'Video' : 'Image')}
                       fill
@@ -238,33 +273,64 @@ export function AdoptVariationSection(props: AdoptVariationSectionProps) {
                   )}
                 </Link>
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs font-mono font-medium text-gray-900 truncate" title={primaryLabel}>
+                  <p className={`text-xs font-mono font-medium truncate ${isUnavailable ? 'text-gray-600' : 'text-gray-900'}`} title={primaryLabel}>
                     {primaryLabel}
                   </p>
                   <p className="text-[11px] text-gray-500 font-mono truncate">{candidate.id}</p>
+                  {isUnavailable && (
+                    <p className="text-[11px] text-amber-700 truncate">
+                      Already a variant of {parentLabel}
+                    </p>
+                  )}
                   <p className="text-[11px] text-gray-500 truncate">
                     <span className={`inline-block rounded px-1.5 py-0.5 mr-1 font-mono ${isVideo ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
                       {isVideo ? 'video' : 'image'}
                     </span>
                     {candidate.folder || '[no folder]'}
-                    {showFilename ? ` • ${candidate.filename}` : ''}
+                    {showFilename ? ` - ${candidate.filename}` : ''}
                   </p>
+                  {isUnavailable && (
+                    <div className="mt-1 flex flex-wrap gap-2 text-[11px]">
+                      {candidateRow.parentAsset && (
+                        <Link
+                          href={getAssetDetailPath(candidateRow.parentAsset)}
+                          prefetch={false}
+                          className="text-blue-700 underline decoration-dotted hover:text-blue-900"
+                        >
+                          View parent
+                        </Link>
+                      )}
+                      <Link
+                        href={getAssetDetailPath(candidate)}
+                        prefetch={false}
+                        className="text-blue-700 underline decoration-dotted hover:text-blue-900"
+                      >
+                        View asset
+                      </Link>
+                    </div>
+                  )}
                 </div>
-                <button
-                  onClick={() => void onAssignExistingAsChild(candidate.id)}
-                  disabled={isBusy || isAssigningThisRow}
-                  className="px-3 py-1 text-xs bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Assign this one image as a variation"
-                >
-                  {isAssigningThisRow ? 'Assigning…' : 'Assign'}
-                </button>
+                {isUnavailable ? (
+                  <span className="px-3 py-1 text-xs border rounded-md text-gray-500 bg-white whitespace-nowrap">
+                    Unavailable
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => void onAssignExistingAsChild(candidate.id)}
+                    disabled={isBusy || isAssigningThisRow}
+                    className="px-3 py-1 text-xs bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Assign this one asset as a variation"
+                  >
+                    {isAssigningThisRow ? 'Assigning...' : 'Assign'}
+                  </button>
+                )}
               </div>
             );
           })}
         </div>
       )}
 
-      {filteredAdoptableImages.length > adoptPageSize && (
+      {filteredAssignmentCandidates.length > adoptPageSize && (
         <div className="flex items-center justify-between text-xs text-gray-600 pt-1">
           <div>Page {adoptPage} of {totalAdoptPages}</div>
           <div className="flex gap-2">

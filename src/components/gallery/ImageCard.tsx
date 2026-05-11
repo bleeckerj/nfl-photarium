@@ -269,7 +269,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
             <p>📦 {fileSizeLabel}</p>
             <p>📁 {image.folder ? image.folder : '[none]'}</p>
             <p className="flex items-center gap-1">
-              <span>🧭 {image.namespace ? image.namespace : '[none]'}</span>
+              <span>🧭 {image.namespace ? image.namespace : 'Missing namespace'}</span>
               {image.namespace && (
                 <button
                   type="button"

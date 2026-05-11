@@ -212,7 +212,7 @@ export const buildGalleryImagesUrl = ({
     params.set('refresh', '1');
   }
   if (namespace === '') {
-    params.set('namespace', '__none__');
+    params.set('namespace', process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || 'cf-default');
   } else if (namespace === '__all__') {
     params.set('namespace', '__all__');
   } else if (namespace && namespace !== '__all__') {
@@ -751,10 +751,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     void fetchNamespaces('no-store');
   }, [fetchNamespaces]);
 
-  const registerNamespace = useCallback(async (value: string) => {
+  const registerNamespace = useCallback(async (value: string, description?: string) => {
     const namespace = value.trim();
     if (!namespace || namespace === '__all__' || namespace === '__none__') {
-      return;
+      return false;
     }
 
     try {
@@ -762,7 +762,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         cache: 'no-store',
-        body: JSON.stringify({ namespace }),
+        body: JSON.stringify({ namespace, description: description?.trim() ?? '' }),
       });
       const data = await response.json().catch(() => null);
       if (!response.ok) {
@@ -770,9 +770,11 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       }
       const payload = Array.isArray(data?.namespaces) ? data.namespaces : [];
       setRegistryNamespaces(payload.filter((entry: unknown): entry is string => typeof entry === 'string'));
+      return true;
     } catch (error) {
       console.warn('Failed to register namespace', error);
       void fetchNamespaces('no-store');
+      return false;
     }
   }, [fetchNamespaces]);
 
@@ -810,7 +812,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
 
     const options = [
       { value: '__all__', label: 'All namespaces' },
-      { value: '', label: '(no namespace)' },
     ];
 
     if (defaults.size > 0) {
@@ -834,10 +835,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
 
     options.push({ value: '__custom__', label: 'Enter manually...' });
 
-    // Ensure the currently selected one is present if it wasn't covered above
+    // Ensure the currently selected one is present if it wasn't covered above.
     if (namespace && !options.some((opt) => opt.value === namespace) && namespace !== '__custom__') {
-       // Check if we haven't added it (it might be __none__ which maps to '')
-       options.splice(options.length - 1, 0, { value: namespace, label: namespace });
+      options.splice(options.length - 1, 0, { value: namespace, label: namespace });
     }
 
     return options;
@@ -847,7 +847,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     ? 'All namespaces'
     : namespace
       ? namespace
-      : '(no namespace)';
+      : 'cf-default';
 
   // Restore scroll position when returning from a detail page.
   // Page is restored during initial state hydration to avoid a visible jump.
@@ -3010,6 +3010,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         bulkNamespaceInput={bulkNamespaceInput}
         onBulkNamespaceInputChange={setBulkNamespaceInput}
         registryNamespaces={registryNamespaces}
+        onRegisterNamespace={registerNamespace}
         bulkAnimateFps={bulkAnimateFps}
         onBulkAnimateFpsChange={setBulkAnimateFps}
         bulkAnimateTouched={bulkAnimateTouched}

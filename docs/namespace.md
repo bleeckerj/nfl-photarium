@@ -34,7 +34,7 @@ This document summarizes the namespace feature, its goals, where it is stored, a
 
 - `/api/images` accepts a `namespace` query parameter.
   - When `namespace` is set, only images in that namespace are returned.
-  - When `namespace=__none__`, only images with no namespace are returned.
+  - `namespace=__none__` is reserved for migration/debug tooling that audits legacy images missing namespace metadata.
 - The UI passes the current namespace to `/api/images` and filters the gallery accordingly.
 - Duplicate detection is scoped to the active namespace:
   - URL duplicate checks use only images with the same namespace.
@@ -45,20 +45,18 @@ This document summarizes the namespace feature, its goals, where it is stored, a
 - A gear icon in the gallery header opens the namespace modal.
   - **Dropdown** options include:
     - `All namespaces` (maps to `__all__`)
-    - `(no namespace)` (maps to `__none__`)
     - Registry-known namespaces
     - Observed namespaces in the current image set
     - `Custom…` input for manual entry
   - The selection is persisted to `localStorage` as:
     - `imageNamespace = "namespace-value"`
-    - `imageNamespace = "__none__"` for empty namespace
     - `imageNamespace = "__all__"` for the all-namespace view
 
-## “No Namespace” Mode
+## Missing Namespace Migration
 
-- Selecting `(no namespace)` filters the gallery to images where `namespace` is missing.
-- This is useful during migration when legacy images have no namespace.
-- The mode persists across restarts via `localStorage`.
+- Normal UI does not expose a no-namespace browse or assignment mode.
+- Legacy images missing namespace metadata should be backfilled to `cf-default` unless a more specific namespace is known.
+- `__none__` remains available only as a technical sentinel for migration/debug tools.
 
 ## Migration of Existing Images
 

@@ -86,6 +86,7 @@ interface GalleryModalsProps {
   bulkNamespaceInput: string;
   onBulkNamespaceInputChange: (value: string) => void;
   registryNamespaces: string[];
+  onRegisterNamespace: (namespace: string, description?: string) => Promise<boolean>;
   bulkAnimateFps: string;
   onBulkAnimateFpsChange: (value: string) => void;
   bulkAnimateTouched: boolean;
@@ -97,7 +98,7 @@ interface GalleryModalsProps {
   bulkAnimateLoading: boolean;
   bulkAnimateError: string | null;
   bulkUpdating: boolean;
-  onBulkApply: () => void;
+  onBulkApply: (options?: { namespaceOverride?: string }) => void | Promise<void>;
   onBulkCreateAnimation: () => void;
   onBulkClose: () => void;
 }
@@ -162,6 +163,7 @@ export const GalleryModals: React.FC<GalleryModalsProps> = ({
   bulkNamespaceInput,
   onBulkNamespaceInputChange,
   registryNamespaces,
+  onRegisterNamespace,
   bulkAnimateFps,
   onBulkAnimateFpsChange,
   bulkAnimateTouched,
@@ -258,6 +260,7 @@ export const GalleryModals: React.FC<GalleryModalsProps> = ({
           bulkNamespaceInput={bulkNamespaceInput}
           onBulkNamespaceInputChange={onBulkNamespaceInputChange}
           registryNamespaces={registryNamespaces}
+          onRegisterNamespace={onRegisterNamespace}
           bulkAnimateFps={bulkAnimateFps}
           onBulkAnimateFpsChange={onBulkAnimateFpsChange}
           bulkAnimateTouched={bulkAnimateTouched}

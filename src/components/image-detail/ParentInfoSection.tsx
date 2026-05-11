@@ -10,19 +10,7 @@ type ParentInfoImage = {
   filename?: string;
 };
 
-export function ParentInfoSection({
-  parentImage,
-  parentActionLoading,
-  reassignParentId,
-  setReassignParentId,
-  reassignParentOptions,
-  currentParentId,
-  onDetach,
-  onUpdateParent,
-  getCloudflareImageUrl,
-  onThumbMouseMove,
-  onThumbMouseLeave,
-}: {
+type VariantLockedStateProps = {
   parentImage: ParentInfoImage;
   parentActionLoading: boolean;
   reassignParentId: string;
@@ -34,12 +22,29 @@ export function ParentInfoSection({
   getCloudflareImageUrl: (id: string, variant: string) => string;
   onThumbMouseMove: (url: string, label: string, event: React.MouseEvent) => void;
   onThumbMouseLeave: () => void;
-}) {
+};
+
+export function VariantLockedState({
+  parentImage,
+  parentActionLoading,
+  reassignParentId,
+  setReassignParentId,
+  reassignParentOptions,
+  currentParentId,
+  onDetach,
+  onUpdateParent,
+  getCloudflareImageUrl,
+  onThumbMouseMove,
+  onThumbMouseLeave,
+}: VariantLockedStateProps) {
   return (
     <div id="parent-info-section" className="border border-yellow-200 bg-yellow-50 rounded-lg p-4 space-y-3">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex-1">
-          <p className="text-xs text-yellow-700">This image is stored as a variation.</p>
+          <p className="text-xs font-medium text-yellow-800">This asset is already a variant.</p>
+          <p className="mt-1 text-xs text-yellow-700">
+            Variants can only be attached to canonical assets. Detach this asset or update its parent to make changes.
+          </p>
         </div>
 
         <Link
@@ -108,3 +113,5 @@ export function ParentInfoSection({
     </div>
   );
 }
+
+export const ParentInfoSection = VariantLockedState;
