@@ -16,7 +16,9 @@ export type NamespaceRegistryEntry = {
   description: string;
 };
 
-const BUILT_IN_NAMESPACE_DETAILS: NamespaceRegistryEntry[] = [
+export const DEFAULT_NAMESPACE = 'cf-default';
+
+export const BUILT_IN_NAMESPACE_DETAILS: NamespaceRegistryEntry[] = [
   {
     name: 'cf-site-misc',
     description: 'Miscellaneous images used across various websites.',
@@ -24,25 +26,32 @@ const BUILT_IN_NAMESPACE_DETAILS: NamespaceRegistryEntry[] = [
 ];
 
 // Normalize input so registry only stores meaningful namespaces.
-const normalizeNamespace = (value?: string) => {
+export const normalizeRegistryNamespace = (value?: string) => {
   if (!value) return '';
   const trimmed = value.trim();
   if (!trimmed || trimmed === '__none__' || trimmed === '__all__') return '';
   return trimmed;
 };
 
+export const isProtectedRegistryNamespace = (value?: string) => {
+  const normalized = normalizeRegistryNamespace(value);
+  if (!normalized) return true;
+  if (normalized === DEFAULT_NAMESPACE) return true;
+  return BUILT_IN_NAMESPACE_DETAILS.some((entry) => entry.name === normalized);
+};
+
 const normalizeDescription = (value?: string) => (typeof value === 'string' ? value.trim() : '');
 
 const normalizeEntry = (entry: unknown): NamespaceRegistryEntry | null => {
   if (typeof entry === 'string') {
-    const name = normalizeNamespace(entry);
+    const name = normalizeRegistryNamespace(entry);
     return name ? { name, description: '' } : null;
   }
   if (!entry || typeof entry !== 'object') {
     return null;
   }
   const record = entry as Record<string, unknown>;
-  const name = normalizeNamespace(typeof record.name === 'string' ? record.name : undefined);
+  const name = normalizeRegistryNamespace(typeof record.name === 'string' ? record.name : undefined);
   if (!name) {
     return null;
   }
@@ -110,7 +119,7 @@ export const listRegistryNamespaceDetails = async () => {
 
 // Adds a namespace if it is valid and not already in the registry.
 export const upsertRegistryNamespace = async (namespace?: string, description?: string) => {
-  const normalized = normalizeNamespace(namespace);
+  const normalized = normalizeRegistryNamespace(namespace);
   if (!normalized) return;
   const payload = await readRegistry();
   const entries = normalizeEntries(payload.namespaces);
@@ -129,7 +138,7 @@ export const upsertRegistryNamespace = async (namespace?: string, description?: 
 
 export const upsertRegistryNamespaces = async (namespaces: string[]) => {
   const normalized = Array.from(
-    new Set(namespaces.map((entry) => normalizeNamespace(entry)).filter(Boolean))
+    new Set(namespaces.map((entry) => normalizeRegistryNamespace(entry)).filter(Boolean))
   );
   if (!normalized.length) return;
 
@@ -147,6 +156,21 @@ export const upsertRegistryNamespaces = async (namespaces: string[]) => {
   payload.namespaces = entries;
   payload.updatedAt = new Date().toISOString();
   await writeRegistry(payload);
+};
+
+export const removeRegistryNamespace = async (namespace?: string) => {
+  const normalized = normalizeRegistryNamespace(namespace);
+  if (!normalized || isProtectedRegistryNamespace(normalized)) return false;
+
+  const payload = await readRegistry();
+  const entries = normalizeEntries(payload.namespaces);
+  const nextEntries = entries.filter((entry) => entry.name !== normalized);
+  if (nextEntries.length === entries.length) return false;
+
+  payload.namespaces = nextEntries;
+  payload.updatedAt = new Date().toISOString();
+  await writeRegistry(payload);
+  return true;
 };
 
 // Exposes the registry path for scripts/debugging.

@@ -133,6 +133,20 @@ const METADATA_OVERRIDE_KEY = 'cloudflare-metadata-overrides';
 let sizeBackfillInProgress = false;
 let sizeBackfillLastRun = 0;
 const sizeBackfillAttempts = new Map<string, number>();
+let persistentCacheSaveTimer: ReturnType<typeof setTimeout> | null = null;
+let persistentCacheSaveInFlight: Promise<void> | null = null;
+let persistentCacheSaveQueued = false;
+let metadataOverridesSaveTimer: ReturnType<typeof setTimeout> | null = null;
+let metadataOverridesSaveInFlight: Promise<void> | null = null;
+let metadataOverridesSaveQueued = false;
+const PERSISTENT_CACHE_SAVE_DEBOUNCE_MS = Math.max(
+  50,
+  Number(process.env.CLOUDFLARE_PERSISTENT_CACHE_SAVE_DEBOUNCE_MS ?? 750)
+);
+const METADATA_OVERRIDES_SAVE_DEBOUNCE_MS = Math.max(
+  50,
+  Number(process.env.CLOUDFLARE_METADATA_OVERRIDES_SAVE_DEBOUNCE_MS ?? 750)
+);
 
 // Get persistent storage instance
 let storage: ICacheStorage | null = null;
@@ -173,6 +187,35 @@ const saveMetadataOverrides = async (): Promise<void> => {
   } catch (error) {
     console.warn('[Cache] Failed to save metadata overrides:', error);
   }
+};
+
+const flushMetadataOverridesSave = async (): Promise<void> => {
+  if (CLOUDFLARE_CACHE_DISABLED) return;
+  if (metadataOverridesSaveInFlight) {
+    metadataOverridesSaveQueued = true;
+    return metadataOverridesSaveInFlight;
+  }
+
+  metadataOverridesSaveQueued = false;
+  metadataOverridesSaveInFlight = saveMetadataOverrides()
+    .finally(() => {
+      metadataOverridesSaveInFlight = null;
+      if (metadataOverridesSaveQueued) {
+        scheduleMetadataOverridesSave();
+      }
+    });
+  return metadataOverridesSaveInFlight;
+};
+
+const scheduleMetadataOverridesSave = (): void => {
+  if (CLOUDFLARE_CACHE_DISABLED) return;
+  if (metadataOverridesSaveTimer) {
+    clearTimeout(metadataOverridesSaveTimer);
+  }
+  metadataOverridesSaveTimer = setTimeout(() => {
+    metadataOverridesSaveTimer = null;
+    void flushMetadataOverridesSave();
+  }, METADATA_OVERRIDES_SAVE_DEBOUNCE_MS);
 };
 
 const buildMetadataOverride = (
@@ -633,6 +676,37 @@ const saveToPersistentCache = async (images: CachedCloudflareImage[], timestamp:
   }
 };
 
+const flushPersistentCacheSave = async (): Promise<void> => {
+  if (CLOUDFLARE_CACHE_DISABLED) return;
+  if (persistentCacheSaveInFlight) {
+    persistentCacheSaveQueued = true;
+    return persistentCacheSaveInFlight;
+  }
+
+  persistentCacheSaveQueued = false;
+  const images = cacheState.images;
+  const timestamp = cacheState.lastFetched;
+  persistentCacheSaveInFlight = saveToPersistentCache(images, timestamp)
+    .finally(() => {
+      persistentCacheSaveInFlight = null;
+      if (persistentCacheSaveQueued) {
+        schedulePersistentCacheSave();
+      }
+    });
+  return persistentCacheSaveInFlight;
+};
+
+const schedulePersistentCacheSave = (): void => {
+  if (CLOUDFLARE_CACHE_DISABLED) return;
+  if (persistentCacheSaveTimer) {
+    clearTimeout(persistentCacheSaveTimer);
+  }
+  persistentCacheSaveTimer = setTimeout(() => {
+    persistentCacheSaveTimer = null;
+    void flushPersistentCacheSave();
+  }, PERSISTENT_CACHE_SAVE_DEBOUNCE_MS);
+};
+
 const shouldUseMemoryCache = (forceRefresh?: boolean) => {
   if (CLOUDFLARE_CACHE_DISABLED) return false;
   if (forceRefresh) return false;
@@ -967,12 +1041,12 @@ export const upsertCachedImage = (image: CachedCloudflareImage) => {
     });
     if (Object.keys(override).length) {
       metadataOverrides.set(mergedImage.id, override);
-      saveMetadataOverrides().catch(() => {});
+      scheduleMetadataOverridesSave();
     }
   });
   
-  // Update persistent cache in background
-  saveToPersistentCache(cacheState.images, cacheState.lastFetched).catch(() => {});
+  // Coalesce full-cache writes so bulk edits do not flood Redis with many large payloads.
+  schedulePersistentCacheSave();
 
   if (mergedImage.size === undefined) {
     triggerSizeBackfill();
@@ -991,7 +1065,7 @@ export const removeCachedImage = (id: string) => {
   cacheState.lastFetched = Date.now();
   
   // Update persistent cache in background
-  saveToPersistentCache(cacheState.images, cacheState.lastFetched).catch(() => {});
+  schedulePersistentCacheSave();
 };
 
 export const transformApiImageToCached = (image: CloudflareImageApiResponse) =>

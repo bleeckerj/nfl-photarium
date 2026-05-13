@@ -2,18 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   cleanString,
   CLOUDFLARE_EXTRAS_ONLY_FIELDS,
-  enforceCloudflareMetadataLimit,
   omitExtrasOnlyCloudflareMetadata,
-  parseCloudflareMetadata,
-  pickCloudflareMetadata,
 } from '@/utils/cloudflareMetadata';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
-import { getCachedImages, transformApiImageToCached, upsertCachedImage } from '@/server/cloudflareImageCache';
+import { getCachedImages } from '@/server/cloudflareImageCache';
 import { listImageFamilyIds } from '@/server/imageFamily';
 import { upsertRegistryNamespace } from '@/server/namespaceRegistry';
 import { validateParentAssignmentForExistingImage } from '@/server/parentValidation';
 import { patchImageExtrasRecord } from '@/server/imageExtras';
 import { mergeUserTagsPreservingSystemTags } from '@/utils/systemTags';
+import { patchCloudflareImageMetadata } from '@/server/cloudflareImageMetadata';
 
 const MAX_CLOUDFLARE_TEXT_MIRROR_CHARS = 160;
 
@@ -199,110 +197,6 @@ export async function PATCH(
     };
 
     const updateImage = async (targetId: string, flags: UpdateFlags) => {
-      const fetchedImageResponse = await fetch(
-        `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${targetId}`,
-        {
-          headers: {
-            'Authorization': `Bearer ${apiToken}`,
-          },
-        }
-      );
-
-      const fetchedImageResult = await fetchedImageResponse.json();
-
-      if (!fetchedImageResponse.ok) {
-        console.error('Cloudflare API error (fetch existing image):', fetchedImageResult);
-        throw new Error(
-          fetchedImageResult.errors?.[0]?.message || 'Failed to fetch existing image metadata'
-        );
-      }
-
-      const existingMeta = parseCloudflareMetadata(fetchedImageResult.result?.meta);
-      const metadata = {
-        ...existingMeta,
-        updatedAt: new Date().toISOString(),
-      } as Record<string, unknown>;
-
-      if (flags.tags) {
-        metadata.tags = mergeUserTagsPreservingSystemTags(
-          Array.isArray(existingMeta.tags) ? existingMeta.tags : [],
-          cleanTags
-        );
-      }
-
-      // Extras-only fields stay in local extras storage, not Cloudflare metadata.
-      Object.values(CLOUDFLARE_EXTRAS_ONLY_FIELDS).forEach((field) => {
-        delete metadata[field];
-      });
-
-      if (flags.displayName) {
-        metadata.displayName = cleanDisplayName ?? '';
-      }
-
-      if (flags.parentId) {
-        // Explicitly allow clearing the parent.
-        metadata.variationParentId = cleanParentId;
-      }
-
-      if (flags.altTag) {
-        metadata.altTag = cleanAltTag ?? '';
-      }
-
-      const extrasPatch: {
-        folder?: string;
-        description?: string;
-        altText?: string;
-        sourceUrl?: string;
-        sourceUrlNormalized?: string;
-        originalUrl?: string;
-        originalUrlNormalized?: string;
-        exif?: undefined;
-      } = {};
-      if (flags.folder) {
-        extrasPatch.folder = cleanFolder ?? '';
-      }
-      if (flags.description) {
-        extrasPatch.description = cleanDescription || undefined;
-      }
-      if (flags.altTag) {
-        extrasPatch.altText = cleanAltTag || undefined;
-      }
-      if (flags.sourceUrl) {
-        extrasPatch.sourceUrl = cleanSourceUrl || undefined;
-        extrasPatch.sourceUrlNormalized = normalizeOriginalUrl(cleanSourceUrl) || undefined;
-      }
-      if (flags.originalUrl) {
-        extrasPatch.originalUrl = cleanOriginalUrl || undefined;
-        extrasPatch.originalUrlNormalized = normalizeOriginalUrl(cleanOriginalUrl) || undefined;
-      }
-      if (flags.clearExif) {
-        extrasPatch.exif = undefined;
-      }
-      if (Object.keys(extrasPatch).length > 0) {
-        await patchImageExtrasRecord(targetId, extrasPatch);
-      }
-
-      // Keep Cloudflare metadata compact: alt text gets a small mirror for fallback surfaces.
-      metadata.altTag = toCloudflareTextMirror(
-        flags.altTag
-          ? (cleanAltTag ?? '')
-          : cleanString(typeof metadata.altTag === 'string' ? metadata.altTag : undefined) ?? ''
-      );
-
-      if (flags.variationSort && cleanVariationSort !== undefined) {
-        metadata.variationSort = cleanVariationSort;
-      }
-
-      if (flags.namespace) {
-        metadata.namespace = cleanNamespace ?? '';
-      }
-
-      // IMPORTANT: Cloudflare PATCH semantics do not clear keys that are omitted.
-      // Use includeEmpty so that user-cleared values ('' / []) are sent explicitly.
-      const metadataPayload = pickCloudflareMetadata(
-        omitExtrasOnlyCloudflareMetadata(metadata),
-        { includeEmpty: true }
-      );
       const requiredKeys = new Set<string>();
       if (flags.tags) requiredKeys.add('tags');
       if (flags.displayName) requiredKeys.add('displayName');
@@ -311,50 +205,94 @@ export async function PATCH(
       if (flags.variationSort) requiredKeys.add('variationSort');
       if (flags.namespace) requiredKeys.add('namespace');
 
-      const metadataLimit = enforceCloudflareMetadataLimit(metadataPayload, 1024);
-      const droppedRequired = metadataLimit.dropped.filter((key) => requiredKeys.has(key));
-      if (droppedRequired.length > 0) {
-        throw new Error(
-          `Metadata exceeds Cloudflare 1024-byte limit. Could not apply fields: ${droppedRequired.join(', ')}`
-        );
-      }
-      const finalMetadataPayload = metadataLimit.metadata;
+      const result = await patchCloudflareImageMetadata(targetId, async (existingMeta) => {
+        const metadata = {
+          ...existingMeta,
+          updatedAt: new Date().toISOString(),
+        } as Record<string, unknown>;
 
-      // Update image metadata in Cloudflare using JSON body
-      const response = await fetch(
-        `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${targetId}`,
-        {
-          method: 'PATCH',
-          headers: {
-            'Authorization': `Bearer ${apiToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ metadata: finalMetadataPayload }),
+        if (flags.tags) {
+          metadata.tags = mergeUserTagsPreservingSystemTags(
+            Array.isArray(existingMeta.tags) ? existingMeta.tags : [],
+            cleanTags
+          );
         }
-      );
 
-      const result = await response.json();
+        // Extras-only fields stay in local extras storage, not Cloudflare metadata.
+        Object.values(CLOUDFLARE_EXTRAS_ONLY_FIELDS).forEach((field) => {
+          delete metadata[field];
+        });
 
-      if (!response.ok) {
-        console.error('Cloudflare API error:', result);
-        throw new Error(result.errors?.[0]?.message || 'Failed to update image metadata');
-      }
+        if (flags.displayName) {
+          metadata.displayName = cleanDisplayName ?? '';
+        }
 
-      const cachedImage = transformApiImageToCached({
-        id: fetchedImageResult.result.id,
-        filename: fetchedImageResult.result.filename,
-        uploaded: fetchedImageResult.result.uploaded,
-        variants: fetchedImageResult.result.variants,
-        size: fetchedImageResult.result.size,
-        meta: finalMetadataPayload
-      });
+        if (flags.parentId) {
+          // Explicitly allow clearing the parent.
+          metadata.variationParentId = cleanParentId;
+        }
 
-      console.log(`[Update] Upserting cache for ${targetId} with tags:`, cachedImage.tags);
-      upsertCachedImage(cachedImage);
+        if (flags.altTag) {
+          metadata.altTag = cleanAltTag ?? '';
+        }
+
+        const extrasPatch: {
+          folder?: string;
+          description?: string;
+          altText?: string;
+          sourceUrl?: string;
+          sourceUrlNormalized?: string;
+          originalUrl?: string;
+          originalUrlNormalized?: string;
+          exif?: undefined;
+        } = {};
+        if (flags.folder) {
+          extrasPatch.folder = cleanFolder ?? '';
+        }
+        if (flags.description) {
+          extrasPatch.description = cleanDescription || undefined;
+        }
+        if (flags.altTag) {
+          extrasPatch.altText = cleanAltTag || undefined;
+        }
+        if (flags.sourceUrl) {
+          extrasPatch.sourceUrl = cleanSourceUrl || undefined;
+          extrasPatch.sourceUrlNormalized = normalizeOriginalUrl(cleanSourceUrl) || undefined;
+        }
+        if (flags.originalUrl) {
+          extrasPatch.originalUrl = cleanOriginalUrl || undefined;
+          extrasPatch.originalUrlNormalized = normalizeOriginalUrl(cleanOriginalUrl) || undefined;
+        }
+        if (flags.clearExif) {
+          extrasPatch.exif = undefined;
+        }
+        if (Object.keys(extrasPatch).length > 0) {
+          await patchImageExtrasRecord(targetId, extrasPatch);
+        }
+
+        // Keep Cloudflare metadata compact: alt text gets a small mirror for fallback surfaces.
+        metadata.altTag = toCloudflareTextMirror(
+          flags.altTag
+            ? (cleanAltTag ?? '')
+            : cleanString(typeof metadata.altTag === 'string' ? metadata.altTag : undefined) ?? ''
+        );
+
+        if (flags.variationSort && cleanVariationSort !== undefined) {
+          metadata.variationSort = cleanVariationSort;
+        }
+
+        if (flags.namespace) {
+          metadata.namespace = cleanNamespace ?? '';
+        }
+
+        return omitExtrasOnlyCloudflareMetadata(metadata);
+      }, { requiredKeys });
+
+      console.log(`[Update] Upserting cache for ${targetId} with tags:`, result.cachedImage.tags);
 
       return {
-        metadataPayload: finalMetadataPayload,
-        filename: fetchedImageResult.result.filename as string | undefined,
+        metadataPayload: result.metadataPayload,
+        filename: result.filename,
       };
     };
 

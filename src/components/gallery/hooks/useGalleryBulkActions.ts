@@ -4,6 +4,55 @@ import { truncateMiddle } from '@/components/gallery/utils';
 import { requestSemanticTags } from '@/services/imageAltDescriptionService';
 import { mergeUserTagsPreservingSystemTags } from '@/utils/systemTags';
 
+const BULK_UPDATE_CONCURRENCY = 4;
+
+const runWithConcurrency = async <T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>
+): Promise<Array<PromiseSettledResult<R>>> => {
+  const results: Array<PromiseSettledResult<R>> = new Array(items.length);
+  let cursor = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (true) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= items.length) {
+          break;
+        }
+        try {
+          results[index] = {
+            status: 'fulfilled',
+            value: await worker(items[index], index),
+          };
+        } catch (reason) {
+          results[index] = {
+            status: 'rejected',
+            reason,
+          };
+        }
+      }
+    })
+  );
+
+  return results;
+};
+
+type BulkUpdateResult = {
+  id: string;
+  ok: boolean;
+  skipped?: boolean;
+};
+
+const resolveGalleryNamespaceScope = (namespace?: string): string | null => {
+  const trimmed = namespace?.trim();
+  if (trimmed === '__all__') return null;
+  return trimmed || process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || 'cf-default';
+};
+
 interface UseGalleryBulkActionsOptions {
   images: CloudflareImage[];
   setImages: React.Dispatch<React.SetStateAction<CloudflareImage[]>>;
@@ -137,8 +186,11 @@ export const useGalleryBulkActions = ({
       let aiTagFailureCount = 0;
       let aiTagNoopCount = 0;
       const imageById = new Map(images.map((image) => [image.id, image]));
-      const updateTasks = await Promise.all(
-        Array.from(selectedImageIds).map(async id => {
+      const selectedIds = Array.from(selectedImageIds);
+      const settled = await runWithConcurrency<string, BulkUpdateResult>(
+        selectedIds,
+        BULK_UPDATE_CONCURRENCY,
+        async id => {
           const payload: Record<string, unknown> = {};
           if (bulkApplyFolder) {
             if (bulkFolderMode === 'existing') {
@@ -201,7 +253,7 @@ export const useGalleryBulkActions = ({
                 const target = imageById.get(id);
                 if (target?.assetType === 'video') {
                   aiFailureCount += 1;
-                  return null;
+                  return { id, ok: true, skipped: true };
                 }
                 const response = await fetch(`/api/images/${id}/display-name`, { method: 'POST' });
                 const data = await response.json();
@@ -229,49 +281,53 @@ export const useGalleryBulkActions = ({
             payload.namespace = effectiveBulkNamespace;
           }
           if (!Object.keys(payload).length) {
-            return null;
+            return { id, ok: true, skipped: true };
           }
           const target = imageById.get(id);
           const updateEndpoint = target?.assetType === 'video'
             ? `/api/videos/${id}/update`
             : `/api/images/${id}/update`;
-          return {
-            id,
-            request: fetch(updateEndpoint, {
+          const response = await fetch(updateEndpoint, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
-            }),
-          };
-        })
+          });
+          return { id, ok: response.ok };
+        }
       );
-      const effectiveTasks = updateTasks.filter((task): task is { id: string; request: Promise<Response> } => Boolean(task));
-      const settled = await Promise.allSettled(effectiveTasks.map((task) => task.request));
       const successfulIds = new Set<string>();
       let failedCount = 0;
-      for (let i = 0; i < settled.length; i += 1) {
-        const result = settled[i];
-        const task = effectiveTasks[i];
+      let effectiveTaskCount = 0;
+      for (const result of settled) {
         if (result.status === 'rejected') {
           failedCount += 1;
           continue;
         }
+        if (result.value.skipped) {
+          continue;
+        }
+        effectiveTaskCount += 1;
         if (!result.value.ok) {
           failedCount += 1;
           continue;
         }
-        successfulIds.add(task.id);
+        successfulIds.add(result.value.id);
       }
-      if (effectiveTasks.length > 0 && successfulIds.size === 0) {
+      if (effectiveTaskCount > 0 && successfulIds.size === 0) {
         toastPush('Bulk update failed');
         return;
       }
-      setImages(prev =>
-        prev.map(img => {
+      const activeNamespaceScope = resolveGalleryNamespaceScope(namespace);
+      const movedOutOfCurrentNamespace =
+        bulkApplyNamespace &&
+        activeNamespaceScope !== null &&
+        effectiveBulkNamespace !== activeNamespaceScope;
+      setImages(prev => {
+        const updatedImages = prev.map(img => {
           if (!selectedImageIds.has(img.id)) {
             return img;
           }
-          if (effectiveTasks.length > 0 && !successfulIds.has(img.id)) {
+          if (effectiveTaskCount > 0 && !successfulIds.has(img.id)) {
             return img;
           }
           const updatedFolder: string | undefined =
@@ -317,8 +373,11 @@ export const useGalleryBulkActions = ({
             description: updatedDescription,
             namespace: updatedNamespace
           };
-        })
-      );
+        });
+        return movedOutOfCurrentNamespace
+          ? updatedImages.filter(img => !successfulIds.has(img.id))
+          : updatedImages;
+      });
       if (wantsAiDisplayName) {
         const total = selectedImageIds.size;
         if (aiSuccessCount === 0) {
@@ -372,6 +431,7 @@ export const useGalleryBulkActions = ({
     bulkTagsMode,
     clearSelection,
     images,
+    namespace,
     selectedCount,
     selectedImageIds,
     setBulkEditOpen,

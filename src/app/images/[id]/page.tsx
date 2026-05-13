@@ -365,16 +365,10 @@ export default function ImageDetailPage() {
     return serialized ? `?${serialized}` : '';
   }, [galleryColorParam, galleryNamespaceParam, galleryPageParam, hasGalleryNamespaceParam]);
 
-  const initialDetailSeedRef = useRef(
-    getFreshDetailAssetSeed<CloudflareImage>({
-      id,
-      assetType: 'image',
-      namespace: galleryNamespaceParam,
-    })?.asset ?? null
-  );
+  const initialDetailSeedRef = useRef<CloudflareImage | null>(null);
   const seededInputAppliedRef = useRef(false);
-  const [image, setImage] = useState<CloudflareImage | null>(initialDetailSeedRef.current);
-  const [loading, setLoading] = useState(!initialDetailSeedRef.current);
+  const [image, setImage] = useState<CloudflareImage | null>(null);
+  const [loading, setLoading] = useState(true);
   const [familyLoaded, setFamilyLoaded] = useState(false);
   const toast = useToast();
   const [galleryResultIds, setGalleryResultIds] = useState<string[]>([]);
@@ -400,9 +394,7 @@ export default function ImageDetailPage() {
     router.push('/');
   }, [galleryColorParam, galleryNamespaceParam, galleryPageParam, router]);
 
-  const [allImages, setAllImages] = useState<CloudflareImage[]>(
-    initialDetailSeedRef.current ? [initialDetailSeedRef.current] : []
-  );
+  const [allImages, setAllImages] = useState<CloudflareImage[]>([]);
   const [fallbackParentImage, setFallbackParentImage] = useState<CloudflareImage | null>(null);
   const [reassignParentId, setReassignParentId] = useState('');
   const [adoptImageId, setAdoptImageId] = useState('');

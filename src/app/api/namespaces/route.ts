@@ -5,6 +5,11 @@ import {
   type NamespaceRegistryEntry,
 } from '@/server/namespaceRegistry';
 import { getCachedImages } from '@/server/cloudflareImageCache';
+import { listVideoAssetRecords } from '@/server/videoCatalogStorage';
+import {
+  deleteNamespaceByMovingAssets,
+  validateNamespaceDeletionName,
+} from '@/server/namespaceDeletion';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -15,7 +20,10 @@ const NO_STORE_HEADERS = {
 
 async function loadNamespaces() {
   const namespaceDetails = await listRegistryNamespaceDetails();
-  const cachedImages = await getCachedImages();
+  const [cachedImages, videos] = await Promise.all([
+    getCachedImages(),
+    listVideoAssetRecords(),
+  ]);
   const discovered = new Set<string>();
   const detailsByName = new Map<string, NamespaceRegistryEntry>();
 
@@ -26,6 +34,12 @@ async function loadNamespaces() {
   cachedImages.forEach(image => {
     if (image.namespace) {
       const trimmed = image.namespace.trim();
+      if (trimmed) discovered.add(trimmed);
+    }
+  });
+  videos.forEach(video => {
+    if (video.namespace) {
+      const trimmed = video.namespace.trim();
       if (trimmed) discovered.add(trimmed);
     }
   });
@@ -74,6 +88,38 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(payload, { headers: NO_STORE_HEADERS });
   } catch (error) {
     console.error('Register namespace error:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500, headers: NO_STORE_HEADERS }
+    );
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const body = await request.json().catch(() => null);
+    const namespace = typeof body?.namespace === 'string' ? body.namespace.trim() : '';
+    const dryRun = body?.dryRun === true;
+    const validation = validateNamespaceDeletionName(namespace);
+
+    if (!validation.ok) {
+      return NextResponse.json(
+        { error: validation.error },
+        { status: 400, headers: NO_STORE_HEADERS }
+      );
+    }
+
+    const result = await deleteNamespaceByMovingAssets(validation.namespace, { dryRun });
+    const payload = dryRun || result.partialFailure
+      ? { ...result }
+      : { ...result, ...(await loadNamespaces()) };
+
+    return NextResponse.json(payload, {
+      status: result.partialFailure ? 207 : 200,
+      headers: NO_STORE_HEADERS,
+    });
+  } catch (error) {
+    console.error('Delete namespace error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500, headers: NO_STORE_HEADERS }

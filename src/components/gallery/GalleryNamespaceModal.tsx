@@ -19,6 +19,10 @@ interface GalleryNamespaceModalProps {
   onDraftChange: (value: string) => void;
   onCancel: () => void;
   onSave: () => void;
+  selectedNamespaceForDelete?: string;
+  canDeleteSelectedNamespace?: boolean;
+  deletingNamespace?: boolean;
+  onDeleteNamespace?: () => void;
 }
 
 export const GalleryNamespaceModal: React.FC<GalleryNamespaceModalProps> = ({
@@ -30,6 +34,10 @@ export const GalleryNamespaceModal: React.FC<GalleryNamespaceModalProps> = ({
   onDraftChange,
   onCancel,
   onSave,
+  selectedNamespaceForDelete,
+  canDeleteSelectedNamespace = false,
+  deletingNamespace = false,
+  onDeleteNamespace,
 }) => {
   if (!isOpen) return null;
 
@@ -72,8 +80,24 @@ export const GalleryNamespaceModal: React.FC<GalleryNamespaceModalProps> = ({
             </div>
           </label>
           <p className="text-[0.7em] text-gray-500">
-            Only images in this namespace are shown and used for duplicate checks (unless you pick "All namespaces").
+            Only images in this namespace are shown and used for duplicate checks (unless you pick &quot;All namespaces&quot;).
           </p>
+          {selectedNamespaceForDelete ? (
+            <div className="rounded-md border border-red-200 bg-red-50 p-3">
+              <div className="text-[0.75em] font-medium text-red-800">Delete namespace</div>
+              <p className="mt-1 text-[0.7em] text-red-700">
+                Moves all assets in &quot;{selectedNamespaceForDelete}&quot; to cf-default, then removes this namespace.
+              </p>
+              <button
+                type="button"
+                onClick={onDeleteNamespace}
+                disabled={!canDeleteSelectedNamespace || deletingNamespace}
+                className="mt-2 px-3 py-1 border border-red-300 rounded-md bg-white text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {deletingNamespace ? 'Deleting...' : 'Delete namespace'}
+              </button>
+            </div>
+          ) : null}
         </div>
         <div className="flex items-center justify-end gap-2 p-3 border-t">
           <button

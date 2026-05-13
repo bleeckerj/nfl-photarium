@@ -35,6 +35,10 @@ interface GalleryModalsProps {
   onNamespaceDraftChange: (value: string) => void;
   onNamespaceCancel: () => void;
   onNamespaceSave: () => void;
+  selectedNamespaceForDelete?: string;
+  canDeleteSelectedNamespace?: boolean;
+  deletingNamespace?: boolean;
+  onDeleteNamespace?: () => void;
 
   editingImage: string | null;
   editFolderSelect: string;
@@ -119,6 +123,10 @@ export const GalleryModals: React.FC<GalleryModalsProps> = ({
   onNamespaceDraftChange,
   onNamespaceCancel,
   onNamespaceSave,
+  selectedNamespaceForDelete,
+  canDeleteSelectedNamespace,
+  deletingNamespace,
+  onDeleteNamespace,
   editingImage,
   editFolderSelect,
   editFolderOptions,
@@ -210,6 +218,10 @@ export const GalleryModals: React.FC<GalleryModalsProps> = ({
         onDraftChange={onNamespaceDraftChange}
         onCancel={onNamespaceCancel}
         onSave={onNamespaceSave}
+        selectedNamespaceForDelete={selectedNamespaceForDelete}
+        canDeleteSelectedNamespace={canDeleteSelectedNamespace}
+        deletingNamespace={deletingNamespace}
+        onDeleteNamespace={onDeleteNamespace}
       />
 
       <GalleryEditModal

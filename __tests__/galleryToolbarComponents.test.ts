@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { GalleryCompactHeader } from '@/components/gallery/GalleryCompactHeader';
 import { GalleryPagerStrip } from '@/components/gallery/GalleryPagerStrip';
 import { GalleryFilters } from '@/components/gallery/GalleryFilters';
+import { GalleryNamespaceModal } from '@/components/gallery/GalleryNamespaceModal';
 import LegacyTopBar from '@/components/gallery/LegacyTopBar';
 
 describe('gallery toolbar components', () => {
@@ -194,5 +195,27 @@ describe('gallery toolbar components', () => {
     expect(markup).toContain('Motion Assets Only');
     expect(markup).toContain('Parents With Variants');
     expect(markup).not.toContain('Variations Only');
+  });
+
+  it('renders namespace delete affordance for deletable namespaces', () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(GalleryNamespaceModal, {
+        isOpen: true,
+        namespaceSelectValue: 'client-space',
+        namespaceDraft: 'client-space',
+        namespaceOptions: [{ value: 'client-space', label: 'client-space' }],
+        onSelectChange: vi.fn(),
+        onDraftChange: vi.fn(),
+        onCancel: vi.fn(),
+        onSave: vi.fn(),
+        selectedNamespaceForDelete: 'client-space',
+        canDeleteSelectedNamespace: true,
+        deletingNamespace: false,
+        onDeleteNamespace: vi.fn(),
+      })
+    );
+
+    expect(markup).toContain('Delete namespace');
+    expect(markup).toContain('Moves all assets in &quot;client-space&quot; to cf-default');
   });
 });
