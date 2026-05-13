@@ -30,6 +30,7 @@ export { sanitizeFilename, MAX_FILENAME_LENGTH } from '@/utils/filename';
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 export const CLOUDFLARE_MAX_IMAGE_DIMENSION = 12_000;
 export const CLOUDFLARE_MAX_IMAGE_AREA = 100_000_000;
+export const CLOUDFLARE_MAX_ANIMATION_FRAME_AREA = 100_000_000;
 export const SUPPORTED_IMAGE_TYPES = new Set([
   'image/jpeg',
   'image/jpg',
@@ -132,7 +133,7 @@ export type PreparedUploadPayload = {
   uploadNormalization?: UploadNormalizationMetadata;
 };
 
-type UploadNormalizationReason = 'max-bytes' | 'max-dimension' | 'max-area';
+type UploadNormalizationReason = 'max-bytes' | 'max-dimension' | 'max-area' | 'max-frame-area';
 
 export type UploadNormalizationMetadata = {
   reasons: UploadNormalizationReason[];
@@ -141,12 +142,17 @@ export type UploadNormalizationMetadata = {
   maxBytes: number;
   maxDimension: number;
   maxArea: number;
+  maxAnimationFrameArea: number;
   originalType: string;
   finalType: string;
   originalWidth?: number;
   originalHeight?: number;
+  originalFrameCount?: number;
+  originalFrameArea?: number;
   finalWidth?: number;
   finalHeight?: number;
+  finalFrameCount?: number;
+  finalFrameArea?: number;
 };
 
 const evaluateConstraintReasons = ({
@@ -156,6 +162,8 @@ const evaluateConstraintReasons = ({
   maxBytes,
   maxDimension,
   maxArea,
+  maxAnimationFrameArea = maxArea,
+  frameCount = 1,
 }: {
   bytes: number;
   width?: number;
@@ -163,6 +171,8 @@ const evaluateConstraintReasons = ({
   maxBytes: number;
   maxDimension: number;
   maxArea: number;
+  maxAnimationFrameArea?: number;
+  frameCount?: number;
 }): UploadNormalizationReason[] => {
   const reasons: UploadNormalizationReason[] = [];
   if (bytes > maxBytes) {
@@ -175,6 +185,9 @@ const evaluateConstraintReasons = ({
     if (width * height > maxArea) {
       reasons.push('max-area');
     }
+    if (frameCount > 1 && width * height * frameCount > maxAnimationFrameArea) {
+      reasons.push('max-frame-area');
+    }
   }
   return reasons;
 };
@@ -183,6 +196,7 @@ const describeReasons = (reasons: UploadNormalizationReason[]): string => {
   const labels = reasons.map((reason) => {
     if (reason === 'max-bytes') return 'byte limit';
     if (reason === 'max-dimension') return 'dimension limit';
+    if (reason === 'max-frame-area') return 'animation frame-area limit';
     return 'pixel-area limit';
   });
   return labels.join(', ');
@@ -225,8 +239,26 @@ export async function prepareImageForUpload({
     metadata = undefined;
   }
 
-  const sourceWidth = typeof metadata?.width === 'number' ? metadata.width : 0;
-  const sourceHeight = typeof metadata?.height === 'number' ? metadata.height : 0;
+  let animatedMetadata: sharp.Metadata | undefined;
+  if (typeof metadata?.pages === 'number' && metadata.pages > 1) {
+    try {
+      animatedMetadata = await sharp(buffer, { animated: true }).metadata();
+    } catch {
+      animatedMetadata = undefined;
+    }
+  }
+
+  const sourceFrameCount = Math.max(1, Math.round(metadata?.pages ?? animatedMetadata?.pages ?? 1));
+  const isAnimated = sourceFrameCount > 1;
+  const activeMetadata = animatedMetadata ?? metadata;
+  const sourceWidth = typeof activeMetadata?.width === 'number' ? activeMetadata.width : 0;
+  const animatedPageHeight =
+    typeof animatedMetadata?.pageHeight === 'number' && animatedMetadata.pageHeight > 0
+      ? animatedMetadata.pageHeight
+      : undefined;
+  const sourceHeight = isAnimated
+    ? (animatedPageHeight ?? (typeof metadata?.height === 'number' ? metadata.height : 0))
+    : (typeof metadata?.height === 'number' ? metadata.height : 0);
   const canResize = Boolean(sourceWidth && sourceHeight);
   const sourceReasons = evaluateConstraintReasons({
     bytes: bytesBefore,
@@ -235,6 +267,8 @@ export async function prepareImageForUpload({
     maxBytes,
     maxDimension: CLOUDFLARE_MAX_IMAGE_DIMENSION,
     maxArea: CLOUDFLARE_MAX_IMAGE_AREA,
+    maxAnimationFrameArea: CLOUDFLARE_MAX_ANIMATION_FRAME_AREA,
+    frameCount: sourceFrameCount,
   });
 
   if (sourceReasons.length === 0) {
@@ -255,16 +289,19 @@ export async function prepareImageForUpload({
     return { ok: false, error: 'Unable to determine image dimensions for Cloudflare upload limits.' };
   }
 
-  const hasAlpha = metadata?.hasAlpha === true;
   const qualitySteps = [92, 88, 84, 80, 76, 72, 68, 64, 60];
   const sourceArea = canResize ? sourceWidth * sourceHeight : 0;
+  const sourceFrameArea = sourceArea * sourceFrameCount;
   const scaleToRespectDimension = canResize
     ? Math.min(1, CLOUDFLARE_MAX_IMAGE_DIMENSION / Math.max(sourceWidth, sourceHeight))
     : 1;
   const scaleToRespectArea = canResize && sourceArea > 0
     ? Math.min(1, Math.sqrt(CLOUDFLARE_MAX_IMAGE_AREA / sourceArea))
     : 1;
-  const requiredScale = Math.min(1, scaleToRespectDimension, scaleToRespectArea);
+  const scaleToRespectAnimationFrameArea = canResize && sourceFrameCount > 1 && sourceFrameArea > 0
+    ? Math.min(1, Math.sqrt(CLOUDFLARE_MAX_ANIMATION_FRAME_AREA / sourceFrameArea))
+    : 1;
+  const requiredScale = Math.min(1, scaleToRespectDimension, scaleToRespectArea, scaleToRespectAnimationFrameArea);
   const rawScaleSteps = canResize
     ? Array.from(new Set([
         1,
@@ -287,12 +324,16 @@ export async function prepareImageForUpload({
         Number((requiredScale * 0.98).toFixed(4)),
       ].filter((scale) => scale > 0 && scale <= 1))).sort((a, b) => b - a)
     : [1];
-  const requiresDimensionOrAreaDownscale = sourceReasons.includes('max-dimension') || sourceReasons.includes('max-area');
+  const requiresDimensionOrAreaDownscale =
+    sourceReasons.includes('max-dimension') ||
+    sourceReasons.includes('max-area') ||
+    sourceReasons.includes('max-frame-area');
   const scaleSteps = requiresDimensionOrAreaDownscale
     ? rawScaleSteps.filter((scale) => scale <= requiredScale + 0.0005)
     : rawScaleSteps;
   const minDimension = 320;
-  const formatOrder = hasAlpha ? ['image/webp', 'image/jpeg'] : ['image/webp', 'image/jpeg'];
+  const minResizeDimension = requiresDimensionOrAreaDownscale ? 1 : minDimension;
+  const formatOrder = isAnimated ? ['image/webp'] : ['image/webp', 'image/jpeg'];
 
   let smallestCandidate:
     | {
@@ -306,8 +347,8 @@ export async function prepareImageForUpload({
     | null = null;
 
   for (const scale of scaleSteps) {
-    const requestedWidth = canResize ? Math.max(minDimension, Math.round(sourceWidth * scale)) : 0;
-    const requestedHeight = canResize ? Math.max(minDimension, Math.round(sourceHeight * scale)) : 0;
+    const requestedWidth = canResize ? Math.max(minResizeDimension, Math.round(sourceWidth * scale)) : 0;
+    const requestedHeight = canResize ? Math.max(minResizeDimension, Math.round(sourceHeight * scale)) : 0;
     const needsResize = canResize && (requestedWidth !== sourceWidth || requestedHeight !== sourceHeight);
     const resizedDimensions = canResize
       ? (needsResize
@@ -318,7 +359,7 @@ export async function prepareImageForUpload({
     for (const quality of qualitySteps) {
       const passing: Array<{ buffer: Buffer; type: string; width?: number; height?: number }> = [];
       for (const nextType of formatOrder) {
-        let pipeline = sharp(buffer).rotate();
+        let pipeline = isAnimated ? sharp(buffer, { animated: true }) : sharp(buffer).rotate();
         if (canResize && needsResize) {
           pipeline = pipeline.resize(requestedWidth, requestedHeight, {
             fit: 'inside',
@@ -340,6 +381,8 @@ export async function prepareImageForUpload({
           maxBytes,
           maxDimension: CLOUDFLARE_MAX_IMAGE_DIMENSION,
           maxArea: CLOUDFLARE_MAX_IMAGE_AREA,
+          maxAnimationFrameArea: CLOUDFLARE_MAX_ANIMATION_FRAME_AREA,
+          frameCount: sourceFrameCount,
         });
 
         if (!smallestCandidate || encoded.byteLength < smallestCandidate.buffer.byteLength) {
@@ -388,12 +431,19 @@ export async function prepareImageForUpload({
               maxBytes,
               maxDimension: CLOUDFLARE_MAX_IMAGE_DIMENSION,
               maxArea: CLOUDFLARE_MAX_IMAGE_AREA,
+              maxAnimationFrameArea: CLOUDFLARE_MAX_ANIMATION_FRAME_AREA,
               originalType: fileType,
               finalType: chosen.type,
               originalWidth: canResize ? sourceWidth : undefined,
               originalHeight: canResize ? sourceHeight : undefined,
+              originalFrameCount: isAnimated ? sourceFrameCount : undefined,
+              originalFrameArea: isAnimated && canResize ? sourceFrameArea : undefined,
               finalWidth: chosen.width,
               finalHeight: chosen.height,
+              finalFrameCount: isAnimated ? sourceFrameCount : undefined,
+              finalFrameArea: isAnimated && chosen.width && chosen.height
+                ? chosen.width * chosen.height * sourceFrameCount
+                : undefined,
             },
           },
         };

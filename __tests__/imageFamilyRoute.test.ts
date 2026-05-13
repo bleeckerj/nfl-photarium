@@ -4,9 +4,11 @@ import { NextRequest } from 'next/server';
 const {
   getCachedImagesMock,
   listVideoAssetRecordsWithSyncMock,
+  getImageExtrasRecordsMock,
 } = vi.hoisted(() => ({
   getCachedImagesMock: vi.fn(),
   listVideoAssetRecordsWithSyncMock: vi.fn(),
+  getImageExtrasRecordsMock: vi.fn(),
 }));
 
 vi.mock('@/server/cloudflareImageCache', () => ({
@@ -17,12 +19,17 @@ vi.mock('@/server/videoCatalogStorage', () => ({
   listVideoAssetRecordsWithSync: listVideoAssetRecordsWithSyncMock,
 }));
 
+vi.mock('@/server/imageExtras', () => ({
+  getImageExtrasRecords: getImageExtrasRecordsMock,
+}));
+
 import { GET } from '@/app/api/images/[id]/family/route';
 
 describe('GET /api/images/:id/family', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.ENABLE_VIDEO_ASSETS = '1';
+    getImageExtrasRecordsMock.mockResolvedValue({});
   });
 
   it('returns only the target family by default', async () => {
@@ -91,7 +98,7 @@ describe('GET /api/images/:id/family', () => {
     expect(payload.candidateAssets).toEqual([]);
   });
 
-  it('returns namespace-scoped canonical candidates when requested', async () => {
+  it('returns same-namespace candidates plus cross-namespace orphans when requested', async () => {
     getCachedImagesMock.mockResolvedValue([
       {
         id: 'parent',
@@ -121,7 +128,7 @@ describe('GET /api/images/:id/family', () => {
       {
         id: 'other-parent',
         filename: 'other-parent.jpg',
-        namespace: 'beta',
+        namespace: 'alpha',
         uploaded: '2026-02-20T00:06:30.000Z',
         variants: ['https://imagedelivery.net/hash/other-parent/public'],
         tags: [],
@@ -145,6 +152,14 @@ describe('GET /api/images/:id/family', () => {
       },
     ]);
     listVideoAssetRecordsWithSyncMock.mockResolvedValue([]);
+    getImageExtrasRecordsMock.mockResolvedValue({
+      'candidate-a': {
+        imageId: 'candidate-a',
+        folder: 'extras-folder',
+        description: 'Detailed candidate description',
+        altText: 'Candidate alt text',
+      },
+    });
 
     const response = await GET(
       new NextRequest('http://localhost/api/images/child-a/family?includeCandidates=1'),
@@ -160,17 +175,39 @@ describe('GET /api/images/:id/family', () => {
     }>;
 
     expect(response.status).toBe(200);
-    expect(candidateIds).toEqual(['candidate-a']);
+    expect(candidateIds).toEqual(['candidate-a', 'candidate-b']);
+    expect(payload.candidateAssets[0]).toEqual(
+      expect.objectContaining({
+        id: 'candidate-a',
+        folder: 'extras-folder',
+        description: 'Detailed candidate description',
+        altText: 'Candidate alt text',
+      })
+    );
     expect(assignmentCandidates).toEqual([
       expect.objectContaining({
-        asset: expect.objectContaining({ id: 'candidate-a' }),
+        asset: expect.objectContaining({
+          id: 'candidate-a',
+          folder: 'extras-folder',
+          description: 'Detailed candidate description',
+          altText: 'Candidate alt text',
+        }),
         availability: 'available',
+      }),
+      expect.objectContaining({
+        asset: expect.objectContaining({ id: 'other-parent' }),
+        availability: 'unavailable',
+        unavailableReason: 'has-variants',
       }),
       expect.objectContaining({
         asset: expect.objectContaining({ id: 'assigned-elsewhere' }),
         availability: 'unavailable',
         unavailableReason: 'already-assigned',
         parentAsset: expect.objectContaining({ id: 'other-parent' }),
+      }),
+      expect.objectContaining({
+        asset: expect.objectContaining({ id: 'candidate-b' }),
+        availability: 'available',
       }),
     ]);
   });

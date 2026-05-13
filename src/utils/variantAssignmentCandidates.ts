@@ -36,14 +36,23 @@ export function buildVariantAssignmentCandidates<TAsset extends VariantAssignmen
   currentAssetId,
   familyRootId,
   namespace,
+  includeCrossNamespaceOrphans = false,
 }: {
   assets: TAsset[];
   currentAssetId?: string;
   familyRootId?: string;
   namespace: string;
+  includeCrossNamespaceOrphans?: boolean;
 }): VariantAssignmentCandidate<TAsset>[] {
   const uniqueAssets = uniqueById(assets);
   const byId = new Map(uniqueAssets.map((asset) => [asset.id, asset]));
+  const childCountsByParentId = uniqueAssets.reduce((counts, asset) => {
+    if (!asset.parentId) {
+      return counts;
+    }
+    counts.set(asset.parentId, (counts.get(asset.parentId) ?? 0) + 1);
+    return counts;
+  }, new Map<string, number>());
   const familyIds = new Set(
     uniqueAssets
       .filter((asset) => asset.id === familyRootId || asset.parentId === familyRootId)
@@ -52,7 +61,9 @@ export function buildVariantAssignmentCandidates<TAsset extends VariantAssignmen
 
   return uniqueAssets
     .filter((asset) => {
-      if (!matchesNamespace(asset.namespace, namespace)) return false;
+      const sameNamespace = matchesNamespace(asset.namespace, namespace);
+      const isOrphan = !asset.parentId && (childCountsByParentId.get(asset.id) ?? 0) === 0;
+      if (!sameNamespace && !(includeCrossNamespaceOrphans && isOrphan)) return false;
       if (asset.id === currentAssetId) return false;
       if (familyIds.has(asset.id)) return false;
       return true;
@@ -65,6 +76,13 @@ export function buildVariantAssignmentCandidates<TAsset extends VariantAssignmen
           availability: 'unavailable' as const,
           unavailableReason: 'already-assigned',
           parentAsset,
+        };
+      }
+      if ((childCountsByParentId.get(asset.id) ?? 0) > 0) {
+        return {
+          asset,
+          availability: 'unavailable' as const,
+          unavailableReason: 'has-variants',
         };
       }
       return {

@@ -167,6 +167,9 @@ const applyExtrasTextMetadata = async (image: CachedCloudflareImage) => {
   if (!extras) return image;
 
   const next = { ...image };
+  if (Object.prototype.hasOwnProperty.call(extras, 'folder')) {
+    next.folder = extras.folder;
+  }
   if (Object.prototype.hasOwnProperty.call(extras, 'description')) {
     next.description = extras.description;
   }

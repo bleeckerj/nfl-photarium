@@ -143,4 +143,56 @@ describe('queryGalleryAssets', () => {
     expect(result.total).toBe(2);
     expect(result.scopeTotal).toBe(4);
   });
+
+  it('locates a focused asset by sorted gallery order and returns its page', () => {
+    const result = queryGalleryAssets(
+      [
+        asset({ id: 'newest', uploaded: '2026-02-04T00:00:00.000Z' }),
+        asset({ id: 'target', uploaded: '2026-02-03T00:00:00.000Z' }),
+        asset({ id: 'older', uploaded: '2026-02-02T00:00:00.000Z' }),
+        asset({ id: 'oldest', uploaded: '2026-02-01T00:00:00.000Z' }),
+      ],
+      {},
+      1,
+      1,
+      'target'
+    );
+
+    expect(result.images.map((image) => image.id)).toEqual(['target']);
+    expect(result.page).toBe(2);
+    expect(result.focus).toEqual({
+      assetId: 'target',
+      found: true,
+      index: 1,
+      ordinal: 2,
+      page: 2,
+      pageSize: 1,
+      total: 4,
+    });
+  });
+
+  it('reports a missing focused asset without changing requested pagination', () => {
+    const result = queryGalleryAssets(
+      [
+        asset({ id: 'newer', uploaded: '2026-02-02T00:00:00.000Z' }),
+        asset({ id: 'older', uploaded: '2026-02-01T00:00:00.000Z' }),
+      ],
+      {},
+      2,
+      1,
+      'missing'
+    );
+
+    expect(result.images.map((image) => image.id)).toEqual(['older']);
+    expect(result.page).toBe(2);
+    expect(result.focus).toEqual({
+      assetId: 'missing',
+      found: false,
+      index: -1,
+      ordinal: 0,
+      page: 2,
+      pageSize: 1,
+      total: 2,
+    });
+  });
 });

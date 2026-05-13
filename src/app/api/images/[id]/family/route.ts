@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCachedImages } from '@/server/cloudflareImageCache';
+import { getImageExtrasRecords } from '@/server/imageExtras';
 import { listVideoAssetRecordsWithSync } from '@/server/videoCatalogStorage';
 import {
   buildVariantAssignmentCandidates,
@@ -95,6 +96,33 @@ const uniqueById = (assets: FamilyAsset[]) => {
   });
 };
 
+const applyExtrasSearchMetadata = async (assets: FamilyAsset[]) => {
+  const imageIds = assets
+    .filter((asset) => asset.assetType !== 'video')
+    .map((asset) => asset.id)
+    .filter(Boolean);
+  if (imageIds.length === 0) return assets;
+
+  const extrasById = await getImageExtrasRecords(imageIds);
+  return assets.map((asset) => {
+    if (asset.assetType === 'video') return asset;
+    const extras = extrasById[asset.id];
+    if (!extras) return asset;
+    return {
+      ...asset,
+      ...(Object.prototype.hasOwnProperty.call(extras, 'folder')
+        ? { folder: typeof extras.folder === 'string' ? extras.folder : undefined }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(extras, 'description')
+        ? { description: typeof extras.description === 'string' ? extras.description : undefined }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(extras, 'altText')
+        ? { altText: typeof extras.altText === 'string' ? extras.altText : undefined }
+        : {}),
+    };
+  });
+};
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -153,10 +181,10 @@ export async function GET(
       : [];
     timings.videos_load = mark(performance.now() - videosStartedAt);
 
-    const allAssets = [
+    const allAssets = await applyExtrasSearchMetadata([
       ...images.map((image) => toFamilyAsset(image as unknown as Record<string, unknown>)),
       ...mappedVideos.map((video) => toFamilyAsset(video as unknown as Record<string, unknown>)),
-    ];
+    ]);
     const target = allAssets.find((asset) => asset.id === id) ?? null;
     if (!target) {
       return NextResponse.json({ error: 'Image not found' }, { status: 404 });
@@ -187,6 +215,7 @@ export async function GET(
           currentAssetId: target.id,
           familyRootId,
           namespace,
+          includeCrossNamespaceOrphans: true,
         })
       : [];
     const candidateAssets = listAvailableVariantAssignmentAssets(assignmentCandidates);

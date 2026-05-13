@@ -223,11 +223,6 @@ export async function PATCH(
         updatedAt: new Date().toISOString(),
       } as Record<string, unknown>;
 
-      if (flags.folder) {
-        // Explicitly allow clearing the folder.
-        metadata.folder = cleanFolder ?? '';
-      }
-
       if (flags.tags) {
         metadata.tags = mergeUserTagsPreservingSystemTags(
           Array.isArray(existingMeta.tags) ? existingMeta.tags : [],
@@ -254,6 +249,7 @@ export async function PATCH(
       }
 
       const extrasPatch: {
+        folder?: string;
         description?: string;
         altText?: string;
         sourceUrl?: string;
@@ -262,6 +258,9 @@ export async function PATCH(
         originalUrlNormalized?: string;
         exif?: undefined;
       } = {};
+      if (flags.folder) {
+        extrasPatch.folder = cleanFolder ?? '';
+      }
       if (flags.description) {
         extrasPatch.description = cleanDescription || undefined;
       }
@@ -305,7 +304,6 @@ export async function PATCH(
         { includeEmpty: true }
       );
       const requiredKeys = new Set<string>();
-      if (flags.folder) requiredKeys.add('folder');
       if (flags.tags) requiredKeys.add('tags');
       if (flags.displayName) requiredKeys.add('displayName');
       if (flags.parentId) requiredKeys.add('variationParentId');
@@ -388,7 +386,7 @@ export async function PATCH(
 
     const metadataPayload = targetResult.metadataPayload;
     const finalParentId = cleanString(metadataPayload.variationParentId as string | undefined);
-    const finalFolder = cleanString(metadataPayload.folder as string | undefined);
+    const finalFolder = targetFlags.folder ? (cleanFolder ?? '') : undefined;
     const finalTags = Array.isArray(metadataPayload.tags) ? metadataPayload.tags : [];
     const finalDescription = targetFlags.description
       ? (cleanDescription ?? '')

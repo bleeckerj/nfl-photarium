@@ -272,12 +272,13 @@ describe('GET /api/images/:id embedding status', () => {
     );
   });
 
-  it('overlays extras-backed description and alt text in single-image responses', async () => {
+  it('overlays extras-backed folder, description, and alt text in single-image responses', async () => {
     getCachedImageMock.mockResolvedValueOnce({
       id: 'img-with-extras',
       filename: 'photo.jpg',
       uploaded: '2026-03-20T00:00:00.000Z',
       variants: ['https://imagedelivery.net/hash/img-with-extras/public'],
+      folder: 'Cloudflare fallback folder',
       tags: [],
       description: 'Cloudflare fallback description',
       altTag: 'Cloudflare fallback alt',
@@ -287,6 +288,7 @@ describe('GET /api/images/:id embedding status', () => {
     getImageExtrasRecordMock.mockResolvedValueOnce({
       schemaVersion: 1,
       imageId: 'img-with-extras',
+      folder: 'Durable extras folder',
       description: 'Durable extras description',
       altText: 'Durable extras alt',
       createdAt: '2026-05-06T00:00:00.000Z',
@@ -300,6 +302,7 @@ describe('GET /api/images/:id embedding status', () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
+    expect(payload.image.folder).toBe('Durable extras folder');
     expect(payload.image.description).toBe('Durable extras description');
     expect(payload.image.altTag).toBe('Durable extras alt');
     expect(upsertCachedImageMock).not.toHaveBeenCalledWith(

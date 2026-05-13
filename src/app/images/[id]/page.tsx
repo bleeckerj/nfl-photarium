@@ -55,14 +55,11 @@ import { NamespaceMoveSection } from '@/components/image-detail/NamespaceMoveSec
 import { VariantLinksSection } from '@/components/image-detail/VariantLinksSection';
 import { VariationsSection } from '@/components/image-detail/VariationsSection';
 import { AdoptVariationSection } from '@/components/image-detail/AdoptVariationSection';
+import { buildAdoptVariationCandidatePage, getDefaultAdoptVariationScope } from '@/components/image-detail/adoptVariationSearch';
 import { UploadVariationSection } from '@/components/image-detail/UploadVariationSection';
 import { VARIATION_UPLOAD_ACCEPT } from '@/components/image-detail/variationUploadConfig';
 import { VariantLockedState } from '@/components/image-detail/ParentInfoSection';
-import {
-  hasDirtyTextMetadata,
-  resolveInitialAltText,
-  resolveInitialDescription,
-} from '@/components/image-detail/metadataValueResolvers';
+import { parseUserTagsInput, type ImageMetadataSaveResponse } from '@/components/image-detail/imageMetadataDraft';
 
 import { useParentReassignment } from '@/hooks/useParentReassignment';
 import { useVariationUpload } from '@/hooks/useVariationUpload';
@@ -71,6 +68,7 @@ import { useBulkVariationMetadata } from '@/hooks/useBulkVariationMetadata';
 import { useAltDescriptionGeneration } from '@/hooks/useAltDescriptionGeneration';
 import { useDeleteImageFamily } from '@/hooks/useDeleteImageFamily';
 import { useShareLinks } from '@/hooks/useShareLinks';
+import { useImageMetadataDraft } from '@/hooks/useImageMetadataDraft';
 import { patchParentAssignment as patchParentAssignmentService } from '@/services/parentAssignmentService';
 import { usePersistentShareBaseUrl } from '@/hooks/usePersistentShareBaseUrl';
 import { requestSemanticTags } from '@/services/imageAltDescriptionService';
@@ -135,6 +133,7 @@ interface CloudflareImage {
   generatedBy?: string;
   comfyMetadataDetected?: boolean;
   comfyMetadataSource?: string;
+  altText?: string;
   parentId?: string;
   linkedAssetId?: string;
   variationSort?: number;
@@ -254,13 +253,6 @@ const mergeUniqueTags = (existingTags: string[], incomingTags: string[]) => {
   });
   return Array.from(merged.values());
 };
-
-const parseUserTagsInput = (value: string) =>
-  value
-    .split(',')
-    .map((tag) => tag.trim())
-    .filter(Boolean)
-    .filter((tag) => !tag.startsWith('_'));
 
 const mergeUniqueImagesById = (base: CloudflareImage[], incoming: CloudflareImage[]) => {
   const merged = new Map<string, CloudflareImage>();
@@ -417,8 +409,13 @@ export default function ImageDetailPage() {
   const [childDetachingId, setChildDetachingId] = useState<string | null>(null);
   const [swappingParentId, setSwappingParentId] = useState<string | null>(null);
   const [adoptLoading, setAdoptLoading] = useState(false);
+  const [candidatePoolLoading, setCandidatePoolLoading] = useState(false);
+  const [candidatePoolLoaded, setCandidatePoolLoaded] = useState(false);
+  const [candidatePoolFailed, setCandidatePoolFailed] = useState(false);
   const [adoptSearch, setAdoptSearch] = useState('');
   const [adoptFolderFilter, setAdoptFolderFilter] = useState('');
+  const [adoptScope, setAdoptScope] = useState<'current' | 'all'>('current');
+  const adoptScopeDefaultedForIdRef = useRef<string | null>(null);
   const [adoptAssetTypeFilter, setAdoptAssetTypeFilter] = useState<'' | 'image' | 'video'>('');
   const [variationPage, setVariationPage] = useState(1);
   const [variationLayout, setVariationLayout] = useState<'list' | 'grid'>('list');
@@ -435,23 +432,15 @@ export default function ImageDetailPage() {
     y: number;
   } | null>(null);
 
-  const [folderSelect, setFolderSelect] = useState('');
-  const [tagsInput, setTagsInput] = useState('');
-  const [altTextInput, setAltTextInput] = useState('');
-  const [descriptionInput, setDescriptionInput] = useState('');
   const [promptThisInput, setPromptThisInput] = useState('');
   const [promptThisLoading, setPromptThisLoading] = useState(false);
   const [promptThisGenerating, setPromptThisGenerating] = useState(false);
   const [promptThisSaving, setPromptThisSaving] = useState(false);
   const [lastSavedPromptThis, setLastSavedPromptThis] = useState<string>('');
   const [promptThisMeta, setPromptThisMeta] = useState<{ saved?: boolean; updatedAt?: string; model?: string } | null>(null);
-  const [originalUrlInput, setOriginalUrlInput] = useState('');
-  const [sourceUrlInput, setSourceUrlInput] = useState('');
-  const [displayNameInput, setDisplayNameInput] = useState('');
   const [tagGenerationCount, setTagGenerationCount] = useState(6);
   const [tagGenerationLoading, setTagGenerationLoading] = useState(false);
   const [favoriteLoading, setFavoriteLoading] = useState(false);
-  const [clearExif, setClearExif] = useState(false);
   const { shareBaseUrl, setShareBaseUrl } = usePersistentShareBaseUrl();
   const [embeddingGenerating, setEmbeddingGenerating] = useState(false);
   // Image Extras state (description/altText stored in Redis/file fallback)
@@ -470,7 +459,32 @@ export default function ImageDetailPage() {
   const [saving, setSaving] = useState(false);
   const [embeddingPendingMap, setEmbeddingPendingMap] = useState<Record<string, EmbeddingPendingEntry>>({});
   const [uniqueFolders, setUniqueFolders] = useState<string[]>([]);
-  const [newFolderInput, setNewFolderInput] = useState('');
+  const metadataDraft = useImageMetadataDraft<CloudflareImage>({ image, extrasRecord });
+  const {
+    folderSelect,
+    newFolderInput,
+    tagsInput,
+    descriptionInput,
+    altTextInput,
+    originalUrlInput,
+    sourceUrlInput,
+    displayNameInput,
+    clearExif,
+    setFolderSelect,
+    setNewFolderInput,
+    setTagsInput,
+    setDescriptionInput,
+    setAltTextInput,
+    setOriginalUrlInput,
+    setSourceUrlInput,
+    setDisplayNameInput,
+    setClearExif,
+    applyDraft: applyMetadataDraft,
+    resetFromImage: resetMetadataDraftFromImage,
+    buildSavePayload: buildMetadataSavePayload,
+    applySavedResponse: applyMetadataSavedResponse,
+    markSaved: markMetadataSaved,
+  } = metadataDraft;
   const [variantModalState, setVariantModalState] = useState<{ target: CloudflareImage } | null>(null);
   const [variationOrderOverride, setVariationOrderOverride] = useState<string[] | null>(null);
   const [variationOrderSaving, setVariationOrderSaving] = useState(false);
@@ -485,6 +499,16 @@ export default function ImageDetailPage() {
   const candidatePoolLoadedRef = useRef(false);
   const candidatePoolRequestedRef = useRef(false);
   const metadataDraftDirtyRef = useRef(false);
+  const currentImageIdRef = useRef<string | null>(null);
+  const extrasRecordRef = useRef<typeof extrasRecord>(extrasRecord);
+
+  useEffect(() => {
+    currentImageIdRef.current = image?.id ?? null;
+  }, [image?.id]);
+
+  useEffect(() => {
+    extrasRecordRef.current = extrasRecord;
+  }, [extrasRecord]);
 
   const [semanticSearchAllNamespaces, setSemanticSearchAllNamespaces] = useState(false);
 
@@ -502,22 +526,15 @@ export default function ImageDetailPage() {
 
   const syncImageState = useCallback((found: CloudflareImage | null) => {
     const extrasForCurrentImage =
-      found && extrasRecord?.imageId === found.id ? extrasRecord : null;
+      found && extrasRecordRef.current?.imageId === found.id ? extrasRecordRef.current : null;
     const preserveMetadataInputs =
-      Boolean(found && image?.id === found.id && metadataDraftDirtyRef.current);
+      Boolean(found && currentImageIdRef.current === found.id && metadataDraftDirtyRef.current);
     setImage(found);
     if (found) {
       if (!preserveMetadataInputs) {
-        setFolderSelect(found.folder || '');
-        setTagsInput(getUserVisibleTags(found.tags).join(', '));
-        setDescriptionInput(resolveInitialDescription(extrasForCurrentImage, found));
-        setAltTextInput(resolveInitialAltText(extrasForCurrentImage, found));
-        setOriginalUrlInput(found.originalUrl || '');
-        setSourceUrlInput(found.sourceUrl || '');
-        setDisplayNameInput(found.displayName || found.filename || '');
+        resetMetadataDraftFromImage(found, extrasForCurrentImage);
       }
       setReassignParentId(found.parentId || '');
-      setClearExif(false);
 
       if (!preserveMetadataInputs && typeof window !== 'undefined') {
         const draftKey = `${IMAGE_DETAIL_DRAFT_KEY_PREFIX}${found.id}`;
@@ -528,14 +545,16 @@ export default function ImageDetailPage() {
           if (raw) {
             const parsed = JSON.parse(raw) as Partial<ImageDetailDraft>;
             if (shouldRestoreImageDetailDraft(parsed) && draftAppliedRef.current !== found.id) {
-              if (typeof parsed.folderSelect === 'string') setFolderSelect(parsed.folderSelect);
-              if (typeof parsed.tagsInput === 'string') setTagsInput(parseUserTagsInput(parsed.tagsInput).join(', '));
-              if (typeof parsed.descriptionInput === 'string') setDescriptionInput(parsed.descriptionInput);
-              if (typeof parsed.altTextInput === 'string') setAltTextInput(parsed.altTextInput);
-              if (typeof parsed.originalUrlInput === 'string') setOriginalUrlInput(parsed.originalUrlInput);
-              if (typeof parsed.sourceUrlInput === 'string') setSourceUrlInput(parsed.sourceUrlInput);
-              if (typeof parsed.displayNameInput === 'string') setDisplayNameInput(parsed.displayNameInput);
-              if (typeof parsed.clearExif === 'boolean') setClearExif(parsed.clearExif);
+              applyMetadataDraft({
+                ...(typeof parsed.folderSelect === 'string' ? { folderSelect: parsed.folderSelect } : {}),
+                ...(typeof parsed.tagsInput === 'string' ? { tagsInput: parseUserTagsInput(parsed.tagsInput).join(', ') } : {}),
+                ...(typeof parsed.descriptionInput === 'string' ? { descriptionInput: parsed.descriptionInput } : {}),
+                ...(typeof parsed.altTextInput === 'string' ? { altTextInput: parsed.altTextInput } : {}),
+                ...(typeof parsed.originalUrlInput === 'string' ? { originalUrlInput: parsed.originalUrlInput } : {}),
+                ...(typeof parsed.sourceUrlInput === 'string' ? { sourceUrlInput: parsed.sourceUrlInput } : {}),
+                ...(typeof parsed.displayNameInput === 'string' ? { displayNameInput: parsed.displayNameInput } : {}),
+                ...(typeof parsed.clearExif === 'boolean' ? { clearExif: parsed.clearExif } : {}),
+              });
               draftAppliedRef.current = found.id;
             }
           }
@@ -544,16 +563,10 @@ export default function ImageDetailPage() {
         }
       }
     } else {
-      setFolderSelect('');
-      setTagsInput('');
-      setDescriptionInput('');
-      setAltTextInput('');
-      setOriginalUrlInput('');
-      setSourceUrlInput('');
-      setDisplayNameInput('');
+      resetMetadataDraftFromImage(null, null);
       setReassignParentId('');
     }
-  }, [extrasRecord, image?.id]);
+  }, [applyMetadataDraft, resetMetadataDraftFromImage]);
 
   const mergeContextImages = useCallback((imagesData: CloudflareImage[], familyRootId?: string) => {
     setAllImages((prev) => {
@@ -587,6 +600,10 @@ export default function ImageDetailPage() {
     setFallbackParentImage(null);
     candidatePoolLoadedRef.current = false;
     candidatePoolRequestedRef.current = false;
+    setCandidatePoolLoaded(false);
+    setCandidatePoolLoading(false);
+    setCandidatePoolFailed(false);
+    adoptScopeDefaultedForIdRef.current = null;
     if (seed) {
       logDetailPerf('seed:loaded', detailNavigationStartedAtRef.current, {
         imageId: seed.id,
@@ -781,8 +798,9 @@ export default function ImageDetailPage() {
         const familyRootId =
           typeof familyData?.familyRootId === 'string' ? familyData.familyRootId : undefined;
         mergeContextImages(incoming, familyRootId);
-        if (Array.isArray(familyData?.candidateAssets)) {
+        if (familyData?.diagnostics?.include_candidates === true) {
           candidatePoolLoadedRef.current = true;
+          setCandidatePoolLoaded(true);
         }
       }
       setFamilyLoaded(true);
@@ -909,6 +927,8 @@ export default function ImageDetailPage() {
     }
 
     candidatePoolRequestedRef.current = true;
+    setCandidatePoolLoading(true);
+    setCandidatePoolFailed(false);
     const startedAt = getNow();
     try {
       const response = await fetch(buildFamilyContextUrl({ includeCandidates: true }));
@@ -924,9 +944,8 @@ export default function ImageDetailPage() {
       ] as CloudflareImage[];
       const familyRootId = typeof data?.familyRootId === 'string' ? data.familyRootId : undefined;
       mergeContextImages(incoming, familyRootId);
-      if (Array.isArray(data?.candidateAssets)) {
-        candidatePoolLoadedRef.current = true;
-      }
+      candidatePoolLoadedRef.current = true;
+      setCandidatePoolLoaded(true);
       setFamilyLoaded(true);
       logDetailPerf('candidateFetch:total', startedAt, {
         serverTiming: response.headers.get('server-timing'),
@@ -935,7 +954,10 @@ export default function ImageDetailPage() {
       });
     } catch (error) {
       candidatePoolRequestedRef.current = false;
+      setCandidatePoolFailed(true);
       console.warn('Failed to fetch adoptable candidates', error);
+    } finally {
+      setCandidatePoolLoading(false);
     }
   }, [buildFamilyContextUrl, id, mergeContextImages]);
 
@@ -1091,11 +1113,15 @@ export default function ImageDetailPage() {
         if (!mounted) return;
         setExtrasRecord(data.record ? { ...data.record, imageId: id } : null);
         // Apply extras values, including intentional empty strings from legacy records.
+        const nextDraft: Parameters<typeof applyMetadataDraft>[0] = {};
         if (data.record && Object.prototype.hasOwnProperty.call(data.record, 'description')) {
-          setDescriptionInput(data.record.description ?? '');
+          nextDraft.descriptionInput = data.record.description ?? '';
         }
         if (data.record && Object.prototype.hasOwnProperty.call(data.record, 'altText')) {
-          setAltTextInput(data.record.altText ?? '');
+          nextDraft.altTextInput = data.record.altText ?? '';
+        }
+        if (Object.keys(nextDraft).length > 0) {
+          applyMetadataDraft(nextDraft);
         }
         logDetailPerf('extrasFetch:total', startedAt, {
           jsonParseMs: jsonElapsedMs,
@@ -1112,7 +1138,7 @@ export default function ImageDetailPage() {
     return () => {
       mounted = false;
     };
-  }, [id]);
+  }, [applyMetadataDraft, id]);
 
   const variationChildren = useMemo(
     () => (id ? allImages.filter((img) => img.parentId === id) : []),
@@ -1136,12 +1162,21 @@ export default function ImageDetailPage() {
     excludeId: id
   });
   const resolvedParentImage = parentImage ?? fallbackParentImage;
+  const adoptCurrentNamespace = (resolvedParentImage?.namespace || image?.namespace || '').trim();
+
+  useEffect(() => {
+    if (!id || adoptScopeDefaultedForIdRef.current === id) return;
+    if (!image) return;
+    if (image.parentId && !resolvedParentImage) return;
+    setAdoptScope(getDefaultAdoptVariationScope(adoptCurrentNamespace));
+    adoptScopeDefaultedForIdRef.current = id;
+  }, [adoptCurrentNamespace, id, image, resolvedParentImage]);
 
   useEffect(() => {
     if (!familyLoaded) return;
-    if (!adoptSearch.trim() && !adoptFolderFilter && !adoptAssetTypeFilter) return;
+    if (!adoptSearch.trim() && !adoptFolderFilter && adoptScope === 'current' && !adoptAssetTypeFilter) return;
     void fetchCandidatePool();
-  }, [adoptAssetTypeFilter, adoptFolderFilter, adoptSearch, familyLoaded, fetchCandidatePool]);
+  }, [adoptAssetTypeFilter, adoptFolderFilter, adoptScope, adoptSearch, familyLoaded, fetchCandidatePool]);
 
   useEffect(() => {
     if (!familyLoaded) return;
@@ -1244,45 +1279,6 @@ export default function ImageDetailPage() {
     Math.ceil(displayedVariations.length / variationPageSize)
   );
 
-  const filteredAssignmentCandidates = useMemo(() => {
-    const base = assignmentCandidates.filter(({ asset }) => {
-      if (!adoptFolderFilter) return true;
-      return (asset.folder || '').toLowerCase() === adoptFolderFilter.toLowerCase();
-    });
-    const typeFiltered = base.filter(({ asset }) => {
-      if (!adoptAssetTypeFilter) return true;
-      if (adoptAssetTypeFilter === 'video') return isVideoAsset(asset);
-      return !isVideoAsset(asset);
-    });
-
-    if (!adoptSearch.trim()) {
-      return typeFiltered;
-    }
-
-    const term = adoptSearch.toLowerCase();
-    return typeFiltered.filter(({ asset, parentAsset }) => {
-      if ((asset.id || '').toLowerCase().includes(term)) {
-        return true;
-      }
-      const haystack = [
-        asset.displayName,
-        asset.filename,
-        asset.folder,
-        asset.description,
-        asset.altTag,
-        parentAsset?.displayName,
-        parentAsset?.filename,
-        parentAsset?.id,
-        ...(asset.tags || []),
-      ]
-        .filter(Boolean)
-        .map(String)
-        .join(' ')
-        .toLowerCase();
-      return haystack.includes(term);
-    });
-  }, [adoptAssetTypeFilter, adoptSearch, assignmentCandidates, adoptFolderFilter]);
-
   const adoptAssetTypeOptions = useMemo(
     () => [
       { value: '', label: 'All types' },
@@ -1291,20 +1287,50 @@ export default function ImageDetailPage() {
     ],
     []
   );
+  const adoptScopeOptions = useMemo(
+    () => [
+      { value: 'current', label: `Current namespace: ${adoptCurrentNamespace || '[none]'}` },
+      { value: 'all', label: 'All namespaces' },
+    ],
+    [adoptCurrentNamespace]
+  );
 
-  const totalAdoptPages = Math.max(1, Math.ceil(filteredAssignmentCandidates.length / ADOPT_PAGE_SIZE));
-  const pagedAssignmentCandidates = useMemo(() => {
-    const start = (adoptPage - 1) * ADOPT_PAGE_SIZE;
-    return filteredAssignmentCandidates.slice(start, start + ADOPT_PAGE_SIZE);
-  }, [filteredAssignmentCandidates, adoptPage]);
+  const adoptCandidatePage = useMemo(
+    () =>
+      buildAdoptVariationCandidatePage({
+        candidates: assignmentCandidates,
+        search: adoptSearch,
+        folderFilter: adoptFolderFilter,
+        assetTypeFilter: adoptAssetTypeFilter,
+        scope: adoptScope,
+        currentNamespace: adoptCurrentNamespace,
+        page: adoptPage,
+        pageSize: ADOPT_PAGE_SIZE,
+      }),
+    [adoptAssetTypeFilter, adoptCurrentNamespace, adoptFolderFilter, adoptPage, adoptScope, adoptSearch, assignmentCandidates]
+  );
+  const {
+    filteredAssignmentCandidates,
+    pagedAssignmentCandidates,
+    page: clampedAdoptPage,
+    totalPages: totalAdoptPages,
+    pageStart: adoptPageStart,
+    pageEnd: adoptPageEnd,
+  } = adoptCandidatePage;
 
   useEffect(() => {
     setAdoptPage(1);
-  }, [adoptAssetTypeFilter, adoptFolderFilter, adoptSearch, id]);
+  }, [adoptAssetTypeFilter, adoptFolderFilter, adoptScope, adoptSearch, id]);
 
   useEffect(() => {
     setAdoptPage((prev) => Math.min(prev, totalAdoptPages));
   }, [totalAdoptPages]);
+
+  useEffect(() => {
+    if (adoptPage !== clampedAdoptPage) {
+      setAdoptPage(clampedAdoptPage);
+    }
+  }, [adoptPage, clampedAdoptPage]);
 
   const variants = useMemo(
     () => (id ? getMultipleImageUrls(id, ['thumbnail','small','medium','large','xlarge','full']) : {}),
@@ -1483,6 +1509,21 @@ export default function ImageDetailPage() {
       { scroll: false }
     );
   }, [id, router]);
+  const handleShowInNamespace = useCallback(() => {
+    if (!id) return;
+    const targetNamespace = image?.namespace?.trim();
+    if (!targetNamespace) {
+      toast.push('This image does not have a namespace to show.');
+      return;
+    }
+    router.push(
+      buildCanonicalGalleryHref({
+        assetId: id,
+        namespace: targetNamespace,
+      }),
+      { scroll: false }
+    );
+  }, [id, image?.namespace, router, toast]);
 
   const commitNavigation = useCallback((href: string, targetId?: string | null) => {
     lastUserNavIntentRef.current = Date.now();
@@ -1614,70 +1655,8 @@ export default function ImageDetailPage() {
     return new Map(displayedVariations.map((child, index) => [child.id, index]));
   }, [displayedVariations]);
   const selectedVariationCount = selectedVariationIds.size;
-  const isMetadataDirty = useMemo(() => {
-    if (!image) {
-      return false;
-    }
-    const finalFolder = folderSelect === '__create__'
-      ? cleanString(newFolderInput) ?? ''
-      : cleanString(folderSelect) ?? '';
-    const imageFolder = cleanString(image.folder) ?? '';
-    if (finalFolder !== imageFolder) {
-      return true;
-    }
-    const inputTags = tagsInput
-      ? parseUserTagsInput(tagsInput)
-      : [];
-    const imageTags = getUserVisibleTags(image.tags);
-    const normalizeTags = (tags: string[]) => [...tags].map((tag) => tag.trim()).filter(Boolean).sort();
-    const normalizedInputTags = normalizeTags(inputTags);
-    const normalizedImageTags = normalizeTags(imageTags);
-    if (normalizedInputTags.length !== normalizedImageTags.length) {
-      return true;
-    }
-    for (let i = 0; i < normalizedInputTags.length; i += 1) {
-      if (normalizedInputTags[i] !== normalizedImageTags[i]) {
-        return true;
-      }
-    }
-    const extrasForCurrentImage = extrasRecord?.imageId === image.id ? extrasRecord : null;
-    if (hasDirtyTextMetadata(
-      {
-        descriptionInput,
-        altTextInput,
-      },
-      extrasForCurrentImage,
-      image
-    )) {
-      return true;
-    }
-    const originalValue = cleanString(originalUrlInput) ?? '';
-    const imageOriginal = cleanString(image.originalUrl) ?? '';
-    if (originalValue !== imageOriginal) {
-      return true;
-    }
-    const displayNameValue = cleanString(displayNameInput) ?? '';
-    const imageDisplayName = cleanString(image.displayName || image.filename) ?? '';
-    if (displayNameValue !== imageDisplayName) {
-      return true;
-    }
-    // EXIF clearing is a dirty state
-    if (clearExif) {
-      return true;
-    }
-    return false;
-  }, [
-    altTextInput,
-    clearExif,
-    descriptionInput,
-    displayNameInput,
-    extrasRecord,
-    folderSelect,
-    image,
-    newFolderInput,
-    originalUrlInput,
-    tagsInput
-  ]);
+  const isMetadataDirty = metadataDraft.isDirty;
+  const isMetadataSaveDisabled = !isMetadataDirty || saving;
   useEffect(() => {
     metadataDraftDirtyRef.current = isMetadataDirty;
   }, [isMetadataDirty]);
@@ -2176,51 +2155,30 @@ export default function ImageDetailPage() {
     if (!image) {
       return;
     }
-    setFolderSelect(image.folder || '');
-    setNewFolderInput('');
-    setTagsInput(getUserVisibleTags(image.tags).join(', '));
-    setDescriptionInput(resolveInitialDescription(extrasRecord, image));
-    setAltTextInput(resolveInitialAltText(extrasRecord, image));
-    setOriginalUrlInput(image.originalUrl || '');
-    setSourceUrlInput(image.sourceUrl || '');
-    setDisplayNameInput(image.displayName || image.filename || '');
-    setClearExif(false);
-  }, [image, extrasRecord]);
+    resetMetadataDraftFromImage(image, extrasRecord);
+  }, [extrasRecord, image, resetMetadataDraftFromImage]);
 
   const handleSaveMetadata = useCallback(async () => {
-    if (!image || !id) {
+    if (!image || !id || !isMetadataDirty) {
       return;
     }
     setSaving(true);
     try {
-      const finalFolder = folderSelect === '__create__'
-        ? (newFolderInput.trim() || undefined)
-        : (folderSelect === '' ? undefined : folderSelect);
-      const cleanedOriginalUrl = cleanString(originalUrlInput);
-      const cleanedSourceUrl = cleanString(sourceUrlInput);
-      const payload: Record<string, unknown> = {
-        folder: finalFolder,
-        tags: mergeUserTagsPreservingSystemTags(image.tags, parseUserTagsInput(tagsInput)),
-        description: descriptionInput,
-        originalUrl: cleanedOriginalUrl ?? '',
-        sourceUrl: cleanedSourceUrl ?? '',
-        displayName: cleanString(displayNameInput) ?? '',
-        altTag: cleanString(altTextInput) ?? '',
-      };
-      // Include clearExif flag if user wants to remove EXIF
-      if (clearExif) {
-        payload.clearExif = true;
+      const payload = buildMetadataSavePayload();
+      if (!payload) {
+        return;
       }
       const res = await fetch(`/api/images/${id}/update`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const body = await res.json() as CloudflareImage | { error: string };
+      const body = await res.json() as ImageMetadataSaveResponse | { error: string };
       if (res.ok && !('error' in body)) {
         setExtrasRecord(prev => ({
           ...prev,
           imageId: id,
+          folder: body.folder,
           description: descriptionInput || undefined,
           altText: cleanString(altTextInput) || undefined,
         }));
@@ -2232,30 +2190,10 @@ export default function ImageDetailPage() {
             // Ignore storage access failures.
           }
         }
-        // Reset clearExif flag after successful save
-        setClearExif(false);
-        setImage(prev => prev ? ({
-          ...prev,
-          folder: body.folder,
-          tags: Array.isArray(body.tags) ? body.tags : mergeUserTagsPreservingSystemTags(image.tags, parseUserTagsInput(tagsInput)),
-          description: descriptionInput,
-          originalUrl: body.originalUrl,
-          sourceUrl: body.sourceUrl,
-          displayName: body.displayName,
-          altTag: cleanString(altTextInput) ?? '',
-          exif: clearExif ? undefined : prev.exif  // Clear EXIF in local state if requested
-        }) : prev);
-        setAllImages(prev => prev.map(entry => entry.id === id ? {
-          ...entry,
-          folder: body.folder,
-          tags: Array.isArray(body.tags) ? body.tags : mergeUserTagsPreservingSystemTags(image.tags, parseUserTagsInput(tagsInput)),
-          description: descriptionInput,
-          originalUrl: body.originalUrl,
-          sourceUrl: body.sourceUrl,
-          displayName: body.displayName,
-          altTag: cleanString(altTextInput) ?? '',
-          exif: clearExif ? undefined : entry.exif
-        } : entry));
+        const savedImage = applyMetadataSavedResponse(image, body);
+        setImage(prev => prev ? applyMetadataSavedResponse(prev, body) : prev);
+        setAllImages(prev => prev.map(entry => entry.id === id ? applyMetadataSavedResponse(entry, body) : entry));
+        markMetadataSaved(savedImage);
       } else {
         toast.push('error' in body ? body.error : 'Failed to update metadata');
       }
@@ -2267,16 +2205,13 @@ export default function ImageDetailPage() {
     }
   }, [
     altTextInput,
-    clearExif,
+    applyMetadataSavedResponse,
+    buildMetadataSavePayload,
     descriptionInput,
-    displayNameInput,
-    folderSelect,
     id,
     image,
-    newFolderInput,
-    originalUrlInput,
-    sourceUrlInput,
-    tagsInput,
+    isMetadataDirty,
+    markMetadataSaved,
     toast
   ]);
 
@@ -2315,7 +2250,7 @@ export default function ImageDetailPage() {
     } finally {
       setTagGenerationLoading(false);
     }
-  }, [id, image?.tags, tagGenerationCount, tagsInput, toast]);
+  }, [id, image?.tags, setTagsInput, tagGenerationCount, tagsInput, toast]);
 
   const toggleVariationSelection = useCallback((variationId: string) => {
     setSelectedVariationIds((prev) => {
@@ -2809,7 +2744,16 @@ export default function ImageDetailPage() {
                 onClick={handleShowInGalleryOrder}
                 className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-xs font-mono text-blue-700 hover:border-blue-300"
               >
-                Show in gallery order
+                Show in gallery
+              </button>
+              <button
+                type="button"
+                onClick={handleShowInNamespace}
+                disabled={!image.namespace}
+                className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-xs font-mono text-blue-700 hover:border-blue-300 disabled:opacity-50 disabled:cursor-not-allowed"
+                title={image.namespace ? `Show in ${image.namespace}` : 'Image has no namespace'}
+              >
+                Show in namespace
               </button>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
@@ -3556,6 +3500,9 @@ export default function ImageDetailPage() {
                     adoptFolderFilter={adoptFolderFilter}
                     setAdoptFolderFilter={setAdoptFolderFilter}
                     adoptFolderOptions={adoptFolderOptions}
+                    adoptScope={adoptScope}
+                    setAdoptScope={setAdoptScope}
+                    adoptScopeOptions={adoptScopeOptions}
                     adoptAssetTypeFilter={adoptAssetTypeFilter}
                     setAdoptAssetTypeFilter={setAdoptAssetTypeFilter}
                     adoptAssetTypeOptions={adoptAssetTypeOptions}
@@ -3565,6 +3512,9 @@ export default function ImageDetailPage() {
                     setAdoptPage={setAdoptPage}
                     totalAdoptPages={totalAdoptPages}
                     adoptPageSize={ADOPT_PAGE_SIZE}
+                    adoptPageStart={adoptPageStart}
+                    adoptPageEnd={adoptPageEnd}
+                    assignmentCandidatesLoading={candidatePoolLoading || (!candidatePoolLoaded && !candidatePoolFailed)}
                     onHandleThumbMouseMove={handleThumbMouseMove}
                     onHandleThumbLeave={handleThumbLeave}
                     onHandleImageDragStart={handleImageDragStart}
@@ -3645,7 +3595,7 @@ export default function ImageDetailPage() {
           <button
             onClick={handleSaveMetadata}
             className="px-4 py-2 text-xs bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
-            disabled={saving}
+            disabled={isMetadataSaveDisabled}
           >
             {saving ? 'Saving…' : 'Save changes'}
           </button>

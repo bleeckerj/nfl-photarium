@@ -519,12 +519,14 @@ describe('GET /api/images video integration', () => {
     expect(response.status).toBe(200);
     expect(payload.images).toHaveLength(1);
     expect(payload.images[0].id).toBe('img-2');
-    expect(payload.pagination).toEqual({
-      page: 2,
-      pageSize: 1,
-      total: 3,
-      totalPages: 3,
-    });
+    expect(payload.pagination).toEqual(
+      expect.objectContaining({
+        page: 2,
+        pageSize: 1,
+        total: 3,
+        totalPages: 3,
+      })
+    );
   });
 
   it('returns page-sized server gallery query payloads with facets and summaries', async () => {
@@ -566,12 +568,14 @@ describe('GET /api/images video integration', () => {
     expect(response.status).toBe(200);
     expect(payload.images).toHaveLength(1);
     expect(payload.images[0].id).toBe('img-parent');
-    expect(payload.pagination).toEqual({
-      page: 1,
-      pageSize: 1,
-      total: 1,
-      totalPages: 1,
-    });
+    expect(payload.pagination).toEqual(
+      expect.objectContaining({
+        page: 1,
+        pageSize: 1,
+        total: 1,
+        totalPages: 1,
+      })
+    );
     expect(payload.facets.folders).toEqual([
       { value: 'archive', count: 1 },
       { value: 'editorial', count: 2 },
@@ -583,6 +587,109 @@ describe('GET /api/images video integration', () => {
         childIds: ['img-child'],
       })
     );
+  });
+
+  it('returns all-namespace focus metadata and the focused asset page', async () => {
+    getCachedImagesMock.mockResolvedValue([
+      {
+        id: 'global-newest',
+        filename: 'global-newest.jpg',
+        namespace: 'beta',
+        uploaded: '2026-02-22T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/global-newest/public'],
+        tags: [],
+      },
+      {
+        id: 'global-target',
+        filename: 'global-target.jpg',
+        namespace: 'alpha',
+        uploaded: '2026-02-21T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/global-target/public'],
+        tags: [],
+      },
+      {
+        id: 'global-oldest',
+        filename: 'global-oldest.jpg',
+        namespace: 'beta',
+        uploaded: '2026-02-20T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/global-oldest/public'],
+        tags: [],
+      },
+    ]);
+    listVideoAssetRecordsWithSyncMock.mockResolvedValue([]);
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/images?namespace=__all__&focus=global-target&page=1&pageSize=1')
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.images.map((image: { id: string }) => image.id)).toEqual(['global-target']);
+    expect(payload.pagination).toEqual(
+      expect.objectContaining({
+        page: 2,
+        pageSize: 1,
+        total: 3,
+        totalPages: 3,
+      })
+    );
+    expect(payload.focus).toEqual({
+      assetId: 'global-target',
+      found: true,
+      index: 1,
+      ordinal: 2,
+      page: 2,
+      pageSize: 1,
+      total: 3,
+    });
+  });
+
+  it('returns namespace-scoped focus metadata after an asset moves namespaces', async () => {
+    getCachedImagesMock.mockResolvedValue([
+      {
+        id: 'new-namespace-newer',
+        filename: 'newer.jpg',
+        namespace: 'new-space',
+        uploaded: '2026-02-22T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/new-namespace-newer/public'],
+        tags: [],
+      },
+      {
+        id: 'moved-image',
+        filename: 'moved.jpg',
+        namespace: 'new-space',
+        uploaded: '2026-02-21T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/moved-image/public'],
+        tags: [],
+      },
+      {
+        id: 'old-namespace-neighbor',
+        filename: 'old.jpg',
+        namespace: 'old-space',
+        uploaded: '2026-02-20T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/old-namespace-neighbor/public'],
+        tags: [],
+      },
+    ]);
+    listVideoAssetRecordsWithSyncMock.mockResolvedValue([]);
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/images?namespace=new-space&focus=moved-image&page=1&pageSize=1')
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.namespace).toBe('new-space');
+    expect(payload.images.map((image: { id: string }) => image.id)).toEqual(['moved-image']);
+    expect(payload.focus).toEqual({
+      assetId: 'moved-image',
+      found: true,
+      index: 1,
+      ordinal: 2,
+      page: 2,
+      pageSize: 1,
+      total: 2,
+    });
   });
 
   it('reports pagination totals after mediaFilter=animated is applied', async () => {
@@ -618,11 +725,13 @@ describe('GET /api/images video integration', () => {
 
     expect(response.status).toBe(200);
     expect(payload.images).toHaveLength(1);
-    expect(payload.pagination).toEqual({
-      page: 2,
-      pageSize: 1,
-      total: 2,
-      totalPages: 2,
-    });
+    expect(payload.pagination).toEqual(
+      expect.objectContaining({
+        page: 2,
+        pageSize: 1,
+        total: 2,
+        totalPages: 2,
+      })
+    );
   });
 });

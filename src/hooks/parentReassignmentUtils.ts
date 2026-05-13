@@ -46,8 +46,15 @@ export const buildParentReassignmentState = ({
     currentAssetId: excludeId,
     familyRootId,
     namespace: scopeNamespace,
+    includeCrossNamespaceOrphans: true,
   });
-  const canonicalCandidates = listAvailableVariantAssignmentAssets(assignmentCandidates);
+  const namespaceScopedAssignmentCandidates = buildVariantAssignmentCandidates({
+    assets: allImages,
+    currentAssetId: excludeId,
+    familyRootId,
+    namespace: scopeNamespace,
+  });
+  const canonicalCandidates = listAvailableVariantAssignmentAssets(namespaceScopedAssignmentCandidates);
 
   const parentCandidates = uniqueById(
     [

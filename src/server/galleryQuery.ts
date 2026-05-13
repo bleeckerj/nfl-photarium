@@ -59,6 +59,7 @@ export type GalleryQueryResult<T extends GalleryQueryAsset> = {
   totalPages: number;
   page: number;
   pageSize: number;
+  focus: GalleryQueryFocusResult | null;
   facets: GalleryQueryFacets;
   familySummaryMap: ReturnType<typeof buildFamilySummaryMap>;
   duplicateSummary: {
@@ -69,6 +70,16 @@ export type GalleryQueryResult<T extends GalleryQueryAsset> = {
     duplicateIdsExcludingNewest: string[];
     duplicateIdsExcludingOldest: string[];
   };
+};
+
+export type GalleryQueryFocusResult = {
+  assetId: string;
+  found: boolean;
+  index: number;
+  ordinal: number;
+  page: number;
+  pageSize: number;
+  total: number;
 };
 
 const normalize = (value?: string) => value?.toLowerCase() ?? '';
@@ -200,7 +211,8 @@ export const queryGalleryAssets = <T extends GalleryQueryAsset>(
   assets: T[],
   filters: GalleryQueryFilters,
   page: number,
-  pageSize: number
+  pageSize: number,
+  focusAssetId?: string
 ): GalleryQueryResult<T> => {
   const scopeTotal = assets.length;
   const familySummaryMapAll = buildFamilySummaryMap(assets as never);
@@ -253,7 +265,25 @@ export const queryGalleryAssets = <T extends GalleryQueryAsset>(
   const safePageSize = Math.max(1, Math.floor(pageSize));
   const total = sorted.length;
   const totalPages = Math.max(1, Math.ceil(total / safePageSize));
-  const pageIndex = Math.min(safePage, totalPages);
+  const normalizedFocusAssetId = focusAssetId?.trim() ?? '';
+  const focusIndex = normalizedFocusAssetId
+    ? sorted.findIndex((asset) => asset.id === normalizedFocusAssetId)
+    : -1;
+  const focusPage = focusIndex >= 0
+    ? Math.floor(focusIndex / safePageSize) + 1
+    : null;
+  const pageIndex = focusPage ?? Math.min(safePage, totalPages);
+  const focus: GalleryQueryFocusResult | null = normalizedFocusAssetId
+    ? {
+        assetId: normalizedFocusAssetId,
+        found: focusIndex >= 0,
+        index: focusIndex,
+        ordinal: focusIndex >= 0 ? focusIndex + 1 : 0,
+        page: focusPage ?? Math.min(safePage, totalPages),
+        pageSize: safePageSize,
+        total,
+      }
+    : null;
   const start = (pageIndex - 1) * safePageSize;
   const images = sorted.slice(start, start + safePageSize);
   const pageIds = new Set(images.map((asset) => asset.id));
@@ -269,6 +299,7 @@ export const queryGalleryAssets = <T extends GalleryQueryAsset>(
     totalPages,
     page: pageIndex,
     pageSize: safePageSize,
+    focus,
     facets,
     familySummaryMap: pageFamilySummaryMap,
     duplicateSummary: {

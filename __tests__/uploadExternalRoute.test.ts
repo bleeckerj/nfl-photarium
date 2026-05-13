@@ -464,7 +464,7 @@ describe('POST /api/upload/external', () => {
       return new Response(JSON.stringify({ result: { images: [] } }), { status: 200 });
     });
 
-    const seed = Date.now() % 255;
+    const seed = Date.now();
     const wideImage = await sharp({
       create: {
         width: 16364,
@@ -492,4 +492,100 @@ describe('POST /api/upload/external', () => {
     expect((uploadedMetadata?.uploadNormalization as { reasons?: string[] } | undefined)?.reasons).toContain('max-dimension');
     expect((payload.uploadNormalization as { reasons?: string[] } | undefined)?.reasons).toContain('max-dimension');
   }, 20_000);
+
+  it('preemptively rescales oversized animations before Cloudflare upload', async () => {
+    process.env.CLOUDFLARE_ACCOUNT_ID = 'acct';
+    process.env.CLOUDFLARE_API_TOKEN = 'token';
+
+    let uploadedWidth = 0;
+    let uploadedPageHeight = 0;
+    let uploadedFrames = 0;
+    let uploadedMetadata: Record<string, unknown> | undefined;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      if (typeof url === 'string' && url.endsWith('/images/v1') && init?.method === 'POST') {
+        const body = init.body as FormData;
+        const uploadedFile = body.get('file') as Blob;
+        const metadataRaw = body.get('metadata');
+
+        uploadedMetadata = metadataRaw ? JSON.parse(String(metadataRaw)) : undefined;
+        const uploadedBuffer = Buffer.from(await uploadedFile.arrayBuffer());
+        const uploadedImageMeta = await sharp(uploadedBuffer, { animated: true }).metadata();
+        uploadedWidth = uploadedImageMeta.width ?? 0;
+        uploadedPageHeight = uploadedImageMeta.pageHeight ?? uploadedImageMeta.height ?? 0;
+        uploadedFrames = uploadedImageMeta.pages ?? 1;
+
+        return new Response(
+          JSON.stringify({
+            result: {
+              id: 'animated-resized-123',
+              filename: 'motion.webp',
+              uploaded: '2026-02-01T00:00:00.000Z',
+              variants: ['https://imagedelivery.net/hash/animated-resized-123/public'],
+              images: [],
+            },
+          }),
+          { status: 200 }
+        );
+      }
+
+      return new Response(JSON.stringify({ result: { images: [] } }), { status: 200 });
+    });
+
+    const frameCount = 103;
+    const width = 1000;
+    const height = 1000;
+    const seed = Date.now() % 255;
+    const frames: Buffer[] = [];
+    for (let index = 0; index < frameCount; index += 1) {
+      frames.push(
+        await sharp({
+          create: {
+            width,
+            height,
+            channels: 4,
+            background: {
+              r: (seed + index) % 255,
+              g: (Math.floor(seed / 255) + index * 3) % 255,
+              b: (Math.floor(seed / 65025) + index * 7) % 255,
+              alpha: 1,
+            },
+          },
+        })
+          .raw()
+          .toBuffer()
+      );
+    }
+    const animatedWebp = await sharp(Buffer.concat(frames), {
+      raw: {
+        width,
+        height: height * frameCount,
+        channels: 4,
+        pageHeight: height,
+      },
+    })
+      .webp({ delay: Array(frameCount).fill(40), loop: 0, quality: 80, effort: 1 })
+      .toBuffer();
+    const sourceMeta = await sharp(animatedWebp, { animated: true }).metadata();
+    const sourceFrameCount = sourceMeta.pages ?? 1;
+    const sourcePageHeight = sourceMeta.pageHeight ?? sourceMeta.height ?? height;
+    expect((sourceMeta.width ?? width) * sourcePageHeight * sourceFrameCount).toBeGreaterThan(100_000_000);
+
+    const file = new File([new Uint8Array(animatedWebp)], `motion-${Date.now()}.webp`, { type: 'image/webp' });
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('namespace', 'ingest');
+
+    const response = await POST(createRequest(formData));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.id).toBe('animated-resized-123');
+    expect(uploadedFrames).toBe(sourceFrameCount);
+    expect(uploadedWidth).toBeLessThan(width);
+    expect(uploadedPageHeight).toBeLessThan(height);
+    expect(uploadedWidth * uploadedPageHeight * uploadedFrames).toBeLessThanOrEqual(100_000_000);
+    expect((uploadedMetadata?.uploadNormalization as { reasons?: string[] } | undefined)?.reasons).toContain('max-frame-area');
+    expect((payload.uploadNormalization as { reasons?: string[] } | undefined)?.reasons).toContain('max-frame-area');
+  }, 30_000);
 });

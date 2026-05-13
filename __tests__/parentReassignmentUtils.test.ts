@@ -8,7 +8,7 @@ const makeImage = (overrides: Partial<ParentReassignmentImage> & Pick<ParentReas
 });
 
 describe('buildParentReassignmentState', () => {
-  it('scopes adoptable candidates to the current canonical namespace', () => {
+  it('keeps reassign parent options scoped while exposing cross-namespace orphan assignment candidates', () => {
     const current = makeImage({
       id: 'current',
       filename: 'current.png',
@@ -35,6 +35,7 @@ describe('buildParentReassignmentState', () => {
       ],
     });
 
+    expect(state.assignmentCandidates.map((candidate) => candidate.asset.id)).toEqual(['same-ns', 'other-ns']);
     expect(state.adoptableImages.map((asset) => asset.id)).toEqual(['same-ns']);
     expect(state.reassignParentOptions.map((option) => option.value)).toEqual(['', 'same-ns']);
   });
@@ -75,11 +76,15 @@ describe('buildParentReassignmentState', () => {
     });
 
     expect(state.parentImage?.id).toBe('root');
+    expect(state.assignmentCandidates.map((candidate) => candidate.asset.id)).toEqual([
+      'same-root-ns',
+      'child-ns-only',
+    ]);
     expect(state.adoptableImages.map((asset) => asset.id)).toEqual(['same-root-ns']);
     expect(state.reassignParentOptions.map((option) => option.value)).toEqual(['', 'root', 'same-root-ns']);
   });
 
-  it('classifies already-assigned assets as unavailable candidates with parent context', () => {
+  it('classifies already-assigned assets and existing parents as unavailable candidates', () => {
     const current = makeImage({
       id: 'current',
       filename: 'current.png',
@@ -106,11 +111,13 @@ describe('buildParentReassignmentState', () => {
       allImages: [current, otherParent, assignedChild],
     });
 
-    expect(state.adoptableImages.map((asset) => asset.id)).toEqual(['other-parent']);
+    expect(state.adoptableImages.map((asset) => asset.id)).toEqual([]);
+    expect(state.reassignParentOptions.map((option) => option.value)).toEqual(['']);
     expect(state.assignmentCandidates).toEqual([
       expect.objectContaining({
         asset: expect.objectContaining({ id: 'other-parent' }),
-        availability: 'available',
+        availability: 'unavailable',
+        unavailableReason: 'has-variants',
       }),
       expect.objectContaining({
         asset: expect.objectContaining({ id: 'assigned-child' }),

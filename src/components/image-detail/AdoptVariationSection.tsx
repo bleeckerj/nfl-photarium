@@ -3,6 +3,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 
 import MonoSelect from '@/components/MonoSelect';
+import type { AdoptVariationScope } from '@/components/image-detail/adoptVariationSearch';
 import { getAssetDetailPath, getAssetPreviewUrl, isVideoAsset } from '@/utils/assetUrls';
 import type { VariantAssignmentCandidate } from '@/utils/variantAssignmentCandidates';
 
@@ -12,7 +13,11 @@ export interface ImageCandidateLike {
   filename: string;
   displayName?: string;
   folder?: string;
+  description?: string;
+  altTag?: string;
+  altText?: string;
   uploaded: string;
+  namespace?: string;
   parentId?: string;
   videoPlaybackUrl?: string;
   videoHlsUrl?: string;
@@ -35,6 +40,9 @@ export interface AdoptVariationSectionProps {
   adoptFolderFilter: string;
   setAdoptFolderFilter: (value: string) => void;
   adoptFolderOptions: SelectOption[];
+  adoptScope: AdoptVariationScope;
+  setAdoptScope: (value: AdoptVariationScope) => void;
+  adoptScopeOptions: SelectOption[];
   adoptAssetTypeFilter: '' | 'image' | 'video';
   setAdoptAssetTypeFilter: (value: '' | 'image' | 'video') => void;
   adoptAssetTypeOptions: SelectOption[];
@@ -46,6 +54,9 @@ export interface AdoptVariationSectionProps {
   setAdoptPage: React.Dispatch<React.SetStateAction<number>>;
   totalAdoptPages: number;
   adoptPageSize: number;
+  adoptPageStart: number;
+  adoptPageEnd: number;
+  assignmentCandidatesLoading?: boolean;
 
   onHandleThumbMouseMove: (url: string, label: string, evt: React.MouseEvent) => void;
   onHandleThumbLeave: () => void;
@@ -60,6 +71,13 @@ export interface AdoptVariationSectionProps {
 const getCandidateLabel = (candidate: ImageCandidateLike) =>
   (candidate.displayName || '').trim() || candidate.filename || candidate.id;
 
+const getUnavailableMessage = (candidate: ImageAssignmentCandidateLike, parentLabel: string) => {
+  if (candidate.unavailableReason === 'has-variants') {
+    return 'Already a parent with variants';
+  }
+  return `Already a variant of ${parentLabel}`;
+};
+
 export function AdoptVariationSection(props: AdoptVariationSectionProps) {
   const {
     adoptSearch,
@@ -67,6 +85,9 @@ export function AdoptVariationSection(props: AdoptVariationSectionProps) {
     adoptFolderFilter,
     setAdoptFolderFilter,
     adoptFolderOptions,
+    adoptScope,
+    setAdoptScope,
+    adoptScopeOptions,
     adoptAssetTypeFilter,
     setAdoptAssetTypeFilter,
     adoptAssetTypeOptions,
@@ -76,6 +97,9 @@ export function AdoptVariationSection(props: AdoptVariationSectionProps) {
     setAdoptPage,
     totalAdoptPages,
     adoptPageSize,
+    adoptPageStart,
+    adoptPageEnd,
+    assignmentCandidatesLoading = false,
     onHandleThumbMouseMove,
     onHandleThumbLeave,
     onHandleImageDragStart,
@@ -99,6 +123,7 @@ export function AdoptVariationSection(props: AdoptVariationSectionProps) {
   const selectedCount = selectedAvailableIds.length;
   const availableCount = availableCandidates.length;
   const isBusy = assigningBulk || Boolean(assigningId);
+  const hasMultiplePages = filteredAssignmentCandidates.length > adoptPageSize;
 
   const toggleSelection = (candidateId: string) => {
     if (!availableIds.has(candidateId)) return;
@@ -130,6 +155,31 @@ export function AdoptVariationSection(props: AdoptVariationSectionProps) {
     clearSelection();
   };
 
+  const pageControls = hasMultiplePages ? (
+    <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600">
+      <span className="font-mono">Page {adoptPage} of {totalAdoptPages}</span>
+      <span className="font-mono">
+        Showing {adoptPageStart}-{adoptPageEnd} of {filteredAssignmentCandidates.length} matches
+      </span>
+      <button
+        type="button"
+        onClick={() => setAdoptPage((p) => Math.max(1, p - 1))}
+        disabled={adoptPage === 1}
+        className="px-2 py-1 border rounded disabled:opacity-50 bg-white hover:bg-gray-100"
+      >
+        Prev
+      </button>
+      <button
+        type="button"
+        onClick={() => setAdoptPage((p) => Math.min(totalAdoptPages, p + 1))}
+        disabled={adoptPage === totalAdoptPages}
+        className="px-2 py-1 border rounded disabled:opacity-50 bg-white hover:bg-gray-100"
+      >
+        Next
+      </button>
+    </div>
+  ) : null;
+
   return (
     <div id="adopt-variation-section" className="space-y-3 border border-dashed rounded-lg p-3 bg-gray-50">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -141,7 +191,7 @@ export function AdoptVariationSection(props: AdoptVariationSectionProps) {
           type="text"
           value={adoptSearch}
           onChange={(e) => setAdoptSearch(e.target.value)}
-          placeholder="Search by ID, display name, filename, folder, tag, or parent"
+          placeholder="Search by ID, display name, filename, folder, tag, description, alt text, or parent"
           className="w-full sm:w-64 border border-gray-300 rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
       </div>
@@ -157,6 +207,17 @@ export function AdoptVariationSection(props: AdoptVariationSectionProps) {
           options={adoptFolderOptions}
           className="w-full sm:w-48"
           placeholder="All folders"
+        />
+        <label htmlFor="adopt-scope" className="text-xs font-medium text-gray-700 sm:ml-2">
+          Scope
+        </label>
+        <MonoSelect
+          id="adopt-scope"
+          value={adoptScope}
+          onChange={(value) => setAdoptScope((value || 'current') as AdoptVariationScope)}
+          options={adoptScopeOptions}
+          className="w-full sm:w-56"
+          placeholder="Current namespace"
         />
         <label htmlFor="adopt-type" className="text-xs font-medium text-gray-700 sm:ml-2">
           Type
@@ -202,7 +263,18 @@ export function AdoptVariationSection(props: AdoptVariationSectionProps) {
         </div>
       </div>
 
-      {filteredAssignmentCandidates.length === 0 ? (
+      {(assignmentCandidatesLoading || pageControls) && (
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          {assignmentCandidatesLoading ? (
+            <p className="text-xs text-gray-500">Loading full assignment candidate set...</p>
+          ) : (
+            <span />
+          )}
+          {pageControls}
+        </div>
+      )}
+
+      {filteredAssignmentCandidates.length === 0 && !assignmentCandidatesLoading ? (
         <p className="text-xs text-gray-500">No assignment candidates found.</p>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -218,6 +290,7 @@ export function AdoptVariationSection(props: AdoptVariationSectionProps) {
             const parentLabel = candidateRow.parentAsset
               ? getCandidateLabel(candidateRow.parentAsset)
               : candidate.parentId || 'another parent';
+            const unavailableMessage = getUnavailableMessage(candidateRow, parentLabel);
             const isAssigningThisRow =
               assigningId === candidate.id || (assigningBulk && selectedSet.has(candidate.id));
 
@@ -235,7 +308,7 @@ export function AdoptVariationSection(props: AdoptVariationSectionProps) {
                   onChange={() => toggleSelection(candidate.id)}
                   disabled={isBusy || isUnavailable}
                   className="h-4 w-4"
-                  title={isUnavailable ? 'Already assigned to a parent' : isSelected ? 'Deselect' : 'Select for bulk assign'}
+                  title={isUnavailable ? unavailableMessage : isSelected ? 'Deselect' : 'Select for bulk assign'}
                 />
                 <Link
                   href={getAssetDetailPath(candidate)}
@@ -279,12 +352,15 @@ export function AdoptVariationSection(props: AdoptVariationSectionProps) {
                   <p className="text-[11px] text-gray-500 font-mono truncate">{candidate.id}</p>
                   {isUnavailable && (
                     <p className="text-[11px] text-amber-700 truncate">
-                      Already a variant of {parentLabel}
+                      {unavailableMessage}
                     </p>
                   )}
                   <p className="text-[11px] text-gray-500 truncate">
                     <span className={`inline-block rounded px-1.5 py-0.5 mr-1 font-mono ${isVideo ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
                       {isVideo ? 'video' : 'image'}
+                    </span>
+                    <span className="inline-block rounded bg-gray-100 px-1.5 py-0.5 mr-1 font-mono text-gray-700">
+                      {candidate.namespace?.trim() || '[no namespace]'}
                     </span>
                     {candidate.folder || '[no folder]'}
                     {showFilename ? ` - ${candidate.filename}` : ''}
@@ -330,9 +406,11 @@ export function AdoptVariationSection(props: AdoptVariationSectionProps) {
         </div>
       )}
 
-      {filteredAssignmentCandidates.length > adoptPageSize && (
+      {hasMultiplePages && (
         <div className="flex items-center justify-between text-xs text-gray-600 pt-1">
-          <div>Page {adoptPage} of {totalAdoptPages}</div>
+          <div>
+            Page {adoptPage} of {totalAdoptPages} · Showing {adoptPageStart}-{adoptPageEnd} of {filteredAssignmentCandidates.length} matches
+          </div>
           <div className="flex gap-2">
             <button
               onClick={() => setAdoptPage((p) => Math.max(1, p - 1))}

@@ -11,7 +11,7 @@
 
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import Image from 'next/image';
 import { getCloudflareImageUrl } from '@/utils/imageUtils';
 
@@ -71,6 +71,7 @@ export function SemanticNeighbors({
   // Track if we've reached the end of available results
   const [neighborsHasMore, setNeighborsHasMore] = useState(true);
   const [strangersHasMore, setStrangersHasMore] = useState(true);
+  const lastFetchKeyRef = useRef<string | null>(null);
 
   const handleMouseEnter = useCallback((e: React.MouseEvent, result: SimilarResult) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -127,8 +128,26 @@ export function SemanticNeighbors({
     }
   }, [neighbors, strangers, copyVariant, type, onCopySuccess]);
 
-  const fetchSimilar = useCallback(async () => {
+  const fetchSimilar = useCallback(async (options?: { force?: boolean }) => {
     if (!imageId) return;
+
+    const nsParam = (() => {
+      if (namespace === '__all__') return null;
+      if (searchAllNamespaces) return null;
+      if (!namespace) return 'cf-default';
+      return namespace;
+    })();
+    const includeStrangers = showStrangers && type === 'clip';
+    const fetchKey = JSON.stringify({
+      imageId,
+      type,
+      includeStrangers,
+      namespace: nsParam,
+    });
+    if (!options?.force && lastFetchKeyRef.current === fetchKey) {
+      return;
+    }
+    lastFetchKeyRef.current = fetchKey;
     
     setLoading(true);
     setError(null);
@@ -139,14 +158,6 @@ export function SemanticNeighbors({
     setStrangersHasMore(true);
     
     try {
-      const includeStrangers = showStrangers && type === 'clip';
-      
-      const nsParam = (() => {
-        if (namespace === '__all__') return null;
-        if (searchAllNamespaces) return null;
-        if (!namespace) return 'cf-default';
-        return namespace;
-      })();
       const nsQuery = nsParam ? `&namespace=${encodeURIComponent(nsParam)}` : '';
 
       const response = await fetch(
@@ -167,6 +178,7 @@ export function SemanticNeighbors({
       setStrangersHasMore(newStrangers.length >= FETCH_BATCH);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
+      lastFetchKeyRef.current = null;
     } finally {
       setLoading(false);
     }
@@ -255,7 +267,7 @@ export function SemanticNeighbors({
       <div className={`${className}`}>
         <p className="text-red-400 text-sm">{error}</p>
         <button
-          onClick={fetchSimilar}
+          onClick={() => fetchSimilar({ force: true })}
           className="text-xs text-blue-400 hover:text-blue-300 underline mt-1"
         >
           Retry

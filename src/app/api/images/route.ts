@@ -242,6 +242,7 @@ export async function GET(request: NextRequest) {
     const dateEnd = request.nextUrl.searchParams.get('dateEnd')?.trim() || '';
     const hiddenFolders = parseCsvParam(request.nextUrl.searchParams.get('hiddenFolders'));
     const hiddenTags = parseCsvParam(request.nextUrl.searchParams.get('hiddenTags'));
+    const focusAssetId = request.nextUrl.searchParams.get('focus')?.trim() || '';
     const namespaceParam = request.nextUrl.searchParams.get('namespace');
     const videoLimitParam = request.nextUrl.searchParams.get('videoLimit');
     const pageParam = request.nextUrl.searchParams.get('page');
@@ -448,7 +449,8 @@ export async function GET(request: NextRequest) {
       hiddenFolders.length > 0 ||
       hiddenTags.length > 0
     );
-    const queryResult = hasPagination || hasGalleryQueryParams
+    const hasFocusQuery = Boolean(focusAssetId);
+    const queryResult = hasPagination || hasGalleryQueryParams || hasFocusQuery
       ? await markStage('gallery_query', () =>
           queryGalleryAssets(
             finalImages as never,
@@ -469,7 +471,8 @@ export async function GET(request: NextRequest) {
               hiddenTags,
             },
             page,
-            hasPagination ? pageSize : Math.max(1, finalImages.length)
+            hasPagination || hasFocusQuery ? pageSize : Math.max(1, finalImages.length),
+            focusAssetId
           )
         )
       : null;
@@ -498,6 +501,8 @@ export async function GET(request: NextRequest) {
           const extras = extrasById[typed.id];
           if (!extras) return asset;
 
+          const hasExtrasFolder = Object.prototype.hasOwnProperty.call(extras, 'folder');
+          const extrasFolder = hasExtrasFolder && typeof extras.folder === 'string' ? extras.folder : undefined;
           const extrasDescription = typeof extras.description === 'string' ? extras.description : undefined;
           const extrasAltText = typeof extras.altText === 'string' ? extras.altText : undefined;
           const extrasSourceUrl = typeof extras.sourceUrl === 'string' ? extras.sourceUrl : undefined;
@@ -509,6 +514,7 @@ export async function GET(request: NextRequest) {
 
           return {
             ...typed,
+            folder: hasExtrasFolder ? extrasFolder : typed.folder,
             description: extrasDescription ?? typed.description,
             sourceUrl: extrasSourceUrl ?? typed.sourceUrl,
             sourceUrlNormalized: extrasSourceUrlNormalized ?? typed.sourceUrlNormalized,
@@ -538,7 +544,8 @@ export async function GET(request: NextRequest) {
       facets: queryResult?.facets ?? null,
       familySummaryMap: queryResult?.familySummaryMap ?? {},
       duplicateSummary: queryResult?.duplicateSummary ?? null,
-      pagination: hasPagination
+      focus: queryResult?.focus ?? null,
+      pagination: hasPagination || hasFocusQuery
         ? {
             page: queryResult?.page ?? page,
             pageSize: queryResult?.pageSize ?? pageSize,

@@ -127,14 +127,19 @@ describe('PATCH /api/images/:id/update', () => {
 
     expect(response.status).toBe(200);
     expect(payload.parentId).toBe('new-parent');
+    expect(payload.folder).toBe('new-folder');
     expect(payload.tags).toEqual(existingMeta.tags);
 
     const patchCall = mockFetch.mock.calls[1];
     const submittedBody = patchCall?.[1]?.body;
     const parsed = JSON.parse(String(submittedBody));
-    expect(parsed.metadata.folder).toBe('new-folder');
+    expect(parsed.metadata.folder).toBeUndefined();
     expect(parsed.metadata.tags).toEqual(existingMeta.tags);
     expect(parsed.metadata.variationParentId).toBe('new-parent');
+    expect(patchImageExtrasRecordMock).toHaveBeenCalledWith(
+      'child',
+      expect.objectContaining({ folder: 'new-folder' })
+    );
   });
 
   it('detaches the child from its parent when empty parentId provided', async () => {
@@ -284,6 +289,49 @@ describe('PATCH /api/images/:id/update', () => {
     expect(patchImageExtrasRecordMock).toHaveBeenCalledWith(
       'child',
       expect.objectContaining({ description: longDescription })
+    );
+  });
+
+  it('stores a cleared folder in extras without writing stale Cloudflare folder metadata', async () => {
+    const mockFetch = vi.spyOn(globalThis, 'fetch');
+
+    mockFetch
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: {
+              id: 'child',
+              filename: 'child.png',
+              uploaded: '2026-02-01T00:00:00.000Z',
+              variants: ['https://example.com/public'],
+              meta: JSON.stringify({ folder: 'old-folder' }),
+            },
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ result: {} }),
+          { status: 200 }
+        )
+      );
+
+    const request = createRequest({ folder: '' });
+    const response = await PATCH(request, { params: Promise.resolve({ id: 'child' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.folder).toBe('');
+
+    const patchCall = mockFetch.mock.calls[1];
+    const submittedBody = patchCall?.[1]?.body;
+    const parsed = JSON.parse(String(submittedBody));
+    expect(parsed.metadata.folder).toBeUndefined();
+
+    expect(patchImageExtrasRecordMock).toHaveBeenCalledWith(
+      'child',
+      expect.objectContaining({ folder: '' })
     );
   });
 

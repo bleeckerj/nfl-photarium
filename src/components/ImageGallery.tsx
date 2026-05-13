@@ -159,6 +159,16 @@ type GalleryServerPagination = {
   totalPages: number;
 };
 
+type GalleryServerFocus = {
+  assetId: string;
+  found: boolean;
+  index: number;
+  ordinal: number;
+  page: number;
+  pageSize: number;
+  total: number;
+} | null;
+
 type GalleryServerFacets = {
   folders: Array<{ value: string; count: number }>;
   tags: Array<{ value: string; count: number }>;
@@ -199,6 +209,7 @@ export const buildGalleryImagesUrl = ({
   includeExtrasForGallery = false,
   showMotionAssetsOnly = false,
   serverQuery,
+  focusAssetId,
 }: {
   forceRefresh?: boolean;
   namespace?: string;
@@ -206,6 +217,7 @@ export const buildGalleryImagesUrl = ({
   includeExtrasForGallery?: boolean;
   showMotionAssetsOnly?: boolean;
   serverQuery?: GalleryServerQueryState;
+  focusAssetId?: string | null;
 }) => {
   const params = new URLSearchParams();
   if (forceRefresh) {
@@ -226,6 +238,9 @@ export const buildGalleryImagesUrl = ({
   }
   if (showMotionAssetsOnly) {
     params.set('mediaFilter', 'animated');
+  }
+  if (focusAssetId?.trim()) {
+    params.set('focus', focusAssetId.trim());
   }
   if (serverQuery) {
     params.set('page', String(serverQuery.page));
@@ -704,6 +719,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   );
   const [videoMeta, setVideoMeta] = useState<VideoMetaState>(null);
   const [serverPagination, setServerPagination] = useState<GalleryServerPagination | null>(null);
+  const [serverFocus, setServerFocus] = useState<GalleryServerFocus>(null);
   const [serverFacets, setServerFacets] = useState<GalleryServerFacets | null>(null);
   const [serverFamilySummaryMap, setServerFamilySummaryMap] = useState<Record<string, GalleryFamilySummary>>({});
   const [serverDuplicateSummary, setServerDuplicateSummary] = useState<GalleryDuplicateSummary | null>(null);
@@ -999,6 +1015,12 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       setRefreshingCache(true);
     }
     try {
+      const focusTarget = initialFocusTargetRef.current;
+      const activeNamespace = namespace ?? '';
+      const focusAssetId =
+        focusTarget && !focusAppliedRef.current && focusTarget.namespace === activeNamespace
+          ? focusTarget.assetId
+          : undefined;
       const url = buildGalleryImagesUrl({
         forceRefresh,
         namespace,
@@ -1006,6 +1028,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         includeExtrasForGallery,
         showMotionAssetsOnly: showMotionAssetsOnlyRef.current,
         serverQuery: galleryServerQueryRef.current,
+        focusAssetId,
       });
       const response = await fetch(url, { signal: controller.signal });
       const data = await response.json();
@@ -1041,6 +1064,38 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         setServerFacets(data?.facets && typeof data.facets === 'object' ? data.facets : null);
         setServerFamilySummaryMap(data?.familySummaryMap && typeof data.familySummaryMap === 'object' ? data.familySummaryMap : {});
         setServerDuplicateSummary(data?.duplicateSummary && typeof data.duplicateSummary === 'object' ? data.duplicateSummary : null);
+        const responseFocus = data?.focus as
+          | {
+              assetId?: unknown;
+              found?: unknown;
+              index?: unknown;
+              ordinal?: unknown;
+              page?: unknown;
+              pageSize?: unknown;
+              total?: unknown;
+            }
+          | null
+          | undefined;
+        setServerFocus(
+          responseFocus &&
+            typeof responseFocus.assetId === 'string' &&
+            typeof responseFocus.found === 'boolean' &&
+            typeof responseFocus.index === 'number' &&
+            typeof responseFocus.ordinal === 'number' &&
+            typeof responseFocus.page === 'number' &&
+            typeof responseFocus.pageSize === 'number' &&
+            typeof responseFocus.total === 'number'
+            ? {
+                assetId: responseFocus.assetId,
+                found: responseFocus.found,
+                index: responseFocus.index,
+                ordinal: responseFocus.ordinal,
+                page: responseFocus.page,
+                pageSize: responseFocus.pageSize,
+                total: responseFocus.total,
+              }
+            : null
+        );
         const responseVideoMeta = data?.videoMeta as
           | { truncated?: boolean; returned?: number; totalScoped?: number; limit?: number; enabled?: boolean }
           | undefined;
@@ -1084,6 +1139,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     } catch (error) {
       if ((error as Error).name === 'AbortError') return;
       console.error('Failed to fetch images:', error);
+      setServerFocus(null);
     } finally {
       if (abortControllerRef.current === controller) {
         setLoading(false);
@@ -1148,6 +1204,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       setPromptThisMap({});
       setVideoLimitOverride(null);
       setVideoMeta(null);
+      setServerFocus(null);
       setVideoResultsNotice(null);
       videoAutoExpandPageRef.current = null;
       requestedPromptIdsRef.current.clear();
@@ -1590,7 +1647,11 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     focusCanonicalizedRef.current = true;
     clearFilters();
     clearColorSearch();
-    setFocusNotice('Showing full gallery order across all namespaces; filters were cleared for this focused asset.');
+    setFocusNotice(
+      focusTarget.namespace === '__all__'
+        ? 'Locating image in all namespaces; filters were cleared for this focused asset.'
+        : 'Locating image in this namespace; filters were cleared for this focused asset.'
+    );
   }, [clearColorSearch, clearFilters, namespace]);
 
   useEffect(() => {
@@ -2354,6 +2415,19 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     if (focusTarget.namespace !== activeNamespace) return;
     if (!focusCanonicalizedRef.current) return;
     if (loading) return;
+    if (!serverFocus || serverFocus.assetId !== focusTarget.assetId) return;
+
+    if (!serverFocus.found) {
+      focusAppliedRef.current = true;
+      setFocusNotice('The requested asset could not be placed in gallery order.');
+      return;
+    }
+
+    const targetPage = serverFocus.page;
+    if (pageIndex !== targetPage) {
+      goToPageNumber(targetPage);
+      return;
+    }
 
     const scopedAsset = galleryImages.find((entry) => entry.id === focusTarget.assetId);
     if (!scopedAsset) {
@@ -2362,21 +2436,15 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       return;
     }
 
-    const focusedIndex = filteredImages.findIndex((entry) => entry.id === focusTarget.assetId);
-    if (focusedIndex < 0) {
+    const isOnLoadedPage = filteredImages.some((entry) => entry.id === focusTarget.assetId);
+    if (!isOnLoadedPage) {
       focusAppliedRef.current = true;
       setFocusNotice('The requested asset could not be placed in gallery order.');
       return;
     }
 
-    const targetPage = Math.floor(focusedIndex / pageSize) + 1;
-    if (pageIndex !== targetPage) {
-      goToPageNumber(targetPage);
-      return;
-    }
-
     focusAppliedRef.current = true;
-    setFocusNotice(null);
+    setFocusNotice(`Image ${serverFocus.ordinal.toLocaleString()} of ${serverFocus.total.toLocaleString()}`);
     setFocusedGalleryAssetId(focusTarget.assetId);
 
     if (focusHighlightTimerRef.current !== null) {
@@ -2394,7 +2462,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       setFocusedGalleryAssetId((current) => (current === focusTarget.assetId ? null : current));
       focusHighlightTimerRef.current = null;
     }, 4000);
-  }, [filteredImages, galleryImages, goToPageNumber, loading, namespace, pageIndex, pageSize]);
+  }, [filteredImages, galleryImages, goToPageNumber, loading, namespace, pageIndex, serverFocus]);
   const backupAgeDays = backupInfo
     ? (Date.now() - backupInfo.date.getTime()) / (1000 * 60 * 60 * 24)
     : null;

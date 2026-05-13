@@ -76,6 +76,7 @@ export const CLOUDFLARE_METADATA_FIELDS = [
 ] as const;
 
 export const CLOUDFLARE_EXTRAS_ONLY_FIELDS = [
+  'folder',
   'description',
   'originalUrl',
   'originalUrlNormalized',

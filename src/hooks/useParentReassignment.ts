@@ -12,6 +12,7 @@ export type ParentReassignmentImage = {
   folder?: string;
   description?: string;
   altTag?: string;
+  altText?: string;
   tags?: string[];
   namespace?: string;
 };

@@ -10,6 +10,7 @@ import { useDropzone } from 'react-dropzone';
 import { useToast } from '@/components/Toast';
 import MonoSelect from '@/components/MonoSelect';
 import { AdoptVariationSection } from '@/components/image-detail/AdoptVariationSection';
+import { buildAdoptVariationCandidatePage, getDefaultAdoptVariationScope } from '@/components/image-detail/adoptVariationSearch';
 import { UploadVariationSection } from '@/components/image-detail/UploadVariationSection';
 import { VARIATION_UPLOAD_ACCEPT } from '@/components/image-detail/variationUploadConfig';
 import { AssetFamilyList } from '@/components/asset-detail/AssetFamilyList';
@@ -122,6 +123,7 @@ type AssetRecord = {
   tags?: string[];
   description?: string;
   altTag?: string;
+  altText?: string;
   parentId?: string;
   namespace?: string;
   variationSort?: number;
@@ -404,6 +406,8 @@ export default function VideoDetailPage() {
 
   const [adoptSearch, setAdoptSearch] = useState('');
   const [adoptFolderFilter, setAdoptFolderFilter] = useState('');
+  const [adoptScope, setAdoptScope] = useState<'current' | 'all'>('current');
+  const adoptScopeDefaultedForIdRef = useRef<string | null>(null);
   const [adoptAssetTypeFilter, setAdoptAssetTypeFilter] = useState<'' | 'image' | 'video'>('');
   const [adoptPage, setAdoptPage] = useState(1);
   const [assigningId, setAssigningId] = useState<string | null>(null);
@@ -496,6 +500,7 @@ export default function VideoDetailPage() {
     setCandidateAssetsLoaded(false);
     setCandidateAssetsLoading(false);
     setCandidateAssetsRequested(false);
+    adoptScopeDefaultedForIdRef.current = null;
     setError(null);
     if (!initialDetailSeed) {
       setVideo(null);
@@ -617,11 +622,12 @@ export default function VideoDetailPage() {
 
   useEffect(() => {
     if (candidateAssetsLoaded || candidateAssetsRequested) return;
-    if (!adoptSearch.trim() && !adoptFolderFilter && !adoptAssetTypeFilter) return;
+    if (!adoptSearch.trim() && !adoptFolderFilter && adoptScope === 'current' && !adoptAssetTypeFilter) return;
     void fetchCandidateAssets();
   }, [
     adoptAssetTypeFilter,
     adoptFolderFilter,
+    adoptScope,
     adoptSearch,
     candidateAssetsLoaded,
     candidateAssetsRequested,
@@ -674,6 +680,23 @@ export default function VideoDetailPage() {
   }, [allAssets, video?.parentId]);
   const familyRootId = video?.parentId || video?.id || '';
   const familyRootAsset = video?.parentId ? parentImage : currentVideoAsset;
+  const adoptCurrentNamespace = (familyRootAsset?.namespace || video?.namespace || '').trim();
+
+  useEffect(() => {
+    if (!id || adoptScopeDefaultedForIdRef.current === id) return;
+    if (!video) return;
+    if (video.parentId && !parentImage) return;
+    setAdoptScope(getDefaultAdoptVariationScope(adoptCurrentNamespace));
+    adoptScopeDefaultedForIdRef.current = id;
+  }, [adoptCurrentNamespace, id, parentImage, video]);
+
+  const adoptScopeOptions = useMemo(
+    () => [
+      { value: 'current', label: `Current namespace: ${adoptCurrentNamespace || '[none]'}` },
+      { value: 'all', label: 'All namespaces' },
+    ],
+    [adoptCurrentNamespace]
+  );
   const isCanonicalVideo = Boolean(video?.id) && !video?.parentId;
   const assignmentCandidates = useMemo(
     () =>
@@ -682,6 +705,7 @@ export default function VideoDetailPage() {
         currentAssetId: video?.id,
         familyRootId,
         namespace: familyRootAsset?.namespace || video?.namespace || DEFAULT_NAMESPACE,
+        includeCrossNamespaceOrphans: true,
       }),
     [allAssets, familyRootAsset?.namespace, familyRootId, video?.id, video?.namespace]
   );
@@ -727,54 +751,43 @@ export default function VideoDetailPage() {
     setSiblingPage((prev) => Math.min(prev, totalSiblingPages));
   }, [totalSiblingPages]);
 
-  const filteredAssignmentCandidates = useMemo(() => {
-    const folderFiltered = assignmentCandidates.filter(({ asset }) => {
-      if (!adoptFolderFilter) return true;
-      return (asset.folder || '').toLowerCase() === adoptFolderFilter.toLowerCase();
-    });
-    const typeFiltered = folderFiltered.filter(({ asset }) => {
-      if (!adoptAssetTypeFilter) return true;
-      if (adoptAssetTypeFilter === 'video') return (asset.assetType || 'image') === 'video';
-      return (asset.assetType || 'image') !== 'video';
-    });
-
-    if (!adoptSearch.trim()) return typeFiltered;
-    const term = adoptSearch.toLowerCase();
-    return typeFiltered.filter(({ asset, parentAsset }) => {
-      if ((asset.id || '').toLowerCase().includes(term)) return true;
-      const haystack = [
-        asset.displayName,
-        asset.filename,
-        asset.folder,
-        asset.description,
-        asset.altTag,
-        parentAsset?.displayName,
-        parentAsset?.filename,
-        parentAsset?.id,
-        ...(asset.tags || []),
-      ]
-        .filter(Boolean)
-        .map(String)
-        .join(' ')
-        .toLowerCase();
-      return haystack.includes(term);
-    });
-  }, [adoptAssetTypeFilter, adoptFolderFilter, adoptSearch, assignmentCandidates]);
-
   const ADOPT_PAGE_SIZE = 12;
-  const totalAdoptPages = Math.max(1, Math.ceil(filteredAssignmentCandidates.length / ADOPT_PAGE_SIZE));
-  const pagedAssignmentCandidates = useMemo(() => {
-    const start = (adoptPage - 1) * ADOPT_PAGE_SIZE;
-    return filteredAssignmentCandidates.slice(start, start + ADOPT_PAGE_SIZE);
-  }, [adoptPage, filteredAssignmentCandidates]);
+  const adoptCandidatePage = useMemo(
+    () =>
+      buildAdoptVariationCandidatePage({
+        candidates: assignmentCandidates,
+        search: adoptSearch,
+        folderFilter: adoptFolderFilter,
+        assetTypeFilter: adoptAssetTypeFilter,
+        scope: adoptScope,
+        currentNamespace: adoptCurrentNamespace,
+        page: adoptPage,
+        pageSize: ADOPT_PAGE_SIZE,
+      }),
+    [adoptAssetTypeFilter, adoptCurrentNamespace, adoptFolderFilter, adoptPage, adoptScope, adoptSearch, assignmentCandidates]
+  );
+  const {
+    filteredAssignmentCandidates,
+    pagedAssignmentCandidates,
+    page: clampedAdoptPage,
+    totalPages: totalAdoptPages,
+    pageStart: adoptPageStart,
+    pageEnd: adoptPageEnd,
+  } = adoptCandidatePage;
 
   useEffect(() => {
     setAdoptPage(1);
-  }, [adoptAssetTypeFilter, adoptFolderFilter, adoptSearch, familyRootId]);
+  }, [adoptAssetTypeFilter, adoptFolderFilter, adoptScope, adoptSearch, familyRootId]);
 
   useEffect(() => {
     setAdoptPage((prev) => Math.min(prev, totalAdoptPages));
   }, [totalAdoptPages]);
+
+  useEffect(() => {
+    if (adoptPage !== clampedAdoptPage) {
+      setAdoptPage(clampedAdoptPage);
+    }
+  }, [adoptPage, clampedAdoptPage]);
 
   const {
     childUploadItems,
@@ -1692,6 +1705,9 @@ export default function VideoDetailPage() {
               adoptFolderFilter={adoptFolderFilter}
               setAdoptFolderFilter={setAdoptFolderFilter}
               adoptFolderOptions={adoptFolderOptions}
+              adoptScope={adoptScope}
+              setAdoptScope={setAdoptScope}
+              adoptScopeOptions={adoptScopeOptions}
               adoptAssetTypeFilter={adoptAssetTypeFilter}
               setAdoptAssetTypeFilter={setAdoptAssetTypeFilter}
               adoptAssetTypeOptions={adoptAssetTypeOptions}
@@ -1701,6 +1717,9 @@ export default function VideoDetailPage() {
               setAdoptPage={setAdoptPage}
               totalAdoptPages={totalAdoptPages}
               adoptPageSize={ADOPT_PAGE_SIZE}
+              adoptPageStart={adoptPageStart}
+              adoptPageEnd={adoptPageEnd}
+              assignmentCandidatesLoading={candidateAssetsLoading || (!candidateAssetsLoaded && Boolean(adoptSearch.trim() || adoptFolderFilter || adoptScope === 'all' || adoptAssetTypeFilter))}
               onHandleThumbMouseMove={handleThumbMouseMove}
               onHandleThumbLeave={handleThumbLeave}
               onHandleImageDragStart={handleAssetDragStart}

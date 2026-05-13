@@ -93,6 +93,33 @@ describe('ImageGallery motion assets helpers', () => {
     );
   });
 
+  it('adds focus asset ids to server-backed gallery requests', () => {
+    expect(
+      buildGalleryImagesUrl({
+        namespace: '__all__',
+        focusAssetId: 'img-1',
+        serverQuery: {
+          page: 1,
+          pageSize: 60,
+          search: '',
+          folder: 'all',
+          tag: '',
+          onlyCanonical: false,
+          onlyWithVariants: false,
+          favorites: false,
+          duplicates: false,
+          comfy: false,
+          embedding: 'none',
+          aspectRatioFilters: [],
+          dateFilter: null,
+          hiddenFolders: [],
+          hiddenTags: [],
+          showMotionAssetsOnly: false,
+        },
+      })
+    ).toBe('/api/images?namespace=__all__&focus=img-1&page=1&pageSize=60');
+  });
+
   it('restores the stored motion-assets preference from localStorage', () => {
     const { localStorage } = installWindow();
     localStorage.setItem(
@@ -229,6 +256,12 @@ describe('ImageGallery motion assets helpers', () => {
   it('builds all-namespace canonical gallery focus hrefs', () => {
     expect(buildCanonicalGalleryHref({ assetId: 'img-1', namespace: '__all__' })).toBe(
       '/?gns=__all__&focus=img-1'
+    );
+  });
+
+  it('builds namespace-specific canonical gallery focus hrefs', () => {
+    expect(buildCanonicalGalleryHref({ assetId: 'img-1', namespace: 'new-space' })).toBe(
+      '/?gns=new-space&focus=img-1'
     );
   });
 });

@@ -92,10 +92,9 @@ export type ImageExtrasRecordV1 = {
   imageId: string;
 
   /**
-   * Freeform descriptive fields that can be larger than Cloudflare metadata limits.
-   *
-   * NOTE: Keep namespace/folder/tags in Cloudflare metadata for filtering.
+   * Application-specific metadata that should not depend on Cloudflare metadata persistence.
    */
+  folder?: string;
   description?: string;
   altText?: string;
   sourceUrl?: string;
