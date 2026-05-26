@@ -118,12 +118,25 @@ export const ImageCard: React.FC<ImageCardProps> = ({
     <div
       id={`gallery-asset-${image.id}`}
       data-gallery-asset-id={image.id}
-      className={`z-0 group bg-gray-100 rounded-lg overflow-hidden flex flex-col h-full border ${
+      // scrollMarginTop pairs with scrollIntoView({ block: 'start' }) so the
+      // focused tile lands cleanly below the sticky gallery header instead of
+      // colliding with it.
+      style={isFocusedInGallery ? { scrollMarginTop: '6rem' } : undefined}
+      className={`relative z-0 group bg-gray-100 rounded-lg overflow-hidden flex flex-col h-full border ${
         isSelected ? 'border-blue-500 ring-2 ring-blue-400' : 'border-transparent'
       } ${isFocusedInGallery ? 'border-amber-400 ring-2 ring-amber-300 ring-offset-2' : ''} ${
         bulkSelectionMode ? 'cursor-pointer' : ''
       }`}
     >
+      {isFocusedInGallery && (
+        <div
+          className="absolute top-1.5 left-1.5 z-20 flex items-center gap-1 rounded bg-amber-400/95 px-1.5 py-0.5 text-[10px] font-mono text-white shadow-sm pointer-events-none select-none"
+          aria-hidden="true"
+        >
+          <span>↳</span>
+          <span>focused</span>
+        </div>
+      )}
       <Link
         href={detailHref}
         className={`relative block w-full ${respectAspectRatio ? '' : 'aspect-square'}`}

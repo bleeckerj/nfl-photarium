@@ -16,7 +16,8 @@ import {
   updateVideoAssetRecord,
 } from '@/server/videoCatalogStorage';
 import { resolveVideoDownloadUrls } from '@/server/videoDownloadUrl';
-import { fetchImageDimensions } from '@/server/aspectRatio';
+import { classifyAspectRatio, fetchImageDimensions } from '@/server/aspectRatio';
+import { storeImageAspectMetadata } from '@/server/vectorSearch';
 import { getCloudflareImageUrl, calculateAspectRatio } from '@/utils/imageUtils';
 
 type ResolvedSource =
@@ -189,6 +190,30 @@ const getImageSources = (image: CachedCloudflareImage): ResolvedSource[] =>
     })(),
   ]);
 
+const hasImageDimensions = (image: CachedCloudflareImage) =>
+  Boolean(image.dimensions?.width && image.dimensions?.height);
+
+const persistImageAspectMetadata = async (image: CachedCloudflareImage): Promise<void> => {
+  const width = image.dimensions?.width;
+  const height = image.dimensions?.height;
+  if (!width || !height) return;
+
+  try {
+    await storeImageAspectMetadata({
+      imageId: image.id,
+      aspectRatio: image.aspectRatio ?? calculateAspectRatio(width, height).common,
+      aspectRatioClass: classifyAspectRatio(width, height),
+      width,
+      height,
+    });
+  } catch (error) {
+    console.warn('[metadata-enrichment] Failed to persist image aspect metadata', {
+      imageId: image.id,
+      error,
+    });
+  }
+};
+
 const getVideoSources = (video: VideoAssetRecord): ResolvedSource[] =>
   dedupeSources([
     ...resolveVideoDownloadUrls(video).map((value) => toRemoteSource(value)),
@@ -201,7 +226,8 @@ const getVideoSources = (video: VideoAssetRecord): ResolvedSource[] =>
 const hasImageMetadata = (image: CachedCloudflareImage) =>
   typeof image.size === 'number' &&
   image.size > 0 &&
-  Boolean(image.aspectRatio || (image.dimensions?.width && image.dimensions?.height));
+  Boolean(image.aspectRatio) &&
+  hasImageDimensions(image);
 
 const hasVideoMetadata = (video: VideoAssetRecord) =>
   typeof video.fileSizeBytes === 'number' &&
@@ -215,7 +241,10 @@ export async function enrichImageAssetMetadata(
 ): Promise<CachedCloudflareImage | null> {
   const image = typeof input === 'string' ? await getCachedImage(input) : input;
   if (!image) return null;
-  if (hasImageMetadata(image)) return image;
+  if (hasImageMetadata(image)) {
+    await persistImageAspectMetadata(image);
+    return image;
+  }
 
   const patch: ImageMetadataPatch = {};
   const sources = getImageSources(image);
@@ -233,7 +262,12 @@ export async function enrichImageAssetMetadata(
     }
   }
 
-  if (!(image.aspectRatio || (image.dimensions?.width && image.dimensions?.height))) {
+  if (!image.aspectRatio && hasImageDimensions(image)) {
+    const { width, height } = image.dimensions!;
+    patch.aspectRatio = calculateAspectRatio(width, height).common;
+  }
+
+  if (!hasImageDimensions(image)) {
     for (const source of sources) {
       const metadata =
         source.kind === 'remote'
@@ -259,6 +293,7 @@ export async function enrichImageAssetMetadata(
     dimensions: patch.dimensions ?? image.dimensions,
   };
   upsertCachedImage(next);
+  await persistImageAspectMetadata(next);
   return next;
 }
 

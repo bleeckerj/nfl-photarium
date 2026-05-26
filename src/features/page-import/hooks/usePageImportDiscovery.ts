@@ -10,12 +10,51 @@ import type {
 const PAGE_IMPORT_PREVIEW_LIMIT = 60;
 const DEFAULT_PAGE_IMPORT_MAX_ASSETS = '250';
 
+type PageImportDiscoveryResponse = {
+  media?: ImportCandidate[];
+  relativeUrlWarning?: string;
+};
+
 const parseCookieHeaderFromClipboard = (raw: string) => {
   const trimmed = raw.trim();
   if (!trimmed) return '';
   const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const cookieLine = lines.find((line) => /^cookie\s*:/i.test(line));
   return (cookieLine || trimmed).replace(/^cookie\s*:\s*/i, '').trim();
+};
+
+const isHtmlFile = (file: File) => {
+  const lowerName = file.name.toLowerCase();
+  return file.type === 'text/html' || lowerName.endsWith('.html') || lowerName.endsWith('.htm');
+};
+
+const isValidHttpUrl = (value: string) => {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+};
+
+const readImportPageResponse = async (response: Response) => {
+  const contentType = response.headers.get('content-type') || '';
+  const isJson = contentType.includes('application/json');
+  const data = isJson ? await response.json() : await response.text();
+  if (!response.ok) {
+    if (isJson && typeof data === 'object' && data && 'error' in data) {
+      throw new Error(
+        typeof (data as { error?: string }).error === 'string'
+          ? (data as { error?: string }).error
+          : 'Failed to inspect page'
+      );
+    }
+    throw new Error('Failed to inspect page');
+  }
+  if (!isJson || typeof data !== 'object' || !data) {
+    throw new Error('Failed to inspect page');
+  }
+  return data as PageImportDiscoveryResponse;
 };
 
 const toQueueItem = (
@@ -234,22 +273,7 @@ export function usePageImportDiscovery({
             ...(cookieHeaderValue ? { cookieHeader: cookieHeaderValue } : {}),
           }),
         });
-        const contentType = response.headers.get('content-type') || '';
-        const isJson = contentType.includes('application/json');
-        const data = isJson ? await response.json() : await response.text();
-        if (!response.ok) {
-          if (isJson && typeof data === 'object' && data && 'error' in data) {
-            throw new Error(
-              typeof (data as { error?: string }).error === 'string'
-                ? (data as { error?: string }).error
-                : 'Failed to inspect page'
-            );
-          }
-          throw new Error('Failed to inspect page');
-        }
-        if (!isJson || typeof data !== 'object' || !data) {
-          throw new Error('Failed to inspect page');
-        }
+        const data = await readImportPageResponse(response);
 
         const media = Array.isArray(data?.media) ? (data.media as ImportCandidate[]) : [];
         if (media.length === 0) {
@@ -293,6 +317,86 @@ export function usePageImportDiscovery({
       pageImportMaxScrolls,
       pageImportScrollDelayMs,
       pageImportScrollMode,
+      pageImportUrl,
+      setSourceUrlIfEmpty,
+    ]
+  );
+
+  const handleImportHtmlFile = useCallback(
+    async (file: File) => {
+      if (pageImportLoading) return;
+      if (!isHtmlFile(file)) {
+        setPageImportError('Drop an .html or .htm file.');
+        return;
+      }
+
+      setPageImportLoading(true);
+      setPageImportError(null);
+      setPageImportProgress(null);
+
+      try {
+        const html = await file.text();
+        if (!html.trim()) {
+          throw new Error('HTML file is empty');
+        }
+
+        const sessionId = await ensureImportSession();
+        const sourceUrl = isValidHttpUrl(pageImportUrl.trim()) ? pageImportUrl.trim() : '';
+        const response = await fetch('/api/import/page', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            html,
+            sourceFilename: file.name,
+            ...(sourceUrl ? { sourceUrl } : {}),
+            minBytes: pageImportIncludeSmallAssets ? 1024 : 8 * 1024,
+            allowInsecure: pageImportAllowInsecure,
+            includeUiChrome: pageImportIncludeUiChrome,
+            includeSmallAssets: pageImportIncludeSmallAssets,
+          }),
+        });
+        const data = await readImportPageResponse(response);
+        const media = Array.isArray(data.media) ? data.media : [];
+
+        if (media.length === 0) {
+          setPageImportError(
+            data.relativeUrlWarning ||
+              'No media found in that HTML file. Relative media URLs require a page URL in the scan field or a <base href> tag.'
+          );
+          return;
+        }
+
+        const includePreviews = media.length <= PAGE_IMPORT_PREVIEW_LIMIT;
+        addQueuedFiles(
+          media.map((entry) => toQueueItem(entry, createQueueId(), sessionId, includePreviews))
+        );
+        if (sourceUrl) {
+          setSourceUrlIfEmpty(sourceUrl);
+          setPageImportUrl('');
+        }
+        setPageImportProgress({
+          message: `Scanned ${file.name}`,
+          scrollCount: 0,
+          imageCount: media.length,
+        });
+        if (data.relativeUrlWarning) {
+          setPageImportError(data.relativeUrlWarning);
+        }
+      } catch (error) {
+        console.error('Import HTML file failed', error);
+        setPageImportError(error instanceof Error ? error.message : 'Failed to import HTML file');
+      } finally {
+        setPageImportLoading(false);
+      }
+    },
+    [
+      addQueuedFiles,
+      createQueueId,
+      ensureImportSession,
+      pageImportAllowInsecure,
+      pageImportIncludeSmallAssets,
+      pageImportIncludeUiChrome,
+      pageImportLoading,
       pageImportUrl,
       setSourceUrlIfEmpty,
     ]
@@ -352,6 +456,7 @@ export function usePageImportDiscovery({
     pageImportProgress,
     setPageImportProgress,
     handleImportPage,
+    handleImportHtmlFile,
     handleStopImportPage,
     handlePasteCookiesAndScan,
   };

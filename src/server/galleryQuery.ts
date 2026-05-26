@@ -207,17 +207,104 @@ const buildFacets = <T extends GalleryQueryAsset>(assets: T[]): GalleryQueryFace
   };
 };
 
+// -- Scope-level memoization ------------------------------------------------
+// `buildFamilySummaryMap`, `matchesHidden` filtering, and `buildFacets` all
+// produce results that depend only on (a) the asset array contents and (b)
+// the hidden-folders/hidden-tags filters. They do NOT depend on per-request
+// filters like search, folder, tag, page, etc. When a caller passes a stable
+// `scopeKey` describing the snapshot of asset contents + hidden filters,
+// we can compute these once and reuse them across every paginated request
+// against the same scope.
+//
+// The cache is process-global (kept via Symbol.for so it survives HMR in dev)
+// and bounded to a small number of entries with FIFO eviction. The expected
+// working set is tiny (one entry per distinct namespace/scope combination).
+interface ScopeMemoEntry {
+  familySummaryMapAll: ReturnType<typeof buildFamilySummaryMap>;
+  facetBase: GalleryQueryAsset[];
+  facets: GalleryQueryFacets;
+}
+
+const SCOPE_MEMO_MAX_ENTRIES = 8;
+const SCOPE_MEMO_CACHE_KEY = Symbol.for('photarium.galleryQuery.scopeMemo');
+const scopeMemoGlobal = globalThis as typeof globalThis & {
+  [SCOPE_MEMO_CACHE_KEY]?: Map<string, ScopeMemoEntry>;
+};
+const scopeMemoCache: Map<string, ScopeMemoEntry> =
+  scopeMemoGlobal[SCOPE_MEMO_CACHE_KEY] ?? new Map();
+if (!scopeMemoGlobal[SCOPE_MEMO_CACHE_KEY]) {
+  scopeMemoGlobal[SCOPE_MEMO_CACHE_KEY] = scopeMemoCache;
+}
+
+const getOrBuildScopeMemo = <T extends GalleryQueryAsset>(
+  cacheKey: string,
+  assets: T[],
+  filters: GalleryQueryFilters
+): ScopeMemoEntry => {
+  const cached = scopeMemoCache.get(cacheKey);
+  if (cached) {
+    // LRU touch: re-insert so it moves to the tail.
+    scopeMemoCache.delete(cacheKey);
+    scopeMemoCache.set(cacheKey, cached);
+    return cached;
+  }
+  const familySummaryMapAll = buildFamilySummaryMap(assets as never);
+  const facetBase = assets.filter((asset) =>
+    matchesHidden(asset, filters.hiddenFolders, filters.hiddenTags)
+  );
+  const facets = buildFacets(facetBase);
+  const entry: ScopeMemoEntry = {
+    familySummaryMapAll,
+    facetBase: facetBase as unknown as GalleryQueryAsset[],
+    facets,
+  };
+  if (scopeMemoCache.size >= SCOPE_MEMO_MAX_ENTRIES) {
+    const oldest = scopeMemoCache.keys().next().value;
+    if (oldest !== undefined) scopeMemoCache.delete(oldest);
+  }
+  scopeMemoCache.set(cacheKey, entry);
+  return entry;
+};
+
+export const clearGalleryQueryScopeMemo = () => {
+  scopeMemoCache.clear();
+};
+
+const buildScopeMemoKey = (
+  scopeKey: string,
+  filters: GalleryQueryFilters
+): string => {
+  const hiddenFolders = (filters.hiddenFolders ?? []).slice().sort().join(',');
+  const hiddenTags = (filters.hiddenTags ?? []).slice().sort().join(',');
+  return `${scopeKey}|hf:${hiddenFolders}|ht:${hiddenTags}`;
+};
+
 export const queryGalleryAssets = <T extends GalleryQueryAsset>(
   assets: T[],
   filters: GalleryQueryFilters,
   page: number,
   pageSize: number,
-  focusAssetId?: string
+  focusAssetId?: string,
+  scopeKey?: string
 ): GalleryQueryResult<T> => {
   const scopeTotal = assets.length;
-  const familySummaryMapAll = buildFamilySummaryMap(assets as never);
-  const facetBase = assets.filter((asset) => matchesHidden(asset, filters.hiddenFolders, filters.hiddenTags));
-  const facets = buildFacets(facetBase);
+  // If the caller supplied a scopeKey, use the memoized family/facet artifacts
+  // for this scope. Otherwise compute them inline (legacy / test path).
+  let familySummaryMapAll: ReturnType<typeof buildFamilySummaryMap>;
+  let facetBase: T[];
+  let facets: GalleryQueryFacets;
+  if (scopeKey) {
+    const memo = getOrBuildScopeMemo(buildScopeMemoKey(scopeKey, filters), assets, filters);
+    familySummaryMapAll = memo.familySummaryMapAll;
+    facetBase = memo.facetBase as unknown as T[];
+    facets = memo.facets;
+  } else {
+    familySummaryMapAll = buildFamilySummaryMap(assets as never);
+    facetBase = assets.filter((asset) =>
+      matchesHidden(asset, filters.hiddenFolders, filters.hiddenTags)
+    );
+    facets = buildFacets(facetBase);
+  }
 
   const baseFiltered = facetBase.filter((asset) => {
     if (!matchesFolder(asset, filters.folder)) return false;
@@ -269,6 +356,11 @@ export const queryGalleryAssets = <T extends GalleryQueryAsset>(
   const focusIndex = normalizedFocusAssetId
     ? sorted.findIndex((asset) => asset.id === normalizedFocusAssetId)
     : -1;
+  // When a focus asset is provided and found, return the *natural* page that
+  // contains the asset. The asset appears in its real position on that page;
+  // the client scrolls and highlights it. We deliberately do NOT anchor the
+  // slice to start at the focus -- that misrepresents pagination ("Page 1 of
+  // 11" while actually showing items 26-145 of 1312, etc.).
   const focusPage = focusIndex >= 0
     ? Math.floor(focusIndex / safePageSize) + 1
     : null;

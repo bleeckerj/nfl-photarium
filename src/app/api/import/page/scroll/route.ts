@@ -13,7 +13,7 @@
  * Environment variables:
  * - PUPPETEER_EXECUTABLE_PATH: Path to Chrome/Chromium (optional, auto-detects)
  * - IMPORT_SCROLL_MAX_SCROLLS: Max number of scroll iterations (default: 10)
- * - IMPORT_SCROLL_TIMEOUT_MS: Page load timeout (default: 30000)
+ * - IMPORT_SCROLL_TIMEOUT_MS: Initial DOM navigation timeout (default: 30000)
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -35,6 +35,10 @@ import {
   cookieHeaderToPuppeteerCookies,
   normalizeCookieHeader,
 } from '@/server/pageImportCookies';
+import {
+  navigatePageForImport,
+  waitForPageImportNetworkIdle,
+} from '@/server/pageImportBrowserNavigation';
 import { toImportCandidate } from '@/server/import-metadata/candidates';
 
 // Puppeteer types - we use any since it's an optional dependency
@@ -204,15 +208,15 @@ const extractMediaFromPage = async (
       }
     });
 
-    // Navigate to the page
-    const navigationResponse = await page.goto(pageUrl, {
-      waitUntil: 'networkidle2',
-      timeout: options.timeoutMs,
+    // Network idle is best-effort because normal pages can keep requests open.
+    const navigation = await navigatePageForImport(page, pageUrl, {
+      timeoutMs: options.timeoutMs,
     });
+    await waitForPageImportNetworkIdle(page);
 
     // Initial wait for dynamic content
     await new Promise(resolve => setTimeout(resolve, 1000));
-    const archiveDiagnostics = await getArchivePageDiagnostics(pageUrl, page, navigationResponse?.status?.());
+    const archiveDiagnostics = await getArchivePageDiagnostics(pageUrl, page, navigation.response?.status?.());
     logArchiveDiagnostics('import/page/scroll', archiveDiagnostics, { phase: 'page-load' });
     if (archiveDiagnostics?.challengeDetected) {
       return {

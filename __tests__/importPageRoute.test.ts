@@ -334,4 +334,153 @@ describe('POST /api/import/page', () => {
       expect.anything()
     );
   });
+
+  it('discovers absolute image and video candidates from posted HTML', async () => {
+    const html = `
+      <html>
+        <body>
+          <img src="https://cdn.example.com/campaign/hero.jpg" />
+          <video src="https://cdn.example.com/campaign/loop.mp4"></video>
+        </body>
+      </html>
+    `;
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = String(input);
+      if (url === 'https://cdn.example.com/campaign/hero.jpg' && init?.method === 'HEAD') {
+        return Promise.resolve(new Response(null, {
+          status: 200,
+          headers: {
+            'content-type': 'image/jpeg',
+            'content-length': '32768',
+          },
+        }));
+      }
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+
+    const response = await POST(createRequest({
+      html,
+      sourceFilename: 'campaign.html',
+    }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.sourceFilename).toBe('campaign.html');
+    expect(payload.images).toEqual([
+      expect.objectContaining({
+        url: 'https://cdn.example.com/campaign/hero.jpg',
+      }),
+    ]);
+    expect(payload.videos).toEqual([
+      expect.objectContaining({
+        url: 'https://cdn.example.com/campaign/loop.mp4',
+      }),
+    ]);
+    expect(payload.media).toHaveLength(2);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://cdn.example.com/campaign/hero.jpg',
+      expect.objectContaining({ method: 'HEAD' })
+    );
+  });
+
+  it('resolves relative media URLs in posted HTML against sourceUrl', async () => {
+    const html = `
+      <html>
+        <body>
+          <img src="/assets/hero.jpg" />
+        </body>
+      </html>
+    `;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = String(input);
+      if (url === 'https://campaign.example.com/assets/hero.jpg' && init?.method === 'HEAD') {
+        return Promise.resolve(new Response(null, {
+          status: 200,
+          headers: {
+            'content-type': 'image/jpeg',
+            'content-length': '32768',
+          },
+        }));
+      }
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+
+    const response = await POST(createRequest({
+      html,
+      sourceUrl: 'https://campaign.example.com/email/index.html',
+    }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.baseUrl).toBe('https://campaign.example.com/email/index.html');
+    expect(payload.images).toEqual([
+      expect.objectContaining({
+        url: 'https://campaign.example.com/assets/hero.jpg',
+      }),
+    ]);
+  });
+
+  it('resolves relative media URLs in posted HTML against an absolute base tag', async () => {
+    const html = `
+      <html>
+        <head>
+          <base href="https://assets.example.com/newsletter/" />
+        </head>
+        <body>
+          <img src="hero.jpg" />
+        </body>
+      </html>
+    `;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = String(input);
+      if (url === 'https://assets.example.com/newsletter/hero.jpg' && init?.method === 'HEAD') {
+        return Promise.resolve(new Response(null, {
+          status: 200,
+          headers: {
+            'content-type': 'image/jpeg',
+            'content-length': '32768',
+          },
+        }));
+      }
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+
+    const response = await POST(createRequest({ html }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.baseUrl).toBe('https://assets.example.com/newsletter/');
+    expect(payload.images).toEqual([
+      expect.objectContaining({
+        url: 'https://assets.example.com/newsletter/hero.jpg',
+      }),
+    ]);
+  });
+
+  it('skips relative media URLs in posted HTML when no base URL is available', async () => {
+    const html = `
+      <html>
+        <body>
+          <img src="hero.jpg" />
+        </body>
+      </html>
+    `;
+
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+      Promise.resolve(new Response(null, { status: 404 }))
+    );
+
+    const response = await POST(createRequest({ html }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.images).toEqual([]);
+    expect(payload.media).toEqual([]);
+    expect(payload.skippedRelativeCount).toBe(1);
+    expect(payload.relativeUrlWarning).toContain('relative media URL');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

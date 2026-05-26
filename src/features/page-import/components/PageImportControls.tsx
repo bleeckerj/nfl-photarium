@@ -1,6 +1,7 @@
 'use client';
 
-import { Loader2 } from 'lucide-react';
+import { FileText, Loader2 } from 'lucide-react';
+import { useDropzone } from 'react-dropzone';
 import type { ImportProgressState } from '@/features/page-import/types';
 
 type PageImportControlsProps = {
@@ -30,6 +31,7 @@ type PageImportControlsProps = {
   pageImportError: string | null;
   pageImportProgress: ImportProgressState;
   handleImportPage: () => Promise<void>;
+  handleImportHtmlFile: (file: File) => Promise<void>;
   handleStopImportPage: () => void;
   handlePasteCookiesAndScan: () => Promise<void>;
 };
@@ -62,9 +64,30 @@ export function PageImportControls(props: PageImportControlsProps) {
     pageImportError,
     pageImportProgress,
     handleImportPage,
+    handleImportHtmlFile,
     handleStopImportPage,
     handlePasteCookiesAndScan,
   } = props;
+
+  const {
+    getRootProps: getHtmlRootProps,
+    getInputProps: getHtmlInputProps,
+    isDragActive: isHtmlDragActive,
+    open: openHtmlFileDialog,
+  } = useDropzone({
+    accept: {
+      'text/html': ['.html', '.htm'],
+    },
+    disabled: pageImportLoading,
+    multiple: false,
+    noClick: true,
+    onDrop: (acceptedFiles) => {
+      const file = acceptedFiles[0];
+      if (file) {
+        void handleImportHtmlFile(file);
+      }
+    },
+  });
 
   return (
     <>
@@ -106,6 +129,34 @@ export function PageImportControls(props: PageImportControlsProps) {
             disabled={pageImportLoading || !pageImportUrl.trim()}
           >
             Paste Cookies + Scan
+          </button>
+        </div>
+
+        <div
+          {...getHtmlRootProps()}
+          className={`mt-3 flex flex-col gap-3 rounded-lg border border-dashed bg-white/70 p-3 transition-colors sm:flex-row sm:items-center sm:justify-between ${
+            isHtmlDragActive ? 'border-blue-400 bg-blue-100' : 'border-blue-200'
+          }`}
+        >
+          <input {...getHtmlInputProps()} />
+          <div className="flex items-start gap-2">
+            <FileText className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
+            <div>
+              <p className="text-xs font-medium text-blue-950">
+                {isHtmlDragActive ? 'Drop the HTML file to scan it' : 'Drop a saved HTML file here'}
+              </p>
+              <p className="mt-1 text-[11px] text-blue-700">
+                Relative media URLs use the page URL field above or the file&apos;s base tag.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={openHtmlFileDialog}
+            className="rounded-md border border-blue-300 bg-white px-3 py-2 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={pageImportLoading}
+          >
+            Choose HTML
           </button>
         </div>
 

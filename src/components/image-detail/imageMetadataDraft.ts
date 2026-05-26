@@ -34,7 +34,6 @@ export type ImageMetadataDraftValues = {
   originalUrlInput: string;
   sourceUrlInput: string;
   displayNameInput: string;
-  clearExif: boolean;
 };
 
 export type ImageMetadataSaveResponse = {
@@ -55,7 +54,6 @@ export const emptyImageMetadataDraftValues = (): ImageMetadataDraftValues => ({
   originalUrlInput: '',
   sourceUrlInput: '',
   displayNameInput: '',
-  clearExif: false,
 });
 
 export const parseUserTagsInput = (value: string) =>
@@ -82,7 +80,6 @@ export function resolveImageMetadataDraftValues(
     originalUrlInput: image.originalUrl || '',
     sourceUrlInput: image.sourceUrl || '',
     displayNameInput: image.displayName || image.filename || '',
-    clearExif: false,
   };
 }
 
@@ -140,7 +137,7 @@ export function isImageMetadataDraftDirty(
     return true;
   }
 
-  return values.clearExif;
+  return false;
 }
 
 export function buildImageMetadataSavePayload(
@@ -162,10 +159,6 @@ export function buildImageMetadataSavePayload(
     altTag: cleanString(values.altTextInput) ?? '',
   };
 
-  if (values.clearExif) {
-    payload.clearExif = true;
-  }
-
   return payload;
 }
 
@@ -186,7 +179,7 @@ export function applyImageMetadataSaveResponse<T extends ImageMetadataDraftAsset
     sourceUrl: response.sourceUrl,
     displayName: response.displayName,
     altTag: cleanString(values.altTextInput) ?? '',
-    exif: values.clearExif ? undefined : image.exif,
+    exif: image.exif,
   };
 }
 
@@ -203,6 +196,5 @@ export function resolveImageMetadataDraftValuesAfterSave(
     // A newly typed folder is now a saved existing folder value.
     folderSelect: savedImage.folder || '',
     newFolderInput: '',
-    clearExif: false,
   };
 }

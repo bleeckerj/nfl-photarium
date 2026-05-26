@@ -104,10 +104,11 @@ export const GalleryFilters: React.FC<GalleryFiltersProps> = ({
 
   // Build folder options for the select
   const folderOptions = [
-    { value: '', label: 'All Folders' },
-    ...folders
-      .filter((f) => !hiddenFolders.has(f))
-      .map((f) => ({ value: f, label: f || '(root)' })),
+    { value: 'all', label: 'All Folders' },
+    ...folders.map((f) => ({
+      value: f,
+      label: hiddenFolders.has(f) ? `${f || '(root)'} (hidden)` : f || '(root)',
+    })),
   ];
 
   // Build tag options for the select

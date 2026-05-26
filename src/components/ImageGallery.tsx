@@ -31,6 +31,7 @@ import { normalizeColorSearchHex, resolveColorSearchAssets, type ColorSearchResu
 import { AUDIT_LOG_LIMIT, DEFAULT_GRID_SIZE } from './gallery/constants';
 import { normalizeGridSize } from './gallery/gridSizing';
 import { normalizeDateFilterValue, toDateKey } from './gallery/dateFilter';
+import { collectFacetFolders, collectImageFolders, mergeFolderNames } from './gallery/folderOptions';
 import {
   clearGalleryReturnState,
   getFreshGalleryReturnState,
@@ -41,6 +42,7 @@ import {
   type NormalizedGalleryReturnState,
 } from './gallery/returnState';
 import { parseCanonicalGalleryFocusFromSearch } from './gallery/focusNavigation';
+import { useSearchParams } from 'next/navigation';
 import { isLikelySourceSearchTerm } from '@/utils/galleryFilter';
 import { patchImageFavorite } from '@/services/imageMetadataService';
 import { getUserVisibleTags, hasFavoriteTag } from '@/utils/systemTags';
@@ -530,8 +532,19 @@ export const neutralizeStoredPreferenceFilters = (
 
 const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   ({ refreshTrigger, namespace, onNamespaceChange }, ref) => {
+  // Read the focus target via React's URL hook -- it is reliably in sync with
+  // the rendered route, unlike window.location.search which has been observed
+  // to lag a tick behind during client-side navigation in this app. Fall back
+  // to window.location only if the React hook returns nothing (e.g. SSR).
+  const galleryUrlSearchParams = useSearchParams();
   const initialFocusTargetRef = useRef(
-    typeof window === 'undefined' ? null : parseCanonicalGalleryFocusFromSearch(window.location.search)
+    (() => {
+      const fromHook = galleryUrlSearchParams ? galleryUrlSearchParams.toString() : '';
+      const fromHookTarget = fromHook ? parseCanonicalGalleryFocusFromSearch(`?${fromHook}`) : null;
+      if (fromHookTarget) return fromHookTarget;
+      if (typeof window === 'undefined') return null;
+      return parseCanonicalGalleryFocusFromSearch(window.location.search);
+    })()
   );
   const initialGalleryReturnStateRef = useRef<NormalizedGalleryReturnState | null>(
     initialFocusTargetRef.current ? null : getFreshGalleryReturnState()
@@ -1019,9 +1032,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     }
     try {
       const focusTarget = initialFocusTargetRef.current;
-      const activeNamespace = namespace ?? '';
       const focusAssetId =
-        focusTarget && !focusAppliedRef.current && focusTarget.namespace === activeNamespace
+        focusTarget && !focusAppliedRef.current
           ? focusTarget.assetId
           : undefined;
       const url = buildGalleryImagesUrl({
@@ -1239,14 +1251,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     setColorSearchLoading(false);
   }, []);
 
-  useEffect(() => {
-    return () => {
-      if (focusHighlightTimerRef.current !== null) {
-        clearTimeout(focusHighlightTimerRef.current);
-      }
-    };
-  }, []);
-
   const [backupInfo, setBackupInfo] = useState<{
     timestamp: string;
     date: Date;
@@ -1259,7 +1263,11 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [focusNotice, setFocusNotice] = useState<string | null>(null);
   const focusCanonicalizedRef = useRef(false);
   const focusAppliedRef = useRef(false);
-  const focusHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Set true to skip the next refetch that would otherwise be triggered by a
+  // currentPage change. Used during focus reconciliation: the server's first
+  // response already returned the focus page's data, so when we sync the client
+  // currentPage to match serverFocus.page, there's no reason to refetch.
+  const focusReconcileSkipRef = useRef(false);
 
   const {
     brokenAudit,
@@ -1594,6 +1602,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     currentPageRangeLabel,
     prevPageRangeLabel,
     nextPageRangeLabel,
+    setCurrentPage,
     goToPageNumber,
     goToPreviousPage,
     goToNextPage,
@@ -1709,22 +1718,37 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       didInitServerQueryFetchRef.current = true;
       return;
     }
+    if (focusReconcileSkipRef.current) {
+      focusReconcileSkipRef.current = false;
+      return;
+    }
     void fetchImages({ silent: true });
   }, [fetchImages, serverGalleryQueryKey, serverGalleryQuery]);
 
   const uniqueFolders = useMemo(() => {
-    if (serverFacets?.folders) {
-      return serverFacets.folders.map((entry) => entry.value);
+    const selectedFolderValue =
+      selectedFolder && selectedFolder !== 'all' && selectedFolder !== 'no-folder'
+        ? [selectedFolder]
+        : [];
+    return mergeFolderNames(
+      collectFacetFolders(serverFacets?.folders),
+      collectImageFolders(images),
+      hiddenFolders,
+      selectedFolderValue,
+      [bulkFolderInput, editFolderSelect]
+    );
+  }, [bulkFolderInput, editFolderSelect, hiddenFolders, images, selectedFolder, serverFacets]);
+  const handleFolderFilterChange = useCallback((folder: string) => {
+    if (
+      folder &&
+      folder !== 'all' &&
+      folder !== 'no-folder' &&
+      hiddenFolderSet.has(folder)
+    ) {
+      unhideFolderByName(folder);
     }
-    const folderNames = images
-      .map(img => img.folder?.trim())
-      .filter((folder): folder is string => Boolean(folder));
-    return Array.from(new Set(folderNames)).sort((a, b) => a.localeCompare(b));
-  }, [images, serverFacets]);
-  const visibleFolders = useMemo(
-    () => uniqueFolders.filter(folder => !hiddenFolders.includes(folder)),
-    [uniqueFolders, hiddenFolders]
-  );
+    setSelectedFolder(folder);
+  }, [hiddenFolderSet, setSelectedFolder, unhideFolderByName]);
 
   const saveGalleryReturnState = useCallback((imageId: string) => {
     if (typeof window === 'undefined') return;
@@ -2520,12 +2544,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       return;
     }
 
-    const targetPage = serverFocus.page;
-    if (pageIndex !== targetPage) {
-      goToPageNumber(targetPage);
-      return;
-    }
-
+    // The server already returned the focus page's data in this response.
+    // The asset should be present in galleryImages right now. If it isn't,
+    // the data the server placed us on is inconsistent with focus metadata --
+    // surface that and stop.
     const scopedAsset = galleryImages.find((entry) => entry.id === focusTarget.assetId);
     if (!scopedAsset) {
       focusAppliedRef.current = true;
@@ -2540,26 +2562,44 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       return;
     }
 
+    // Sync the client's currentPage to match what the server placed us on,
+    // without triggering a refetch -- the data is already loaded. This keeps
+    // the pagination indicator honest and lets subsequent navigation start
+    // from the focused page.
+    const targetPage = serverFocus.page;
+    if (pageIndex !== targetPage) {
+      focusReconcileSkipRef.current = true;
+      setCurrentPage(targetPage);
+    }
+
     focusAppliedRef.current = true;
     setFocusNotice(`Image ${serverFocus.ordinal.toLocaleString()} of ${serverFocus.total.toLocaleString()}`);
     setFocusedGalleryAssetId(focusTarget.assetId);
 
-    if (focusHighlightTimerRef.current !== null) {
-      clearTimeout(focusHighlightTimerRef.current);
-    }
-
+    // Scroll the focused tile to just under the gallery header, not centered
+    // mid-viewport. The card's `scroll-margin-top` (set in ImageCard) provides
+    // the offset so the tile sits cleanly under the sticky controls.
     window.requestAnimationFrame(() => {
       const target = document.querySelector<HTMLElement>(
         `[data-gallery-asset-id="${focusTarget.assetId}"]`
       );
-      target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
+    // Highlight is persistent: it stays until the user navigates away from
+    // the focus page or unmounts the gallery. See the page-change effect below.
+  }, [filteredImages, galleryImages, loading, namespace, pageIndex, serverFocus, setCurrentPage]);
 
-    focusHighlightTimerRef.current = setTimeout(() => {
-      setFocusedGalleryAssetId((current) => (current === focusTarget.assetId ? null : current));
-      focusHighlightTimerRef.current = null;
-    }, 4000);
-  }, [filteredImages, galleryImages, goToPageNumber, loading, namespace, pageIndex, serverFocus]);
+  // Clear the focus highlight when the user navigates to a different page.
+  // This makes the highlight feel like an "I just landed here" cue rather than
+  // a permanent marker that follows the user through pagination.
+  useEffect(() => {
+    if (!focusAppliedRef.current) return;
+    if (!serverFocus) return;
+    if (!focusedGalleryAssetId) return;
+    if (pageIndex !== serverFocus.page) {
+      setFocusedGalleryAssetId(null);
+    }
+  }, [pageIndex, serverFocus, focusedGalleryAssetId]);
   const backupAgeDays = backupInfo
     ? (Date.now() - backupInfo.date.getTime()) / (1000 * 60 * 60 * 24)
     : null;
@@ -2778,9 +2818,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
               <GalleryFilters
                 searchTerm={searchTerm}
                 onSearchChange={setSearchTerm}
-                folders={visibleFolders}
+                folders={uniqueFolders}
                 selectedFolder={selectedFolder}
-                onFolderChange={setSelectedFolder}
+                onFolderChange={handleFolderFilterChange}
                 hiddenFolders={hiddenFolderSet}
                 onToggleHiddenFolder={(folder: string) =>
                   hiddenFolderSet.has(folder) ? unhideFolderByName(folder) : hideFolderByName(folder)

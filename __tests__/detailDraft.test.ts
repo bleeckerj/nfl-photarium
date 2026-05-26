@@ -28,7 +28,6 @@ describe('detailDraft', () => {
       originalUrlInput: '',
       sourceUrlInput: '',
       displayNameInput: '',
-      clearExif: false,
     };
 
     expect(shouldRestoreImageDetailDraft(draft, now)).toBe(true);
@@ -45,7 +44,6 @@ describe('detailDraft', () => {
       originalUrlInput: '',
       sourceUrlInput: '',
       displayNameInput: '',
-      clearExif: false,
     };
 
     expect(shouldRestoreImageDetailDraft(draft, now)).toBe(false);

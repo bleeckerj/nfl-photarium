@@ -37,7 +37,6 @@ describe('imageMetadataDraft', () => {
       originalUrlInput: 'https://example.com/source.jpg',
       sourceUrlInput: 'https://example.com/page',
       displayNameInput: 'Original name',
-      clearExif: false,
     });
   });
 
@@ -77,7 +76,6 @@ describe('imageMetadataDraft', () => {
       ...resolveImageMetadataDraftValues(image, null),
       folderSelect: 'new-folder',
       descriptionInput: 'Updated description',
-      clearExif: true,
     };
 
     expect(applyImageMetadataSaveResponse(image, {
@@ -92,7 +90,7 @@ describe('imageMetadataDraft', () => {
       tags: ['hero', '_favorite_'],
       description: 'Updated description',
       altTag: 'Cloudflare alt',
-      exif: undefined,
+      exif: { Camera: 'Test' },
     });
   });
 
@@ -102,7 +100,6 @@ describe('imageMetadataDraft', () => {
       folderSelect: 'new-folder',
       descriptionInput: 'Updated description',
       altTextInput: 'Updated alt',
-      clearExif: true,
     };
     const savedImage = applyImageMetadataSaveResponse(image, {
       folder: 'new-folder',
@@ -122,7 +119,6 @@ describe('imageMetadataDraft', () => {
       originalUrlInput: 'https://example.com/source.jpg',
       sourceUrlInput: 'https://example.com/page',
       displayNameInput: 'Original name',
-      clearExif: false,
     });
     expect(isImageMetadataDraftDirty(cleanDraft, savedImage, {
       description: 'Updated description',

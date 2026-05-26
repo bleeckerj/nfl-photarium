@@ -784,6 +784,7 @@ Checkpoint fields include `pagesFetched`, `recordsWritten`, `nextMaxId`, and `up
 
 - **[Features & Operations](./docs/features_and_operations.md)** — Primary feature map and operational guide
 - **[Headless API](./docs/HEADLESS_API.md)** — Route-level API reference for uploads, search, metadata, and media flows
+- **[Redis VPS Migration Plan](./docs/redis-vps-migration-plan.md)** — Move Redis Stack from local Docker to a VPS with local backup pulls
 - **[Client Sites Publishing](./docs/client-sites-publishing.md)** — Contract-based publishing into the adjacent public client-sites worker
 - **[Namespaces](./docs/namespace.md)** — Project isolation, namespace storage, and migration behavior
 - **[FAQ](./docs/faq.md)** — Common questions about search behavior, Redis, and namespace usage

@@ -197,6 +197,89 @@ describe('gallery toolbar components', () => {
     expect(markup).not.toContain('Variations Only');
   });
 
+  it('renders selected all and hidden folder labels in the folder select', () => {
+    const allMarkup = renderToStaticMarkup(
+      React.createElement(GalleryFilters, {
+        searchTerm: '',
+        onSearchChange: vi.fn(),
+        folders: ['640-walls'],
+        selectedFolder: 'all',
+        onFolderChange: vi.fn(),
+        hiddenFolders: new Set<string>(),
+        onToggleHiddenFolder: vi.fn(),
+        onShowAllFolders: vi.fn(),
+        allTags: [],
+        selectedTag: '',
+        onTagChange: vi.fn(),
+        hiddenTags: new Set<string>(),
+        onToggleHiddenTag: vi.fn(),
+        onShowAllTags: vi.fn(),
+        aspectRatioFilters: [],
+        onAspectRatioFiltersChange: vi.fn(),
+        showDuplicatesOnly: false,
+        onShowDuplicatesOnlyChange: vi.fn(),
+        showVariationsOnly: false,
+        onShowVariationsOnlyChange: vi.fn(),
+        showMotionAssetsOnly: false,
+        onShowMotionAssetsOnlyChange: vi.fn(),
+        showOnlyMissingEmbeddings: false,
+        onShowOnlyMissingEmbeddingsChange: vi.fn(),
+        onlyCanonical: false,
+        onOnlyCanonicalChange: vi.fn(),
+        respectAspectRatio: false,
+        onRespectAspectRatioChange: vi.fn(),
+        showBrokenOnly: false,
+        onShowBrokenOnlyChange: vi.fn(),
+        showComfyOnly: false,
+        onShowComfyOnlyChange: vi.fn(),
+        onClearFilters: vi.fn(),
+        hasActiveFilters: false,
+      })
+    );
+    const hiddenMarkup = renderToStaticMarkup(
+      React.createElement(GalleryFilters, {
+        searchTerm: '',
+        onSearchChange: vi.fn(),
+        folders: ['640-walls'],
+        selectedFolder: '640-walls',
+        onFolderChange: vi.fn(),
+        hiddenFolders: new Set<string>(['640-walls']),
+        onToggleHiddenFolder: vi.fn(),
+        onShowAllFolders: vi.fn(),
+        allTags: [],
+        selectedTag: '',
+        onTagChange: vi.fn(),
+        hiddenTags: new Set<string>(),
+        onToggleHiddenTag: vi.fn(),
+        onShowAllTags: vi.fn(),
+        aspectRatioFilters: [],
+        onAspectRatioFiltersChange: vi.fn(),
+        showDuplicatesOnly: false,
+        onShowDuplicatesOnlyChange: vi.fn(),
+        showVariationsOnly: false,
+        onShowVariationsOnlyChange: vi.fn(),
+        showMotionAssetsOnly: false,
+        onShowMotionAssetsOnlyChange: vi.fn(),
+        showOnlyMissingEmbeddings: false,
+        onShowOnlyMissingEmbeddingsChange: vi.fn(),
+        onlyCanonical: false,
+        onOnlyCanonicalChange: vi.fn(),
+        respectAspectRatio: false,
+        onRespectAspectRatioChange: vi.fn(),
+        showBrokenOnly: false,
+        onShowBrokenOnlyChange: vi.fn(),
+        showComfyOnly: false,
+        onShowComfyOnlyChange: vi.fn(),
+        onClearFilters: vi.fn(),
+        hasActiveFilters: false,
+      })
+    );
+
+    expect(allMarkup).toContain('All Folders');
+    expect(allMarkup).not.toContain('Select…');
+    expect(hiddenMarkup).toContain('640-walls (hidden)');
+  });
+
   it('renders namespace delete affordance for deletable namespaces', () => {
     const markup = renderToStaticMarkup(
       React.createElement(GalleryNamespaceModal, {

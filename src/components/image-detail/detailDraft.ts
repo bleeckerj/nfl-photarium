@@ -12,7 +12,6 @@ export type ImageDetailDraft = {
   originalUrlInput: string;
   sourceUrlInput: string;
   displayNameInput: string;
-  clearExif: boolean;
 };
 
 export function shouldRestoreImageDetailDraft(

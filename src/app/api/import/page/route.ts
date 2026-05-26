@@ -1,20 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Agent } from 'undici';
 import {
-  looksLikeTinyTrackingPixel,
-  looksLikeTrackingOrUtilityAsset,
-  looksLikeUiChromeAsset,
-} from '@/server/pageImportFilters';
-import {
   buildArchiveChallengeMessage,
   inspectArchiveHtml,
   logArchiveDiagnostics,
   readArchiveResponseDiagnostics,
 } from '@/server/archiveDiagnostics';
 import { normalizeCookieHeader } from '@/server/pageImportCookies';
-import { toImportCandidate } from '@/server/import-metadata/candidates';
-
-const DEFAULT_MIN_BYTES = 8 * 1024;
+import {
+  DEFAULT_PAGE_IMPORT_MIN_BYTES,
+  discoverPageMediaFromHtml,
+  isPrivateHost,
+} from '@/server/pageImportDiscovery';
 
 // Use a browser-like User-Agent to avoid sites (e.g. Google Drive) redirecting to login pages
 const BROWSER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -99,180 +96,6 @@ const buildFetchPageFailureMessage = (sourceUrl: string, response: Response) => 
   return `Failed to fetch page from ${host} (HTTP ${status} ${statusText}). ${hint}`;
 };
 
-const isPrivateHost = (hostname: string) => {
-  const lowered = hostname.toLowerCase();
-  if (lowered === 'localhost') return true;
-  const ipv4Match = /^(\d{1,3}\.){3}\d{1,3}$/.test(lowered);
-  if (!ipv4Match) return false;
-  const octets = lowered.split('.').map((part) => Number(part));
-  if (octets.some((value) => Number.isNaN(value) || value < 0 || value > 255)) {
-    return true;
-  }
-  const [a, b] = octets;
-  if (a === 10) return true;
-  if (a === 127) return true;
-  if (a === 192 && b === 168) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 169 && b === 254) return true;
-  return false;
-};
-
-const extractBaseHref = (html: string) => {
-  const match = html.match(/<base[^>]*href=["']([^"']+)["'][^>]*>/i);
-  return match?.[1];
-};
-
-const parseAttributes = (tag: string) => {
-  const attributes: Record<string, string> = {};
-  const attrRegex = /([a-zA-Z_:][a-zA-Z0-9_:\-]*)\s*=\s*(["'])(.*?)\2/g;
-  let match: RegExpExecArray | null;
-  while ((match = attrRegex.exec(tag)) !== null) {
-    attributes[match[1].toLowerCase()] = match[3];
-  }
-  return attributes;
-};
-
-type SrcsetCandidate = { url: string; score: number };
-
-const pickSrcsetCandidate = (srcset: string) => {
-  const parts = srcset.split(',');
-  const candidates: SrcsetCandidate[] = [];
-  for (const part of parts) {
-    const trimmed = part.trim();
-    if (!trimmed) continue;
-    const [url, descriptor] = trimmed.split(/\s+/, 2);
-    let score = 0;
-    if (descriptor?.endsWith('w')) {
-      const width = Number(descriptor.slice(0, -1));
-      score = Number.isFinite(width) ? width : 0;
-    } else if (descriptor?.endsWith('x')) {
-      const ratio = Number(descriptor.slice(0, -1));
-      score = Number.isFinite(ratio) ? ratio * 1000 : 0;
-    } else {
-      score = 1;
-    }
-    candidates.push({ url, score });
-  }
-  if (candidates.length === 0) return undefined;
-  candidates.sort((a, b) => b.score - a.score);
-  return candidates[0].url;
-};
-
-type DiscoveredMediaCandidate = {
-  kind: 'image' | 'video';
-  rawUrl: string;
-  filenameHint?: string;
-};
-
-const extractImageUrls = (html: string) => {
-  const tags = html.match(/<img\b[^>]*>/gi) ?? [];
-  const urls: DiscoveredMediaCandidate[] = [];
-  for (const tag of tags) {
-    const attrs = parseAttributes(tag);
-    const typeValue = (attrs.type || '').toLowerCase();
-    const srcsetCandidate = attrs.srcset ? pickSrcsetCandidate(attrs.srcset) : undefined;
-    const raw =
-      srcsetCandidate ||
-      attrs.src ||
-      attrs['data-src'] ||
-      attrs['data-lazy-src'] ||
-      attrs['data-original'];
-    if (!raw) continue;
-    const looksLikeVideoSource =
-      typeValue.startsWith('video/') || /\.(mp4|webm|mov|m4v|ogv|ogg)(\?|$)/i.test(raw);
-    urls.push({
-      kind: looksLikeVideoSource ? 'video' : 'image',
-      rawUrl: raw,
-    });
-  }
-  return urls;
-};
-
-const extractVideoUrls = (html: string) => {
-  const candidates: DiscoveredMediaCandidate[] = [];
-  const videoTags = html.match(/<video\b[^>]*>([\s\S]*?)<\/video>/gi) ?? [];
-  for (const videoTag of videoTags) {
-    const videoOpenTag = videoTag.match(/<video\b[^>]*>/i)?.[0] ?? '';
-    const videoAttrs = parseAttributes(videoOpenTag);
-    const filenameHint = videoAttrs['aria-label'] || videoAttrs['title'] || videoAttrs['data-filename'];
-    const directVideoSrc =
-      videoAttrs.src || videoAttrs['data-src'] || videoAttrs['data-original'] || videoAttrs.poster;
-    if (directVideoSrc) {
-      candidates.push({
-        kind: 'video',
-        rawUrl: directVideoSrc,
-        filenameHint,
-      });
-    }
-
-    const sourceTags = videoTag.match(/<source\b[^>]*>/gi) ?? [];
-    for (const sourceTag of sourceTags) {
-      const attrs = parseAttributes(sourceTag);
-      const raw = attrs.src || (attrs.srcset ? pickSrcsetCandidate(attrs.srcset) : undefined);
-      if (!raw) continue;
-      candidates.push({
-        kind: 'video',
-        rawUrl: raw,
-        filenameHint,
-      });
-    }
-  }
-  return candidates;
-};
-
-const resolveUrl = (value: string, baseUrl: string) => {
-  try {
-    const resolved = new URL(value, baseUrl);
-    if (!['http:', 'https:'].includes(resolved.protocol)) return undefined;
-    resolved.hash = '';
-    if (isPrivateHost(resolved.hostname)) return undefined;
-    return resolved.toString();
-  } catch {
-    return undefined;
-  }
-};
-
-const resolveMediaCandidate = (candidate: DiscoveredMediaCandidate, baseUrl: string) => {
-  const raw = candidate.rawUrl.trim();
-  if (!raw) return null;
-
-  if (raw.startsWith('blob:')) {
-    return {
-      kind: candidate.kind,
-      url: raw,
-      isBlob: true,
-      filename: candidate.filenameHint || getFilenameFromUrl(raw),
-    };
-  }
-
-  const resolved = resolveUrl(raw, baseUrl);
-  if (!resolved) return null;
-  return {
-    kind: candidate.kind,
-    url: resolved,
-    isBlob: false,
-    filename: candidate.filenameHint || getFilenameFromUrl(resolved),
-  };
-};
-
-const mapWithConcurrency = async <T, R>(
-  items: T[],
-  limit: number,
-  mapper: (item: T) => Promise<R>
-) => {
-  const results: R[] = [];
-  let index = 0;
-  const run = async () => {
-    while (index < items.length) {
-      const currentIndex = index++;
-      results[currentIndex] = await mapper(items[currentIndex]);
-    }
-  };
-  const workers = Array.from({ length: Math.min(limit, items.length) }, () => run());
-  await Promise.all(workers);
-  return results;
-};
-
 const fetchHeadInfo = async (url: string, allowInsecure: boolean) => {
   try {
     const response = await fetchWithCertFallback(url, allowInsecure, { method: 'HEAD', redirect: 'follow' });
@@ -288,20 +111,14 @@ const fetchHeadInfo = async (url: string, allowInsecure: boolean) => {
   }
 };
 
-const getFilenameFromUrl = (value: string) => {
-  try {
-    const parsed = new URL(value);
-    const segments = parsed.pathname.split('/').filter(Boolean);
-    return segments[segments.length - 1] || 'remote-image';
-  } catch {
-    return 'remote-image';
-  }
-};
-
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const pageUrl = typeof body?.url === 'string' ? body.url.trim() : '';
+    const htmlBody = typeof body?.html === 'string' ? body.html : '';
+    const sourceUrl = typeof body?.sourceUrl === 'string' ? body.sourceUrl.trim() : '';
+    const sourceFilename = typeof body?.sourceFilename === 'string' ? body.sourceFilename.trim() : '';
+    const hasHtmlBody = htmlBody.trim().length > 0;
     const includeUiChrome = Boolean(body?.includeUiChrome);
     const includeSmallAssets = Boolean(body?.includeSmallAssets);
     let cookieHeader: string | null = null;
@@ -312,13 +129,68 @@ export async function POST(request: NextRequest) {
     }
     const minBytes = Number.isFinite(body?.minBytes)
       ? Number(body.minBytes)
-      : (includeSmallAssets ? 1024 : DEFAULT_MIN_BYTES);
+      : (includeSmallAssets ? 1024 : DEFAULT_PAGE_IMPORT_MIN_BYTES);
     const maxImages = Number.isFinite(body?.maxImages) ? Math.max(0, Number(body.maxImages)) : undefined;
     const allowInsecureEnv = process.env.IMPORT_ALLOW_INSECURE_TLS === 'true';
     const allowInsecure = allowInsecureEnv && Boolean(body?.allowInsecure);
 
     if (process.env.NODE_ENV !== 'production') {
       console.log('[import/page] allowInsecureEnv:', allowInsecureEnv, 'allowInsecureReq:', Boolean(body?.allowInsecure), 'effective:', allowInsecure);
+    }
+
+    if (hasHtmlBody) {
+      const htmlSourceUrl = sourceUrl || (pageUrl && isValidUrl(pageUrl) ? pageUrl : '');
+      if (sourceUrl && !isValidUrl(sourceUrl)) {
+        return NextResponse.json({ error: 'sourceUrl must be a valid page URL when provided' }, { status: 400 });
+      }
+      if (htmlSourceUrl) {
+        const parsedSource = new URL(htmlSourceUrl);
+        if (isPrivateHost(parsedSource.hostname)) {
+          return NextResponse.json({ error: 'Private or localhost source URLs are not allowed' }, { status: 400 });
+        }
+      }
+
+      const diagnosticSource = htmlSourceUrl || sourceFilename || 'local-html';
+      const archiveDiagnostics = inspectArchiveHtml({
+        sourceUrl: diagnosticSource,
+        html: htmlBody,
+        status: 200,
+        finalUrl: diagnosticSource,
+        contentType: 'text/html',
+      });
+      logArchiveDiagnostics('import/page', archiveDiagnostics, { phase: 'html-body-scan' });
+      if (archiveDiagnostics?.challengeDetected) {
+        return NextResponse.json(
+          {
+            error: buildArchiveChallengeMessage(archiveDiagnostics.host),
+            details: {
+              archiveDiagnostics,
+            },
+          },
+          { status: 403 }
+        );
+      }
+
+      const discovery = await discoverPageMediaFromHtml({
+        html: htmlBody,
+        sourceUrl: htmlSourceUrl || undefined,
+        minBytes,
+        maxImages,
+        includeUiChrome,
+        fetchHeadInfo: (url) => fetchHeadInfo(url, allowInsecure),
+      });
+
+      return NextResponse.json({
+        sourceUrl: htmlSourceUrl || null,
+        sourceFilename: sourceFilename || null,
+        minBytes,
+        maxImages: typeof maxImages === 'number' ? maxImages : null,
+        allowInsecure,
+        includeUiChrome,
+        includeSmallAssets,
+        archiveDiagnostics,
+        ...discovery,
+      });
     }
 
     if (!pageUrl || !isValidUrl(pageUrl)) {
@@ -425,113 +297,14 @@ export async function POST(request: NextRequest) {
         { status: 403 }
       );
     }
-    const baseHref = extractBaseHref(html);
-    const baseUrl = baseHref ? new URL(baseHref, pageUrl).toString() : pageUrl;
-
-    const rawCandidates = [...extractImageUrls(html), ...extractVideoUrls(html)];
-    const resolvedCandidates = rawCandidates
-      .map((candidate) => resolveMediaCandidate(candidate, baseUrl))
-      .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate));
-
-    const dedupedCandidates = Array.from(
-      new Map(
-        resolvedCandidates.map((candidate) => [
-          `${candidate.kind}:${candidate.url}`,
-          candidate,
-        ])
-      ).values()
-    );
-
-    const filteredCandidates = dedupedCandidates.filter(
-      (candidate) =>
-        (includeUiChrome || !looksLikeUiChromeAsset(candidate.url, candidate.filename)) &&
-        !looksLikeTrackingOrUtilityAsset(candidate.url, candidate.filename) &&
-        !looksLikeTinyTrackingPixel({
-          url: candidate.url,
-          filenameHint: candidate.filename,
-        })
-    );
-
-    const imageCandidates = filteredCandidates.filter((candidate) => candidate.kind === 'image' && !candidate.isBlob);
-    const videoCandidates = filteredCandidates.filter((candidate) => candidate.kind === 'video');
-
-    const limitedImageCandidates =
-      typeof maxImages === 'number' && maxImages > 0
-        ? imageCandidates.slice(0, maxImages)
-        : imageCandidates;
-
-    const headInfos = await mapWithConcurrency(limitedImageCandidates, 6, async (candidate) => ({
-      url: candidate.url,
-      filename: candidate.filename,
-      ...(await fetchHeadInfo(candidate.url, allowInsecure))
-    }));
-
-    const images = headInfos
-      .filter((info) => {
-        if (looksLikeTinyTrackingPixel({
-          url: info.url,
-          filenameHint: info.filename,
-          contentLength: info.contentLength,
-        })) {
-          return false;
-        }
-        if (info.contentType && !info.contentType.startsWith('image/')) return false;
-        if (typeof info.contentLength === 'number' && info.contentLength < minBytes) return false;
-        return true;
-      })
-      .map((info) => ({
-        url: info.url,
-        filename: info.filename || getFilenameFromUrl(info.url),
-        contentType: info.contentType,
-        contentLength: info.contentLength
-      }));
-
-    const videos = videoCandidates.map((candidate) => ({
-      kind: 'video' as const,
-      url: candidate.url,
-      filename: candidate.filename || getFilenameFromUrl(candidate.url),
-      isBlob: candidate.isBlob,
-      contentType: candidate.url.startsWith('blob:') ? undefined : 'video/unknown',
-    }));
-
-    const normalizedImages = images.map((image) => {
-      const candidate = toImportCandidate({
-        kind: 'image',
-        url: image.url,
-        filename: image.filename || getFilenameFromUrl(image.url),
-        metadata: {
-          fileSizeBytes: image.contentLength,
-          contentType: image.contentType,
-          sources: {
-            fileSize: typeof image.contentLength === 'number' ? 'head' : undefined,
-          },
-        },
-      });
-      return {
-        ...candidate,
-        contentType: image.contentType,
-        contentLength: image.contentLength,
-      };
+    const discovery = await discoverPageMediaFromHtml({
+      html,
+      sourceUrl: pageUrl,
+      minBytes,
+      maxImages,
+      includeUiChrome,
+      fetchHeadInfo: (url) => fetchHeadInfo(url, allowInsecure),
     });
-
-    const normalizedVideos = videos.map((video) => {
-      const candidate = toImportCandidate({
-        kind: 'video',
-        url: video.url,
-        filename: video.filename || getFilenameFromUrl(video.url),
-        isBlobSource: video.isBlob,
-        metadata: {
-          contentType: video.contentType,
-        },
-      });
-      return {
-        ...candidate,
-        isBlob: video.isBlob,
-        contentType: video.contentType,
-      };
-    });
-
-    const media = [...normalizedImages, ...normalizedVideos];
 
     return NextResponse.json({
       sourceUrl: pageUrl,
@@ -541,9 +314,7 @@ export async function POST(request: NextRequest) {
       includeUiChrome,
       includeSmallAssets,
       archiveDiagnostics,
-      images: normalizedImages,
-      videos: normalizedVideos,
-      media,
+      ...discovery,
     });
   } catch (error) {
     console.error('Page import discovery error:', error);

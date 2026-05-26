@@ -215,6 +215,33 @@ describe('GET /api/images/:id embedding status', () => {
     expect(payload.image.namespace).toBeUndefined();
   });
 
+  it('surfaces extras-backed EXIF metadata on the detail response', async () => {
+    getImageExtrasRecordMock.mockResolvedValueOnce({
+      schemaVersion: 1,
+      imageId: 'img-1',
+      exif: {
+        make: 'Nikon',
+        model: 'Z f',
+        iso: 400,
+      },
+      createdAt: '2026-03-20T00:00:00.000Z',
+      updatedAt: '2026-03-20T00:00:00.000Z',
+    });
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/images/img-1'),
+      { params: Promise.resolve({ id: 'img-1' }) }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.image.exif).toEqual({
+      make: 'Nikon',
+      model: 'Z f',
+      iso: 400,
+    });
+  });
+
   it('refreshes from Cloudflare when explicitly requested', async () => {
     getCachedImageMock.mockResolvedValueOnce({
       id: 'img-live',

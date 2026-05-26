@@ -7,11 +7,15 @@ const {
   getCacheStatsMock,
   listVideoAssetRecordsWithSyncMock,
   getImageExtrasRecordsMock,
+  getImageFolderOverridesMock,
+  getImageFolderOverridesVersionMock,
 } = vi.hoisted(() => ({
   getCachedImagesMock: vi.fn(),
   getCacheStatsMock: vi.fn(),
   listVideoAssetRecordsWithSyncMock: vi.fn(),
   getImageExtrasRecordsMock: vi.fn(),
+  getImageFolderOverridesMock: vi.fn<[], Promise<Map<string, string | undefined>>>(),
+  getImageFolderOverridesVersionMock: vi.fn<[], number>(),
 }));
 
 vi.mock('@/server/cloudflareImageCache', () => ({
@@ -31,6 +35,10 @@ vi.mock('@/server/videoCatalogStorage', () => ({
 
 vi.mock('@/server/imageExtras', () => ({
   getImageExtrasRecords: getImageExtrasRecordsMock,
+  // Fix 1 / Fix 2 (perf): route reads the folder-override map and its
+  // version on every request. Tests set these per-case via the hoisted mocks.
+  getImageFolderOverrides: getImageFolderOverridesMock,
+  getImageFolderOverridesVersion: getImageFolderOverridesVersionMock,
 }));
 
 describe('GET /api/images video integration', () => {
@@ -65,6 +73,8 @@ describe('GET /api/images video integration', () => {
       },
     ]);
     getImageExtrasRecordsMock.mockResolvedValue({});
+    getImageFolderOverridesMock.mockResolvedValue(new Map<string, string | undefined>());
+    getImageFolderOverridesVersionMock.mockReturnValue(0);
   });
 
   it('returns merged image and video assets', async () => {
@@ -587,6 +597,74 @@ describe('GET /api/images video integration', () => {
         childIds: ['img-child'],
       })
     );
+  });
+
+  it('uses extras-backed folders for gallery facets, filters, hidden folders, and cards', async () => {
+    getCachedImagesMock.mockResolvedValue([
+      {
+        id: 'moved-image',
+        filename: 'moved.jpg',
+        folder: 'old-folder',
+        uploaded: '2026-02-20T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/moved-image/public'],
+        tags: [],
+      },
+      {
+        id: 'other-image',
+        filename: 'other.jpg',
+        folder: 'other-folder',
+        uploaded: '2026-02-19T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/other-image/public'],
+        tags: [],
+      },
+    ]);
+    listVideoAssetRecordsWithSyncMock.mockResolvedValue([]);
+    getImageExtrasRecordsMock.mockResolvedValue({
+      'moved-image': {
+        schemaVersion: 1,
+        imageId: 'moved-image',
+        folder: 'new-folder',
+        createdAt: '2026-02-20T00:00:00.000Z',
+        updatedAt: '2026-02-20T00:00:00.000Z',
+      },
+      'other-image': null,
+    });
+    // Fix 1 (perf): the route now consults the in-memory folder-override map
+    // for pre-pagination folder merging. Seed it to match the extras above.
+    getImageFolderOverridesMock.mockResolvedValue(
+      new Map<string, string | undefined>([['moved-image', 'new-folder']])
+    );
+
+    const facetResponse = await GET(
+      new NextRequest('http://localhost/api/images?page=1&pageSize=10')
+    );
+    const facetPayload = await facetResponse.json();
+
+    expect(facetResponse.status).toBe(200);
+    expect(facetPayload.images.find((image: { id: string }) => image.id === 'moved-image')).toEqual(
+      expect.objectContaining({ folder: 'new-folder' })
+    );
+    expect(facetPayload.facets.folders).toEqual([
+      { value: 'new-folder', count: 1 },
+      { value: 'other-folder', count: 1 },
+    ]);
+
+    const folderResponse = await GET(
+      new NextRequest('http://localhost/api/images?page=1&pageSize=10&folder=new-folder')
+    );
+    const folderPayload = await folderResponse.json();
+
+    expect(folderResponse.status).toBe(200);
+    expect(folderPayload.images.map((image: { id: string }) => image.id)).toEqual(['moved-image']);
+
+    const hiddenResponse = await GET(
+      new NextRequest('http://localhost/api/images?page=1&pageSize=10&hiddenFolders=new-folder')
+    );
+    const hiddenPayload = await hiddenResponse.json();
+
+    expect(hiddenResponse.status).toBe(200);
+    expect(hiddenPayload.images.map((image: { id: string }) => image.id)).toEqual(['other-image']);
+    expect(hiddenPayload.facets.folders).toEqual([{ value: 'other-folder', count: 1 }]);
   });
 
   it('returns all-namespace focus metadata and the focused asset page', async () => {

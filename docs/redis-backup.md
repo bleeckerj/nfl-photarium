@@ -330,6 +330,7 @@ Or restart the app - it will recreate indexes on startup.
 
 ## Related Documentation
 
+- [Redis VPS Migration Plan](./redis-vps-migration-plan.md) - Move the Redis Stack container to a VPS and pull backups locally
 - [Remote Hash Cache](./remote-hash-cache.md) - Understanding Redis caching
 - [Embedding Generation](./FUTURE_SEARCH_FEATURES.md) - How embeddings are created
 - [Docker Setup](../README.md#redis-setup) - Initial Redis configuration

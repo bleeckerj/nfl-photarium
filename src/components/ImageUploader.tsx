@@ -541,6 +541,7 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
   const embeddingQueueRef = useRef<Array<{ id: string; clip: boolean; color: boolean }>>([]);
   const embeddingWorkerRef = useRef(false);
   const activeUploadOpsRef = useRef(0);
+  const manualUploadInFlightRef = useRef(false);
   const galleryRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const setSourceUrlIfEmpty = useCallback((value: string) => {
@@ -576,6 +577,7 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     setPageImportCookieHeader,
     pageImportProgress,
     handleImportPage,
+    handleImportHtmlFile,
     handleStopImportPage,
     handlePasteCookiesAndScan,
   } = usePageImportDiscovery({
@@ -1975,6 +1977,10 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
 
   // Manual upload button handler
   const handleManualUpload = async () => {
+    if (manualUploadInFlightRef.current) {
+      return;
+    }
+
     const selectedItems = queuedFiles.filter((item) => item.selected !== false);
     if (selectedItems.length === 0) return;
     if (!uploadNamespace) {
@@ -1982,39 +1988,44 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
       return;
     }
 
-    const localItems = selectedItems.filter((item) => Boolean(item.file));
-    const remoteItems = selectedItems.filter((item) => Boolean(item.remoteUrl) && !item.file);
+    manualUploadInFlightRef.current = true;
+    try {
+      const localItems = selectedItems.filter((item) => Boolean(item.file));
+      const remoteItems = selectedItems.filter((item) => Boolean(item.remoteUrl) && !item.file);
 
-    if (localItems.length > 0) {
-      const processed: QueuedFile[] = [];
-      for (const item of localItems) {
-        if (!item.file) continue;
-        const processedFile = isArchiveFile(item.file) ? item.file : item.file;
-        processed.push({
-          assetType: item.assetType,
-          file: processedFile,
-          filename: item.filename,
-          id: item.id,
-          originalUrl: item.originalUrl,
-          sourceUrl: item.sourceUrl,
-          sourcePath: item.sourcePath,
-          posterUrl: item.posterUrl,
-          isBlobSource: item.isBlobSource,
-          folder: item.folder,
-          tags: item.tags,
-          description: item.description,
-          selected: item.selected
-        });
+      if (localItems.length > 0) {
+        const processed: QueuedFile[] = [];
+        for (const item of localItems) {
+          if (!item.file) continue;
+          const processedFile = isArchiveFile(item.file) ? item.file : item.file;
+          processed.push({
+            assetType: item.assetType,
+            file: processedFile,
+            filename: item.filename,
+            id: item.id,
+            originalUrl: item.originalUrl,
+            sourceUrl: item.sourceUrl,
+            sourcePath: item.sourcePath,
+            posterUrl: item.posterUrl,
+            isBlobSource: item.isBlobSource,
+            folder: item.folder,
+            tags: item.tags,
+            description: item.description,
+            selected: item.selected
+          });
+        }
+        await uploadFiles(processed);
       }
-      await uploadFiles(processed);
-    }
 
-    if (remoteItems.length > 0) {
-      await uploadRemoteFiles(remoteItems);
-    }
+      if (remoteItems.length > 0) {
+        await uploadRemoteFiles(remoteItems);
+      }
 
-    const attemptedIds = new Set(selectedItems.map((item) => item.id));
-    setQueuedFiles((prev) => unselectAttemptedQueuedItems(prev, attemptedIds));
+      const attemptedIds = new Set(selectedItems.map((item) => item.id));
+      setQueuedFiles((prev) => unselectAttemptedQueuedItems(prev, attemptedIds));
+    } finally {
+      manualUploadInFlightRef.current = false;
+    }
   };
 
   const handleAiRefineSelectedNames = useCallback(async () => {
@@ -2855,6 +2866,7 @@ A long list of filenames is not user friendly and essentially useless for select
         pageImportError={pageImportError}
         pageImportProgress={pageImportProgress}
         handleImportPage={handleImportPage}
+        handleImportHtmlFile={handleImportHtmlFile}
         handleStopImportPage={handleStopImportPage}
         handlePasteCookiesAndScan={handlePasteCookiesAndScan}
       />

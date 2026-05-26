@@ -26,6 +26,7 @@ const createRequest = (body: Record<string, unknown>, signal?: AbortSignal) =>
 
 const createMockBrowser = (options?: {
   gotoDelayMs?: number;
+  gotoError?: Error;
   mediaBatches?: unknown[];
 }) => {
   const mediaBatches = [...(options?.mediaBatches || [])];
@@ -59,6 +60,9 @@ const createMockBrowser = (options?: {
         await new Promise((resolve) => setTimeout(resolve, options.gotoDelayMs));
       }
       page.url.mockReturnValue(url);
+      if (options?.gotoError) {
+        throw options.gotoError;
+      }
       return { status: () => 200 };
     }),
     on: vi.fn(),
@@ -156,5 +160,38 @@ describe('POST /api/import/page/scroll/stream', () => {
     expect(response.status).toBe(200);
     expect(text).not.toContain('event: error');
     expect(browser.close).toHaveBeenCalled();
+  });
+
+  it('continues scanning loaded content when browser navigation times out', async () => {
+    const { browser } = createMockBrowser({
+      gotoError: new Error('Navigation timeout of 30000 ms exceeded'),
+      mediaBatches: [makeMediaResults(2), []],
+    });
+
+    (globalThis as typeof globalThis & { __PHOTARIUM_TEST_PUPPETEER__?: unknown })
+      .__PHOTARIUM_TEST_PUPPETEER__ = {
+      launch: vi.fn(async () => browser),
+    };
+
+    const response = await POST(
+      createRequest({
+        url: 'https://example.com/page',
+        autoScrollUntilStable: false,
+        maxScrolls: 1,
+        maxAssets: 2,
+        maxPages: 1,
+        scrollDelayMs: 500,
+      })
+    );
+
+    const text = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(text).toContain('event: status');
+    expect(text).toContain('Page load timed out before all browser navigation signals completed');
+    expect((text.match(/event: media/g) || []).length).toBe(2);
+    expect(text).toContain('event: done');
+    expect(text).not.toContain('event: error');
+    expect(browser.close).toHaveBeenCalledTimes(1);
   });
 });

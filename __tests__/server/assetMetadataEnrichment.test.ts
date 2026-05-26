@@ -8,6 +8,7 @@ const syncVideoAssetRecordFromStreamMock = vi.fn();
 const updateVideoAssetRecordMock = vi.fn();
 const probeVideoSourceMock = vi.fn();
 const fetchImageDimensionsMock = vi.fn();
+const storeImageAspectMetadataMock = vi.fn();
 
 vi.mock('@/server/cloudflareImageCache', () => ({
   getCachedImage: getCachedImageMock,
@@ -32,7 +33,16 @@ vi.mock('@/server/videoFrameService', () => ({
 }));
 
 vi.mock('@/server/aspectRatio', () => ({
+  classifyAspectRatio: (width: number, height: number) => {
+    const ratio = width / height;
+    if (Math.abs(ratio - 1) <= 0.05) return 'square';
+    return ratio > 1 ? 'horizontal' : 'vertical';
+  },
   fetchImageDimensions: fetchImageDimensionsMock,
+}));
+
+vi.mock('@/server/vectorSearch', () => ({
+  storeImageAspectMetadata: storeImageAspectMetadataMock,
 }));
 
 vi.mock('@/utils/imageUtils', async () => {
@@ -83,6 +93,41 @@ describe('asset metadata enrichment', () => {
         dimensions: { width: 1800, height: 1200 },
       })
     );
+    expect(storeImageAspectMetadataMock).toHaveBeenCalledWith({
+      imageId: 'img-1',
+      aspectRatio: '3:2',
+      aspectRatioClass: 'horizontal',
+      width: 1800,
+      height: 1200,
+    });
+  });
+
+  it('persists existing complete image dimensions to Redis without recomputing them', async () => {
+    const image: CachedCloudflareImage = {
+      id: 'img-existing',
+      filename: 'existing.jpg',
+      uploaded: '2026-04-27T00:00:00.000Z',
+      variants: ['https://cdn.example.com/img-existing/public'],
+      tags: [],
+      size: 4096,
+      aspectRatio: '1:1',
+      dimensions: { width: 1200, height: 1200 },
+    };
+    getCachedImageMock.mockResolvedValue(image);
+
+    const { enrichImageAssetMetadata } = await import('@/server/assetMetadataEnrichment');
+    const enriched = await enrichImageAssetMetadata('img-existing');
+
+    expect(enriched).toBe(image);
+    expect(fetchImageDimensionsMock).not.toHaveBeenCalled();
+    expect(upsertCachedImageMock).not.toHaveBeenCalled();
+    expect(storeImageAspectMetadataMock).toHaveBeenCalledWith({
+      imageId: 'img-existing',
+      aspectRatio: '1:1',
+      aspectRatioClass: 'square',
+      width: 1200,
+      height: 1200,
+    });
   });
 
   it('enriches video metadata from stream sync, HEAD size, and ffprobe fallback', async () => {

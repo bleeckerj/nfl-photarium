@@ -244,6 +244,11 @@ export const clearGalleryReturnState = (): void => {
   window.sessionStorage.removeItem(GALLERY_RETURN_STATE_KEY);
 };
 
+export const clearGalleryReturnSnapshot = (): void => {
+  if (typeof window === 'undefined') return;
+  window.sessionStorage.removeItem(GALLERY_RETURN_SNAPSHOT_KEY);
+};
+
 const isSeedAssetRecord = (value: unknown): value is Record<string, unknown> & { id: string } => {
   if (!value || typeof value !== 'object') return false;
   const record = value as Record<string, unknown>;

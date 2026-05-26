@@ -12,9 +12,9 @@ export function VariantLinksSection(props: {
     altText?: string
   ) => Promise<void>;
   imageAltTag?: string;
-  imageFilename?: string;
+  imageDownloadName?: string;
 }) {
-  const { variants, getVariantWidthLabel, onHandleCopyUrl, imageAltTag, imageFilename } = props;
+  const { variants, getVariantWidthLabel, onHandleCopyUrl, imageAltTag, imageDownloadName } = props;
   const toast = useToast();
   const formatOptions = [
     { label: 'PNG', format: 'png', extension: 'png' },
@@ -40,7 +40,7 @@ export function VariantLinksSection(props: {
 
   const handleDownload = async (sourceUrl: string, format: string, extension: string) => {
     try {
-      const downloadName = formatDownloadFileName(imageFilename || 'image', extension);
+      const downloadName = formatDownloadFileName(imageDownloadName || 'image', extension);
       await downloadImageToFile(buildFormatUrl(sourceUrl, format), downloadName);
       toast.push('Download started');
     } catch (error) {

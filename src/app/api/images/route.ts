@@ -2,8 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCachedImages, getCacheStats } from '@/server/cloudflareImageCache';
 import { batchGetAspectMetadata, batchGetColorMetadata, isVectorSearchAvailable } from '@/server/vectorSearch';
 import { listVideoAssetRecordsWithSync } from '@/server/videoCatalogStorage';
-import { getImageExtrasRecords } from '@/server/imageExtras';
-import { queryGalleryAssets, type GalleryQueryFilters } from '@/server/galleryQuery';
+import {
+  getImageExtrasRecords,
+  getImageFolderOverrides,
+  getImageFolderOverridesVersion,
+} from '@/server/imageExtras';
+import { queryGalleryAssets, type GalleryQueryAsset, type GalleryQueryFilters } from '@/server/galleryQuery';
 
 type ListableImage = {
   id: string;
@@ -148,6 +152,24 @@ const parseEmbeddingFilter = (value: string | null): GalleryQueryFilters['embedd
   return 'none';
 };
 
+const isImageAsset = (asset: GalleryQueryAsset) =>
+  asset.assetType !== 'video';
+
+const applyFolderOverridesToAssets = <T extends GalleryQueryAsset>(
+  assets: T[],
+  overrides: Map<string, string | undefined>
+): T[] => {
+  if (overrides.size === 0) return assets;
+  return assets.map((asset) => {
+    if (asset.assetType === 'video') return asset;
+    if (!overrides.has(asset.id)) return asset;
+    return {
+      ...asset,
+      folder: overrides.get(asset.id),
+    };
+  });
+};
+
 function toListableImage(image: Record<string, unknown>): ListableImage {
   const rawDimensions = image.dimensions as { width?: unknown; height?: unknown } | undefined;
   const width = typeof rawDimensions?.width === 'number' ? rawDimensions.width : undefined;
@@ -256,11 +278,19 @@ export async function GET(request: NextRequest) {
           : namespaceParam !== null
             ? namespaceParam.trim()
             : defaultNamespace;
-    const cacheStart = performance.now();
-    const images = await getCachedImages(forceRefresh);
-    timings.cache_load = mark(performance.now() - cacheStart);
-    const filteredImages = images.filter((image) => matchesNamespace(image.namespace, namespace));
-    diagnostics.filtered_image_count = filteredImages.length;
+    // Kick off all three I/O-bound loads concurrently. They are independent:
+    // the image cache, the video catalog, and the folder-override map do not
+    // depend on each other's results. Awaiting them serially adds their
+    // latencies together; awaiting them in parallel makes total I/O time
+    // bounded by the slowest of the three. On a warm process all three are
+    // ~tens of ms; on a cold process this saves whichever pair would have
+    // run sequentially.
+    const folderOverridesPromise = getImageFolderOverrides();
+    folderOverridesPromise.catch((error) => {
+      console.warn('[ImagesAPI] Folder override warm failed:', error);
+    });
+
+    const cachePromise = markStage('cache_load', () => getCachedImages(forceRefresh));
 
     const videoAssetsEnabled = process.env.ENABLE_VIDEO_ASSETS === '1';
     const configuredVideoLimit = Number(process.env.VIDEO_ASSET_LIST_LIMIT ?? 300);
@@ -268,9 +298,15 @@ export async function GET(request: NextRequest) {
     const videoLimit = Number.isFinite(parsedVideoLimit) && parsedVideoLimit > 0
       ? Math.floor(parsedVideoLimit)
       : 300;
-    const allVideos = videoAssetsEnabled
-      ? await markStage('videos_load', () => listVideoAssetRecordsWithSync())
-      : [];
+    const videosPromise = videoAssetsEnabled
+      ? markStage('videos_load', () => listVideoAssetRecordsWithSync())
+      : Promise.resolve([] as Awaited<ReturnType<typeof listVideoAssetRecordsWithSync>>);
+
+    const images = await cachePromise;
+    const filteredImages = images.filter((image) => matchesNamespace(image.namespace, namespace));
+    diagnostics.filtered_image_count = filteredImages.length;
+
+    const allVideos = await videosPromise;
     const mappedVideos = allVideos.map((video) => ({
       id: video.id,
       assetType: 'video' as const,
@@ -397,7 +433,48 @@ export async function GET(request: NextRequest) {
       }
       return enrichedImageMap.get(asset.id) ?? asset;
     });
-    let finalImages = finalAssetsBeforeQuery;
+    let finalImages: GalleryQueryAsset[] = finalAssetsBeforeQuery as GalleryQueryAsset[];
+    const parsedPage = pageParam ? Number(pageParam) : NaN;
+    const parsedPageSize = pageSizeParam ? Number(pageSizeParam) : NaN;
+    const hasPagination = Number.isFinite(parsedPage) || Number.isFinite(parsedPageSize);
+    const page = Number.isFinite(parsedPage) && parsedPage > 0 ? Math.floor(parsedPage) : 1;
+    const pageSize = Number.isFinite(parsedPageSize) && parsedPageSize > 0
+      ? Math.min(500, Math.floor(parsedPageSize))
+      : 60;
+    const hasGalleryQueryParams = Boolean(
+      search ||
+      folder ||
+      tag ||
+      onlyCanonical ||
+      onlyWithVariants ||
+      favorites ||
+      duplicates ||
+      comfy ||
+      embedding !== 'none' ||
+      aspectRatioClasses.length > 0 ||
+      dateStart ||
+      dateEnd ||
+      hiddenFolders.length > 0 ||
+      hiddenTags.length > 0
+    );
+    const hasFocusQuery = Boolean(focusAssetId);
+    // Folder filtering, hidden-folder filtering, and folder facets all need the
+    // extras-stored folder for each image. We used to MGET the entire extras
+    // dataset (~18k keys, ~270ms) on every request to do this merge -- now we
+    // consult a write-through in-memory map that is populated once on first
+    // request and updated synchronously after every extras mutation. The
+    // populate was kicked off in parallel above, so on warm requests this
+    // await is effectively free.
+    const needsFolderOverrides = hasPagination || hasGalleryQueryParams || hasFocusQuery;
+    const folderOverrides = needsFolderOverrides
+      ? await markStage('query_extras_load', () => folderOverridesPromise)
+      : null;
+    diagnostics.query_extras_image_count = folderOverrides ? folderOverrides.size : 0;
+    if (folderOverrides && folderOverrides.size > 0) {
+      finalImages = await markStage('query_extras_folder_merge', () =>
+        applyFolderOverridesToAssets(finalImages, folderOverrides)
+      );
+    }
     if ((aspectRatioClass || aspectRatio) && aspectRatioClasses.length === 0) {
       finalImages = finalImages.filter((image) => {
         const entry = image as Record<string, unknown>;
@@ -426,34 +503,27 @@ export async function GET(request: NextRequest) {
     }
 
     diagnostics.pre_pagination_count = finalImages.length;
-    const parsedPage = pageParam ? Number(pageParam) : NaN;
-    const parsedPageSize = pageSizeParam ? Number(pageSizeParam) : NaN;
-    const hasPagination = Number.isFinite(parsedPage) || Number.isFinite(parsedPageSize);
-    const page = Number.isFinite(parsedPage) && parsedPage > 0 ? Math.floor(parsedPage) : 1;
-    const pageSize = Number.isFinite(parsedPageSize) && parsedPageSize > 0
-      ? Math.min(500, Math.floor(parsedPageSize))
-      : 60;
-    const hasGalleryQueryParams = Boolean(
-      search ||
-      folder ||
-      tag ||
-      onlyCanonical ||
-      onlyWithVariants ||
-      favorites ||
-      duplicates ||
-      comfy ||
-      embedding !== 'none' ||
-      aspectRatioClasses.length > 0 ||
-      dateStart ||
-      dateEnd ||
-      hiddenFolders.length > 0 ||
-      hiddenTags.length > 0
-    );
-    const hasFocusQuery = Boolean(focusAssetId);
+    // Build a stable scope key that uniquely identifies the dataset+scope
+    // passed into queryGalleryAssets. As long as this key is unchanged
+    // between requests, the family/facet/hidden-filter intermediates can be
+    // safely reused. The key intentionally excludes per-request filters
+    // (search, folder, tag, page, etc.) because those are applied AFTER
+    // the memoized stage.
+    const cacheStats = getCacheStats();
+    const scopeKey = [
+      'v2',
+      cacheStats.lastFetched,
+      getImageFolderOverridesVersion(),
+      namespace ?? '__all__',
+      mediaFilter ?? '__none__',
+      includeFamilyFor || '__none__',
+      videoLimit,
+      videoAssetsEnabled ? 'v1' : 'v0',
+    ].join('|');
     const queryResult = hasPagination || hasGalleryQueryParams || hasFocusQuery
       ? await markStage('gallery_query', () =>
-          queryGalleryAssets(
-            finalImages as never,
+          queryGalleryAssets<GalleryQueryAsset>(
+            finalImages,
             {
               search,
               folder,
@@ -472,7 +542,8 @@ export async function GET(request: NextRequest) {
             },
             page,
             hasPagination || hasFocusQuery ? pageSize : Math.max(1, finalImages.length),
-            focusAssetId
+            focusAssetId,
+            scopeKey
           )
         )
       : null;
@@ -490,6 +561,10 @@ export async function GET(request: NextRequest) {
       .map((asset) => String((asset as { id: string }).id))
       .filter(Boolean);
     diagnostics.extras_image_count = includeExtras ? imageIdsForExtras.length : 0;
+    // includeExtras requests merge full extras records into the response for
+    // the page slice only -- typically ~60 ids, not the full scope. The
+    // pre-pagination folder merge above does NOT pull full records anymore,
+    // so we always need to MGET here when includeExtras is requested.
     const extrasById = includeExtras && imageIdsForExtras.length > 0
       ? await markStage('extras_load', () => getImageExtrasRecords(imageIdsForExtras))
       : {};
@@ -526,7 +601,10 @@ export async function GET(request: NextRequest) {
         }))
       : finalImages;
 
-    const cache = getCacheStats();
+    // cacheStats is captured earlier in this function (above gallery_query)
+    // for the scope key; reuse it here for the response body so we don't pay
+    // the (cheap, but still nonzero) cost twice.
+    const cache = cacheStats;
     const serializedImages = await markStage('serialize_images', () =>
       withExtrasApplied.map((image) => toListableImage(image as Record<string, unknown>))
     );

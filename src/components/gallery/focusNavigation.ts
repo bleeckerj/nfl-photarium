@@ -1,5 +1,43 @@
 export const GALLERY_NAMESPACE_QUERY_PARAM = 'gns';
 export const GALLERY_FOCUS_QUERY_PARAM = 'focus';
+export const GALLERY_NAMESPACE_STORAGE_KEY = 'imageNamespace';
+const GALLERY_PREFERENCES_STORAGE_KEY = 'galleryPreferences';
+
+/**
+ * Wipe the persisted gallery `currentPage` (and any active filters) so that
+ * a focus navigation always starts from a clean pagination/filter baseline.
+ * Defensive: even if the gallery's own focus-mode neutralization fails for
+ * timing reasons, the stored prefs themselves no longer point at a stale page.
+ */
+export const resetGalleryPreferencesForFocus = () => {
+  if (typeof window === 'undefined') return;
+  try {
+    const raw = window.localStorage.getItem(GALLERY_PREFERENCES_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    const reset = {
+      ...(parsed && typeof parsed === 'object' ? parsed : {}),
+      currentPage: 1,
+      searchTerm: '',
+      selectedFolder: 'all',
+      selectedTag: '',
+      onlyCanonical: false,
+      onlyWithVariants: false,
+      showMotionAssetsOnly: false,
+      showFavoritesOnly: false,
+      showComfyOnly: false,
+      showDuplicatesOnly: false,
+      showBrokenOnly: false,
+      embeddingFilter: 'none',
+      aspectRatioFilters: [],
+      hiddenFolders: [],
+      hiddenTags: [],
+      dateFilter: null,
+    };
+    window.localStorage.setItem(GALLERY_PREFERENCES_STORAGE_KEY, JSON.stringify(reset));
+  } catch {
+    // best effort; if storage is unavailable, ignore
+  }
+};
 
 export type CanonicalGalleryFocusTarget = {
   assetId: string;

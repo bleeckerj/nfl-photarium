@@ -26,6 +26,10 @@ import {
   cookieHeaderToPuppeteerCookies,
   normalizeCookieHeader,
 } from '@/server/pageImportCookies';
+import {
+  navigatePageForImport,
+  waitForPageImportNetworkIdle,
+} from '@/server/pageImportBrowserNavigation';
 import { toImportCandidate } from '@/server/import-metadata/candidates';
 
 // Puppeteer types - we use any since it's an optional dependency
@@ -355,7 +359,7 @@ export async function POST(request: NextRequest) {
             close: () => Promise<void>;
             newPage: () => Promise<{
               evaluate: <T>(pageFunction: () => T | Promise<T>) => Promise<T>;
-              goto: (url: string, options: { waitUntil: string; timeout: number }) => Promise<{ status?: () => number } | null>;
+              goto: (url: string, options: { waitUntil: 'load' | 'domcontentloaded' | 'networkidle0' | 'networkidle2'; timeout: number }) => Promise<{ status?: () => number } | null>;
               on: (
                 event: string,
                 listener: (response: {
@@ -390,7 +394,7 @@ export async function POST(request: NextRequest) {
       try {
         send('status', { message: 'Launching browser...', scrollCount: 0, imageCount: 0, pageNum: 1 });
 
-        browser = await pup.launch({
+        const launchedBrowser = await pup.launch({
           headless: true,
           executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
           args: [
@@ -400,9 +404,10 @@ export async function POST(request: NextRequest) {
             '--disable-gpu',
             '--disable-extensions',
           ],
-        });
+        }) as NonNullable<typeof browser>;
+        browser = launchedBrowser;
 
-        const page = await browser.newPage();
+        const page = await launchedBrowser.newPage();
         await page.setViewport({ width: 1280, height: 900 });
         if (cookieHeader) {
           const cookies = cookieHeaderToPuppeteerCookies(pageUrl, cookieHeader);
@@ -894,15 +899,22 @@ export async function POST(request: NextRequest) {
             pageNum: currentPageNum
           });
 
-          const navigationResponse = await page.goto(currentUrl, {
-            waitUntil: 'networkidle2',
-            timeout: timeoutMs,
-          });
+          const navigation = await navigatePageForImport(page, currentUrl, { timeoutMs });
           if (shouldStop()) break;
+          await waitForPageImportNetworkIdle(page);
+          if (shouldStop()) break;
+          if (navigation.warning) {
+            send('status', {
+              message: navigation.warning,
+              scrollCount: totalScrollCount,
+              imageCount: totalMediaSent,
+              pageNum: currentPageNum,
+            });
+          }
 
           await new Promise(resolve => setTimeout(resolve, 1000));
           if (shouldStop()) break;
-          const archiveDiagnostics = await getArchivePageDiagnostics(currentUrl, page, navigationResponse?.status?.());
+          const archiveDiagnostics = await getArchivePageDiagnostics(currentUrl, page, navigation.response?.status?.());
           logArchiveDiagnostics('import/page/scroll/stream', archiveDiagnostics, {
             phase: 'page-load',
             pageNum: currentPageNum,

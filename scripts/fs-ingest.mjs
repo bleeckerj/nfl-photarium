@@ -6,6 +6,13 @@ import os from "node:os";
 import process from "node:process";
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
+import {
+  buildFlickrSourceRecord,
+  buildSidecarIndex,
+  enrichUploadFromSidecar,
+  loadSidecar,
+  lookupSidecarForFile,
+} from "./fs-ingest/flickr-sidecar.mjs";
 
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".avif"]);
 const VIDEO_EXTENSIONS = new Set([".mp4", ".webm", ".mov", ".m4v", ".ogv", ".ogg"]);
@@ -62,9 +69,29 @@ Options:
   --verbose                   More logging
   --help                      Show this help
 
+Flickr sidecar options (for "Request my Flickr data" exports):
+  --sidecar-mode <none|flickr> Default: none. When 'flickr', look for photo_<id>.json
+                              sidecars next to (or anywhere under) --root and use their
+                              metadata to enrich uploads. Also defaults --namespace to
+                              'cf-flickr' if not set.
+  --sidecar-required          Fail any file that has no matching sidecar (default:
+                              warn and proceed with filename/path metadata only).
+  --no-folder-from-album      Don't use the photo's primary album title as its folder.
+  --album-tags                Also add all album titles as lowercase tags.
+  --report-sidecars           Print which files match which sidecars and exit without
+                              uploading. Useful for validating coverage before a run.
+  --allow-zips-in-root        Bypass the preflight that refuses to run when --root
+                              contains *.zip files at its top level.
+
 Examples:
   node scripts/fs-ingest.mjs --root ~/Code/chester-downloads-discord-images --namespace midjourney
   node scripts/fs-ingest.mjs --root ~/Code/chester-downloads-discord-images --namespace mj-archive --folder discord --ai-metadata --tag-count 4
+
+  # Flickr export — preflight: how many photos have a matching sidecar?
+  node scripts/fs-ingest.mjs --root ~/flickr-export --sidecar-mode flickr --report-sidecars
+
+  # Flickr export — first real run, limited and into the default cf-flickr namespace
+  node scripts/fs-ingest.mjs --root ~/flickr-export --sidecar-mode flickr --limit 25 --concurrency 1 -v
 `);
 }
 
@@ -101,6 +128,12 @@ function parseArgs(argv) {
     dryRun: false,
     verbose: false,
     help: false,
+    sidecarMode: "none",
+    sidecarRequired: false,
+    folderFromAlbum: true,
+    albumTags: false,
+    reportSidecars: false,
+    allowZipsInRoot: false,
   };
   const errors = [];
 
@@ -196,6 +229,20 @@ function parseArgs(argv) {
       opts.dryRun = true;
     } else if (arg === "--verbose") {
       opts.verbose = true;
+    } else if (arg === "--sidecar-mode") {
+      if (!requireValue(arg, next)) continue;
+      opts.sidecarMode = next.trim().toLowerCase();
+      i += 1;
+    } else if (arg === "--sidecar-required") {
+      opts.sidecarRequired = true;
+    } else if (arg === "--no-folder-from-album") {
+      opts.folderFromAlbum = false;
+    } else if (arg === "--album-tags") {
+      opts.albumTags = true;
+    } else if (arg === "--report-sidecars") {
+      opts.reportSidecars = true;
+    } else if (arg === "--allow-zips-in-root") {
+      opts.allowZipsInRoot = true;
     } else if (arg.startsWith("-")) {
       errors.push(unknownFlagMessage(arg));
     } else {
@@ -214,6 +261,13 @@ function parseArgs(argv) {
   if (!["reject", "family"].includes(opts.onDuplicate)) {
     errors.push(`Invalid value for --on-duplicate: ${opts.onDuplicate} (expected reject or family)`);
     opts.onDuplicate = "reject";
+  }
+  if (!["none", "flickr"].includes(opts.sidecarMode)) {
+    errors.push(`Invalid value for --sidecar-mode: ${opts.sidecarMode} (expected none or flickr)`);
+    opts.sidecarMode = "none";
+  }
+  if (opts.sidecarMode === "flickr" && !opts.namespace) {
+    opts.namespace = "cf-flickr";
   }
   return { ...opts, errors };
 }
@@ -414,6 +468,7 @@ export async function uploadImage({
   description,
   displayName,
   sourcePath,
+  originalUrl,
   duplicateAction,
 }) {
   const filename = path.basename(filePath);
@@ -428,6 +483,7 @@ export async function uploadImage({
   if (description) form.append("description", description);
   if (displayName) form.append("displayName", displayName);
   form.append("sourceUrl", sourcePath);
+  if (originalUrl) form.append("originalUrl", originalUrl);
   if (duplicateAction === "family") form.append("duplicateAction", duplicateAction);
 
   const res = await fetch(`${apiBase}/api/upload/external`, {
@@ -449,6 +505,7 @@ async function uploadVideo({
   tags,
   description,
   sourcePath,
+  originalUrl,
 }) {
   const filename = path.basename(filePath);
   const ext = path.extname(filePath).toLowerCase();
@@ -461,6 +518,7 @@ async function uploadVideo({
   if (tags.length > 0) form.append("tags", tags.join(","));
   if (description) form.append("description", description);
   form.append("sourceUrl", sourcePath);
+  if (originalUrl) form.append("originalUrl", originalUrl);
 
   const res = await fetch(`${apiBase}/api/import/page/upload-video`, {
     method: "POST",
@@ -471,6 +529,18 @@ async function uploadVideo({
     return { ok: false, status: res.status, payload };
   }
   return { ok: true, status: res.status, payload };
+}
+
+async function patchImageExtras({ apiBase, imageId, flickrSource }) {
+  const res = await fetch(`${apiBase}/api/images/${imageId}/extras`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ flickrSource }),
+  });
+  if (!res.ok) {
+    const payload = await res.json().catch(() => ({}));
+    throw new Error(payload?.error || `extras PATCH failed (${res.status})`);
+  }
 }
 
 function formatSourcePath(rootDir, filePath) {
@@ -800,6 +870,18 @@ async function main() {
     throw new Error(`Root directory not found or not a directory: ${opts.root}`);
   }
 
+  if (!opts.allowZipsInRoot) {
+    const topLevel = await fs.readdir(opts.root, { withFileTypes: true });
+    const zips = topLevel.filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".zip"));
+    if (zips.length > 0) {
+      const example = zips.slice(0, 3).map((z) => z.name).join(", ");
+      throw new Error(
+        `Found ${zips.length} .zip file(s) at the top level of --root (e.g. ${example}). ` +
+        `Extract them first, or pass --allow-zips-in-root to bypass this check.`
+      );
+    }
+  }
+
   const baseTags = splitCsv(opts.tagsCsv).map(normalizeTag).filter(Boolean);
   const appendImageTag = normalizeTag(opts.appendImageTag);
   const checkpointPath = opts.checkpointFile || defaultCheckpointPath(opts.root, opts.namespace);
@@ -820,9 +902,67 @@ async function main() {
   console.log(`[scan] root=${opts.root}`);
   console.log(`[scan] found=${counts.total} images=${counts.images} videos=${counts.videos}`);
   console.log(
-    `[config] namespace=${opts.namespace} apiBase=${opts.apiBase} concurrency=${opts.concurrency} throttleMs=${opts.throttleMs} onDuplicate=${opts.onDuplicate} dryRun=${opts.dryRun ? "1" : "0"} hashBackfillOnly=${opts.hashCacheBackfillOnly ? "1" : "0"} assumeUploaded=${opts.assumeUploaded ? "1" : "0"}`
+    `[config] namespace=${opts.namespace} apiBase=${opts.apiBase} concurrency=${opts.concurrency} throttleMs=${opts.throttleMs} onDuplicate=${opts.onDuplicate} dryRun=${opts.dryRun ? "1" : "0"} hashBackfillOnly=${opts.hashCacheBackfillOnly ? "1" : "0"} assumeUploaded=${opts.assumeUploaded ? "1" : "0"} sidecarMode=${opts.sidecarMode}`
   );
   console.log(`[checkpoint] ${checkpointPath}`);
+
+  let sidecarIndex = null;
+  if (opts.sidecarMode === "flickr") {
+    console.log(`[sidecars] Building index from ${opts.root}...`);
+    sidecarIndex = await buildSidecarIndex(opts.root);
+    console.log(`[sidecars] Found ${sidecarIndex.size} sidecar file(s)`);
+
+    const usedSidecarIds = new Set();
+    let matched = 0;
+    let missing = 0;
+    const missingExamples = [];
+    for (const item of files) {
+      if (item.kind !== "image") continue;
+      const hit = lookupSidecarForFile(path.basename(item.path), sidecarIndex);
+      if (hit) {
+        matched += 1;
+        usedSidecarIds.add(hit.photoId);
+      } else {
+        missing += 1;
+        if (missingExamples.length < 5) missingExamples.push(path.basename(item.path));
+      }
+    }
+    const orphans = sidecarIndex.size - usedSidecarIds.size;
+    const imageCount = counts.images;
+    const coverage = imageCount > 0 ? (matched / imageCount) * 100 : 0;
+    console.log(
+      `[sidecars] Matched ${matched} / ${imageCount} image(s) to sidecars (${coverage.toFixed(2)}% coverage)`
+    );
+    if (missing > 0) {
+      console.log(
+        `[sidecars] ${missing} image(s) without a sidecar — will use filename/path metadata only` +
+          (missingExamples.length ? ` (e.g. ${missingExamples.join(", ")})` : "")
+      );
+    }
+    if (orphans > 0) {
+      console.log(`[sidecars] ${orphans} sidecar(s) without a matching photo (unused)`);
+    }
+
+    if (opts.reportSidecars) {
+      console.log(`[sidecars] --report-sidecars mode: printing per-file matches and exiting`);
+      for (const item of files) {
+        const filename = path.basename(item.path);
+        if (item.kind !== "image") {
+          if (opts.verbose) console.log(`[sidecars] skip-non-image ${filename}`);
+          continue;
+        }
+        const hit = lookupSidecarForFile(filename, sidecarIndex);
+        if (hit) {
+          if (opts.verbose) console.log(`[sidecars] match ${filename} -> photo_${hit.photoId}.json`);
+        } else {
+          console.log(`[sidecars] miss ${filename}`);
+        }
+      }
+      return;
+    }
+  } else if (opts.reportSidecars) {
+    throw new Error("--report-sidecars requires --sidecar-mode flickr");
+  }
 
   if (counts.total === 0) return;
   if (opts.reportCache) {
@@ -955,46 +1095,92 @@ async function main() {
     const pathTags = opts.includePathTags && relDir && relDir !== "."
       ? relDir.split("/").map(normalizeTag).filter(Boolean)
       : [];
-    const tags = uniqueStrings([...baseTags, ...pathTags]).slice(0, 12);
-    const description = buildDescription({
+    const baseTagsLocal = uniqueStrings([...baseTags, ...pathTags]).slice(0, 12);
+    const baseDescription = buildDescription({
       relDir,
       filename,
       descriptionPrefix: opts.descriptionPrefix,
       includeFilename: opts.includeFilename,
     });
-    const sourcePath = formatSourcePath(opts.root, filePath);
+    const baseSourceUrl = formatSourcePath(opts.root, filePath);
 
-    let displayName;
+    let sidecar = null;
+    let sidecarPhotoId = null;
+    if (opts.sidecarMode === "flickr" && sidecarIndex) {
+      const hit = lookupSidecarForFile(filename, sidecarIndex);
+      if (hit) {
+        sidecarPhotoId = hit.photoId;
+        try {
+          sidecar = await loadSidecar(hit.sidecarPath);
+        } catch (error) {
+          console.log(`[sidecar][warn] failed to load ${hit.sidecarPath}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    }
+
+    if (opts.sidecarMode === "flickr" && !sidecar && opts.sidecarRequired) {
+      counts.failed += 1;
+      console.log(`${prefix} fail ${relPath} -> sidecar required but not found`);
+      return;
+    }
+
+    const enriched = enrichUploadFromSidecar({
+      baseTags: baseTagsLocal,
+      baseDescription,
+      baseFolder: opts.folder || undefined,
+      baseDisplayName: undefined,
+      baseSourceUrl,
+      baseOriginalUrl: undefined,
+      descriptionPrefix: sidecar ? opts.descriptionPrefix : "",
+      sidecar,
+      folderFromAlbum: opts.folderFromAlbum,
+      albumTags: opts.albumTags,
+    });
+
+    const hasSidecarName = Boolean(sidecar?.name);
+    const hasSidecarTags = Boolean(sidecar?.tags?.length);
+    const wantAiDisplayName = opts.aiDisplayName && !hasSidecarName;
+    const wantAiTags = opts.aiTags && !hasSidecarTags;
+
+    let displayName = enriched.displayName;
     let aiTags = [];
-    if (item.kind === "image" && (opts.aiDisplayName || opts.aiTags)) {
+    if (item.kind === "image" && (wantAiDisplayName || wantAiTags)) {
       try {
         const ai = await suggestAiMetadata({
           apiBase: opts.apiBase,
           filePath,
           filename,
-          folder: opts.folder,
-          existingTags: tags,
-          wantDisplayName: opts.aiDisplayName,
-          wantTags: opts.aiTags,
+          folder: enriched.folder,
+          existingTags: enriched.tags,
+          wantDisplayName: wantAiDisplayName,
+          wantTags: wantAiTags,
           tagCount: opts.tagCount,
         });
-        if (opts.aiDisplayName && ai.displayName) displayName = ai.displayName;
-        if (opts.aiTags) aiTags = (ai.tags || []).map(normalizeTag).filter(Boolean);
+        if (wantAiDisplayName && ai.displayName) displayName = ai.displayName;
+        if (wantAiTags) aiTags = (ai.tags || []).map(normalizeTag).filter(Boolean);
         counts.aiSuggested += 1;
       } catch (error) {
         console.log(`[ai][warn] ${relPath} -> ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 
-    const mergedTags = uniqueStrings([...tags, ...aiTags]).slice(0, 12);
+    const mergedTags = uniqueStrings([...enriched.tags, ...aiTags]).slice(0, 12);
     const finalTags = item.kind === "image"
       ? mergeTagsWithOptionalTail(mergedTags, appendImageTag, 12)
       : mergedTags;
+    const description = enriched.description;
+    const folder = enriched.folder;
+    const sourcePath = enriched.sourceUrl;
+    const originalUrl = enriched.originalUrl;
     if (opts.verbose || opts.dryRun) {
       console.log(`${prefix} ${relPath}`);
+      if (sidecarPhotoId) console.log(`  sidecar=photo_${sidecarPhotoId}.json`);
+      else if (opts.sidecarMode === "flickr") console.log(`  sidecar=(missing)`);
       if (displayName) console.log(`  displayName=${displayName}`);
+      if (folder) console.log(`  folder=${folder}`);
       if (finalTags.length) console.log(`  tags=${finalTags.join(", ")}`);
       if (description) console.log(`  description=${description}`);
+      if (originalUrl) console.log(`  originalUrl=${originalUrl}`);
     }
 
     if (opts.dryRun) {
@@ -1009,21 +1195,23 @@ async function main() {
           apiBase: opts.apiBase,
           filePath,
           namespace: opts.namespace,
-          folder: opts.folder || undefined,
+          folder: folder || undefined,
           tags: finalTags,
           description,
           displayName,
           sourcePath,
+          originalUrl,
           duplicateAction: opts.onDuplicate,
         })
       : await uploadVideo({
           apiBase: opts.apiBase,
           filePath,
           namespace: opts.namespace,
-          folder: opts.folder || undefined,
+          folder: folder || undefined,
           tags: finalTags,
           description,
           sourcePath,
+          originalUrl,
         });
 
     if (outcome.ok) {
@@ -1055,6 +1243,17 @@ async function main() {
       }
       await checkpointWrite(() => saveCheckpoint(checkpointPath, checkpoint));
       console.log(`${prefix} ok ${relPath} -> ${id}`);
+
+      if (item.kind === "image" && sidecar && id && id !== "n/a") {
+        const flickrSource = buildFlickrSourceRecord({ sidecar, contentHash });
+        if (flickrSource) {
+          try {
+            await patchImageExtras({ apiBase: opts.apiBase, imageId: id, flickrSource });
+          } catch (error) {
+            console.log(`[extras][warn] ${relPath} -> ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+      }
       return;
     }
 
@@ -1094,6 +1293,17 @@ async function main() {
       }
       await checkpointWrite(() => saveCheckpoint(checkpointPath, checkpoint));
       console.log(`${prefix} skip(duplicate) ${relPath} -> ${duplicateId}`);
+
+      if (sidecar && duplicateId && duplicateId !== "duplicate") {
+        const flickrSource = buildFlickrSourceRecord({ sidecar, contentHash });
+        if (flickrSource) {
+          try {
+            await patchImageExtras({ apiBase: opts.apiBase, imageId: duplicateId, flickrSource });
+          } catch (error) {
+            console.log(`[extras][warn] ${relPath} -> ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+      }
       return;
     }
 

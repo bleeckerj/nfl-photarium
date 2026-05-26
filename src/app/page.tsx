@@ -3,19 +3,38 @@
 import { useEffect, useRef, useState } from 'react';
 import ImageUploader from '@/components/ImageUploader';
 import ImageGallery from '@/components/ImageGallery';
-import { parseGalleryNamespaceFromSearch } from '@/components/gallery/focusNavigation';
+import {
+  GALLERY_NAMESPACE_STORAGE_KEY,
+  parseGalleryNamespaceFromSearch,
+} from '@/components/gallery/focusNavigation';
+import { useSearchParams } from 'next/navigation';
 
 export default function Home() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const galleryRef = useRef<{ refreshImages: () => void }>(null);
   const envDefaultNamespace = process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || 'cf-default';
-  // Keep the initial server/client render deterministic; hydrate from localStorage in an effect.
-  const [namespace, setNamespace] = useState<string>(envDefaultNamespace);
+  const searchParams = useSearchParams();
+  const search = searchParams.toString();
+  const galleryInstanceKey = search ? `gallery:${search}` : 'gallery';
+  // Derive the initial namespace synchronously from the URL so that a navigation
+  // like /?gns=__all__&focus=<id> passes the correct scope into ImageGallery on
+  // its very first render. Without this, the gallery would mount under the env
+  // default namespace, decide the focus target's namespace doesn't match, and
+  // drop the focus on the first fetch -- producing the "all namespaces, page 1"
+  // regression. localStorage hydration still happens in the effect below for
+  // the no-query case, since localStorage isn't available during SSR.
+  const [namespace, setNamespace] = useState<string>(() => {
+    const queryNamespace = parseGalleryNamespaceFromSearch(search);
+    if (queryNamespace !== undefined) {
+      return queryNamespace || envDefaultNamespace;
+    }
+    return envDefaultNamespace;
+  });
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const queryNamespace = parseGalleryNamespaceFromSearch(window.location.search);
-    const stored = window.localStorage.getItem('imageNamespace');
+    const queryNamespace = parseGalleryNamespaceFromSearch(search);
+    const stored = window.localStorage.getItem(GALLERY_NAMESPACE_STORAGE_KEY);
     const nextNamespace =
       queryNamespace !== undefined
         ? (queryNamespace || envDefaultNamespace)
@@ -26,20 +45,20 @@ export default function Home() {
             : stored || envDefaultNamespace;
     if (queryNamespace !== undefined) {
       if (nextNamespace === '__all__') {
-        window.localStorage.setItem('imageNamespace', '__all__');
+        window.localStorage.setItem(GALLERY_NAMESPACE_STORAGE_KEY, '__all__');
       } else {
-        window.localStorage.setItem('imageNamespace', nextNamespace);
+        window.localStorage.setItem(GALLERY_NAMESPACE_STORAGE_KEY, nextNamespace);
       }
     }
     setNamespace((prev) => (prev === nextNamespace ? prev : nextNamespace));
-  }, [envDefaultNamespace]);
+  }, [envDefaultNamespace, search]);
 
   const handleNamespaceChange = (value: string) => {
     if (typeof window !== 'undefined') {
       if (value === '__all__') {
-        window.localStorage.setItem('imageNamespace', '__all__');
+        window.localStorage.setItem(GALLERY_NAMESPACE_STORAGE_KEY, '__all__');
       } else {
-        window.localStorage.setItem('imageNamespace', value || envDefaultNamespace);
+        window.localStorage.setItem(GALLERY_NAMESPACE_STORAGE_KEY, value || envDefaultNamespace);
       }
     }
     setNamespace(value || envDefaultNamespace);
@@ -62,6 +81,7 @@ export default function Home() {
         <div className="max-w-6xl mx-auto space-y-8">
           <section className="z-999" id="gallery-section">
             <ImageGallery
+              key={galleryInstanceKey}
               ref={galleryRef}
               refreshTrigger={refreshTrigger}
               namespace={namespace}

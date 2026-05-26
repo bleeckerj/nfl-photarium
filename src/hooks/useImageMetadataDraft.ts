@@ -82,10 +82,6 @@ export function useImageMetadataDraft<TImage extends ImageMetadataDraftAsset>({
     setValues((prev) => ({ ...prev, displayNameInput: resolveStateAction(prev.displayNameInput, displayNameInput) }));
   }, [resolveStateAction]);
 
-  const setClearExif = useCallback((clearExif: SetStateAction<boolean>) => {
-    setValues((prev) => ({ ...prev, clearExif: resolveStateAction(prev.clearExif, clearExif) }));
-  }, [resolveStateAction]);
-
   const isDirty = useMemo(
     () => isImageMetadataDraftDirty(values, image, extrasRecord),
     [extrasRecord, image, values]
@@ -116,7 +112,6 @@ export function useImageMetadataDraft<TImage extends ImageMetadataDraftAsset>({
     originalUrlInput: values.originalUrlInput,
     sourceUrlInput: values.sourceUrlInput,
     displayNameInput: values.displayNameInput,
-    clearExif: values.clearExif,
     setFolderSelect,
     setNewFolderInput,
     setTagsInput,
@@ -125,7 +120,6 @@ export function useImageMetadataDraft<TImage extends ImageMetadataDraftAsset>({
     setOriginalUrlInput,
     setSourceUrlInput,
     setDisplayNameInput,
-    setClearExif,
     applyDraft,
     resetFromImage,
     isDirty,

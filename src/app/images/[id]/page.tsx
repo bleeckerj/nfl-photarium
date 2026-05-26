@@ -33,7 +33,7 @@ import { useImageAspectRatio } from '@/hooks/useImageAspectRatio';
 import { formatBytes } from '@/utils/formatBytes';
 import { ColorSwatches } from '@/components/ColorSwatches';
 import { normalizeColorSearchHex } from '@/components/gallery/colorSearch';
-import { buildCanonicalGalleryHref } from '@/components/gallery/focusNavigation';
+import { buildCanonicalGalleryHref, GALLERY_NAMESPACE_STORAGE_KEY, resetGalleryPreferencesForFocus } from '@/components/gallery/focusNavigation';
 
 import { AltTextEditor } from '@/components/image-detail/AltTextEditor';
 import { CloudflareMetadataHeader } from '@/components/image-detail/CloudflareMetadataHeader';
@@ -72,6 +72,7 @@ import { useImageMetadataDraft } from '@/hooks/useImageMetadataDraft';
 import { patchParentAssignment as patchParentAssignmentService } from '@/services/parentAssignmentService';
 import { usePersistentShareBaseUrl } from '@/hooks/usePersistentShareBaseUrl';
 import { requestSemanticTags } from '@/services/imageAltDescriptionService';
+import { fetchDetailImageResponse } from '@/services/detailImageService';
 import { patchImageFavorite, patchImageMetadata } from '@/services/imageMetadataService';
 import type { VariantAssignmentCandidate } from '@/utils/variantAssignmentCandidates';
 import {
@@ -80,6 +81,8 @@ import {
   mergeUserTagsPreservingSystemTags,
 } from '@/utils/systemTags';
 import {
+  clearGalleryReturnSnapshot,
+  clearGalleryReturnState,
   getFreshDetailAssetSeed,
   getFreshGalleryReturnState,
   hasFreshGalleryReturnState,
@@ -461,7 +464,6 @@ export default function ImageDetailPage() {
     originalUrlInput,
     sourceUrlInput,
     displayNameInput,
-    clearExif,
     setFolderSelect,
     setNewFolderInput,
     setTagsInput,
@@ -470,7 +472,6 @@ export default function ImageDetailPage() {
     setOriginalUrlInput,
     setSourceUrlInput,
     setDisplayNameInput,
-    setClearExif,
     applyDraft: applyMetadataDraft,
     resetFromImage: resetMetadataDraftFromImage,
     buildSavePayload: buildMetadataSavePayload,
@@ -545,7 +546,6 @@ export default function ImageDetailPage() {
                 ...(typeof parsed.originalUrlInput === 'string' ? { originalUrlInput: parsed.originalUrlInput } : {}),
                 ...(typeof parsed.sourceUrlInput === 'string' ? { sourceUrlInput: parsed.sourceUrlInput } : {}),
                 ...(typeof parsed.displayNameInput === 'string' ? { displayNameInput: parsed.displayNameInput } : {}),
-                ...(typeof parsed.clearExif === 'boolean' ? { clearExif: parsed.clearExif } : {}),
               });
               draftAppliedRef.current = found.id;
             }
@@ -769,7 +769,7 @@ export default function ImageDetailPage() {
     const startedAt = getNow();
     try {
       const [imageResponse, familyResponse] = await Promise.all([
-        fetch(`/api/images/${encodeURIComponent(id)}`),
+        fetchDetailImageResponse(id),
         fetch(buildFamilyContextUrl({ includeCandidates: candidatePoolLoadedRef.current })),
       ]);
       const [imageData, familyData] = await Promise.all([
@@ -1022,7 +1022,7 @@ export default function ImageDetailPage() {
         if (!id) {
           return;
         }
-        const res = await fetch(`/api/images/${encodeURIComponent(id)}`);
+        const res = await fetchDetailImageResponse(id);
         const jsonStartedAt = getNow();
         const data = await res.json();
         const jsonElapsedMs = Math.round(getNow() - jsonStartedAt);
@@ -1405,7 +1405,7 @@ export default function ImageDetailPage() {
       contentHash: image?.contentHash,
       altTag: image?.altTag ?? '',
       displayName: image?.displayName ?? image?.filename,
-      exif: clearExif ? undefined : image?.exif,
+      exif: image?.exif,
       variationParentId: image?.parentId,
       linkedAssetId: image?.linkedAssetId,
       updatedAt: new Date().toISOString()
@@ -1448,7 +1448,6 @@ export default function ImageDetailPage() {
     }
   }, [
     altTextInput,
-    clearExif,
     displayNameInput,
     folderSelect,
     image,
@@ -1493,6 +1492,12 @@ export default function ImageDetailPage() {
   }, [galleryNamespaceParam, image?.namespace, router]);
   const handleShowInGalleryOrder = useCallback(() => {
     if (!id) return;
+    clearGalleryReturnState();
+    clearGalleryReturnSnapshot();
+    resetGalleryPreferencesForFocus();
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(GALLERY_NAMESPACE_STORAGE_KEY, '__all__');
+    }
     router.push(
       buildCanonicalGalleryHref({
         assetId: id,
@@ -1507,6 +1512,12 @@ export default function ImageDetailPage() {
     if (!targetNamespace) {
       toast.push('This image does not have a namespace to show.');
       return;
+    }
+    clearGalleryReturnState();
+    clearGalleryReturnSnapshot();
+    resetGalleryPreferencesForFocus();
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(GALLERY_NAMESPACE_STORAGE_KEY, targetNamespace);
     }
     router.push(
       buildCanonicalGalleryHref({
@@ -1698,7 +1709,6 @@ export default function ImageDetailPage() {
         originalUrlInput,
         sourceUrlInput,
         displayNameInput,
-        clearExif,
       };
       window.sessionStorage.setItem(draftKey, JSON.stringify(draft));
     } catch {
@@ -1706,7 +1716,6 @@ export default function ImageDetailPage() {
     }
   }, [
     altTextInput,
-    clearExif,
     descriptionInput,
     displayNameInput,
     folderSelect,
@@ -3417,14 +3426,14 @@ export default function ImageDetailPage() {
               onCopyToClipboard={handleCopyText}
             />
 
-            <ExifSection exifEntries={exifEntries} clearExif={clearExif} setClearExif={setClearExif} />
+            <ExifSection exifEntries={exifEntries} />
 
             <VariantLinksSection
               variants={variants}
               getVariantWidthLabel={getVariantWidthLabel}
               onHandleCopyUrl={handleCopyUrl}
               imageAltTag={image.altTag}
-              imageFilename={image.filename}
+              imageDownloadName={displayNameInput.trim() || image.displayName || image.filename}
             />
 
             <div className="space-y-4">
@@ -3657,7 +3666,15 @@ export default function ImageDetailPage() {
                         <button
                           onClick={async () => {
                             try {
-                              const downloadName = formatDownloadFileName(target.filename || image.filename || 'image');
+                              const targetDownloadName =
+                                target.displayName?.trim() ||
+                                target.filename ||
+                                image.displayName?.trim() ||
+                                image.filename ||
+                                'image';
+                              const downloadName = formatDownloadFileName(
+                                targetDownloadName
+                              );
                               await downloadImageToFile(String(url), downloadName);
                               toast.push('Download started');
                             } catch (error) {

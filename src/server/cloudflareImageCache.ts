@@ -877,11 +877,19 @@ export const getCachedImages = async (forceRefresh = false): Promise<CachedCloud
 
   // 4. Try to load from persistent cache
   const persistent = await loadFromPersistentCache();
-  
+
   if (persistent && persistent.images.length > 0) {
-    // Use persistent cache data
-    rebuildState(persistent.images, persistent.timestamp);
-    
+    // Use persistent cache data. We deliberately pass Date.now() (not the
+    // persistent timestamp) so the in-memory TTL is measured from when this
+    // data became resident in memory, not from when it was originally saved.
+    // Without this, a persistent cache older than CACHE_TTL_MS would make
+    // shouldUseMemoryCache() return false on every subsequent request,
+    // forcing each one to re-load the full image array from Redis/disk
+    // (~200-400ms) instead of hitting the in-memory copy (~5ms). The
+    // persistent timestamp is still used below for the staleness check that
+    // decides whether to schedule a background refresh from Cloudflare.
+    rebuildState(persistent.images, Date.now());
+
     // Check if persistent cache is stale and needs background refresh
     const persistentAge = Date.now() - persistent.timestamp;
     if (persistentAge > CACHE_TTL_MS) {

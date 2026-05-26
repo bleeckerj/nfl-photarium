@@ -94,6 +94,116 @@ const VIDEO_STREAM_SYNC_ON_LIST = process.env.VIDEO_STREAM_SYNC_ON_LIST === '1';
 
 const getRecordKey = (id: string) => `${VIDEO_RECORD_KEY_PREFIX}:${id}`;
 
+// -- In-memory video catalog cache -----------------------------------------
+// Previously every gallery / search / family request triggered an index GET
+// plus N parallel record GETs (~523 round-trips at the time of writing) -- a
+// steady-state cost of ~30ms even when the data hadn't changed. We now hold
+// the full record set in memory after first load and update it write-through
+// on create/update/delete. This mirrors the cloudflareImageCache pattern and
+// keeps reads instant for the hot path.
+interface VideoCacheState {
+  records: VideoAssetRecord[];           // sorted newest-first
+  map: Map<string, VideoAssetRecord>;
+  lastFetched: number;
+  inflight: Promise<VideoAssetRecord[]> | null;
+  initialized: boolean;
+}
+
+const VIDEO_CACHE_KEY = Symbol.for('photarium.videoCatalog.cache');
+const videoCacheGlobal = globalThis as typeof globalThis & {
+  [VIDEO_CACHE_KEY]?: VideoCacheState;
+};
+const videoCacheState: VideoCacheState = videoCacheGlobal[VIDEO_CACHE_KEY] ?? {
+  records: [],
+  map: new Map(),
+  lastFetched: 0,
+  inflight: null,
+  initialized: false,
+};
+if (!videoCacheGlobal[VIDEO_CACHE_KEY]) {
+  videoCacheGlobal[VIDEO_CACHE_KEY] = videoCacheState;
+}
+
+const VIDEO_CACHE_TTL_MS = (() => {
+  const raw = Number(process.env.VIDEO_CACHE_TTL_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 5 * 60 * 1000;
+})();
+
+const sortVideoRecordsByUploadedDesc = (records: VideoAssetRecord[]) =>
+  [...records].sort((a, b) => Date.parse(b.uploaded) - Date.parse(a.uploaded));
+
+const populateVideoCacheFromStorage = async (): Promise<VideoAssetRecord[]> => {
+  const storage = getCacheStorage();
+  const index = await storage.get<string[]>(VIDEO_RECORD_INDEX_KEY);
+  const ids = index?.data ?? [];
+  if (!ids.length) {
+    videoCacheState.records = [];
+    videoCacheState.map = new Map();
+    videoCacheState.lastFetched = Date.now();
+    videoCacheState.initialized = true;
+    return [];
+  }
+  const records = await Promise.all(
+    ids.map((id) =>
+      storage.get<VideoAssetRecord>(getRecordKey(id)).then((cached) => cached?.data ?? null)
+    )
+  );
+  const valid = records.filter((r): r is VideoAssetRecord => Boolean(r));
+  const sorted = sortVideoRecordsByUploadedDesc(valid);
+  videoCacheState.records = sorted;
+  videoCacheState.map = new Map(sorted.map((record) => [record.id, record]));
+  videoCacheState.lastFetched = Date.now();
+  videoCacheState.initialized = true;
+  return sorted;
+};
+
+const ensureVideoCacheFresh = async (): Promise<VideoAssetRecord[]> => {
+  const now = Date.now();
+  const isFresh =
+    videoCacheState.initialized &&
+    now - videoCacheState.lastFetched < VIDEO_CACHE_TTL_MS;
+  if (isFresh) return videoCacheState.records;
+  if (videoCacheState.inflight) return videoCacheState.inflight;
+  const promise = populateVideoCacheFromStorage().finally(() => {
+    videoCacheState.inflight = null;
+  });
+  videoCacheState.inflight = promise;
+  return promise;
+};
+
+const upsertVideoInCache = (record: VideoAssetRecord) => {
+  if (!videoCacheState.initialized) return;
+  videoCacheState.map.set(record.id, record);
+  const idx = videoCacheState.records.findIndex((entry) => entry.id === record.id);
+  if (idx >= 0) {
+    videoCacheState.records[idx] = record;
+  } else {
+    videoCacheState.records.push(record);
+  }
+  videoCacheState.records = sortVideoRecordsByUploadedDesc(videoCacheState.records);
+};
+
+const removeVideoFromCache = (id: string) => {
+  if (!videoCacheState.initialized) return;
+  videoCacheState.map.delete(id);
+  videoCacheState.records = videoCacheState.records.filter((entry) => entry.id !== id);
+};
+
+export const invalidateVideoAssetCache = () => {
+  videoCacheState.records = [];
+  videoCacheState.map = new Map();
+  videoCacheState.lastFetched = 0;
+  videoCacheState.initialized = false;
+  videoCacheState.inflight = null;
+};
+
+export const getVideoAssetCacheStats = () => ({
+  count: videoCacheState.records.length,
+  lastFetched: videoCacheState.lastFetched,
+  ttlMs: VIDEO_CACHE_TTL_MS,
+  initialized: videoCacheState.initialized,
+});
+
 const normalizeStatus = (readyToStream?: boolean, state?: string) => {
   if (readyToStream === true) return 'ready' as const;
   if ((state || '').toLowerCase() === 'error') return 'error' as const;
@@ -133,6 +243,14 @@ const shouldSyncRecord = (record: VideoAssetRecord, now: number) => {
   return false;
 };
 
+// Always reads from durable storage, bypassing the in-memory cache. Used by
+// write paths (update / delete) so they don't risk overwriting another
+// process's newer write with cached fields.
+const getVideoAssetRecordFromStorage = async (id: string): Promise<VideoAssetRecord | null> => {
+  const cached = await getCacheStorage().get<VideoAssetRecord>(getRecordKey(id));
+  return cached?.data ?? null;
+};
+
 export const createVideoAssetRecord = async (
   input: VideoAssetRecordInput
 ): Promise<VideoAssetRecord> => {
@@ -154,6 +272,7 @@ export const createVideoAssetRecord = async (
   nextIndex.add(id);
   await storage.set(VIDEO_RECORD_INDEX_KEY, Array.from(nextIndex));
 
+  upsertVideoInCache(record);
   return record;
 };
 
@@ -161,7 +280,7 @@ export const updateVideoAssetRecord = async (
   id: string,
   patch: Partial<Omit<VideoAssetRecord, 'id' | 'createdAt' | 'updatedAt'>>
 ): Promise<VideoAssetRecord | null> => {
-  const existing = await getVideoAssetRecord(id);
+  const existing = await getVideoAssetRecordFromStorage(id);
   if (!existing) return null;
   const next: VideoAssetRecord = {
     ...existing,
@@ -171,17 +290,32 @@ export const updateVideoAssetRecord = async (
     updatedAt: new Date().toISOString(),
   };
   await getCacheStorage().set(getRecordKey(id), next);
+  upsertVideoInCache(next);
   return next;
 };
 
 export const getVideoAssetRecord = async (id: string): Promise<VideoAssetRecord | null> => {
-  const cached = await getCacheStorage().get<VideoAssetRecord>(getRecordKey(id));
-  return cached?.data ?? null;
+  // Fast path: in-memory cache hit. Populates the cache on first access.
+  if (videoCacheState.initialized) {
+    const hit = videoCacheState.map.get(id);
+    if (hit) return hit;
+    // The cache is initialized but doesn't have this id. It's either a
+    // record that was created in another process after our last populate,
+    // or genuinely not present. Fall through to storage and, if found,
+    // backfill the cache.
+  } else {
+    // Trigger a populate so subsequent calls hit the cache. Don't await --
+    // we serve this request from storage.
+    void ensureVideoCacheFresh();
+  }
+  const fresh = await getVideoAssetRecordFromStorage(id);
+  if (fresh) upsertVideoInCache(fresh);
+  return fresh;
 };
 
 export const deleteVideoAssetRecord = async (id: string): Promise<boolean> => {
   const storage = getCacheStorage();
-  const existing = await getVideoAssetRecord(id);
+  const existing = await getVideoAssetRecordFromStorage(id);
   if (!existing) {
     return false;
   }
@@ -192,19 +326,14 @@ export const deleteVideoAssetRecord = async (id: string): Promise<boolean> => {
   const ids = index?.data ?? [];
   const nextIds = ids.filter((entry) => entry !== id);
   await storage.set(VIDEO_RECORD_INDEX_KEY, nextIds);
+  removeVideoFromCache(id);
   return true;
 };
 
 export const listVideoAssetRecords = async (): Promise<VideoAssetRecord[]> => {
-  const storage = getCacheStorage();
-  const index = await storage.get<string[]>(VIDEO_RECORD_INDEX_KEY);
-  const ids = index?.data ?? [];
-  if (!ids.length) return [];
-
-  const records = await Promise.all(ids.map((id) => getVideoAssetRecord(id)));
-  return records
-    .filter((record): record is VideoAssetRecord => Boolean(record))
-    .sort((a, b) => Date.parse(b.uploaded) - Date.parse(a.uploaded));
+  const records = await ensureVideoCacheFresh();
+  // Return a shallow copy so callers cannot accidentally mutate our cache.
+  return records.slice();
 };
 
 export const syncVideoAssetRecordFromStream = async (

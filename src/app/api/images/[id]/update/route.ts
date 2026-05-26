@@ -54,7 +54,6 @@ export async function PATCH(
       displayName,
       altTag,
       variationSort,
-      clearExif,
       namespace,
       applyToFamily,
       applyToFamilyFields,
@@ -75,7 +74,6 @@ export async function PATCH(
     const displayNameProvided = Object.prototype.hasOwnProperty.call(body, 'displayName');
     const altTagProvided = Object.prototype.hasOwnProperty.call(body, 'altTag');
     const variationSortProvided = Object.prototype.hasOwnProperty.call(body, 'variationSort');
-    const clearExifProvided = Object.prototype.hasOwnProperty.call(body, 'clearExif');
     const namespaceProvided = Object.prototype.hasOwnProperty.call(body, 'namespace');
 
     const cleanFolder = cleanString(typeof folder === 'string' ? folder : undefined);
@@ -164,7 +162,6 @@ export async function PATCH(
       parentId: boolean;
       altTag: boolean;
       variationSort: boolean;
-      clearExif: boolean;
       namespace: boolean;
     };
 
@@ -178,7 +175,6 @@ export async function PATCH(
       parentId: parentProvided,
       altTag: altTagProvided,
       variationSort: variationSortProvided && cleanVariationSort !== undefined,
-      clearExif: clearExifProvided && clearExif === true,
       namespace: namespaceProvided,
     };
 
@@ -192,7 +188,6 @@ export async function PATCH(
       parentId: false,
       altTag: false,
       variationSort: false,
-      clearExif: false,
       namespace: namespaceProvided && familyFieldSet.has('namespace'),
     };
 
@@ -244,7 +239,6 @@ export async function PATCH(
           sourceUrlNormalized?: string;
           originalUrl?: string;
           originalUrlNormalized?: string;
-          exif?: undefined;
         } = {};
         if (flags.folder) {
           extrasPatch.folder = cleanFolder ?? '';
@@ -262,9 +256,6 @@ export async function PATCH(
         if (flags.originalUrl) {
           extrasPatch.originalUrl = cleanOriginalUrl || undefined;
           extrasPatch.originalUrlNormalized = normalizeOriginalUrl(cleanOriginalUrl) || undefined;
-        }
-        if (flags.clearExif) {
-          extrasPatch.exif = undefined;
         }
         if (Object.keys(extrasPatch).length > 0) {
           await patchImageExtrasRecord(targetId, extrasPatch);

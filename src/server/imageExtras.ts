@@ -67,8 +67,11 @@ export type FlickrSourceRecord = {
   username?: string;
   permalink?: string;
   visibility?: string;
+  safety?: string;
+  license?: string;
   lastUpdate?: string;
   takenAt?: string;
+  dateImported?: string;
   albumTitles?: string[];
   tagList?: string[];
   preferredSize?: string;
@@ -76,6 +79,11 @@ export type FlickrSourceRecord = {
   originalAvailable?: boolean;
   originalFormat?: string;
   downloadedContentHash?: string;
+  /**
+   * Provenance of the ingest path that populated this record.
+   * Examples: "flickr-api", "flickr-export".
+   */
+  importSource?: string;
 };
 
 export type SnagitSourceRecord = {
@@ -324,17 +332,158 @@ export async function getImageExtrasRecords(imageIds: string[]): Promise<Record<
   return result;
 }
 
+// -- Folder override cache -------------------------------------------------
+// The gallery list endpoint historically pre-loaded the entire image-extras
+// dataset on every paginated request, purely so the folder filter and folder
+// facets reflected extras-stored folders. That MGET (~18k keys, ~270ms per
+// request) is by far the largest steady-state cost of /api/images.
+//
+// We replace it with a write-through in-memory map keyed by image id. The map
+// is populated lazily on first read, refreshed periodically as a defence
+// against multi-process drift, and updated synchronously after every
+// successful set/delete so single-process deployments stay consistent without
+// hitting storage on the hot path.
+//
+// `null` (not in map) means "no override -- use cached/Cloudflare folder".
+// `undefined` (in map) means "extras explicitly cleared the folder".
+// `string` (in map) means "extras specifies this folder".
+type FolderOverrideMap = Map<string, string | undefined>;
+
+interface FolderOverrideCacheState {
+  map: FolderOverrideMap;
+  loadedAt: number;
+  inflight: Promise<FolderOverrideMap> | null;
+  // Monotonically increasing version bumped on every successful load and on
+  // every applyFolderOverrideUpdate. Downstream caches (e.g. galleryQuery
+  // memoization) use this in their scope keys so they invalidate as soon as
+  // the folder data they snapshotted has changed.
+  version: number;
+}
+
+const FOLDER_OVERRIDE_CACHE_KEY = Symbol.for('photarium.imageExtras.folderOverrides');
+const folderOverrideGlobal = globalThis as typeof globalThis & {
+  [FOLDER_OVERRIDE_CACHE_KEY]?: FolderOverrideCacheState;
+};
+
+const folderOverrideState: FolderOverrideCacheState =
+  folderOverrideGlobal[FOLDER_OVERRIDE_CACHE_KEY] ?? {
+    map: new Map(),
+    loadedAt: 0,
+    inflight: null,
+    version: 0,
+  };
+
+if (!folderOverrideGlobal[FOLDER_OVERRIDE_CACHE_KEY]) {
+  folderOverrideGlobal[FOLDER_OVERRIDE_CACHE_KEY] = folderOverrideState;
+}
+
+const FOLDER_OVERRIDE_TTL_MS = (() => {
+  const raw = Number(process.env.IMAGE_EXTRAS_FOLDER_OVERRIDE_TTL_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 5 * 60 * 1000;
+})();
+
+type FolderOverrideExtraction =
+  | { present: true; folder: string | undefined }
+  | { present: false };
+
+function extractExtrasFolder(record: ImageExtrasRecord | null): FolderOverrideExtraction {
+  if (!record) return { present: false };
+  if (!Object.prototype.hasOwnProperty.call(record, 'folder')) return { present: false };
+  const folder = typeof record.folder === 'string' ? record.folder : undefined;
+  return { present: true, folder };
+}
+
+async function refreshFolderOverridesFromStorage(): Promise<FolderOverrideMap> {
+  const allIds = await listImageExtrasImageIds();
+  const map: FolderOverrideMap = new Map();
+  if (allIds.length === 0) return map;
+  const records = await getImageExtrasRecords(allIds);
+  for (const id of allIds) {
+    const extracted = extractExtrasFolder(records[id]);
+    if (extracted.present) {
+      map.set(id, extracted.folder);
+    }
+  }
+  return map;
+}
+
+/**
+ * Returns the in-memory folder override map. Lazily loaded on first call,
+ * refreshed after FOLDER_OVERRIDE_TTL_MS. Concurrent first-callers share a
+ * single inflight promise.
+ */
+export async function getImageFolderOverrides(): Promise<FolderOverrideMap> {
+  const now = Date.now();
+  const isFresh = folderOverrideState.loadedAt > 0
+    && now - folderOverrideState.loadedAt < FOLDER_OVERRIDE_TTL_MS;
+  if (isFresh) {
+    return folderOverrideState.map;
+  }
+  if (folderOverrideState.inflight) {
+    return folderOverrideState.inflight;
+  }
+  const inflight = refreshFolderOverridesFromStorage()
+    .then((map) => {
+      folderOverrideState.map = map;
+      folderOverrideState.loadedAt = Date.now();
+      folderOverrideState.version += 1;
+      return map;
+    })
+    .finally(() => {
+      folderOverrideState.inflight = null;
+    });
+  folderOverrideState.inflight = inflight;
+  return inflight;
+}
+
+/**
+ * Synchronous accessor used by tests and diagnostics. Returns the current
+ * map without triggering a load.
+ */
+export function getImageFolderOverridesSync(): FolderOverrideMap {
+  return folderOverrideState.map;
+}
+
+/**
+ * Version counter for the folder override map. Increments on every successful
+ * load and on every mutation. Downstream caches that snapshot folder data
+ * should include this in their cache keys to invalidate correctly.
+ */
+export function getImageFolderOverridesVersion(): number {
+  return folderOverrideState.version;
+}
+
+function applyFolderOverrideUpdate(imageId: string, record: ImageExtrasRecord | null) {
+  // If the cache has never been populated, skip updates -- the first read
+  // will fetch a complete fresh copy from storage.
+  if (folderOverrideState.loadedAt === 0) return;
+  const extracted = extractExtrasFolder(record);
+  if (!extracted.present) {
+    folderOverrideState.map.delete(imageId);
+  } else {
+    folderOverrideState.map.set(imageId, extracted.folder);
+  }
+  folderOverrideState.version += 1;
+}
+
+export function invalidateImageFolderOverridesCache(): void {
+  folderOverrideState.map = new Map();
+  folderOverrideState.loadedAt = 0;
+  folderOverrideState.inflight = null;
+  folderOverrideState.version += 1;
+}
+
 export async function setImageExtrasRecord(record: ImageExtrasRecord): Promise<void> {
   const storage = getExtrasStorage();
-  await storage.set(
-    getImageExtrasKey(record.imageId),
-    sanitizeImageExtrasRecord(record) ?? record
-  );
+  const sanitized = sanitizeImageExtrasRecord(record) ?? record;
+  await storage.set(getImageExtrasKey(record.imageId), sanitized);
+  applyFolderOverrideUpdate(record.imageId, sanitized);
 }
 
 export async function deleteImageExtrasRecord(imageId: string): Promise<void> {
   const storage = getExtrasStorage();
   await storage.delete(getImageExtrasKey(imageId));
+  applyFolderOverrideUpdate(imageId, null);
 }
 
 export async function listImageExtrasImageIds(): Promise<string[]> {

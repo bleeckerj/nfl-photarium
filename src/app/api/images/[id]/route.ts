@@ -162,7 +162,25 @@ const enrichWithVectorMetadata = async (
   };
 };
 
-const applyExtrasTextMetadata = async (image: CachedCloudflareImage) => {
+const toExifSummary = (value: unknown): Record<string, string | number> | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  const candidate =
+    record.summary && typeof record.summary === 'object' && !Array.isArray(record.summary)
+      ? (record.summary as Record<string, unknown>)
+      : record;
+  const entries = Object.entries(candidate).filter(
+    (entry): entry is [string, string | number] =>
+      typeof entry[1] === 'string' || typeof entry[1] === 'number'
+  );
+
+  return entries.length ? Object.fromEntries(entries) : undefined;
+};
+
+const applyExtrasMetadata = async (image: CachedCloudflareImage) => {
   const extras = await getImageExtrasRecord(image.id);
   if (!extras) return image;
 
@@ -175,6 +193,10 @@ const applyExtrasTextMetadata = async (image: CachedCloudflareImage) => {
   }
   if (Object.prototype.hasOwnProperty.call(extras, 'altText')) {
     next.altTag = extras.altText;
+  }
+  const exif = toExifSummary(extras.exif);
+  if (exif) {
+    next.exif = exif;
   }
   return next;
 };
@@ -363,7 +385,7 @@ export async function GET(
     }
 
     const extrasStartedAt = performance.now();
-    const responseImageWithExtras = await applyExtrasTextMetadata(responseImage);
+    const responseImageWithExtras = await applyExtrasMetadata(responseImage);
     timings.extras_load = mark(performance.now() - extrasStartedAt);
 
     timings.total = mark(performance.now() - startedAt);
