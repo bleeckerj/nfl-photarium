@@ -104,12 +104,6 @@ const ALLOWED_OVERSIZED_FILES = new Map([
     reason: 'cache service awaiting storage/fetch split',
     expires: '2026-07-15',
   }],
-  ['src/server/vectorSearch.ts', {
-    category: 'service',
-    owner: 'maintainability-refactor',
-    reason: 'vector service awaiting provider/query split',
-    expires: '2026-07-15',
-  }],
 ]);
 
 const color = {

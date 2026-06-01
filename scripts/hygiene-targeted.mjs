@@ -58,6 +58,9 @@ function testsForFile(file) {
   if (file.includes('imageSearchRoute') || file.includes('/api/images/search')) {
     tests.push('__tests__/imageSearchRoute.test.ts');
   }
+  if (file.includes('vectorSearch') || file.includes('vectorColorTransforms')) {
+    tests.push('__tests__/imageSearchRoute.test.ts', '__tests__/colorsRoute.test.ts');
+  }
   if (file.includes('assetParentService') || file.includes('detach-children')) {
     tests.push('__tests__/assetParentService.test.ts', '__tests__/detachChildrenRoute.test.ts');
   }
