@@ -32,12 +32,6 @@ const ALLOWED_OVERSIZED_FILES = new Map([
     reason: 'legacy MCP runtime deferred from first-pass app refactor',
     expires: '2026-07-15',
   }],
-  ['scripts/backfill-discord-image-metadata.mjs', {
-    category: 'script',
-    owner: 'maintainability-refactor',
-    reason: 'legacy backfill awaiting CLI/library split',
-    expires: '2026-07-15',
-  }],
   ['scripts/dng-ingest.mjs', {
     category: 'script',
     owner: 'maintainability-refactor',

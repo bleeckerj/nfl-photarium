@@ -5,98 +5,10 @@ import path from 'node:path';
 import os from 'node:os';
 import process from 'node:process';
 import { createHash } from 'node:crypto';
+import { MAX_VERBOSITY, setupLogger, trace } from './lib/cliLogger.mjs';
 
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tif', '.tiff', '.avif']);
-const MAX_VERBOSITY = 4;
-const LOG_LEVELS = {
-  error: 0,
-  warn: 1,
-  info: 2,
-  debug: 3,
-  trace: 4,
-};
-
-const ANSI = {
-  reset: '\x1b[0m',
-  dim: '\x1b[2m',
-  red: '\x1b[31m',
-  yellow: '\x1b[33m',
-  cyan: '\x1b[36m',
-  green: '\x1b[32m',
-  magenta: '\x1b[35m',
-};
-
-let LOG_VERBOSE = MAX_VERBOSITY;
-let LOG_COLOR = Boolean(process.stdout.isTTY);
 let WAIT_FOR_HTTP_SLOT = async () => {};
-
-function toLocalTimestamp() {
-  const now = new Date();
-  const date = now.toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
-  const time = now.toLocaleTimeString('en-US', {
-    hour12: false,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
-  return `${date} ${time}.${String(now.getMilliseconds()).padStart(3, '0')}`;
-}
-
-function stringifyLogArg(value) {
-  if (typeof value === 'string') return value;
-  if (value instanceof Error) return value.stack || value.message;
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
-function linePrefix(level) {
-  if (level === 'error') return { emoji: '💥', color: ANSI.red };
-  if (level === 'warn') return { emoji: '⚠️', color: ANSI.yellow };
-  if (level === 'info') return { emoji: '🚀', color: ANSI.cyan };
-  if (level === 'debug') return { emoji: '🧭', color: ANSI.green };
-  return { emoji: '🧪', color: ANSI.magenta };
-}
-
-function shouldLog(level) {
-  return LOG_LEVELS[level] <= LOG_VERBOSE;
-}
-
-function emitLog(level, args) {
-  if (!shouldLog(level)) return;
-  const rendered = args.map(stringifyLogArg).join(' ');
-  const lines = rendered.split('\n');
-  const { emoji, color } = linePrefix(level);
-  const stream = level === 'error' || level === 'warn' ? process.stderr : process.stdout;
-  const stamp = `[${toLocalTimestamp()}]`;
-  for (const line of lines) {
-    if (LOG_COLOR) {
-      stream.write(`${ANSI.dim}${stamp}${ANSI.reset} ${emoji} ${color}${line}${ANSI.reset}\n`);
-    } else {
-      stream.write(`${stamp} ${emoji} ${line}\n`);
-    }
-  }
-}
-
-function setupLogger({ verbosity, color }) {
-  LOG_VERBOSE = Math.max(0, Math.min(MAX_VERBOSITY, Number(verbosity) || 0));
-  LOG_COLOR = Boolean(color);
-  console.log = (...args) => emitLog('info', args);
-  console.info = (...args) => emitLog('info', args);
-  console.warn = (...args) => emitLog('warn', args);
-  console.error = (...args) => emitLog('error', args);
-  console.debug = (...args) => emitLog('debug', args);
-}
-
-function trace(...args) {
-  emitLog('trace', args);
-}
 
 function createMinIntervalLimiter(minIntervalMs) {
   const interval = Math.max(0, Number(minIntervalMs) || 0);
