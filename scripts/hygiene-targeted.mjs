@@ -74,6 +74,9 @@ function testsForFile(file) {
   if (file.includes('image-tools/')) {
     tests.push('__tests__/imageToolsRegistry.test.ts', '__tests__/imageToolsRoutes.test.ts');
   }
+  if (file.includes('fs-ingest')) {
+    tests.push('__tests__/fsIngestScript.test.ts', '__tests__/fsIngestFlickrSidecar.test.ts');
+  }
   if (file.includes('audit-file-sizes') || file.includes('hygiene-targeted')) {
     tests.push();
   }

@@ -38,12 +38,6 @@ const ALLOWED_OVERSIZED_FILES = new Map([
     reason: 'legacy ingest awaiting media pipeline split',
     expires: '2026-07-15',
   }],
-  ['scripts/fs-ingest.mjs', {
-    category: 'script',
-    owner: 'maintainability-refactor',
-    reason: 'legacy ingest awaiting scanner/uploader split',
-    expires: '2026-07-15',
-  }],
   ['scripts/instagram-ingest.mjs', {
     category: 'script',
     owner: 'maintainability-refactor',
