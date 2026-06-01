@@ -23,6 +23,15 @@ interface GalleryBulkEditModalProps {
     altText?: string;
     altTag?: string;
   }>;
+  animationPreviewImages: Array<{
+    id: string;
+    filename: string;
+    altText?: string;
+    altTag?: string;
+  }>;
+  bulkAnimateOrderMode: 'gallery' | 'reverse-gallery';
+  onBulkAnimateOrderModeChange: (value: 'gallery' | 'reverse-gallery') => void;
+  bulkAnimateSelectionOrderDiffers: boolean;
   onCopySelectionPayload: (payload: string) => void | Promise<void>;
   bulkApplyFolder: boolean;
   onBulkApplyFolderChange: (value: boolean) => void;
@@ -74,6 +83,10 @@ interface GalleryBulkEditModalProps {
 export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
   selectedCount,
   selectedImages,
+  animationPreviewImages,
+  bulkAnimateOrderMode,
+  onBulkAnimateOrderModeChange,
+  bulkAnimateSelectionOrderDiffers,
   onCopySelectionPayload,
   bulkApplyFolder,
   onBulkApplyFolderChange,
@@ -522,6 +535,74 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
         </div>
         <div className="space-y-2 border-t border-gray-200 pt-3">
           <p className="text-[0.65rem] text-gray-500 uppercase tracking-wide">Animate selection</p>
+          <div className="space-y-2">
+            <div className="inline-flex overflow-hidden rounded border border-gray-300 text-[0.65rem]">
+              <button
+                type="button"
+                onClick={() => onBulkAnimateOrderModeChange('gallery')}
+                className={`px-2 py-1 ${
+                  bulkAnimateOrderMode === 'gallery'
+                    ? 'bg-gray-900 text-white'
+                    : 'bg-white text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                Gallery order
+              </button>
+              <button
+                type="button"
+                onClick={() => onBulkAnimateOrderModeChange('reverse-gallery')}
+                className={`border-l border-gray-300 px-2 py-1 ${
+                  bulkAnimateOrderMode === 'reverse-gallery'
+                    ? 'bg-gray-900 text-white'
+                    : 'bg-white text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                Reverse gallery
+              </button>
+            </div>
+            {bulkAnimateSelectionOrderDiffers && (
+              <p className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[0.65rem] text-amber-800">
+                Manual click order differs from gallery order. This animation will follow the order shown below.
+              </p>
+            )}
+            {animationPreviewImages.length > 0 && (
+              <div className="flex gap-2 overflow-x-auto rounded border border-gray-200 bg-gray-50 p-2">
+                {animationPreviewImages.map((image, index) => {
+                  let previewUrl = '';
+                  try {
+                    previewUrl = getCloudflareImageUrl(image.id, 'w=150');
+                  } catch {
+                    previewUrl = '';
+                  }
+                  return (
+                    <div key={image.id} className="w-24 shrink-0 space-y-1">
+                      <div className="relative aspect-square overflow-hidden rounded border border-gray-200 bg-white">
+                        {previewUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={previewUrl} alt="" className="h-full w-full object-cover" />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-[0.6rem] text-gray-400">
+                            no preview
+                          </div>
+                        )}
+                        <span className="absolute left-1 top-1 rounded bg-black/70 px-1 py-0.5 text-[0.6rem] text-white">
+                          {index + 1}
+                        </span>
+                      </div>
+                      <p className="truncate text-[0.6rem] text-gray-700" title={image.filename}>
+                        {image.filename}
+                      </p>
+                      {(index === 0 || index === animationPreviewImages.length - 1) && (
+                        <p className="text-[0.55rem] uppercase tracking-wide text-gray-500">
+                          {index === 0 ? 'first frame' : 'last frame'}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           <div className="flex flex-wrap items-center gap-3">
             <label className="flex items-center gap-2 text-[0.65rem] text-gray-600">
               FPS

@@ -9,6 +9,7 @@ import {
   getFreshGalleryReturnState,
   saveGalleryReturnState,
 } from '@/components/gallery/returnState';
+import { resolveBulkAnimationIds } from '@/components/gallery/hooks/useGalleryBulkActions';
 
 type StorageLike = {
   getItem: (key: string) => string | null;
@@ -47,6 +48,36 @@ afterEach(() => {
 });
 
 describe('ImageGallery motion assets helpers', () => {
+  it('resolves animation ids in visible gallery order', () => {
+    const images = [
+      { id: 'newest' },
+      { id: 'middle' },
+      { id: 'oldest' },
+    ];
+    const clickedOrder = new Set(['oldest', 'newest', 'middle']);
+
+    expect(resolveBulkAnimationIds(images, clickedOrder, 'gallery')).toEqual([
+      'newest',
+      'middle',
+      'oldest',
+    ]);
+  });
+
+  it('resolves animation ids in reverse visible gallery order', () => {
+    const images = [
+      { id: 'newest' },
+      { id: 'middle' },
+      { id: 'oldest' },
+    ];
+    const selected = new Set(['oldest', 'newest', 'middle']);
+
+    expect(resolveBulkAnimationIds(images, selected, 'reverse-gallery')).toEqual([
+      'oldest',
+      'middle',
+      'newest',
+    ]);
+  });
+
   it('adds mediaFilter=animated only when motion assets are enabled', () => {
     expect(
       buildGalleryImagesUrl({
@@ -83,13 +114,14 @@ describe('ImageGallery motion assets helpers', () => {
           embedding: 'missing-any',
           aspectRatioFilters: ['horizontal'],
           dateFilter: { startDate: '2026-01-01', endDate: '2026-01-31' },
+          dateTimeZone: 'America/Los_Angeles',
           hiddenFolders: ['Archive'],
           hiddenTags: ['private'],
           showMotionAssetsOnly: false,
         },
       })
     ).toBe(
-      '/api/images?namespace=studio&page=2&pageSize=60&search=blue+chair&folder=editorial&tag=hero&onlyCanonical=1&onlyWithVariants=1&favorites=1&duplicates=1&comfy=1&embedding=missing-any&aspectRatioClasses=horizontal&dateStart=2026-01-01&dateEnd=2026-01-31&hiddenFolders=Archive&hiddenTags=private'
+      '/api/images?namespace=studio&page=2&pageSize=60&search=blue+chair&folder=editorial&tag=hero&onlyCanonical=1&onlyWithVariants=1&favorites=1&duplicates=1&comfy=1&embedding=missing-any&aspectRatioClasses=horizontal&dateStart=2026-01-01&dateEnd=2026-01-31&dateTimeZone=America%2FLos_Angeles&hiddenFolders=Archive&hiddenTags=private'
     );
   });
 

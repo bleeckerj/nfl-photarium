@@ -59,6 +59,15 @@ interface GalleryModalsProps {
     altText?: string;
     altTag?: string;
   }>;
+  selectedAnimationPreview: Array<{
+    id: string;
+    filename: string;
+    altText?: string;
+    altTag?: string;
+  }>;
+  bulkAnimateOrderMode: 'gallery' | 'reverse-gallery';
+  onBulkAnimateOrderModeChange: (value: 'gallery' | 'reverse-gallery') => void;
+  bulkAnimateSelectionOrderDiffers: boolean;
   onCopySelectionPayload: (payload: string) => void | Promise<void>;
   bulkApplyFolder: boolean;
   onBulkApplyFolderChange: (value: boolean) => void;
@@ -140,6 +149,10 @@ export const GalleryModals: React.FC<GalleryModalsProps> = ({
   bulkEditOpen,
   selectedCount,
   selectedImagesForPayload,
+  selectedAnimationPreview,
+  bulkAnimateOrderMode,
+  onBulkAnimateOrderModeChange,
+  bulkAnimateSelectionOrderDiffers,
   onCopySelectionPayload,
   bulkApplyFolder,
   onBulkApplyFolderChange,
@@ -241,6 +254,10 @@ export const GalleryModals: React.FC<GalleryModalsProps> = ({
         <GalleryBulkEditModal
           selectedCount={selectedCount}
           selectedImages={selectedImagesForPayload}
+          animationPreviewImages={selectedAnimationPreview}
+          bulkAnimateOrderMode={bulkAnimateOrderMode}
+          onBulkAnimateOrderModeChange={onBulkAnimateOrderModeChange}
+          bulkAnimateSelectionOrderDiffers={bulkAnimateSelectionOrderDiffers}
           onCopySelectionPayload={onCopySelectionPayload}
           bulkApplyFolder={bulkApplyFolder}
           onBulkApplyFolderChange={onBulkApplyFolderChange}

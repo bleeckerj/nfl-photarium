@@ -1,152 +1,70 @@
 'use client';
 
-import { useState, useEffect, forwardRef, useImperativeHandle, useMemo, useRef, useCallback, useLayoutEffect, useReducer } from 'react';
-import { AlertTriangle, Info } from 'lucide-react';
-import MonoSelect from './MonoSelect';
-import GalleryCommandBar from './GalleryCommandBar';
-import FolderManagerButton from './FolderManagerButton';
-import { GalleryFilters } from './gallery/GalleryFilters';
-import { type AspectRatioClass, type DateFilter, type EmbeddingFilter, type GalleryFamilySummary, type GridSize } from './gallery/types';
+import { useState, useEffect, forwardRef, useImperativeHandle, useMemo, useRef, useCallback, useLayoutEffect } from 'react';
+import {
+  type CloudflareImage,
+  type GalleryFamilySummary,
+  type GridSize,
+  type ImageGalleryProps,
+  type ImageGalleryRef,
+} from './gallery/types';
 import { getMultipleImageUrls, IMAGE_VARIANTS } from '@/utils/imageUtils';
 import { setDragPayloadForImage } from '@/utils/imageDrag';
 import { copyToClipboard, formatCopyPayload } from '@/utils/clipboard';
 import { useToast } from './Toast';
-import { useImageAspectRatio } from '@/hooks/useImageAspectRatio';
 import HoverPreview from './HoverPreview';
 import { downloadImageToFile, formatDownloadFileName } from '@/utils/downloadUtils';
-import LegacyTopBar from '@/components/gallery/LegacyTopBar';
 import { GalleryCompactHeader } from '@/components/gallery/GalleryCompactHeader';
+import GalleryControlsPanel from '@/components/gallery/GalleryControlsPanel';
+import GalleryNoticeStack from '@/components/gallery/GalleryNoticeStack';
 import { GalleryPagerStrip } from '@/components/gallery/GalleryPagerStrip';
-import GallerySemanticSearch, { type GallerySemanticSearchRef } from '@/components/gallery/GallerySemanticSearch';
+import GalleryUtilityRail from '@/components/gallery/GalleryUtilityRail';
+import { type GallerySemanticSearchRef } from '@/components/gallery/GallerySemanticSearch';
 import { useGallerySelection } from './gallery/hooks/useGallerySelection';
 import { useGalleryFilters } from './gallery/hooks/useGalleryFilters';
 import { useGalleryItemActions } from './gallery/hooks/useGalleryItemActions';
 import { useGalleryBulkActions } from './gallery/hooks/useGalleryBulkActions';
+import { useGalleryBulkState } from './gallery/hooks/useGalleryBulkState';
 import { useGalleryAudit } from './gallery/hooks/useGalleryAudit';
+import { useGalleryBackup } from './gallery/hooks/useGalleryBackup';
 import { useGalleryEmbedding } from './gallery/hooks/useGalleryEmbedding';
-import { GalleryListView } from './gallery/GalleryListView';
-import { GalleryGridView } from './gallery/GalleryGridView';
+import { useGalleryFocusNavigation } from './gallery/hooks/useGalleryFocusNavigation';
+import { rememberGalleryWarmCache, useGalleryInitialLoadState } from './gallery/hooks/useGalleryInitialLoadState';
+import { useGalleryNamespace } from './gallery/hooks/useGalleryNamespace';
 import { GalleryModals } from './gallery/GalleryModals';
+import GalleryResultsRegion from './gallery/GalleryResultsRegion';
 import { normalizeColorSearchHex, resolveColorSearchAssets, type ColorSearchResultRow } from './gallery/colorSearch';
-import { AUDIT_LOG_LIMIT, DEFAULT_GRID_SIZE } from './gallery/constants';
+import { DEFAULT_GRID_SIZE } from './gallery/constants';
 import { normalizeGridSize } from './gallery/gridSizing';
-import { normalizeDateFilterValue, toDateKey } from './gallery/dateFilter';
+import { toDateKey } from './gallery/dateFilter';
 import { collectFacetFolders, collectImageFolders, mergeFolderNames } from './gallery/folderOptions';
 import {
   clearGalleryReturnState,
-  getFreshGalleryReturnState,
   GALLERY_RETURN_SNAPSHOT_KEY,
-  GALLERY_RETURN_TTL_MS,
   saveDetailAssetSeed,
   saveGalleryReturnState as persistGalleryReturnState,
-  type NormalizedGalleryReturnState,
 } from './gallery/returnState';
-import { parseCanonicalGalleryFocusFromSearch } from './gallery/focusNavigation';
 import { useSearchParams } from 'next/navigation';
 import { isLikelySourceSearchTerm } from '@/utils/galleryFilter';
 import { patchImageFavorite } from '@/services/imageMetadataService';
 import { getUserVisibleTags, hasFavoriteTag } from '@/utils/systemTags';
+import { buildGalleryImagesUrl, type GalleryServerQueryState } from './gallery/galleryImagesUrl';
+import {
+  DEFAULT_PAGE_SIZE,
+  PAGE_SIZE_OPTIONS,
+} from './gallery/storedPreferences';
 
-interface CloudflareImage {
-  id: string;
-  assetType?: 'image' | 'video';
-  filename: string;
-  displayName?: string;
-  promptThis?: string;
-  uploaded: string;
-  variants: string[];
-  folder?: string;
-  tags?: string[];
-  description?: string;
-  aspectRatio?: string;
-  dimensions?: { width: number; height: number };
-  altTag?: string;
-  altText?: string;
-  parentId?: string;
-  linkedAssetId?: string;
-  originalUrl?: string;
-  originalUrlNormalized?: string;
-  sourceUrl?: string;
-  sourceUrlNormalized?: string;
-  contentHash?: string;
-  namespace?: string;
-  generatedBy?: string;
-  comfyMetadataDetected?: boolean;
-  comfyMetadataSource?: string;
-  videoStatus?: 'pending' | 'ready' | 'error';
-  videoDurationSeconds?: number;
-  videoPlaybackUrl?: string;
-  videoHlsUrl?: string;
-  videoThumbnailUrl?: string;
-  videoPreviewUrl?: string;
-  // Embedding status fields
-  hasClipEmbedding?: boolean;
-  hasColorEmbedding?: boolean;
-  dominantColors?: string[];
-  averageColor?: string;
-}
+export { buildGalleryImagesUrl } from './gallery/galleryImagesUrl';
+export {
+  getDefaultStoredPreferences,
+  getStoredPreferences,
+  neutralizeStoredPreferenceFilters,
+} from './gallery/storedPreferences';
+export type { ImageGalleryRef } from './gallery/types';
 
-interface ImageGalleryProps {
-  refreshTrigger?: number;
-  namespace?: string;
-  onNamespaceChange?: (value: string) => void;
-}
-
-export interface ImageGalleryRef {
-  refreshImages: () => void;
-}
-
-const DEFAULT_PAGE_SIZE = 30;
-const PAGE_SIZE_OPTIONS = [12, 24, 30, 48, 60, 90, 120];
 const VARIANT_DIMENSIONS = new Map(IMAGE_VARIANTS.map(variant => [variant.name, variant.width]));
 const VIDEO_LIMIT_STEP = 150;
 const COLOR_SEARCH_LIMIT = 100;
-const DEFAULT_NAMESPACE = 'cf-default';
-const PROTECTED_NAMESPACE_VALUES = new Set(['__all__', '__none__', DEFAULT_NAMESPACE, 'cf-site-misc']);
-
-type GalleryWarmCacheState = {
-  namespace: string;
-  images: CloudflareImage[];
-  savedAt: number;
-};
-
-type GalleryReturnSnapshotState = {
-  namespace?: string;
-  savedAt?: number;
-  currentPage?: number;
-  images?: CloudflareImage[];
-};
-
-type StoredGalleryPreferences = {
-  variant: string;
-  onlyCanonical: boolean;
-  respectAspectRatio: boolean;
-  onlyWithVariants: boolean;
-  showMotionAssetsOnly: boolean;
-  showFavoritesOnly: boolean;
-  showComfyOnly: boolean;
-  embeddingFilter: EmbeddingFilter;
-  selectedFolder: string;
-  selectedTag: string;
-  searchTerm: string;
-  colorSearchHex?: string | null;
-  viewMode: 'grid' | 'list';
-  gridSize: GridSize;
-  filtersCollapsed: boolean;
-  bulkFolderInput: string;
-  bulkFolderMode: 'existing' | 'new';
-  showDuplicatesOnly: boolean;
-  showBrokenOnly: boolean;
-  aspectRatioFilters: Array<'horizontal' | 'vertical' | 'square'>;
-  hiddenFolders: string[];
-  hiddenTags: string[];
-  showCli: boolean;
-  controlsVisible: boolean;
-  pageSize: number;
-  dateFilter: DateFilter | null;
-  currentPage: number;
-};
-
 type VideoMetaState = {
   enabled: boolean;
   limit: number;
@@ -187,445 +105,31 @@ type GalleryDuplicateSummary = {
   duplicateIdsExcludingOldest?: string[];
 };
 
-type GalleryServerQueryState = {
-  page: number;
-  pageSize: number;
-  search: string;
-  folder: string;
-  tag: string;
-  onlyCanonical: boolean;
-  onlyWithVariants: boolean;
-  favorites: boolean;
-  duplicates: boolean;
-  comfy: boolean;
-  embedding: EmbeddingFilter;
-  aspectRatioFilters: AspectRatioClass[];
-  dateFilter: DateFilter | null;
-  hiddenFolders: string[];
-  hiddenTags: string[];
-  showMotionAssetsOnly: boolean;
-};
-
-export const buildGalleryImagesUrl = ({
-  forceRefresh = false,
-  namespace,
-  videoLimitOverride,
-  includeExtrasForGallery = false,
-  showMotionAssetsOnly = false,
-  serverQuery,
-  focusAssetId,
-}: {
-  forceRefresh?: boolean;
-  namespace?: string;
-  videoLimitOverride?: number | null;
-  includeExtrasForGallery?: boolean;
-  showMotionAssetsOnly?: boolean;
-  serverQuery?: GalleryServerQueryState;
-  focusAssetId?: string | null;
-}) => {
-  const params = new URLSearchParams();
-  if (forceRefresh) {
-    params.set('refresh', '1');
-  }
-  if (namespace === '') {
-    params.set('namespace', process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || 'cf-default');
-  } else if (namespace === '__all__') {
-    params.set('namespace', '__all__');
-  } else if (namespace && namespace !== '__all__') {
-    params.set('namespace', namespace);
-  }
-  if (videoLimitOverride && videoLimitOverride > 0) {
-    params.set('videoLimit', String(videoLimitOverride));
-  }
-  if (includeExtrasForGallery) {
-    params.set('includeExtras', '1');
-  }
-  if (showMotionAssetsOnly) {
-    params.set('mediaFilter', 'animated');
-  }
-  if (focusAssetId?.trim()) {
-    params.set('focus', focusAssetId.trim());
-  }
-  if (serverQuery) {
-    params.set('page', String(serverQuery.page));
-    params.set('pageSize', String(serverQuery.pageSize));
-    if (serverQuery.search.trim()) params.set('search', serverQuery.search.trim());
-    if (serverQuery.folder && serverQuery.folder !== 'all') params.set('folder', serverQuery.folder);
-    if (serverQuery.tag) params.set('tag', serverQuery.tag);
-    if (serverQuery.onlyCanonical) params.set('onlyCanonical', '1');
-    if (serverQuery.onlyWithVariants) params.set('onlyWithVariants', '1');
-    if (serverQuery.favorites) params.set('favorites', '1');
-    if (serverQuery.duplicates) params.set('duplicates', '1');
-    if (serverQuery.comfy) params.set('comfy', '1');
-    if (serverQuery.embedding !== 'none') params.set('embedding', serverQuery.embedding);
-    if (serverQuery.aspectRatioFilters.length) params.set('aspectRatioClasses', serverQuery.aspectRatioFilters.join(','));
-    if (serverQuery.dateFilter?.startDate) params.set('dateStart', serverQuery.dateFilter.startDate);
-    if (serverQuery.dateFilter?.endDate) params.set('dateEnd', serverQuery.dateFilter.endDate);
-    if (serverQuery.hiddenFolders.length) params.set('hiddenFolders', serverQuery.hiddenFolders.join(','));
-    if (serverQuery.hiddenTags.length) params.set('hiddenTags', serverQuery.hiddenTags.join(','));
-  }
-  const queryString = params.toString();
-  return queryString ? `/api/images?${queryString}` : '/api/images';
-};
-
-let galleryWarmCache: GalleryWarmCacheState | null = null;
-
-type BulkState = {
-  bulkSelectionMode: boolean;
-  bulkEditOpen: boolean;
-  bulkFolderInput: string;
-  bulkFolderMode: 'existing' | 'new';
-  bulkTagsInput: string;
-  bulkTagsAiCount: string;
-  bulkApplyFolder: boolean;
-  bulkApplyTags: boolean;
-  bulkTagsMode: 'replace' | 'append' | 'ai';
-  bulkApplyDisplayName: boolean;
-  bulkDisplayNameMode: 'custom' | 'auto' | 'clear' | 'ai';
-  bulkDisplayNameInput: string;
-  bulkApplyDescription: boolean;
-  bulkDescriptionAppendInput: string;
-  bulkApplyNamespace: boolean;
-  bulkNamespaceInput: string;
-  bulkUpdating: boolean;
-  bulkDeleting: boolean;
-  bulkEmbeddingGenerating: boolean;
-  bulkAnimateFps: string;
-  bulkAnimateTouched: boolean;
-  bulkAnimateLoop: boolean;
-  bulkAnimateFilename: string;
-  bulkAnimateLoading: boolean;
-  bulkAnimateError: string | null;
-};
-
-type BulkAction =
-  | { type: 'set'; field: keyof BulkState; value: BulkState[keyof BulkState] }
-  | { type: 'resetEdit' };
-
-const bulkReducer = (state: BulkState, action: BulkAction): BulkState => {
-  switch (action.type) {
-    case 'set':
-      return {
-        ...state,
-        [action.field]: action.value,
-      };
-    case 'resetEdit':
-      return {
-        ...state,
-        bulkEditOpen: true,
-        bulkFolderInput: '',
-        bulkFolderMode: 'existing',
-        bulkTagsInput: '',
-        bulkTagsAiCount: '6',
-        bulkApplyFolder: false,
-        bulkApplyTags: true,
-        bulkTagsMode: 'append',
-        bulkApplyDisplayName: false,
-        bulkDisplayNameMode: 'custom',
-        bulkDisplayNameInput: '',
-        bulkApplyDescription: false,
-        bulkDescriptionAppendInput: '',
-        bulkApplyNamespace: false,
-        bulkNamespaceInput: '',
-        bulkAnimateFps: '',
-        bulkAnimateTouched: false,
-        bulkAnimateLoop: true,
-        bulkAnimateFilename: '',
-        bulkAnimateError: null,
-      };
-    default:
-      return state;
-  }
-};
-
-export const getDefaultStoredPreferences = (): StoredGalleryPreferences => ({
-  variant: 'full',
-  onlyCanonical: false,
-  respectAspectRatio: false,
-  onlyWithVariants: false,
-  showMotionAssetsOnly: false,
-  showFavoritesOnly: false,
-  showComfyOnly: false,
-  embeddingFilter: 'none',
-  selectedFolder: 'all',
-  selectedTag: '',
-  searchTerm: '',
-  colorSearchHex: null,
-  viewMode: 'grid',
-  gridSize: DEFAULT_GRID_SIZE,
-  filtersCollapsed: false,
-  bulkFolderInput: '',
-  bulkFolderMode: 'existing',
-  showDuplicatesOnly: false,
-  showBrokenOnly: false,
-  aspectRatioFilters: [],
-  hiddenFolders: [],
-  hiddenTags: [],
-  showCli: true,
-  controlsVisible: true,
-  pageSize: DEFAULT_PAGE_SIZE,
-  dateFilter: null,
-  currentPage: 1,
-});
-
-export const getStoredPreferences = (
-  namespace: string | undefined,
-  initialGalleryReturnState: NormalizedGalleryReturnState | null,
-  options: { neutralizeFilters?: boolean } = {}
-): StoredGalleryPreferences => {
-  if (typeof window === 'undefined') {
-    return getDefaultStoredPreferences();
-  }
-
-  const next = getDefaultStoredPreferences();
-
+const getBrowserDateTimeZone = () => {
+  if (typeof window === 'undefined' || typeof Intl === 'undefined') return undefined;
   try {
-    const stored = window.localStorage.getItem('galleryPreferences');
-    if (stored) {
-      const parsed = JSON.parse(stored) as {
-        variant?: string;
-        onlyCanonical?: boolean;
-        respectAspectRatio?: boolean;
-        onlyWithVariants?: boolean;
-        showMotionAssetsOnly?: boolean;
-        showFavoritesOnly?: boolean;
-        showComfyOnly?: boolean;
-        selectedFolder?: string;
-        selectedTag?: string;
-        searchTerm?: string;
-        colorSearchHex?: string | null;
-        viewMode?: 'grid' | 'list';
-        gridSize?: GridSize;
-        filtersCollapsed?: boolean;
-        bulkFolderInput?: string;
-        bulkFolderMode?: 'existing' | 'new';
-        showDuplicatesOnly?: boolean;
-        showBrokenOnly?: boolean;
-        aspectRatioFilters?: ('horizontal' | 'vertical' | 'square')[];
-        showCli?: boolean;
-        controlsVisible?: boolean;
-        pageSize?: number;
-        dateFilter?: { startDate?: string; endDate?: string } | { year?: number; month?: number } | null;
-        currentPage?: number;
-      };
-
-      const rawPageSize = typeof parsed.pageSize === 'number' ? parsed.pageSize : DEFAULT_PAGE_SIZE;
-      const normalizedPageSize = PAGE_SIZE_OPTIONS.includes(rawPageSize)
-        ? rawPageSize
-        : DEFAULT_PAGE_SIZE;
-      const storedVariant = typeof parsed.variant === 'string' ? parsed.variant : 'full';
-
-      next.variant = storedVariant === 'public' || storedVariant === 'original' ? 'full' : storedVariant;
-      next.onlyCanonical = Boolean(parsed.onlyCanonical);
-      next.respectAspectRatio = Boolean(parsed.respectAspectRatio);
-      next.onlyWithVariants = Boolean(parsed.onlyWithVariants);
-      next.showMotionAssetsOnly = Boolean(parsed.showMotionAssetsOnly);
-      next.showFavoritesOnly = Boolean(parsed.showFavoritesOnly);
-      next.showComfyOnly = Boolean(parsed.showComfyOnly);
-      next.selectedFolder = parsed.selectedFolder ?? 'all';
-      next.selectedTag = parsed.selectedTag ?? '';
-      next.searchTerm = parsed.searchTerm ?? '';
-      next.colorSearchHex =
-        typeof parsed.colorSearchHex === 'string' && parsed.colorSearchHex.trim()
-          ? parsed.colorSearchHex.trim()
-          : null;
-      next.viewMode = parsed.viewMode === 'list' ? 'list' : 'grid';
-      next.gridSize = normalizeGridSize(parsed.gridSize, DEFAULT_GRID_SIZE);
-      next.filtersCollapsed = Boolean(parsed.filtersCollapsed);
-      next.bulkFolderInput = typeof parsed.bulkFolderInput === 'string' ? parsed.bulkFolderInput : '';
-      next.bulkFolderMode = parsed.bulkFolderMode === 'new' ? 'new' : 'existing';
-      next.showDuplicatesOnly = Boolean(parsed.showDuplicatesOnly);
-      next.showBrokenOnly = Boolean(parsed.showBrokenOnly);
-      next.aspectRatioFilters = Array.isArray(parsed.aspectRatioFilters)
-        ? parsed.aspectRatioFilters.filter((value) => value === 'horizontal' || value === 'vertical' || value === 'square')
-        : [];
-      next.showCli = parsed.showCli !== false;
-      next.controlsVisible = parsed.controlsVisible !== false;
-      next.pageSize = normalizedPageSize;
-      next.dateFilter = normalizeDateFilterValue(parsed.dateFilter);
-      next.currentPage =
-        typeof parsed.currentPage === 'number' && parsed.currentPage > 0
-          ? Math.floor(parsed.currentPage)
-          : 1;
-    }
-  } catch (error) {
-    console.warn('Failed to parse gallery preferences', error);
-  }
-
-  if (options.neutralizeFilters) {
-    return neutralizeStoredPreferenceFilters(next);
-  }
-
-  if (initialGalleryReturnState?.filters) {
-    next.searchTerm = initialGalleryReturnState.filters.searchTerm;
-    next.colorSearchHex = initialGalleryReturnState.filters.colorSearchHex ?? null;
-    next.selectedFolder = initialGalleryReturnState.filters.selectedFolder;
-    next.selectedTag = initialGalleryReturnState.filters.selectedTag;
-    next.onlyCanonical = initialGalleryReturnState.filters.onlyCanonical;
-    next.onlyWithVariants = initialGalleryReturnState.filters.onlyWithVariants;
-    next.showMotionAssetsOnly = initialGalleryReturnState.filters.showMotionAssetsOnly;
-    next.showFavoritesOnly = Boolean(initialGalleryReturnState.filters.showFavoritesOnly);
-    next.showDuplicatesOnly = initialGalleryReturnState.filters.showDuplicatesOnly;
-    next.showBrokenOnly = initialGalleryReturnState.filters.showBrokenOnly;
-    next.showComfyOnly = initialGalleryReturnState.filters.showComfyOnly;
-    next.embeddingFilter = initialGalleryReturnState.filters.embeddingFilter;
-    next.aspectRatioFilters = initialGalleryReturnState.filters.aspectRatioFilters;
-    next.dateFilter = initialGalleryReturnState.filters.dateFilter;
-    next.hiddenFolders = initialGalleryReturnState.filters.hiddenFolders;
-    next.hiddenTags = initialGalleryReturnState.filters.hiddenTags;
-    next.pageSize = initialGalleryReturnState.filters.pageSize;
-    next.currentPage = initialGalleryReturnState.filters.currentPage;
-    return next;
-  }
-
-  if (initialGalleryReturnState?.currentPage) {
-    next.currentPage = initialGalleryReturnState.currentPage;
-    return next;
-  }
-
-  try {
-    const params = new URLSearchParams(window.location.search);
-    const gns = params.get('gns') ?? '';
-    const gpage = params.get('gpage');
-    const gcolor = normalizeColorSearchHex(params.get('gcolor'));
-    const activeNamespace = namespace ?? '';
-    if (gns === activeNamespace && gpage) {
-      const parsedPage = Number.parseInt(gpage, 10);
-      if (Number.isFinite(parsedPage) && parsedPage > 0) {
-        next.currentPage = parsedPage;
-      }
-    }
-    if (gns === activeNamespace && gcolor) {
-      next.colorSearchHex = gcolor;
-    }
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
   } catch {
-    // ignore
+    return undefined;
   }
-
-  return next;
 };
-
-export const neutralizeStoredPreferenceFilters = (
-  preferences: StoredGalleryPreferences
-): StoredGalleryPreferences => ({
-  ...preferences,
-  searchTerm: '',
-  colorSearchHex: null,
-  selectedFolder: 'all',
-  selectedTag: '',
-  onlyCanonical: false,
-  onlyWithVariants: false,
-  showMotionAssetsOnly: false,
-  showFavoritesOnly: false,
-  showComfyOnly: false,
-  showDuplicatesOnly: false,
-  showBrokenOnly: false,
-  embeddingFilter: 'none',
-  aspectRatioFilters: [],
-  hiddenFolders: [],
-  hiddenTags: [],
-  dateFilter: null,
-  currentPage: 1,
-});
-
-
 
 const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   ({ refreshTrigger, namespace, onNamespaceChange }, ref) => {
-  // Read the focus target via React's URL hook -- it is reliably in sync with
-  // the rendered route, unlike window.location.search which has been observed
-  // to lag a tick behind during client-side navigation in this app. Fall back
-  // to window.location only if the React hook returns nothing (e.g. SSR).
   const galleryUrlSearchParams = useSearchParams();
-  const initialFocusTargetRef = useRef(
-    (() => {
-      const fromHook = galleryUrlSearchParams ? galleryUrlSearchParams.toString() : '';
-      const fromHookTarget = fromHook ? parseCanonicalGalleryFocusFromSearch(`?${fromHook}`) : null;
-      if (fromHookTarget) return fromHookTarget;
-      if (typeof window === 'undefined') return null;
-      return parseCanonicalGalleryFocusFromSearch(window.location.search);
-    })()
-  );
-  const initialGalleryReturnStateRef = useRef<NormalizedGalleryReturnState | null>(
-    initialFocusTargetRef.current ? null : getFreshGalleryReturnState()
-  );
-  const storedPreferencesRef = useRef(
-    getStoredPreferences(namespace, initialGalleryReturnStateRef.current, {
-      neutralizeFilters: Boolean(initialFocusTargetRef.current),
-    })
-  );
+  const {
+    initialFocusTargetRef,
+    initialGalleryReturnStateRef,
+    storedPreferencesRef,
+    returningFromDetailRef,
+    initialSilentFetchRef,
+    deferInitialFetchRef,
+    initialImages,
+    initialLoading,
+  } = useGalleryInitialLoadState({ namespace, galleryUrlSearchParams });
 
-  const initialReturningFromDetail = (() => {
-    if (initialFocusTargetRef.current) return false;
-    if (initialGalleryReturnStateRef.current) return true;
-    if (typeof window === 'undefined') return false;
-    try {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('gpage')) return true;
-    } catch {
-      // ignore
-    }
-    return false;
-  })();
-
-  const initialWarmImages = (() => {
-    if (!initialReturningFromDetail) {
-      return [] as CloudflareImage[];
-    }
-    const activeNamespace = namespace ?? '';
-    if (!galleryWarmCache) {
-      return [] as CloudflareImage[];
-    }
-    if (galleryWarmCache.namespace !== activeNamespace) {
-      return [] as CloudflareImage[];
-    }
-    if (Date.now() - galleryWarmCache.savedAt > GALLERY_RETURN_TTL_MS) {
-      return [] as CloudflareImage[];
-    }
-    return galleryWarmCache.images;
-  })();
-
-  const initialSnapshotImages = (() => {
-    if (!initialReturningFromDetail || typeof window === 'undefined') {
-      return [] as CloudflareImage[];
-    }
-    const activeNamespace = namespace ?? '';
-    try {
-      const rawSnapshot = window.sessionStorage.getItem(GALLERY_RETURN_SNAPSHOT_KEY);
-      if (!rawSnapshot) {
-        return [] as CloudflareImage[];
-      }
-      const parsed = JSON.parse(rawSnapshot) as GalleryReturnSnapshotState;
-      const savedNamespace = typeof parsed?.namespace === 'string' ? parsed.namespace : '';
-      const savedAt = typeof parsed?.savedAt === 'number' ? parsed.savedAt : 0;
-      const freshEnough = !savedAt || Date.now() - savedAt < GALLERY_RETURN_TTL_MS;
-      if (!freshEnough || savedNamespace !== activeNamespace || !Array.isArray(parsed?.images)) {
-        return [] as CloudflareImage[];
-      }
-      const snapshotImages = parsed.images.filter(
-        (image): image is CloudflareImage => Boolean(image) && typeof image.id === 'string'
-      );
-      if (snapshotImages.length > 0) {
-        galleryWarmCache = {
-          namespace: activeNamespace,
-          images: snapshotImages,
-          savedAt: savedAt || Date.now(),
-        };
-      }
-      return snapshotImages;
-    } catch {
-      return [] as CloudflareImage[];
-    }
-  })();
-
-  const returningFromDetailRef = useRef(initialReturningFromDetail);
-  const initialSilentFetchRef = useRef(initialWarmImages.length > 0 || initialSnapshotImages.length > 0);
-  const deferInitialFetchRef = useRef(initialReturningFromDetail && initialSnapshotImages.length > 0);
-
-  const [images, setImages] = useState<CloudflareImage[]>(
-    initialSnapshotImages.length > 0 ? initialSnapshotImages : initialWarmImages
-  );
-  const [loading, setLoading] = useState(initialWarmImages.length === 0 && initialSnapshotImages.length === 0);
+  const [images, setImages] = useState<CloudflareImage[]>(initialImages);
+  const [loading, setLoading] = useState(initialLoading);
   const [selectedVariant, setSelectedVariant] = useState<string>(storedPreferencesRef.current.variant);
   const [openCopyMenu, setOpenCopyMenu] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>((storedPreferencesRef.current.viewMode ?? 'grid') as 'grid' | 'list');
@@ -636,36 +140,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [showCli, setShowCli] = useState(storedPreferencesRef.current.showCli ?? true);
   const [controlsVisiblePreference, setControlsVisiblePreference] = useState(storedPreferencesRef.current.controlsVisible ?? true);
   const [galleryControlsVisible, setGalleryControlsVisible] = useState(storedPreferencesRef.current.controlsVisible ?? true);
-  const [bulkState, dispatchBulk] = useReducer(
-    bulkReducer,
-    {
-      bulkSelectionMode: false,
-      bulkEditOpen: false,
-      bulkFolderInput: storedPreferencesRef.current.bulkFolderInput ?? '',
-      bulkFolderMode: (storedPreferencesRef.current.bulkFolderMode ?? 'existing') as 'existing' | 'new',
-      bulkTagsInput: '',
-      bulkTagsAiCount: '6',
-      bulkApplyFolder: true,
-      bulkApplyTags: false,
-      bulkTagsMode: 'replace',
-      bulkApplyDisplayName: false,
-      bulkDisplayNameMode: 'custom',
-      bulkDisplayNameInput: '',
-      bulkApplyDescription: false,
-      bulkDescriptionAppendInput: '',
-      bulkApplyNamespace: false,
-      bulkNamespaceInput: '',
-      bulkUpdating: false,
-      bulkDeleting: false,
-      bulkEmbeddingGenerating: false,
-      bulkAnimateFps: '',
-      bulkAnimateTouched: false,
-      bulkAnimateLoop: true,
-      bulkAnimateFilename: '',
-      bulkAnimateLoading: false,
-      bulkAnimateError: null,
-    }
-  );
   const {
     bulkSelectionMode,
     bulkEditOpen,
@@ -689,46 +163,68 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     bulkAnimateFps,
     bulkAnimateTouched,
     bulkAnimateLoop,
+    bulkAnimateOrderMode,
     bulkAnimateFilename,
     bulkAnimateLoading,
     bulkAnimateError,
-  } = bulkState;
+    dispatchBulk,
+    setBulkSelectionMode,
+    setBulkEditOpen,
+    setBulkFolderInput,
+    setBulkFolderMode,
+    setBulkTagsInput,
+    setBulkTagsAiCount,
+    setBulkApplyFolder,
+    setBulkApplyTags,
+    setBulkTagsMode,
+    setBulkApplyDisplayName,
+    setBulkDisplayNameMode,
+    setBulkDisplayNameInput,
+    setBulkApplyDescription,
+    setBulkDescriptionAppendInput,
+    setBulkApplyNamespace,
+    setBulkNamespaceInput,
+    setBulkUpdating,
+    setBulkDeleting,
+    setBulkEmbeddingGenerating,
+    setBulkAnimateFps,
+    setBulkAnimateTouched,
+    setBulkAnimateLoop,
+    setBulkAnimateOrderMode,
+    setBulkAnimateFilename,
+    setBulkAnimateLoading,
+    setBulkAnimateError,
+  } = useGalleryBulkState({
+    bulkFolderInput: storedPreferencesRef.current.bulkFolderInput ?? '',
+    bulkFolderMode: (storedPreferencesRef.current.bulkFolderMode ?? 'existing') as 'existing' | 'new',
+  });
 
-  const setBulkField = useCallback(<K extends keyof BulkState>(field: K, value: BulkState[K]) => {
-    dispatchBulk({ type: 'set', field, value });
-  }, []);
-
-  const setBulkSelectionMode = useCallback((value: boolean) => setBulkField('bulkSelectionMode', value), [setBulkField]);
-  const setBulkEditOpen = useCallback((value: boolean) => setBulkField('bulkEditOpen', value), [setBulkField]);
-  const setBulkFolderInput = useCallback((value: string) => setBulkField('bulkFolderInput', value), [setBulkField]);
-  const setBulkFolderMode = useCallback((value: 'existing' | 'new') => setBulkField('bulkFolderMode', value), [setBulkField]);
-  const setBulkTagsInput = useCallback((value: string) => setBulkField('bulkTagsInput', value), [setBulkField]);
-  const setBulkTagsAiCount = useCallback((value: string) => setBulkField('bulkTagsAiCount', value), [setBulkField]);
-  const setBulkApplyFolder = useCallback((value: boolean) => setBulkField('bulkApplyFolder', value), [setBulkField]);
-  const setBulkApplyTags = useCallback((value: boolean) => setBulkField('bulkApplyTags', value), [setBulkField]);
-  const setBulkTagsMode = useCallback((value: 'replace' | 'append' | 'ai') => setBulkField('bulkTagsMode', value), [setBulkField]);
-  const setBulkApplyDisplayName = useCallback((value: boolean) => setBulkField('bulkApplyDisplayName', value), [setBulkField]);
-  const setBulkDisplayNameMode = useCallback((value: 'custom' | 'auto' | 'clear' | 'ai') => setBulkField('bulkDisplayNameMode', value), [setBulkField]);
-  const setBulkDisplayNameInput = useCallback((value: string) => setBulkField('bulkDisplayNameInput', value), [setBulkField]);
-  const setBulkApplyDescription = useCallback((value: boolean) => setBulkField('bulkApplyDescription', value), [setBulkField]);
-  const setBulkDescriptionAppendInput = useCallback((value: string) => setBulkField('bulkDescriptionAppendInput', value), [setBulkField]);
-  const setBulkApplyNamespace = useCallback((value: boolean) => setBulkField('bulkApplyNamespace', value), [setBulkField]);
-  const setBulkNamespaceInput = useCallback((value: string) => setBulkField('bulkNamespaceInput', value), [setBulkField]);
-  const setBulkUpdating = useCallback((value: boolean) => setBulkField('bulkUpdating', value), [setBulkField]);
-  const setBulkDeleting = useCallback((value: boolean) => setBulkField('bulkDeleting', value), [setBulkField]);
-  const setBulkEmbeddingGenerating = useCallback((value: boolean) => setBulkField('bulkEmbeddingGenerating', value), [setBulkField]);
-  const setBulkAnimateFps = useCallback((value: string) => setBulkField('bulkAnimateFps', value), [setBulkField]);
-  const setBulkAnimateTouched = useCallback((value: boolean) => setBulkField('bulkAnimateTouched', value), [setBulkField]);
-  const setBulkAnimateLoop = useCallback((value: boolean) => setBulkField('bulkAnimateLoop', value), [setBulkField]);
-  const setBulkAnimateFilename = useCallback((value: string) => setBulkField('bulkAnimateFilename', value), [setBulkField]);
-  const setBulkAnimateLoading = useCallback((value: boolean) => setBulkField('bulkAnimateLoading', value), [setBulkField]);
-  const setBulkAnimateError = useCallback((value: string | null) => setBulkField('bulkAnimateError', value), [setBulkField]);
   const [refreshingCache, setRefreshingCache] = useState(false);
-  const [namespaceSettingsOpen, setNamespaceSettingsOpen] = useState(false);
-  const [namespaceDeleting, setNamespaceDeleting] = useState(false);
-  const [namespaceDraft, setNamespaceDraft] = useState(namespace ?? '');
-  const [namespaceSelectValue, setNamespaceSelectValue] = useState('');
-  const [registryNamespaces, setRegistryNamespaces] = useState<string[]>([]);
+  const toast = useToast();
+  const {
+    namespaceSettingsOpen,
+    setNamespaceSettingsOpen,
+    namespaceDeleting,
+    namespaceDraft,
+    namespaceSelectValue,
+    registryNamespaces,
+    fetchNamespaces,
+    registerNamespace,
+    namespaceOptions,
+    namespaceLabel,
+    handleNamespaceSelectChange,
+    handleNamespaceDraftChange,
+    selectedNamespaceForDelete,
+    canDeleteSelectedNamespace,
+    handleNamespaceSave,
+    handleNamespaceDelete,
+  } = useGalleryNamespace({
+    images,
+    namespace,
+    onNamespaceChange,
+    toastPush: toast.push,
+  });
+
   const [videoLimitOverride, setVideoLimitOverride] = useState<number | null>(null);
   const [includeExtrasForGallery, setIncludeExtrasForGallery] = useState(
     isLikelySourceSearchTerm(storedPreferencesRef.current.searchTerm ?? '')
@@ -754,132 +250,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const COLOR_METADATA_RETRY_MS = 5 * 60 * 1000;
   const PROMPT_THIS_RETRY_MS = 60 * 1000;
   const ENABLE_COLOR_METADATA = process.env.NEXT_PUBLIC_ENABLE_COLOR_METADATA === '1';
-  const utilityButtonClasses = 'text-[0.65rem] font-mono px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 transition';
   const didRestoreReturnStateRef = useRef(false);
-
-  // Keep ref in sync with state for use in effects without triggering re-runs
-  useEffect(() => {
-    promptThisMapRef.current = promptThisMap;
-  }, [promptThisMap]);
-
-  useEffect(() => {
-    const next = namespace ?? '';
-    setNamespaceDraft(next === '__all__' ? '' : next);
-    setNamespaceSelectValue(next || '');
-  }, [namespace]);
-
-  const fetchNamespaces = useCallback(async (cache: RequestCache = 'no-store') => {
-    try {
-      const response = await fetch('/api/namespaces', { cache });
-      const data = await response.json();
-      const payload = Array.isArray(data?.namespaces) ? data.namespaces : [];
-      setRegistryNamespaces(payload.filter((entry: unknown): entry is string => typeof entry === 'string'));
-    } catch (error) {
-      console.warn('Failed to load namespace registry', error);
-    }
-  }, []);
-
-  useEffect(() => {
-    void fetchNamespaces('no-store');
-  }, [fetchNamespaces]);
-
-  const registerNamespace = useCallback(async (value: string, description?: string) => {
-    const namespace = value.trim();
-    if (!namespace || namespace === '__all__' || namespace === '__none__') {
-      return false;
-    }
-
-    try {
-      const response = await fetch('/api/namespaces', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        cache: 'no-store',
-        body: JSON.stringify({ namespace, description: description?.trim() ?? '' }),
-      });
-      const data = await response.json().catch(() => null);
-      if (!response.ok) {
-        throw new Error(typeof data?.error === 'string' ? data.error : 'Failed to register namespace');
-      }
-      const payload = Array.isArray(data?.namespaces) ? data.namespaces : [];
-      setRegistryNamespaces(payload.filter((entry: unknown): entry is string => typeof entry === 'string'));
-      return true;
-    } catch (error) {
-      console.warn('Failed to register namespace', error);
-      void fetchNamespaces('no-store');
-      return false;
-    }
-  }, [fetchNamespaces]);
-
-  const namespaceOptions = useMemo(() => {
-    const rawSeen = new Set(images.map((image) => image.namespace).filter((ns): ns is string => Boolean(ns)));
-    const envDefault = process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || '';
-    const knownRaw = process.env.NEXT_PUBLIC_KNOWN_NAMESPACES || '';
-    const registryRaw = registryNamespaces;
-    
-    // Explicitly known items
-    const defaults = new Set<string>();
-    if (envDefault) defaults.add(envDefault);
-    
-    // Configured known items
-    const known = new Set<string>();
-    knownRaw.split(',').map(s => s.trim()).filter(Boolean).forEach(s => {
-      // Don't duplicate if it's already the default
-      if (!defaults.has(s)) known.add(s);
-    });
-
-    const registry = new Set<string>();
-    registryRaw.map((entry) => entry.trim()).filter(Boolean).forEach((entry) => {
-      if (!defaults.has(entry) && !known.has(entry)) {
-        registry.add(entry);
-      }
-    });
-
-    // Discovered from current image set
-    const discovered = new Set<string>();
-    rawSeen.forEach(s => {
-      if (!defaults.has(s) && !known.has(s) && !registry.has(s)) {
-        discovered.add(s);
-      }
-    });
-
-    const options = [
-      { value: '__all__', label: 'All namespaces' },
-    ];
-
-    if (defaults.size > 0) {
-      defaults.forEach(val => options.push({ value: val, label: `${val} (default)` }));
-    }
-
-    if (known.size > 0) {
-      const sorted = Array.from(known).sort();
-      sorted.forEach(val => options.push({ value: val, label: val }));
-    }
-
-    if (registry.size > 0) {
-      const sorted = Array.from(registry).sort();
-      sorted.forEach(val => options.push({ value: val, label: `${val} (registry)` }));
-    }
-
-    if (discovered.size > 0) {
-      const sorted = Array.from(discovered).sort();
-      sorted.forEach(val => options.push({ value: val, label: `${val} (discovered)` }));
-    }
-
-    options.push({ value: '__custom__', label: 'Enter manually...' });
-
-    // Ensure the currently selected one is present if it wasn't covered above.
-    if (namespace && !options.some((opt) => opt.value === namespace) && namespace !== '__custom__') {
-      options.splice(options.length - 1, 0, { value: namespace, label: namespace });
-    }
-
-    return options;
-  }, [images, namespace, registryNamespaces]);
-
-  const namespaceLabel = namespace === '__all__'
-    ? 'All namespaces'
-    : namespace
-      ? namespace
-      : 'cf-default';
 
   // Restore scroll position when returning from a detail page.
   // Page is restored during initial state hydration to avoid a visible jump.
@@ -954,6 +325,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     embedding: storedPreferencesRef.current.embeddingFilter ?? 'none',
     aspectRatioFilters: storedPreferencesRef.current.aspectRatioFilters ?? [],
     dateFilter: storedPreferencesRef.current.dateFilter ?? null,
+    dateTimeZone: getBrowserDateTimeZone(),
     hiddenFolders: storedPreferencesRef.current.hiddenFolders ?? [],
     hiddenTags: storedPreferencesRef.current.hiddenTags ?? [],
     showMotionAssetsOnly: storedPreferencesRef.current.showMotionAssetsOnly ?? false,
@@ -1134,11 +506,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         } else {
           setVideoResultsNotice(null);
         }
-        galleryWarmCache = {
-          namespace: namespace ?? '',
-          images: uniqueImages,
-          savedAt: Date.now(),
-        };
+        rememberGalleryWarmCache(namespace ?? '', uniqueImages);
         if (PERF_LOGGING_ENABLED) {
           const elapsedMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
           const serverTiming = response.headers.get('server-timing') ?? 'n/a';
@@ -1242,8 +610,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     fetchImages({ silent: shouldSilentFetch });
   }, [namespace, fetchImages]);
 
-  const toast = useToast();
-
   const clearColorSearch = useCallback(() => {
     setColorSearchHex(null);
     setColorSearchRows([]);
@@ -1251,23 +617,14 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     setColorSearchLoading(false);
   }, []);
 
-  const [backupInfo, setBackupInfo] = useState<{
-    timestamp: string;
-    date: Date;
-    sizeHuman: string;
-    type: 'bundle' | 'rdb';
-  } | null>(null);
-  const [backupLoading, setBackupLoading] = useState(false);
-  const [backupError, setBackupError] = useState<string | null>(null);
-  const [focusedGalleryAssetId, setFocusedGalleryAssetId] = useState<string | null>(null);
-  const [focusNotice, setFocusNotice] = useState<string | null>(null);
-  const focusCanonicalizedRef = useRef(false);
-  const focusAppliedRef = useRef(false);
-  // Set true to skip the next refetch that would otherwise be triggered by a
-  // currentPage change. Used during focus reconciliation: the server's first
-  // response already returned the focus page's data, so when we sync the client
-  // currentPage to match serverFocus.page, there's no reason to refetch.
-  const focusReconcileSkipRef = useRef(false);
+  const {
+    backupLoading,
+    backupError,
+    backupAgeLabel,
+    backupTimeLabel,
+    backupSizeLabel,
+    handleCreateBackup,
+  } = useGalleryBackup(toast.push);
 
   const {
     brokenAudit,
@@ -1285,105 +642,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const { embeddingPendingMap } = useGalleryEmbedding({
     images,
   });
-
-  const parseBackupTimestamp = useCallback((timestamp: string) => {
-    const match = timestamp.match(/(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})([+-]\d{4})?/);
-    if (!match) return null;
-    const [, year, month, day, hour, minute, second, tzOffset] = match;
-    const utcMs = Date.UTC(
-      Number(year),
-      Number(month) - 1,
-      Number(day),
-      Number(hour),
-      Number(minute),
-      Number(second)
-    );
-    if (!tzOffset) {
-      return new Date(utcMs);
-    }
-    const sign = tzOffset.startsWith('-') ? -1 : 1;
-    const offsetHours = Number(tzOffset.slice(1, 3));
-    const offsetMinutes = Number(tzOffset.slice(3, 5));
-    const offsetTotalMinutes = sign * (offsetHours * 60 + offsetMinutes);
-    return new Date(utcMs - offsetTotalMinutes * 60 * 1000);
-  }, []);
-
-  const fetchLatestBackup = useCallback(async () => {
-    try {
-      setBackupError(null);
-      const response = await fetch('/api/backup');
-      if (!response.ok) {
-        throw new Error('Failed to load backups');
-      }
-      const data = await response.json();
-      const backups = (data?.backups ?? []) as Array<{
-        timestamp: string;
-        sizeHuman: string;
-        type: 'bundle' | 'rdb';
-      }>;
-      if (!backups.length) {
-        setBackupInfo(null);
-        return;
-      }
-      const latestTimestamp = backups
-        .map((b) => b.timestamp)
-        .sort()
-        .reverse()[0];
-      const latestBundle = backups.find(
-        (b) => b.timestamp === latestTimestamp && b.type === 'bundle'
-      );
-      const latestRdb = backups.find(
-        (b) => b.timestamp === latestTimestamp && b.type === 'rdb'
-      );
-      const chosen = latestBundle ?? latestRdb;
-      if (!chosen) {
-        setBackupInfo(null);
-        return;
-      }
-      const date = parseBackupTimestamp(chosen.timestamp);
-      if (!date) {
-        setBackupInfo(null);
-        return;
-      }
-      setBackupInfo({
-        timestamp: chosen.timestamp,
-        date,
-        sizeHuman: chosen.sizeHuman,
-        type: chosen.type,
-      });
-    } catch (error) {
-      console.error('Failed to load backup info', error);
-      setBackupError(error instanceof Error ? error.message : 'Backup info unavailable');
-    }
-  }, [parseBackupTimestamp]);
-
-  useEffect(() => {
-    fetchLatestBackup();
-  }, [fetchLatestBackup]);
-
-  const handleCreateBackup = useCallback(async () => {
-    try {
-      setBackupLoading(true);
-      setBackupError(null);
-      const response = await fetch('/api/backup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data?.error || 'Failed to create backup');
-      }
-      toast.push('Backup created');
-      await fetchLatestBackup();
-    } catch (error) {
-      console.error('Backup failed', error);
-      setBackupError(error instanceof Error ? error.message : 'Backup failed');
-      toast.push('Backup failed');
-    } finally {
-      setBackupLoading(false);
-    }
-  }, [fetchLatestBackup, toast]);
 
   const handleCopyUrl = async (
     event: React.MouseEvent<HTMLButtonElement>,
@@ -1446,70 +704,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const handleMouseLeave = () => {
     setHoveredImage(null);
     setShowPreview(false);
-  };
-
-  // Helper function to get orientation icon based on aspect ratio
-  const getOrientationIcon = (aspectRatioString: string) => {
-    // Parse the aspect ratio to determine orientation
-    const parts = aspectRatioString.split(':');
-    if (parts.length === 2) {
-      const width = parseFloat(parts[0]);
-      const height = parseFloat(parts[1]);
-      const ratio = width / height;
-      
-      if (Math.abs(ratio - 1) < 0.1) {
-        // Square (1:1 or close)
-        return (
-          <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor" className="inline-block">
-            <rect x="1" y="1" width="6" height="6" fill="none" stroke="currentColor" strokeWidth="0.8"/>
-          </svg>
-        );
-      } else if (ratio > 1) {
-        // Landscape (wider than tall)
-        return (
-          <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor" className="inline-block">
-            <rect x="1" y="1" width="8" height="4" fill="none" stroke="currentColor" strokeWidth="0.8"/>
-          </svg>
-        );
-      } else {
-        // Portrait (taller than wide)
-        return (
-          <svg width="6" height="10" viewBox="0 0 6 10" fill="currentColor" className="inline-block">
-            <rect x="1" y="1" width="4" height="8" fill="none" stroke="currentColor" strokeWidth="0.8"/>
-          </svg>
-        );
-      }
-    }
-    
-    // Default to square if we can't parse
-    return (
-      <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor" className="inline-block">
-        <rect x="1" y="1" width="6" height="6" fill="none" stroke="currentColor" strokeWidth="0.8"/>
-      </svg>
-    );
-  };
-
-  // Component for displaying aspect ratio
-  const AspectRatioDisplay: React.FC<{ imageId: string }> = ({ imageId }) => {
-    const { aspectRatio, loading, error } = useImageAspectRatio(imageId);
-
-    if (loading) {
-      return (
-        <p className="text-sm font-mono text-gray-400">
-          📐 <span className="inline-block w-8 h-2 bg-gray-200 rounded animate-pulse"></span>
-        </p>
-      );
-    }
-
-    if (error || !aspectRatio) {
-      return <p className="text-sm font-mono text-gray-400">📐 --</p>;
-    }
-
-    return (
-      <p className="text-[0.6rem] font-mono text-gray-500 flex items-center gap-1">
-        📐 {aspectRatio} {getOrientationIcon(aspectRatio)}
-      </p>
-    );
   };
 
   const VARIANT_PRESETS = ['small', 'medium', 'large', 'xlarge', 'full', 'thumbnail'];
@@ -1642,29 +836,31 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     returningFromDetailRef,
   });
 
+  const {
+    focusedGalleryAssetId,
+    focusNotice,
+    setFocusNotice,
+    focusAppliedRef,
+    focusReconcileSkipRef,
+  } = useGalleryFocusNavigation({
+    initialFocusTargetRef,
+    namespace,
+    clearFilters,
+    clearColorSearch,
+    galleryImages,
+    filteredImages,
+    loading,
+    pageIndex,
+    serverFocus,
+    setCurrentPage,
+  });
+
   const hiddenFolderSet = useMemo(() => new Set(hiddenFolders), [hiddenFolders]);
   const hiddenTagSet = useMemo(() => new Set(hiddenTags.map(tag => tag.toLowerCase())), [hiddenTags]);
   const shouldIncludeExtrasForSearch = useMemo(
     () => isLikelySourceSearchTerm(searchTerm),
     [searchTerm]
   );
-
-  useEffect(() => {
-    const focusTarget = initialFocusTargetRef.current;
-    if (!focusTarget) return;
-    if (focusCanonicalizedRef.current) return;
-    const activeNamespace = namespace ?? '';
-    if (focusTarget.namespace !== activeNamespace) return;
-
-    focusCanonicalizedRef.current = true;
-    clearFilters();
-    clearColorSearch();
-    setFocusNotice(
-      focusTarget.namespace === '__all__'
-        ? 'Locating image in all namespaces; filters were cleared for this focused asset.'
-        : 'Locating image in this namespace; filters were cleared for this focused asset.'
-    );
-  }, [clearColorSearch, clearFilters, namespace]);
 
   useEffect(() => {
     if (includeExtrasForGallery === shouldIncludeExtrasForSearch) return;
@@ -1686,6 +882,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       embedding: embeddingFilter,
       aspectRatioFilters,
       dateFilter,
+      dateTimeZone: getBrowserDateTimeZone(),
       hiddenFolders,
       hiddenTags,
       showMotionAssetsOnly,
@@ -1797,7 +994,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           namespace: namespace ?? '',
           savedAt,
           images: pageImages,
-        } as GalleryReturnSnapshotState)
+        })
       );
     } catch {
       // ignore
@@ -2195,6 +1392,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     setBulkAnimateFilename,
     setBulkAnimateFps,
     setBulkAnimateLoop,
+    setBulkAnimateOrderMode,
     setBulkAnimateTouched,
     bulkApplyFolder,
     bulkApplyTags,
@@ -2218,6 +1416,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     bulkAnimateFps,
     bulkAnimateFilename,
     bulkAnimateLoop,
+    bulkAnimateOrderMode,
     namespace,
     fetchImages,
   });
@@ -2338,6 +1537,29 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         })),
     [images, selectedImageIds]
   );
+  const selectedGalleryOrderIds = useMemo(
+    () => selectedImagesForPayload.map((image) => image.id),
+    [selectedImagesForPayload]
+  );
+  const selectedInsertionOrderIds = useMemo(
+    () => Array.from(selectedImageIds),
+    [selectedImageIds]
+  );
+  const selectedAnimationPreview = useMemo(
+    () => (
+      bulkAnimateOrderMode === 'reverse-gallery'
+        ? [...selectedImagesForPayload].reverse()
+        : selectedImagesForPayload
+    ),
+    [bulkAnimateOrderMode, selectedImagesForPayload]
+  );
+  const bulkAnimateSelectionOrderDiffers = useMemo(
+    () =>
+      selectedGalleryOrderIds.length > 1 &&
+      selectedInsertionOrderIds.length === selectedGalleryOrderIds.length &&
+      selectedInsertionOrderIds.some((id, index) => id !== selectedGalleryOrderIds[index]),
+    [selectedGalleryOrderIds, selectedInsertionOrderIds]
+  );
 
   const handleCopySelectionPayload = useCallback(
     async (payload: string) => {
@@ -2355,129 +1577,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   useEffect(() => {
     scrollGalleryToTop();
   }, [scrollGalleryToTop]);
-
-  const handleNamespaceSelectChange = useCallback(
-    (value: string) => {
-      setNamespaceSelectValue(value);
-      if (value === '__custom__') {
-        return;
-      }
-      setNamespaceDraft(value);
-      onNamespaceChange?.(value);
-      setNamespaceSettingsOpen(false);
-    },
-    [onNamespaceChange]
-  );
-
-  const handleNamespaceDraftChange = useCallback((value: string) => {
-    setNamespaceDraft(value);
-    setNamespaceSelectValue('__custom__');
-  }, []);
-
-  const selectedNamespaceForDelete = useMemo(() => {
-    const selected = namespaceSelectValue === '__custom__'
-      ? namespaceDraft.trim()
-      : namespaceSelectValue.trim();
-    if (!selected || selected === '__custom__') return '';
-    return selected;
-  }, [namespaceDraft, namespaceSelectValue]);
-
-  const canDeleteSelectedNamespace =
-    Boolean(selectedNamespaceForDelete) && !PROTECTED_NAMESPACE_VALUES.has(selectedNamespaceForDelete);
-
-  const handleNamespaceSave = useCallback(() => {
-    const next = namespaceSelectValue === '__custom__'
-      ? namespaceDraft.trim()
-      : namespaceSelectValue;
-    if (namespaceSelectValue === '__custom__' && next) {
-      void registerNamespace(next);
-    }
-    onNamespaceChange?.(next);
-    setNamespaceSettingsOpen(false);
-  }, [namespaceDraft, namespaceSelectValue, onNamespaceChange, registerNamespace]);
-
-  const handleNamespaceDelete = useCallback(async () => {
-    if (!selectedNamespaceForDelete || !canDeleteSelectedNamespace) {
-      return;
-    }
-
-    setNamespaceDeleting(true);
-    try {
-      const dryRunResponse = await fetch('/api/namespaces', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        cache: 'no-store',
-        body: JSON.stringify({ namespace: selectedNamespaceForDelete, dryRun: true }),
-      });
-      const dryRunPayload = await dryRunResponse.json().catch(() => null);
-      if (!dryRunResponse.ok) {
-        toast.push(
-          typeof dryRunPayload?.error === 'string'
-            ? dryRunPayload.error
-            : 'Could not preview namespace deletion'
-        );
-        return;
-      }
-
-      const imageCount = typeof dryRunPayload?.imageCount === 'number' ? dryRunPayload.imageCount : 0;
-      const videoCount = typeof dryRunPayload?.videoCount === 'number' ? dryRunPayload.videoCount : 0;
-      const assetCount = imageCount + videoCount;
-      const confirmed = typeof window === 'undefined'
-        ? true
-        : window.confirm(
-            `Delete namespace "${selectedNamespaceForDelete}"?\n\n${assetCount} asset${assetCount === 1 ? '' : 's'} will be moved to ${DEFAULT_NAMESPACE}. No files will be deleted.`
-          );
-      if (!confirmed) return;
-
-      const response = await fetch('/api/namespaces', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        cache: 'no-store',
-        body: JSON.stringify({ namespace: selectedNamespaceForDelete, dryRun: false }),
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok || payload?.partialFailure) {
-        const failureCount = Array.isArray(payload?.failures) ? payload.failures.length : 0;
-        toast.push(
-          failureCount > 0
-            ? `Namespace delete partially failed for ${failureCount} asset${failureCount === 1 ? '' : 's'}`
-            : typeof payload?.error === 'string'
-              ? payload.error
-              : 'Namespace delete failed'
-        );
-        void fetchNamespaces('no-store');
-        return;
-      }
-
-      const movedImageCount = Array.isArray(payload?.movedImageIds) ? payload.movedImageIds.length : 0;
-      const movedVideoCount = Array.isArray(payload?.movedVideoIds) ? payload.movedVideoIds.length : 0;
-      const movedCount = movedImageCount + movedVideoCount;
-      const namespaces = Array.isArray(payload?.namespaces) ? payload.namespaces : [];
-      if (namespaces.length > 0) {
-        setRegistryNamespaces(namespaces.filter((entry: unknown): entry is string => typeof entry === 'string'));
-      } else {
-        void fetchNamespaces('no-store');
-      }
-      setNamespaceDraft(DEFAULT_NAMESPACE);
-      setNamespaceSelectValue(DEFAULT_NAMESPACE);
-      onNamespaceChange?.(DEFAULT_NAMESPACE);
-      setNamespaceSettingsOpen(false);
-      toast.push(
-        `Deleted namespace "${selectedNamespaceForDelete}" and moved ${movedCount} asset${movedCount === 1 ? '' : 's'}`
-      );
-    } catch (error) {
-      console.error('Failed to delete namespace', error);
-      toast.push('Namespace delete failed');
-    } finally {
-      setNamespaceDeleting(false);
-    }
-  }, [
-    canDeleteSelectedNamespace,
-    fetchNamespaces,
-    onNamespaceChange,
-    selectedNamespaceForDelete,
-    toast,
-  ]);
 
   const viewFilters = useMemo(() => ({
     images: pageImages,
@@ -2528,84 +1627,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     clearColorSearch();
   }, [clearColorSearch, clearFilters]);
 
-  useEffect(() => {
-    const focusTarget = initialFocusTargetRef.current;
-    if (!focusTarget) return;
-    if (focusAppliedRef.current) return;
-    const activeNamespace = namespace ?? '';
-    if (focusTarget.namespace !== activeNamespace) return;
-    if (!focusCanonicalizedRef.current) return;
-    if (loading) return;
-    if (!serverFocus || serverFocus.assetId !== focusTarget.assetId) return;
-
-    if (!serverFocus.found) {
-      focusAppliedRef.current = true;
-      setFocusNotice('The requested asset could not be placed in gallery order.');
-      return;
-    }
-
-    // The server already returned the focus page's data in this response.
-    // The asset should be present in galleryImages right now. If it isn't,
-    // the data the server placed us on is inconsistent with focus metadata --
-    // surface that and stop.
-    const scopedAsset = galleryImages.find((entry) => entry.id === focusTarget.assetId);
-    if (!scopedAsset) {
-      focusAppliedRef.current = true;
-      setFocusNotice('The requested asset is not available in this gallery scope.');
-      return;
-    }
-
-    const isOnLoadedPage = filteredImages.some((entry) => entry.id === focusTarget.assetId);
-    if (!isOnLoadedPage) {
-      focusAppliedRef.current = true;
-      setFocusNotice('The requested asset could not be placed in gallery order.');
-      return;
-    }
-
-    // Sync the client's currentPage to match what the server placed us on,
-    // without triggering a refetch -- the data is already loaded. This keeps
-    // the pagination indicator honest and lets subsequent navigation start
-    // from the focused page.
-    const targetPage = serverFocus.page;
-    if (pageIndex !== targetPage) {
-      focusReconcileSkipRef.current = true;
-      setCurrentPage(targetPage);
-    }
-
-    focusAppliedRef.current = true;
-    setFocusNotice(`Image ${serverFocus.ordinal.toLocaleString()} of ${serverFocus.total.toLocaleString()}`);
-    setFocusedGalleryAssetId(focusTarget.assetId);
-
-    // Scroll the focused tile to just under the gallery header, not centered
-    // mid-viewport. The card's `scroll-margin-top` (set in ImageCard) provides
-    // the offset so the tile sits cleanly under the sticky controls.
-    window.requestAnimationFrame(() => {
-      const target = document.querySelector<HTMLElement>(
-        `[data-gallery-asset-id="${focusTarget.assetId}"]`
-      );
-      target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-    // Highlight is persistent: it stays until the user navigates away from
-    // the focus page or unmounts the gallery. See the page-change effect below.
-  }, [filteredImages, galleryImages, loading, namespace, pageIndex, serverFocus, setCurrentPage]);
-
-  // Clear the focus highlight when the user navigates to a different page.
-  // This makes the highlight feel like an "I just landed here" cue rather than
-  // a permanent marker that follows the user through pagination.
-  useEffect(() => {
-    if (!focusAppliedRef.current) return;
-    if (!serverFocus) return;
-    if (!focusedGalleryAssetId) return;
-    if (pageIndex !== serverFocus.page) {
-      setFocusedGalleryAssetId(null);
-    }
-  }, [pageIndex, serverFocus, focusedGalleryAssetId]);
-  const backupAgeDays = backupInfo
-    ? (Date.now() - backupInfo.date.getTime()) / (1000 * 60 * 60 * 24)
-    : null;
-  const backupAgeLabel = backupAgeDays !== null ? `${backupAgeDays.toFixed(1)}d old` : '—';
-  const backupTimeLabel = backupInfo ? backupInfo.date.toLocaleString() : '—';
-  const backupSizeLabel = backupInfo ? backupInfo.sizeHuman : '—';
   const serverPagedResultCount = colorSearchHex ? null : serverPagination?.total ?? null;
   const galleryResultCount = serverPagedResultCount ?? filteredWithVariants.length;
   const galleryTotalCount =
@@ -2659,497 +1680,195 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         />
       </div>
 
-      {duplicateGroupCount > 0 && (
-        <div className="mb-4 flex flex-col gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-[0.65rem] font-mono text-amber-900">
-          <div>
-            Found {duplicateGroupCount} duplicate group{duplicateGroupCount === 1 ? '' : 's'} affecting {duplicateImageCount} image{duplicateImageCount === 1 ? '' : 's'} (must match both original URL and content hash).
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => setShowDuplicatesOnly(!showDuplicatesOnly)}
-              className="px-3 py-1 rounded-md border border-amber-300 bg-white text-amber-900 hover:bg-amber-100 transition"
-            >
-              {showDuplicatesOnly ? 'Show all images' : 'Show duplicates only'}
-            </button>
-            <button
-              onClick={selectDuplicateImages}
-              className="px-3 py-1 rounded-md border border-amber-300 bg-amber-100 text-amber-900 hover:bg-amber-200 transition"
-            >
-              Select all duplicates
-            </button>
-            <button
-              onClick={() => selectDuplicatesKeepSingle('newest')}
-              className="px-3 py-1 rounded-md border border-amber-300 bg-amber-100 text-amber-900 hover:bg-amber-200 transition"
-            >
-              Select duplicates (keep newest)
-            </button>
-            <button
-              onClick={() => selectDuplicatesKeepSingle('oldest')}
-              className="px-3 py-1 rounded-md border border-amber-300 bg-amber-100 text-amber-900 hover:bg-amber-200 transition"
-            >
-              Select duplicates (keep oldest)
-            </button>
-          </div>
-        </div>
-      )}
+      <GalleryNoticeStack
+        duplicateGroupCount={duplicateGroupCount}
+        duplicateImageCount={duplicateImageCount}
+        showDuplicatesOnly={showDuplicatesOnly}
+        colorSearchHex={colorSearchHex}
+        colorSearchLoading={colorSearchLoading}
+        colorSearchError={colorSearchError}
+        galleryResultCount={galleryResultCount}
+        focusNotice={focusNotice}
+        onToggleDuplicatesOnly={() => setShowDuplicatesOnly(!showDuplicatesOnly)}
+        onSelectDuplicateImages={selectDuplicateImages}
+        onSelectDuplicatesKeepSingle={selectDuplicatesKeepSingle}
+        onClearColorSearch={clearColorSearch}
+        onDismissFocusNotice={() => setFocusNotice(null)}
+      />
 
-      {colorSearchHex && (
-        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-[0.65rem] font-mono text-violet-900">
-          <span className="rounded-full border border-violet-300 bg-white px-2 py-0.5">
-            Color: {colorSearchHex}
-          </span>
-          {colorSearchLoading && <span className="text-violet-700">Searching nearby colors…</span>}
-          {!colorSearchLoading && colorSearchError && (
-            <span className="text-red-700">Search failed: {colorSearchError}</span>
-          )}
-          {!colorSearchLoading && !colorSearchError && (
-            <span>{galleryResultCount.toLocaleString()} result{galleryResultCount === 1 ? '' : 's'}</span>
-          )}
-          <button
-            type="button"
-            onClick={clearColorSearch}
-            className="rounded border border-violet-300 bg-white px-2.5 py-1 text-[0.6rem] hover:bg-violet-100"
-          >
-            Clear color search
-          </button>
-        </div>
-      )}
+      <GalleryControlsPanel
+        visible={galleryControlsVisible}
+        filtersCollapsed={filtersCollapsed}
+        semanticSearchRef={semanticSearchRef}
+        namespace={namespace}
+        onSemanticAvailabilityChange={setSemanticSearchAvailable}
+        legacyTopBarProps={{
+          filteredCount: galleryResultCount,
+          totalCount: galleryTotalCount,
+          namespaceLabel,
+          namespace,
+          showPagination,
+          currentPageRangeLabel,
+          sortedImages,
+          dateFilter,
+          onDateFilterChange: setDateFilter,
+          bulkSelectionMode,
+          filtersCollapsed,
+          hasActiveFilters,
+          pageSize,
+          pageSizeOptions: PAGE_SIZE_OPTIONS,
+          defaultPageSize: DEFAULT_PAGE_SIZE,
+          gridSize,
+          refreshingCache,
+          viewMode,
+          selectedCount,
+          bulkEmbeddingGenerating,
+          bulkDeleting,
+          onToggleBulkSelection: () => setBulkSelectionMode(!bulkSelectionMode),
+          onToggleFilters: () => setFiltersCollapsed((prev) => !prev),
+          onClearFilters: handleClearFilters,
+          onPageSizeChange: handlePageSizeChange,
+          onGridSizeChange: setGridSize,
+          onRefreshCache: () => fetchImages({ forceRefresh: true }),
+          onOpenNamespaceSettings: () => setNamespaceSettingsOpen(true),
+          onToggleViewMode: () => setViewMode(viewMode === 'grid' ? 'list' : 'grid'),
+          onSelectPage: () => selectAllOnPage(pageImages),
+          onClearSelection: clearSelection,
+          onOpenBulkEdit: openBulkEditModal,
+          onGenerateEmbeddings: generateEmbeddingsForSelected,
+          onDeleteSelected: deleteSelectedImages,
+        }}
+        backupTimeLabel={backupTimeLabel}
+        backupSizeLabel={backupSizeLabel}
+        backupAgeLabel={backupAgeLabel}
+        backupError={backupError}
+        backupLoading={backupLoading}
+        onCreateBackup={handleCreateBackup}
+        galleryFiltersProps={{
+          searchTerm,
+          onSearchChange: setSearchTerm,
+          folders: uniqueFolders,
+          selectedFolder,
+          onFolderChange: handleFolderFilterChange,
+          hiddenFolders: hiddenFolderSet,
+          onToggleHiddenFolder: (folder: string) =>
+            hiddenFolderSet.has(folder) ? unhideFolderByName(folder) : hideFolderByName(folder),
+          onShowAllFolders: clearHiddenFolders,
+          allTags: uniqueTags,
+          selectedTag,
+          onTagChange: setSelectedTag,
+          hiddenTags: hiddenTagSet,
+          onToggleHiddenTag: (tag: string) =>
+            hiddenTagSet.has(tag.toLowerCase()) ? unhideTagByName(tag) : hideTagByName(tag),
+          onShowAllTags: clearHiddenTags,
+          aspectRatioFilters,
+          onAspectRatioFiltersChange: setAspectRatioFilters,
+          onlyCanonical,
+          onOnlyCanonicalChange: setOnlyCanonical,
+          respectAspectRatio,
+          onRespectAspectRatioChange: setRespectAspectRatio,
+          showDuplicatesOnly,
+          onShowDuplicatesOnlyChange: setShowDuplicatesOnly,
+          showVariationsOnly: onlyWithVariants,
+          onShowVariationsOnlyChange: setOnlyWithVariants,
+          showMotionAssetsOnly,
+          onShowMotionAssetsOnlyChange: setShowMotionAssetsOnly,
+          showFavoritesOnly,
+          onShowFavoritesOnlyChange: setShowFavoritesOnly,
+          showComfyOnly,
+          onShowComfyOnlyChange: setShowComfyOnly,
+          showOnlyMissingEmbeddings: embeddingFilter !== 'none',
+          onShowOnlyMissingEmbeddingsChange: (value: boolean) =>
+            setEmbeddingFilter(value ? 'missing-any' : 'none'),
+          showBrokenOnly,
+          onShowBrokenOnlyChange: setShowBrokenOnly,
+          onClearFilters: handleClearFilters,
+          hasActiveFilters: hasActiveFilters || Boolean(colorSearchHex),
+        }}
+        auditLoading={auditLoading}
+        auditEntries={auditEntries}
+        auditProgress={auditProgress}
+        showCli={showCli}
+        commandBarProps={{
+          hiddenFolders,
+          hiddenTags,
+          knownFolders: uniqueFolders,
+          knownTags: uniqueTags,
+          onHideFolder: hideFolderByName,
+          onUnhideFolder: unhideFolderByName,
+          onClearHidden: clearHiddenFolders,
+          onHideTag: hideTagByName,
+          onUnhideTag: unhideTagByName,
+          onClearHiddenTags: clearHiddenTags,
+          onSelectFolder: setSelectedFolder,
+          selectedTag,
+          onSelectTag: setSelectedTag,
+          onClearTagFilter: () => setSelectedTag(''),
+          showParentsOnly: onlyWithVariants,
+          onSetParentsOnly: setOnlyWithVariants,
+          showComfyOnly,
+          onSetComfyOnly: setShowComfyOnly,
+          currentPage: pageIndex,
+          totalPages,
+          onGoToPage: goToPageNumber,
+          embeddingFilter,
+          onSetEmbeddingFilter: setEmbeddingFilter,
+          onShowLastUploaded: showLastUploaded,
+          onClose: () => setShowCli(false),
+        }}
+      />
 
-      {focusNotice && (
-        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[0.65rem] font-mono text-amber-900">
-          <span>{focusNotice}</span>
-          <button
-            type="button"
-            onClick={() => setFocusNotice(null)}
-            className="rounded border border-amber-300 bg-white px-2.5 py-1 text-[0.6rem] hover:bg-amber-100"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
+      <GalleryUtilityRail
+        expanded={utilityExpanded}
+        filtersCollapsed={filtersCollapsed}
+        showCli={showCli}
+        videoResultsNotice={videoResultsNotice}
+        videoMeta={videoMeta}
+        selectedCount={selectedCount}
+        onExpandChange={setUtilityExpanded}
+        onToggleFilters={() => setFiltersCollapsed((prev) => !prev)}
+        onToggleCli={() => setShowCli((prev) => !prev)}
+        onLoadMoreVideos={loadMoreVideos}
+        onSelectPage={() => selectAllOnPage(pageImages)}
+        onOpenBulkEdit={openBulkEditModal}
+        onClearSelection={clearSelection}
+        onScrollTop={scrollGalleryToTop}
+        onScrollToUploader={scrollToUploader}
+      />
 
-      <div
-        className={`overflow-hidden transition-[max-height,opacity,transform] duration-300 ease-in-out ${
-          galleryControlsVisible
-            ? 'mb-4 max-h-[2000px] opacity-100 translate-y-0'
-            : 'mb-0 max-h-0 pointer-events-none opacity-0 -translate-y-2'
-        }`}
-        aria-hidden={!galleryControlsVisible}
-      >
-        <div className="mb-4 rounded-lg border border-gray-100 bg-white p-4 shadow-sm">
-          <GallerySemanticSearch
-            ref={semanticSearchRef}
-            namespace={namespace}
-            onAvailabilityChange={setSemanticSearchAvailable}
-          />
-          <LegacyTopBar
-            filteredCount={galleryResultCount}
-            totalCount={galleryTotalCount}
-            namespaceLabel={namespaceLabel}
-            namespace={namespace}
-            showPagination={showPagination}
-            currentPageRangeLabel={currentPageRangeLabel}
-            sortedImages={sortedImages}
-            dateFilter={dateFilter}
-            onDateFilterChange={setDateFilter}
-            bulkSelectionMode={bulkSelectionMode}
-            filtersCollapsed={filtersCollapsed}
-            hasActiveFilters={hasActiveFilters}
-            pageSize={pageSize}
-            pageSizeOptions={PAGE_SIZE_OPTIONS}
-            defaultPageSize={DEFAULT_PAGE_SIZE}
-            gridSize={gridSize}
-            refreshingCache={refreshingCache}
-            viewMode={viewMode}
-            selectedCount={selectedCount}
-            bulkEmbeddingGenerating={bulkEmbeddingGenerating}
-            bulkDeleting={bulkDeleting}
-            onToggleBulkSelection={() => setBulkSelectionMode(!bulkSelectionMode)}
-            onToggleFilters={() => setFiltersCollapsed(prev => !prev)}
-            onClearFilters={handleClearFilters}
-            onPageSizeChange={handlePageSizeChange}
-            onGridSizeChange={setGridSize}
-            onRefreshCache={() => fetchImages({ forceRefresh: true })}
-            onOpenNamespaceSettings={() => setNamespaceSettingsOpen(true)}
-            onToggleViewMode={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
-            onSelectPage={() => selectAllOnPage(pageImages)}
-            onClearSelection={clearSelection}
-            onOpenBulkEdit={openBulkEditModal}
-            onGenerateEmbeddings={generateEmbeddingsForSelected}
-            onDeleteSelected={deleteSelectedImages}
-            backupControls={(
-              <div className="ml-1 flex items-end gap-2 text-[0.6rem] font-mono text-gray-500">
-                <div className="text-right leading-tight">
-                  <div>Last backup: {backupTimeLabel}</div>
-                  <div className="text-gray-400">{backupSizeLabel} • {backupAgeLabel}</div>
-                  {backupError && <div className="text-red-500">{backupError}</div>}
-                </div>
-                <button
-                  type="button"
-                  onClick={handleCreateBackup}
-                  disabled={backupLoading}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded border border-gray-200 bg-white/80 text-gray-600 hover:bg-white disabled:opacity-50"
-                  title="Create backup"
-                  aria-label="Create backup"
-                >
-                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="4" y="3" width="16" height="18" rx="2" />
-                    <circle cx="12" cy="12" r="3" />
-                    <path d="M12 9v6" />
-                    <path d="M9 12h6" />
-                    <path d="M7 7h2" />
-                    <path d="M15 7h2" />
-                  </svg>
-                </button>
-              </div>
-            )}
-          />
-        </div>
-        <div
-          className={`transition-[max-height] duration-300 ease-in-out ${filtersCollapsed ? 'max-h-0 overflow-hidden' : 'max-h-[1200px] overflow-visible'}`}
-          aria-hidden={filtersCollapsed}
-        >
-          <div
-            id="gallery-filter-controls"
-            className={`relative z-10 space-y-4 rounded-lg bg-gray-50 p-4 transition-opacity duration-300 ${filtersCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
-          >
-          <div className="grid grid-cols-1 gap-4 items-start">
-            <div>
-              <GalleryFilters
-                searchTerm={searchTerm}
-                onSearchChange={setSearchTerm}
-                folders={uniqueFolders}
-                selectedFolder={selectedFolder}
-                onFolderChange={handleFolderFilterChange}
-                hiddenFolders={hiddenFolderSet}
-                onToggleHiddenFolder={(folder: string) =>
-                  hiddenFolderSet.has(folder) ? unhideFolderByName(folder) : hideFolderByName(folder)
-                }
-                onShowAllFolders={clearHiddenFolders}
-                allTags={uniqueTags}
-                selectedTag={selectedTag}
-                onTagChange={setSelectedTag}
-                hiddenTags={hiddenTagSet}
-                onToggleHiddenTag={(tag: string) =>
-                  hiddenTagSet.has(tag.toLowerCase()) ? unhideTagByName(tag) : hideTagByName(tag)
-                }
-                onShowAllTags={clearHiddenTags}
-                aspectRatioFilters={aspectRatioFilters}
-                onAspectRatioFiltersChange={setAspectRatioFilters}
-                onlyCanonical={onlyCanonical}
-                onOnlyCanonicalChange={setOnlyCanonical}
-                respectAspectRatio={respectAspectRatio}
-                onRespectAspectRatioChange={setRespectAspectRatio}
-                showDuplicatesOnly={showDuplicatesOnly}
-                onShowDuplicatesOnlyChange={setShowDuplicatesOnly}
-                showVariationsOnly={onlyWithVariants}
-                onShowVariationsOnlyChange={setOnlyWithVariants}
-                showMotionAssetsOnly={showMotionAssetsOnly}
-                onShowMotionAssetsOnlyChange={setShowMotionAssetsOnly}
-                showFavoritesOnly={showFavoritesOnly}
-                onShowFavoritesOnlyChange={setShowFavoritesOnly}
-                showComfyOnly={showComfyOnly}
-                onShowComfyOnlyChange={setShowComfyOnly}
-                showOnlyMissingEmbeddings={embeddingFilter !== 'none'}
-                onShowOnlyMissingEmbeddingsChange={(value: boolean) =>
-                  setEmbeddingFilter(value ? 'missing-any' : 'none')
-                }
-                showBrokenOnly={showBrokenOnly}
-                onShowBrokenOnlyChange={setShowBrokenOnly}
-                onClearFilters={handleClearFilters}
-                hasActiveFilters={hasActiveFilters || Boolean(colorSearchHex)}
-              />
-            </div>
-
-            <div className="sr-only" aria-hidden="true" />
-          </div>
-
-          {(auditLoading || auditEntries.length > 0) && (
-            <div className="rounded-md border border-gray-200 bg-white p-3 text-[0.65rem] font-mono text-gray-700">
-              <div className="flex items-center justify-between">
-                <span>Audit log {auditEntries.length >= AUDIT_LOG_LIMIT ? `(last ${AUDIT_LOG_LIMIT})` : ''}</span>
-                {auditLoading && <span className="text-gray-500">Running…</span>}
-              </div>
-              <div className="mt-2 h-1 w-full rounded-full bg-gray-100">
-                <div
-                  className="h-1 rounded-full bg-blue-500 transition-[width]"
-                  style={{
-                    width: auditProgress.total
-                      ? `${Math.min(100, (auditProgress.checked / auditProgress.total) * 100)}%`
-                      : '0%'
-                  }}
-                />
-              </div>
-              <div className="mt-2 max-h-40 overflow-y-auto space-y-1">
-                {auditEntries.map((entry) => (
-                  <div key={`${entry.id}-${entry.url ?? ''}-${entry.status ?? ''}`} className="flex items-start justify-between gap-2">
-                    <div className="text-gray-600">
-                      <div>{entry.id}</div>
-                      <div className="text-gray-400">{entry.filename ?? '[no filename]'}</div>
-                    </div>
-                    <span className="text-gray-500">
-                      {entry.status ?? '—'} {entry.reason ?? ''}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {showCli && (
-            <GalleryCommandBar
-              hiddenFolders={hiddenFolders}
-              hiddenTags={hiddenTags}
-              knownFolders={uniqueFolders}
-              knownTags={uniqueTags}
-              onHideFolder={hideFolderByName}
-              onUnhideFolder={unhideFolderByName}
-              onClearHidden={clearHiddenFolders}
-              onHideTag={hideTagByName}
-              onUnhideTag={unhideTagByName}
-              onClearHiddenTags={clearHiddenTags}
-              onSelectFolder={setSelectedFolder}
-              selectedTag={selectedTag}
-              onSelectTag={setSelectedTag}
-              onClearTagFilter={() => setSelectedTag('')}
-              showParentsOnly={onlyWithVariants}
-              onSetParentsOnly={setOnlyWithVariants}
-              showComfyOnly={showComfyOnly}
-              onSetComfyOnly={setShowComfyOnly}
-              currentPage={pageIndex}
-              totalPages={totalPages}
-              onGoToPage={goToPageNumber}
-              embeddingFilter={embeddingFilter}
-              onSetEmbeddingFilter={setEmbeddingFilter}
-              onShowLastUploaded={showLastUploaded}
-              onClose={() => setShowCli(false)}
-            />
-          )}
-          </div>
-        </div>
-      </div>
-
-      <div
-        className="hidden sm:block fixed right-4 top-1/2 -translate-y-1/2 z-[3000]"
-        onMouseEnter={() => setUtilityExpanded(true)}
-        onMouseLeave={() => setUtilityExpanded(false)}
-        onFocusCapture={() => setUtilityExpanded(true)}
-        onBlurCapture={() => setUtilityExpanded(false)}
-      >
-        {utilityExpanded ? (
-          <div className="pointer-events-auto flex flex-col gap-3 bg-gray-900 text-white border border-gray-700 rounded-2xl shadow-xl px-4 py-3 min-w-[220px]">
-            <div className="flex items-center justify-between text-[0.6rem] uppercase tracking-wide text-gray-300">
-              <span>Utility</span>
-              <button
-                onClick={() => setUtilityExpanded(false)}
-                className="text-gray-400 hover:text-white"
-                aria-label="Collapse utility bar"
-              >
-                ✕
-              </button>
-            </div>
-            <button
-              onClick={() => setFiltersCollapsed(prev => !prev)}
-              className={`${utilityButtonClasses} text-left bg-white/10 hover:bg-white/20`}
-              aria-pressed={!filtersCollapsed}
-            >
-              {filtersCollapsed ? 'Show filters' : 'Hide filters'}
-            </button>
-            <button
-              onClick={() => setShowCli(prev => !prev)}
-              className={`${utilityButtonClasses} text-left bg-white/10 hover:bg-white/20`}
-              aria-pressed={showCli}
-            >
-              {showCli ? 'Hide CLI' : 'Show CLI'}
-            </button>
-            {videoResultsNotice && (
-              <div className="flex flex-col gap-1 rounded-xl border border-sky-300/40 bg-sky-500/10 p-3 text-[0.6rem] text-sky-100">
-                <div className="flex items-center gap-2">
-                  <span className="rounded-full bg-sky-400/20 px-2 py-0.5 uppercase tracking-wide text-sky-100">
-                    Videos
-                  </span>
-                  <span>
-                    {videoMeta ? `${videoMeta.returned}/${videoMeta.totalScoped || videoMeta.returned} shown` : 'Video results limited'}
-                  </span>
-                  {videoMeta?.limit ? <span className="text-sky-200/80">limit {videoMeta.limit}</span> : null}
-                  <button
-                    type="button"
-                    className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-sky-300/50 bg-white/10 text-sky-100 hover:bg-white/20"
-                    title={videoResultsNotice}
-                    aria-label={videoResultsNotice}
-                  >
-                    <Info className="h-3 w-3" />
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  onClick={loadMoreVideos}
-                  className={`${utilityButtonClasses} self-start border border-sky-300/50 bg-white/10 hover:bg-white/20`}
-                >
-                  Load more videos
-                </button>
-              </div>
-            )}
-            {selectedCount > 0 && (
-              <div className="flex flex-col gap-1 text-[0.6rem] text-white">
-                <span>{selectedCount} selected</span>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() => selectAllOnPage(pageImages)}
-                    className={`${utilityButtonClasses} border border-white/20`}
-                  >
-                    Select page
-                  </button>
-                  <button
-                    onClick={openBulkEditModal}
-                    className={`${utilityButtonClasses} bg-blue-600 hover:bg-blue-500`}
-                  >
-                    Bulk edit
-                  </button>
-                  <button
-                    onClick={clearSelection}
-                    className={`${utilityButtonClasses} border border-white/20`}
-                  >
-                    Clear
-                  </button>
-                </div>
-              </div>
-            )}
-            <div className="flex flex-col gap-2 text-[0.6rem] text-gray-200">
-              <button
-                onClick={scrollGalleryToTop}
-                className={`${utilityButtonClasses} text-left`}
-              >
-                Scroll top
-              </button>
-              <button
-                onClick={scrollToUploader}
-                className={`${utilityButtonClasses} text-left`}
-              >
-                Go to uploader
-              </button>
-            </div>
-          </div>
-        ) : (
-          <button
-            onClick={() => setUtilityExpanded(true)}
-            className="pointer-events-auto flex items-center gap-2 bg-gray-900/90 text-white border border-gray-700 rounded-full shadow-lg px-3 py-2 text-[0.65rem] font-mono uppercase tracking-wide hover:bg-gray-800"
-            aria-label="Expand utility bar"
-          >
-            Utility
-          </button>
-        )}
-      </div>
-
-      {!hasResults ? (
-        <div id="gallery-empty-state" className="text-center py-12">
-          <div className="text-gray-400 mb-2">
-            <svg className="mx-auto h-12 w-12" fill="none" viewBox="0 0 20 20" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-            </svg>
-          </div>
-          <p className="text-gray-500">
-            {galleryTotalCount === 0 ? 'No images uploaded yet' : 'No images match your filters'}
-          </p>
-          <p className="text-[0.7em] font-mono text-gray-400">
-            {galleryTotalCount === 0
-              ? 'Upload some images to see them here'
-              : colorSearchHex
-                ? 'Try a different swatch or clear the active color search'
-                : 'Try adjusting your search or filters'}
-          </p>
-          {galleryTotalCount > 0 && (hasActiveFilters || Boolean(colorSearchHex)) && (
-            <button
-              onClick={handleClearFilters}
-              className="mt-3 px-3 py-1 text-[0.7em] font-mono border border-gray-200 rounded-md hover:bg-gray-100 transition"
-            >
-              Clear filters
-            </button>
-          )}
-        </div>
-      ) : (
-        viewMode === 'grid' ? (
-          <GalleryGridView
-            gridSize={gridSize}
-            filters={viewFilters}
-            onToggleSelection={toggleSelection}
-            onBeforeNavigate={saveGalleryReturnState}
-            onCopyNamespace={(ns) => { void copyToClipboard(ns, 'Namespace', toast.push); }}
-            onSelectColor={handleSelectColor}
-            onToggleCopyMenu={handleOpenCopyMenu}
-            onStartEdit={startEdit}
-            onDelete={deleteImage}
-            onToggleFavorite={toggleFavorite}
-            onMouseEnter={handleMouseEnter}
-            onMouseMove={handleMouseMove}
-            onMouseLeave={handleMouseLeave}
-          />
-        ) : (
-          <GalleryListView
-            filters={viewFilters}
-            onToggleSelection={toggleSelection}
-            onStartEdit={startEdit}
-            onDelete={deleteImage}
-            onGenerateAlt={generateAltTag}
-            onGenerateDisplayName={generateDisplayName}
-            onToggleFavorite={toggleFavorite}
-            onCopyUrl={handleOpenCopyMenu}
-            onCopyNamespace={(ns) => { void copyToClipboard(ns, 'Namespace', toast.push); }}
-            onSelectColor={handleSelectColor}
-            onBeforeNavigate={saveGalleryReturnState}
-            onDragStart={(event, img) => setDragPayloadForImage(event, img)}
-            onMouseEnter={handleMouseEnter}
-            onMouseMove={handleMouseMove}
-            onMouseLeave={handleMouseLeave}
-          />
-        )
-      )}
-
-      <div className="mt-4 flex flex-wrap items-end justify-between gap-3">
-        <div className="flex-1 min-w-[200px]">
-          <label htmlFor="variant-select" className="block text-[0.7em] font-mono font-medum text-gray-700 mb-1">
-            Image Size
-          </label>
-          <MonoSelect
-            id="variant-select"
-            value={selectedVariant}
-            onChange={setSelectedVariant}
-            options={variantOptions}
-            className="w-full"
-            size="sm"
-          />
-        </div>
-        <FolderManagerButton
-          onFoldersChanged={handleFoldersChanged}
-          size="sm"
-          label="Edit Folders"
-          namespace={namespace}
-        />
-      </div>
-
-      <div className="mt-4 flex flex-wrap items-center gap-3 text-[0.65rem] font-mono text-gray-600">
-        <button
-          onClick={runBrokenAudit}
-          disabled={auditLoading}
-          className="inline-flex items-center gap-2 px-3 py-1 border border-gray-300 rounded-md bg-white hover:bg-gray-100 disabled:opacity-50"
-        >
-          <AlertTriangle className="h-3 w-3" />
-          {auditLoading ? 'Auditing…' : 'Audit broken URLs'}
-        </button>
-        <span>
-          Broken: {brokenAudit.ids.length}
-        </span>
-        {brokenAudit.checkedAt && (
-          <span>
-            Last audit: {new Date(brokenAudit.checkedAt).toLocaleString()}
-          </span>
-        )}
-        {(auditLoading || auditProgress.checked > 0) && (
-          <span>
-            Checked: {auditProgress.checked}/{auditProgress.total}
-          </span>
-        )}
-      </div>
+      <GalleryResultsRegion
+        hasResults={hasResults}
+        galleryTotalCount={galleryTotalCount}
+        colorSearchHex={colorSearchHex}
+        hasActiveFilters={hasActiveFilters}
+        viewMode={viewMode}
+        gridSize={gridSize}
+        viewFilters={viewFilters}
+        selectedVariant={selectedVariant}
+        variantOptions={variantOptions}
+        namespace={namespace}
+        auditLoading={auditLoading}
+        auditProgress={auditProgress}
+        brokenAudit={brokenAudit}
+        onClearFilters={handleClearFilters}
+        onToggleSelection={toggleSelection}
+        onBeforeNavigate={saveGalleryReturnState}
+        onCopyNamespace={(ns) => { void copyToClipboard(ns, 'Namespace', toast.push); }}
+        onSelectColor={handleSelectColor}
+        onToggleCopyMenu={handleOpenCopyMenu}
+        onStartEdit={startEdit}
+        onDelete={deleteImage}
+        onToggleFavorite={toggleFavorite}
+        onGenerateAlt={generateAltTag}
+        onGenerateDisplayName={generateDisplayName}
+        onDragStart={(event, img) => setDragPayloadForImage(event, img)}
+        onMouseEnter={handleMouseEnter}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+        onVariantChange={setSelectedVariant}
+        onFoldersChanged={handleFoldersChanged}
+        onRunBrokenAudit={runBrokenAudit}
+      />
 
       <GalleryModals
         images={images}
@@ -3188,6 +1907,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         bulkEditOpen={bulkEditOpen}
         selectedCount={selectedCount}
         selectedImagesForPayload={selectedImagesForPayload}
+        selectedAnimationPreview={selectedAnimationPreview}
+        bulkAnimateOrderMode={bulkAnimateOrderMode}
+        onBulkAnimateOrderModeChange={setBulkAnimateOrderMode}
+        bulkAnimateSelectionOrderDiffers={bulkAnimateSelectionOrderDiffers}
         onCopySelectionPayload={handleCopySelectionPayload}
         bulkApplyFolder={bulkApplyFolder}
         onBulkApplyFolderChange={setBulkApplyFolder}

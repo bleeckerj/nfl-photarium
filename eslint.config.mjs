@@ -14,10 +14,13 @@ const eslintConfig = [
   {
     ignores: [
       "node_modules/**",
+      ".venv/**",
+      ".tmp/**",
       ".next/**",
       "out/**",
       "build/**",
       "adjacent/**",
+      "mcp-server/dist/**",
       "next-env.d.ts",
     ],
   },

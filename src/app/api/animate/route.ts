@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import sharp from 'sharp';
 import { uploadImageBuffer } from '@/server/uploadService';
 import { validateParentForNewChild } from '@/server/parentValidation';
+import { buildAnimatedWebpFromFrames } from '@/server/animatedWebpService';
 
 type AnimationItem =
   | { kind: 'file'; fileIndex: number }
@@ -204,53 +204,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Select at least two valid images' }, { status: 400 });
     }
 
-    const metas = await Promise.all(frames.map((frame) => sharp(frame.buffer).metadata()));
-    const widths = metas.map((meta) => meta.width || 0).filter(Boolean);
-    const heights = metas.map((meta) => meta.height || 0).filter(Boolean);
-    const maxWidth = Math.max(...widths, 1);
-    const maxHeight = Math.max(...heights, 1);
     const delayMs = Math.max(1, Math.round(1000 / fps));
 
-    const preparedFrames = await Promise.all(
-      frames.map(async (frame) =>
-        sharp(frame.buffer)
-          .resize(maxWidth, maxHeight, {
-            fit: 'contain',
-            background: { r: 255, g: 255, b: 255, alpha: 0 }
-          })
-          .ensureAlpha()
-          .raw()
-          .toBuffer()
-      )
-    );
-
-    const stacked = Buffer.concat(preparedFrames);
-    const animatedBuffer = await sharp(stacked, {
-      raw: {
-        width: maxWidth,
-        height: maxHeight * preparedFrames.length,
-        channels: 4,
-        pageHeight: maxHeight
-      }
-    })
-      .webp({
-        quality: 80,
-        effort: 4,
-        loop: loop ? 0 : 1,
-        delay: Array(preparedFrames.length).fill(delayMs)
-      })
-      .toBuffer();
+    const animated = await buildAnimatedWebpFromFrames(frames, { fps, loop, delayMs });
 
     const outputName = filenameRaw
       ? normalizeFilename(filenameRaw.replace(/\.webp$/i, '')) + '.webp'
       : `animated-${Date.now()}.webp`;
 
     const outcome = await uploadImageBuffer({
-      buffer: animatedBuffer,
-      originalBuffer: animatedBuffer,
+      buffer: animated.buffer,
+      originalBuffer: animated.buffer,
       fileName: outputName,
       fileType: 'image/webp',
-      fileSize: animatedBuffer.byteLength,
+      fileSize: animated.bytes,
       context: {
         accountId,
         apiToken,

@@ -274,17 +274,22 @@ export const buildNamespaceOptions = (
 export const formatDateRangeLabel = (items: CloudflareImage[]): string | null => {
   if (!items.length) return null;
 
-  const formatDate = (value: string) =>
+  const timestamps = items
+    .map((item) => new Date(item.uploaded).getTime())
+    .filter((value) => Number.isFinite(value));
+  if (!timestamps.length) return null;
+
+  const formatDate = (value: number) =>
     new Date(value).toLocaleDateString(undefined, {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
     });
 
-  const newestLabel = formatDate(items[0].uploaded);
-  const oldestLabel = formatDate(items[items.length - 1].uploaded);
+  const oldestLabel = formatDate(Math.min(...timestamps));
+  const newestLabel = formatDate(Math.max(...timestamps));
 
-  return newestLabel === oldestLabel ? newestLabel : `${newestLabel} - ${oldestLabel}`;
+  return newestLabel === oldestLabel ? newestLabel : `${oldestLabel} - ${newestLabel}`;
 };
 
 /**

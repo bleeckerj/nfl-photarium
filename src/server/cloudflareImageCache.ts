@@ -1,6 +1,7 @@
 import { cleanString, parseCloudflareMetadata, type CloudflareMetadata } from '@/utils/cloudflareMetadata';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { getCacheStorage, type ICacheStorage } from './cacheStorage';
+import type { AnimatedWebpProvenanceRecord } from '@/server/imageExtras';
 
 interface CloudflareImageApiResponse {
   id: string;
@@ -19,6 +20,7 @@ export interface CachedCloudflareImage {
   size?: number;
   contentType?: string;
   isAnimated?: boolean;
+  animatedWebp?: AnimatedWebpProvenanceRecord;
   folder?: string;
   tags: string[];
   description?: string;

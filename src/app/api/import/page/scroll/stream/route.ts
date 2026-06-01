@@ -1,6 +1,6 @@
 /**
  * Streaming SSE endpoint for scroll-based image import.
- * 
+ *
  * Sends events as images are discovered during scrolling:
  * - status: Progress updates (scroll count, message)
  * - image: Individual image found
@@ -18,325 +18,46 @@ import {
 } from '@/server/pageImportFilters';
 import {
   buildArchiveChallengeMessage,
-  inspectArchiveText,
-  isArchiveHost,
   logArchiveDiagnostics,
 } from '@/server/archiveDiagnostics';
 import {
   cookieHeaderToPuppeteerCookies,
-  normalizeCookieHeader,
 } from '@/server/pageImportCookies';
 import {
   navigatePageForImport,
   waitForPageImportNetworkIdle,
 } from '@/server/pageImportBrowserNavigation';
-import { toImportCandidate } from '@/server/import-metadata/candidates';
-
-// Puppeteer types - we use any since it's an optional dependency
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let puppeteer: any = null;
-
-const getPuppeteerTestOverride = () =>
-  (globalThis as typeof globalThis & { __PHOTARIUM_TEST_PUPPETEER__?: unknown })
-    .__PHOTARIUM_TEST_PUPPETEER__;
-
-const loadPuppeteer = async () => {
-  const override = getPuppeteerTestOverride();
-  if (override) return override;
-  if (puppeteer) return puppeteer;
-  try {
-    puppeteer = await (Function('return import("puppeteer")')());
-    return puppeteer;
-  } catch {
-    return null;
-  }
-};
-
-const DEFAULT_MAX_SCROLLS = 10;
-const AUTO_SCROLL_SAFETY_CAP = 200;
-const DEFAULT_SCROLL_DELAY_MS = 1500;
-const DEFAULT_TIMEOUT_MS = 30000;
-const DEFAULT_MAX_ASSETS = 250;
-const MAX_MAX_ASSETS = 2000;
+import { getArchivePageDiagnostics } from '@/server/page-import/scrollArchiveDiagnostics';
+import {
+  getFilenameFromUrl,
+  inferVideoFileName,
+  pickBestFromSrcset,
+  resolveCandidateUrl,
+  serializeMediaCandidate,
+  shouldIncludeImageWithOptions,
+  type ImageInfo,
+  type MediaInfo,
+} from '@/server/page-import/scrollMediaCandidates';
+import { loadPuppeteer } from '@/server/page-import/scrollPuppeteer';
+import { parseScrollImportRequest } from '@/server/page-import/scrollRequest';
 const NO_NEW_IMAGE_STOP_THRESHOLD = 3;
-
-const isValidUrl = (value: string) => {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
-  } catch {
-    return false;
-  }
-};
-
-const isPrivateHost = (hostname: string) => {
-  const lowered = hostname.toLowerCase();
-  if (lowered === 'localhost') return true;
-  const ipv4Match = /^(\d{1,3}\.){3}\d{1,3}$/.test(lowered);
-  if (!ipv4Match) return false;
-  const octets = lowered.split('.').map((part) => Number(part));
-  if (octets.some((value) => Number.isNaN(value) || value < 0 || value > 255)) {
-    return true;
-  }
-  const [a, b] = octets;
-  if (a === 10) return true;
-  if (a === 127) return true;
-  if (a === 192 && b === 168) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 169 && b === 254) return true;
-  return false;
-};
-
-const getArchivePageDiagnostics = async (
-  pageUrl: string,
-  page: {
-    title: () => Promise<string>;
-    evaluate: <T>(pageFunction: () => T | Promise<T>) => Promise<T>;
-    url: () => string;
-  },
-  status?: number
-) => {
-  if (!isArchiveHost(pageUrl) && !isArchiveHost(page.url())) {
-    return null;
-  }
-
-  const [title, text] = await Promise.all([
-    page.title().catch(() => ''),
-    page.evaluate(() => document.body?.innerText?.slice(0, 4000) || '').catch(() => ''),
-  ]);
-
-  return inspectArchiveText({
-    sourceUrl: pageUrl,
-    finalUrl: page.url(),
-    status,
-    contentType: 'text/html',
-    title,
-    text,
-  });
-};
-
-interface ImageInfo {
-  kind: 'image';
-  url: string;
-  filename: string;
-  naturalWidth?: number;
-  naturalHeight?: number;
-  contentLength?: number;
-  inMainContent?: boolean;
-  inUiChrome?: boolean;
-}
-
-interface VideoInfo {
-  kind: 'video';
-  url: string;
-  filename: string;
-  posterUrl?: string;
-  isBlob: boolean;
-}
-
-type MediaInfo = ImageInfo | VideoInfo;
-
-const serializeMediaCandidate = (mediaInfo: MediaInfo) => {
-  if (mediaInfo.kind === 'video') {
-    const candidate = toImportCandidate({
-      kind: 'video',
-      url: mediaInfo.url,
-      filename: mediaInfo.filename,
-      previewUrl: mediaInfo.posterUrl,
-      posterUrl: mediaInfo.posterUrl,
-      isBlobSource: mediaInfo.isBlob,
-      metadata: {
-        contentType: mediaInfo.isBlob ? undefined : 'video/unknown',
-      },
-    });
-    return {
-      ...candidate,
-      isBlob: mediaInfo.isBlob,
-      posterUrl: mediaInfo.posterUrl,
-    };
-  }
-
-  const candidate = toImportCandidate({
-    kind: 'image',
-    url: mediaInfo.url,
-    filename: mediaInfo.filename,
-    metadata: {
-      dimensions:
-        mediaInfo.naturalWidth && mediaInfo.naturalHeight
-          ? { width: mediaInfo.naturalWidth, height: mediaInfo.naturalHeight }
-          : undefined,
-      fileSizeBytes: mediaInfo.contentLength,
-      sources: {
-        dimensions:
-          mediaInfo.naturalWidth && mediaInfo.naturalHeight ? 'browser' : undefined,
-        fileSize: typeof mediaInfo.contentLength === 'number' ? 'network' : undefined,
-      },
-    },
-  });
-  return {
-    ...candidate,
-    naturalWidth: mediaInfo.naturalWidth,
-    naturalHeight: mediaInfo.naturalHeight,
-    contentLength: mediaInfo.contentLength,
-    inMainContent: mediaInfo.inMainContent,
-    inUiChrome: mediaInfo.inUiChrome,
-  };
-};
-
-const pickBestFromSrcset = (srcset: string): string => {
-  if (!srcset) return '';
-  
-  const candidates: Array<{ url: string; score: number }> = [];
-  const parts = srcset.split(',');
-  
-  for (const part of parts) {
-    const trimmed = part.trim();
-    if (!trimmed) continue;
-    
-    const [url, descriptor] = trimmed.split(/\s+/, 2);
-    let score = 1;
-    
-    if (descriptor?.endsWith('w')) {
-      const width = Number(descriptor.slice(0, -1));
-      score = Number.isFinite(width) ? width : 0;
-    } else if (descriptor?.endsWith('x')) {
-      const ratio = Number(descriptor.slice(0, -1));
-      score = Number.isFinite(ratio) ? ratio * 1000 : 0;
-    }
-    
-    candidates.push({ url, score });
-  }
-  
-  if (candidates.length === 0) return '';
-  candidates.sort((a, b) => b.score - a.score);
-  return candidates[0].url;
-};
-
-const getFilenameFromUrl = (value: string): string => {
-  try {
-    const parsed = new URL(value);
-    const segments = parsed.pathname.split('/').filter(Boolean);
-    const filename = segments[segments.length - 1] || 'remote-image';
-    return decodeURIComponent(filename).replace(/[?#].*$/, '');
-  } catch {
-    return 'remote-image';
-  }
-};
-
-const inferVideoFileName = (value: string, fallback = 'remote-video.mp4'): string => {
-  try {
-    const parsed = new URL(value);
-    const segments = parsed.pathname.split('/').filter(Boolean);
-    const filename = segments[segments.length - 1];
-    if (!filename) return fallback;
-    return decodeURIComponent(filename).replace(/[?#].*$/, '');
-  } catch {
-    const trimmed = value.trim();
-    return trimmed || fallback;
-  }
-};
-
-const resolveCandidateUrl = (rawUrl: string, baseUrl: string): string | null => {
-  const trimmed = rawUrl.trim();
-  if (!trimmed || trimmed.startsWith('data:') || trimmed.startsWith('javascript:')) {
-    return null;
-  }
-
-  try {
-    const resolved = new URL(trimmed, baseUrl);
-    if (!['http:', 'https:'].includes(resolved.protocol)) return null;
-    if (isPrivateHost(resolved.hostname)) return null;
-    resolved.hash = '';
-    return resolved.toString();
-  } catch {
-    return null;
-  }
-};
-
-const MIN_DIMENSION = 50;
-
-// Check if URL contains size hints suggesting it's a real image
-const urlHasSizeHints = (url: string): boolean => {
-  // Match patterns like 800x800, 300w, @2x, etc. indicating real image dimensions
-  return /(\d{2,}x\d{2,})|(_\d{3,}w)|(@[23]x)/i.test(url);
-};
-
-const shouldIncludeImageWithOptions = (
-  img: ImageInfo,
-  options?: { includeUiChrome?: boolean; includeSmallAssets?: boolean }
-): boolean => {
-  const includeUiChrome = Boolean(options?.includeUiChrome);
-  const includeSmallAssets = Boolean(options?.includeSmallAssets);
-  if (isBlockedMediaDomain(img.url)) return false;
-  if (!includeUiChrome && looksLikeUiChromeAsset(img.url, img.filename)) return false;
-  if (looksLikeTrackingOrUtilityAsset(img.url, img.filename)) return false;
-  if (looksLikeTinyTrackingPixel({
-    url: img.url,
-    filenameHint: img.filename,
-    naturalWidth: img.naturalWidth,
-    naturalHeight: img.naturalHeight,
-    contentLength: img.contentLength,
-  })) return false;
-  // If URL has size hints (like 800x800), trust it even if naturalWidth/Height are tiny
-  // This handles lazy-loaded images where the actual image hasn't loaded yet
-  if (urlHasSizeHints(img.url)) {
-    return true;
-  }
-  
-  if (img.naturalWidth && img.naturalHeight) {
-    if (!includeSmallAssets && img.naturalWidth < MIN_DIMENSION && img.naturalHeight < MIN_DIMENSION) {
-      return false;
-    }
-    return true;
-  }
-  
-  return looksLikeImageAssetUrl(img.url);
-};
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const pageUrl = typeof body?.url === 'string' ? body.url.trim() : '';
-  const includeUiChrome = Boolean(body?.includeUiChrome);
-  const includeSmallAssets = Boolean(body?.includeSmallAssets);
-  let cookieHeader: string | null = null;
-  try {
-    cookieHeader = normalizeCookieHeader(body?.cookieHeader);
-  } catch (error) {
-    return new Response(
-      `event: error\ndata: ${JSON.stringify({ error: error instanceof Error ? error.message : 'Invalid cookie header' })}\n\n`,
-      { status: 400, headers: { 'Content-Type': 'text/event-stream' } }
-    );
-  }
-  const requestedMaxScrolls = Number.isFinite(body?.maxScrolls)
-    ? Math.max(1, Math.min(50, Number(body.maxScrolls))) 
-    : Number(process.env.IMPORT_SCROLL_MAX_SCROLLS) || DEFAULT_MAX_SCROLLS;
-  const autoScrollUntilStable = Boolean(body?.autoScrollUntilStable);
-  const maxScrolls = autoScrollUntilStable ? AUTO_SCROLL_SAFETY_CAP : requestedMaxScrolls;
-  const maxPages = Number.isFinite(body?.maxPages)
-    ? Math.max(1, Math.min(20, Number(body.maxPages)))
-    : 1; // Default to single page unless specified
-  const maxAssets = Number.isFinite(body?.maxAssets)
-    ? Math.max(1, Math.min(MAX_MAX_ASSETS, Number(body.maxAssets)))
-    : DEFAULT_MAX_ASSETS;
-  const scrollDelayMs = Number.isFinite(body?.scrollDelayMs)
-    ? Math.max(500, Math.min(5000, Number(body.scrollDelayMs)))
-    : DEFAULT_SCROLL_DELAY_MS;
-  const timeoutMs = Number(process.env.IMPORT_SCROLL_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS;
-
-  if (!pageUrl || !isValidUrl(pageUrl)) {
-    return new Response(
-      `event: error\ndata: ${JSON.stringify({ error: 'A valid page URL is required' })}\n\n`,
-      { status: 400, headers: { 'Content-Type': 'text/event-stream' } }
-    );
-  }
-
-  const parsed = new URL(pageUrl);
-  if (isPrivateHost(parsed.hostname)) {
-    return new Response(
-      `event: error\ndata: ${JSON.stringify({ error: 'Private or localhost URLs are not allowed' })}\n\n`,
-      { status: 400, headers: { 'Content-Type': 'text/event-stream' } }
-    );
-  }
+  const parsedRequest = parseScrollImportRequest(body);
+  if ('response' in parsedRequest) return parsedRequest.response;
+  const {
+    pageUrl,
+    includeUiChrome,
+    includeSmallAssets,
+    cookieHeader,
+    maxScrolls,
+    autoScrollUntilStable,
+    maxPages,
+    maxAssets,
+    scrollDelayMs,
+    timeoutMs,
+  } = parsedRequest.config;
 
   const encoder = new TextEncoder();
   

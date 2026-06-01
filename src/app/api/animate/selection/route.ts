@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import sharp from 'sharp';
 import { getUploadDownloadInfo } from '@/server/cloudflareUploadsService';
 import { uploadImageBuffer } from '@/server/uploadService';
+import { buildAnimatedWebpFromFrames } from '@/server/animatedWebpService';
+import { patchImageExtrasRecord } from '@/server/imageExtras';
 
 const normalizeFilename = (value: string) => value.replace(/[^a-zA-Z0-9-_\.]/g, '_');
 
@@ -32,59 +33,31 @@ export async function POST(request: NextRequest) {
 
     const filenameRaw = typeof body?.filename === 'string' ? body.filename.trim() : '';
     const namespace = typeof body?.namespace === 'string' ? body.namespace.trim() : undefined;
+    const orderMode = body?.orderMode === 'reverse-gallery' ? 'reverse-gallery' : 'gallery';
 
-    const frames: Buffer[] = [];
+    const frames: { buffer: Buffer; filename: string }[] = [];
     for (const id of ids) {
-      const { url } = await getUploadDownloadInfo(id);
+      const { url, filename } = await getUploadDownloadInfo(id);
       const response = await fetch(url, { cache: 'no-store' });
       if (!response.ok) {
         return NextResponse.json({ error: `Failed to download image ${id}` }, { status: 502 });
       }
       const buffer = Buffer.from(await response.arrayBuffer());
-      frames.push(buffer);
+      frames.push({ buffer, filename });
     }
 
-    const metas = await Promise.all(frames.map((frame) => sharp(frame).metadata()));
-    const widths = metas.map((meta) => meta.width || 0).filter(Boolean);
-    const heights = metas.map((meta) => meta.height || 0).filter(Boolean);
-    const maxWidth = Math.max(...widths, 1);
-    const maxHeight = Math.max(...heights, 1);
-
-    const preparedFrames = await Promise.all(
-      frames.map(async (frame) =>
-        sharp(frame)
-          .resize(maxWidth, maxHeight, {
-            fit: 'contain',
-            background: { r: 255, g: 255, b: 255, alpha: 0 }
-          })
-          .ensureAlpha()
-          .raw()
-          .toBuffer()
-      )
-    );
-
-    const stacked = Buffer.concat(preparedFrames);
-    const animatedBuffer = await sharp(stacked, {
-      raw: {
-        width: maxWidth,
-        height: maxHeight * preparedFrames.length,
-        channels: 4,
-        pageHeight: maxHeight
-      }
-    })
-      .webp({ loop: loop ? 0 : 1, delay: Array(preparedFrames.length).fill(delayMs) })
-      .toBuffer();
+    const animated = await buildAnimatedWebpFromFrames(frames, { fps, loop, delayMs });
 
     const outputName = filenameRaw
       ? normalizeFilename(filenameRaw.replace(/\.webp$/i, '')) + '.webp'
       : `animated-${Date.now()}.webp`;
 
     const outcome = await uploadImageBuffer({
-      buffer: animatedBuffer,
-      originalBuffer: animatedBuffer,
+      buffer: animated.buffer,
+      originalBuffer: animated.buffer,
       fileName: outputName,
       fileType: 'image/webp',
-      fileSize: animatedBuffer.byteLength,
+      fileSize: animated.bytes,
       context: {
         accountId,
         apiToken,
@@ -96,6 +69,17 @@ export async function POST(request: NextRequest) {
     if (!outcome.ok) {
       return NextResponse.json({ error: outcome.error }, { status: outcome.status });
     }
+
+    await patchImageExtrasRecord(outcome.data.id, {
+      animatedWebp: {
+        sourceImageIds: ids,
+        sourceFilenames: frames.map((frame) => frame.filename),
+        orderMode,
+        fps,
+        loop,
+        generatedAt: new Date().toISOString(),
+      },
+    });
 
     return NextResponse.json(outcome.data);
   } catch (error) {

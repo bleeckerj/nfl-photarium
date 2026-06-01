@@ -48,6 +48,29 @@ export type ImageExifRecord = {
   sharp?: Record<string, unknown>;
 };
 
+export type ImageToolRunRecord = {
+  toolId: string;
+  adapterKind: string;
+  sourceImageId: string;
+  effectId?: string;
+  params?: Record<string, unknown>;
+  output?: Record<string, unknown>;
+  externalJobId?: string;
+  createdAt: string;
+};
+
+export type AnimatedWebpProvenanceRecord = {
+  sourceImageIds?: string[];
+  sourceFilenames?: string[];
+  orderMode?: 'gallery' | 'reverse-gallery' | 'request' | 'reverse';
+  fps?: number;
+  loop?: boolean;
+  generatedAt: string;
+  repairedFromImageId?: string;
+  replacedImageId?: string;
+  repairMode?: 'reverse';
+};
+
 export type DngIngestRecord = {
   sourceType?: 'dng';
   ingestedAt?: string;
@@ -121,6 +144,12 @@ export type ImageExtrasRecordV1 = {
 
   /** Structured EXIF payload for search/audit and downstream workflows. */
   exif?: ImageExifRecord;
+
+  /** Provenance for generated artifacts created through Photarium image tools. */
+  imageToolRun?: ImageToolRunRecord;
+
+  /** Provenance for animated WebP artifacts generated or repaired in Photarium. */
+  animatedWebp?: AnimatedWebpProvenanceRecord;
 
   /** DNG ingest bookkeeping for generated preview artifacts. */
   dngIngest?: DngIngestRecord;

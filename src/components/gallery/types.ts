@@ -12,6 +12,7 @@ export interface CloudflareImage {
   assetType?: 'image' | 'video';
   filename: string;
   displayName?: string;
+  promptThis?: string;
   uploaded: string;
   variants: string[];
   size?: number;

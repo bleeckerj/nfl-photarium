@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { extractFilenameFromUrl, sanitizeFilename } from '@/utils/filename';
+import {
+  appendTextToFilename,
+  extractFilenameFromUrl,
+  removeFilenameExtension,
+  sanitizeFilename,
+} from '@/utils/filename';
 
 describe('filename utils', () => {
   it('extracts filename from Comfy-style query blobs', () => {
@@ -21,5 +26,21 @@ describe('filename utils', () => {
     expect(
       extractFilenameFromUrl('http://example.com/view', 'image/webp')
     ).toBe('UploadedImage.webp');
+  });
+
+  it('removes only the final filename extension', () => {
+    expect(removeFilenameExtension('JCB_080324_164845_07173.normalized.jpg')).toBe(
+      'JCB_080324_164845_07173.normalized'
+    );
+    expect(removeFilenameExtension('image')).toBe('image');
+  });
+
+  it('appends sanitized text before the final extension', () => {
+    expect(appendTextToFilename('JCB_080324_164845_07173.jpg', 'talk to me')).toBe(
+      'JCB_080324_164845_07173_talk_to_me.jpg'
+    );
+    expect(appendTextToFilename('JCB_080324_164845_07173', 'talk to me')).toBe(
+      'JCB_080324_164845_07173_talk_to_me'
+    );
   });
 });

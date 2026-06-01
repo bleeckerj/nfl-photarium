@@ -169,6 +169,23 @@ export function needsSanitization(filename: string): boolean {
   return false;
 }
 
+export function removeFilenameExtension(filename: string): string {
+  const lastSeparator = Math.max(filename.lastIndexOf('/'), filename.lastIndexOf('\\'));
+  const lastDot = filename.lastIndexOf('.');
+  const hasExtension = lastDot > lastSeparator + 1 && lastDot < filename.length - 1;
+  return hasExtension ? filename.slice(0, lastDot) : filename;
+}
+
+export function appendTextToFilename(filename: string, text: string): string {
+  const suffix = sanitizeFilename(text).replace(/\.[^.]+$/, '');
+  if (!suffix) return filename;
+
+  const base = removeFilenameExtension(filename);
+  const extension = filename.slice(base.length);
+  if (!base) return `${suffix}${extension}`;
+  return `${base}_${suffix}${extension}`;
+}
+
 export function extractFilenameFromUrl(url: string, mimeType?: string | null): string {
   const preferredExt = extensionFromMimeType(mimeType) || '.jpg';
 

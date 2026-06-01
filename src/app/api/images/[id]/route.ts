@@ -19,6 +19,7 @@ import {
   getVideoAssetRecord,
 } from '@/server/videoCatalogStorage';
 import { getImageExtrasRecord } from '@/server/imageExtras';
+import { detachAssetChildren, ParentAssignmentError } from '@/server/assetParentService';
 
 const pickVariantUrl = (variants: string[] | undefined): string | undefined => {
   if (!Array.isArray(variants) || variants.length === 0) return undefined;
@@ -198,6 +199,9 @@ const applyExtrasMetadata = async (image: CachedCloudflareImage) => {
   if (exif) {
     next.exif = exif;
   }
+  if (extras.animatedWebp) {
+    next.animatedWebp = extras.animatedWebp;
+  }
   return next;
 };
 
@@ -242,6 +246,32 @@ export async function DELETE(
       return NextResponse.json({ success: true, assetType: 'video' });
     }
 
+    let detachedChildIds: string[] = [];
+    try {
+      const detachResult = await detachAssetChildren(imageId, {
+        forceRefreshImages: true,
+        includeVideos: process.env.ENABLE_VIDEO_ASSETS === '1',
+      });
+      detachedChildIds = detachResult.detachedIds;
+      if (detachResult.failed.length > 0) {
+        return NextResponse.json(
+          {
+            error: 'Failed to detach one or more child variants before deleting parent image',
+            failed: detachResult.failed,
+            detachedIds: detachResult.detachedIds,
+          },
+          { status: 502 }
+        );
+      }
+    } catch (error) {
+      const parentError = error instanceof ParentAssignmentError ? error : null;
+      console.error('[ImageDelete] Failed to detach child variants before parent delete:', error);
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : 'Failed to detach child variants before delete' },
+        { status: parentError?.status ?? 500 }
+      );
+    }
+
     const { accountId, apiToken } = getCloudflareCredentials();
 
     // Delete image from Cloudflare
@@ -273,7 +303,7 @@ export async function DELETE(
       });
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, detachedChildIds });
 
   } catch (error) {
     console.error('Delete image error:', error);

@@ -12,6 +12,8 @@ type PageImportQueueProps = {
   aiRefiningNames: boolean;
   queueRenameValue: string;
   setQueueRenameValue: (value: string) => void;
+  queueAppendValue: string;
+  setQueueAppendValue: (value: string) => void;
   showAllQueuedItems: boolean;
   setShowAllQueuedItems: (value: boolean) => void;
   previewFailures: Record<string, boolean>;
@@ -38,6 +40,8 @@ type PageImportQueueProps = {
   onAiRefineSelectedNames: () => void;
   onManualUpload: () => void;
   onApplyQueueNameToAll: () => void;
+  onRemoveQueueExtensions: () => void;
+  onAppendTextToQueueNames: () => void;
 };
 
 const QUEUE_RENDER_LIMIT = 250;
@@ -52,6 +56,8 @@ export function PageImportQueue(props: PageImportQueueProps) {
     aiRefiningNames,
     queueRenameValue,
     setQueueRenameValue,
+    queueAppendValue,
+    setQueueAppendValue,
     showAllQueuedItems,
     setShowAllQueuedItems,
     previewFailures,
@@ -75,6 +81,8 @@ export function PageImportQueue(props: PageImportQueueProps) {
     onAiRefineSelectedNames,
     onManualUpload,
     onApplyQueueNameToAll,
+    onRemoveQueueExtensions,
+    onAppendTextToQueueNames,
   } = props;
 
   if (queuedFiles.length === 0) {
@@ -126,7 +134,7 @@ export function PageImportQueue(props: PageImportQueueProps) {
           type="text"
           value={queueRenameValue}
           onChange={(e) => setQueueRenameValue(e.target.value)}
-          placeholder="Rename selected queue items"
+          placeholder="Rename every queued item"
           className="flex-1 rounded-md border border-blue-200 px-3 py-2 text-xs"
         />
         <button
@@ -136,6 +144,32 @@ export function PageImportQueue(props: PageImportQueueProps) {
           className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 hover:bg-blue-100 disabled:opacity-50"
         >
           Apply queue name
+        </button>
+      </div>
+
+      <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+        <input
+          type="text"
+          value={queueAppendValue}
+          onChange={(e) => setQueueAppendValue(e.target.value)}
+          placeholder="Append text to every queued name"
+          className="flex-1 rounded-md border border-blue-200 px-3 py-2 text-xs"
+        />
+        <button
+          type="button"
+          onClick={onAppendTextToQueueNames}
+          disabled={isUploading || queuedFiles.length === 0 || queueAppendValue.trim().length === 0}
+          className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+        >
+          Append text
+        </button>
+        <button
+          type="button"
+          onClick={onRemoveQueueExtensions}
+          disabled={isUploading || queuedFiles.length === 0}
+          className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+        >
+          Strip extensions
         </button>
       </div>
 

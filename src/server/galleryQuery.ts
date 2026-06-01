@@ -43,6 +43,7 @@ export type GalleryQueryFilters = {
   aspectRatioClasses?: Array<'horizontal' | 'vertical' | 'square'>;
   dateStart?: string;
   dateEnd?: string;
+  dateTimeZone?: string;
   hiddenFolders?: string[];
   hiddenTags?: string[];
 };
@@ -173,13 +174,61 @@ const matchesAspect = (asset: GalleryQueryAsset, classes?: GalleryQueryFilters['
   );
 };
 
-const matchesDate = (asset: GalleryQueryAsset, dateStart?: string, dateEnd?: string) => {
+const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const dateFormatterCache = new Map<string, Intl.DateTimeFormat>();
+
+const isDateKey = (value?: string) => Boolean(value && DATE_KEY_PATTERN.test(value));
+
+const getDateFormatter = (timeZone: string) => {
+  const cached = dateFormatterCache.get(timeZone);
+  if (cached) return cached;
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  dateFormatterCache.set(timeZone, formatter);
+  return formatter;
+};
+
+const toDateKeyInTimeZone = (date: Date, timeZone?: string): string => {
+  if (!timeZone) return date.toISOString().slice(0, 10);
+  try {
+    const parts = getDateFormatter(timeZone).formatToParts(date);
+    const year = parts.find((part) => part.type === 'year')?.value;
+    const month = parts.find((part) => part.type === 'month')?.value;
+    const day = parts.find((part) => part.type === 'day')?.value;
+    if (year && month && day) {
+      return `${year}-${month}-${day}`;
+    }
+  } catch {
+    // Fall through to the historical UTC behavior for invalid time zone input.
+  }
+  return date.toISOString().slice(0, 10);
+};
+
+const matchesDate = (
+  asset: GalleryQueryAsset,
+  dateStart?: string,
+  dateEnd?: string,
+  dateTimeZone?: string
+) => {
   if (!dateStart && !dateEnd) return true;
-  const uploadedMs = Date.parse(asset.uploaded ?? '');
-  if (!Number.isFinite(uploadedMs)) return false;
-  const startMs = dateStart ? Date.parse(`${dateStart}T00:00:00.000Z`) : -Infinity;
-  const endMs = dateEnd ? Date.parse(`${dateEnd}T23:59:59.999Z`) : Infinity;
-  return uploadedMs >= startMs && uploadedMs <= endMs;
+  if ((dateStart && !isDateKey(dateStart)) || (dateEnd && !isDateKey(dateEnd))) {
+    return false;
+  }
+
+  const uploaded = new Date(asset.uploaded ?? '');
+  if (Number.isNaN(uploaded.getTime())) return false;
+
+  const uploadedKey = toDateKeyInTimeZone(uploaded, dateTimeZone);
+  const startKey =
+    dateStart && dateEnd && dateStart > dateEnd ? dateEnd : dateStart;
+  const endKey =
+    dateStart && dateEnd && dateStart > dateEnd ? dateStart : dateEnd;
+
+  return (!startKey || uploadedKey >= startKey) && (!endKey || uploadedKey <= endKey);
 };
 
 const matchesComfy = (asset: GalleryQueryAsset) => {
@@ -315,7 +364,7 @@ export const queryGalleryAssets = <T extends GalleryQueryAsset>(
     if (filters.comfy && !matchesComfy(asset)) return false;
     if (!matchesEmbedding(asset, filters.embedding)) return false;
     if (!matchesAspect(asset, filters.aspectRatioClasses)) return false;
-    if (!matchesDate(asset, filters.dateStart, filters.dateEnd)) return false;
+    if (!matchesDate(asset, filters.dateStart, filters.dateEnd, filters.dateTimeZone)) return false;
     if (filters.onlyWithVariants) {
       const summary = familySummaryMapAll[asset.id];
       if (summary?.isVariant || (summary?.variantCount ?? 0) === 0) return false;

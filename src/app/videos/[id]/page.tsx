@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
-import { Plus, RefreshCw, Trash2, WandSparkles } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 
 import { useToast } from '@/components/Toast';
@@ -15,15 +15,36 @@ import { UploadVariationSection } from '@/components/image-detail/UploadVariatio
 import { VARIATION_UPLOAD_ACCEPT } from '@/components/image-detail/variationUploadConfig';
 import { AssetFamilyList } from '@/components/asset-detail/AssetFamilyList';
 import { AssetTypeBadge } from '@/components/asset-detail/AssetTypeBadge';
+import AnimatedWebpSection from '@/components/video-detail/AnimatedWebpSection';
+import FrameExtractionSection from '@/components/video-detail/FrameExtractionSection';
 
-import { getCloudflareImageUrl } from '@/utils/imageUtils';
 import { copyToClipboard } from '@/utils/clipboard';
 import { getAssetCopyUrl } from '@/utils/assetUrls';
 import { cleanString } from '@/utils/cloudflareMetadata';
+import { buildVariantAssignmentCandidates } from '@/utils/variantAssignmentCandidates';
 import {
-  buildVariantAssignmentCandidates,
-  type VariantAssignmentCandidate,
-} from '@/utils/variantAssignmentCandidates';
+  PRESET_MAP,
+  createVariationDraft,
+  extractAssignmentCandidateAssets,
+  formatBytes,
+  formatDuration,
+  getNow,
+  logVideoDetailPerf,
+  mergeUniqueAssetsById,
+  normalizeTags,
+  sortFamilyAssets,
+  toOptionalPositiveInt,
+  toOptionalPositiveNumber,
+  videoRecordFromSeed,
+  type ActiveFramePreview,
+  type AssetRecord,
+  type DownloadProbeState,
+  type FamilyContextResponse,
+  type FrameMeta,
+  type GenerationSummary,
+  type VariationDraft,
+  type VideoRecord,
+} from '@/components/video-detail/videoTransforms';
 import {
   buildVideoDownloadShareUrl,
   buildVideoDetailShareUrl,
@@ -42,293 +63,7 @@ import {
   type DeleteFamilyJobStatus,
 } from '@/services/imageDeletionService';
 
-type VideoRecord = {
-  id: string;
-  assetType?: 'video';
-  generatedBy?: string;
-  comfyMetadataDetected?: boolean;
-  comfyMetadataSource?: string;
-  filename: string;
-  displayName?: string;
-  uploaded: string;
-  parentId?: string;
-  variationSort?: number;
-  streamUid: string;
-  playbackUrl?: string;
-  hlsUrl?: string;
-  thumbnailUrl?: string;
-  previewUrl?: string;
-  durationSeconds?: number;
-  videoStatus: 'pending' | 'ready' | 'error';
-  width?: number;
-  height?: number;
-  aspectRatio?: string;
-  streamSyncedAt?: string;
-  streamError?: string;
-  hasClipEmbedding?: boolean;
-  folder?: string;
-  tags: string[];
-  description?: string;
-  originalUrl?: string;
-  sourceUrl?: string;
-  namespace?: string;
-  mux?: {
-    assetId: string;
-    status: 'queued' | 'ingesting' | 'ready' | 'error';
-    ingestUrl?: string;
-    playbackId?: string;
-    playbackIds?: string[];
-    playbackUrl?: string;
-    exportedAt?: string;
-    syncedAt?: string;
-    error?: string;
-  };
-  animatedWebpImageId?: string;
-  animatedWebpUrl?: string;
-  animatedWebpStatus?: 'pending' | 'ready' | 'error';
-  animatedWebpError?: string;
-  animatedWebpUpdatedAt?: string;
-  animatedWebpBytes?: number;
-  animatedWebpWidth?: number;
-  animatedWebpHeight?: number;
-  animatedWebpVariants?: Array<{
-    imageId: string;
-    url?: string;
-    filename: string;
-    bytes: number;
-    width?: number;
-    height?: number;
-    fps: number;
-    loop: boolean;
-    maxWidth: number;
-    maxHeight: number;
-    maxOutputBytes: number;
-    timeoutMs: number;
-    encoder?: string;
-    createdAt: string;
-  }>;
-};
-
 const DEFAULT_NAMESPACE = process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || 'cf-default';
-
-type AssetRecord = {
-  id: string;
-  assetType?: 'image' | 'video';
-  filename: string;
-  displayName?: string;
-  uploaded: string;
-  variants?: string[];
-  size?: number;
-  folder?: string;
-  tags?: string[];
-  description?: string;
-  altTag?: string;
-  altText?: string;
-  parentId?: string;
-  namespace?: string;
-  variationSort?: number;
-  videoPlaybackUrl?: string;
-  videoHlsUrl?: string;
-  videoThumbnailUrl?: string;
-  videoPreviewUrl?: string;
-};
-
-type FamilyContextResponse = {
-  familyAssets?: AssetRecord[];
-  candidateAssets?: AssetRecord[];
-  assignmentCandidates?: VariantAssignmentCandidate<AssetRecord>[];
-  timings?: Record<string, number>;
-  diagnostics?: Record<string, unknown>;
-};
-
-const extractAssignmentCandidateAssets = (payload: FamilyContextResponse): AssetRecord[] => {
-  if (!Array.isArray(payload.assignmentCandidates)) {
-    return [];
-  }
-  return payload.assignmentCandidates.flatMap((candidate) =>
-    [candidate.asset, candidate.parentAsset].filter((asset): asset is AssetRecord => Boolean(asset?.id))
-  );
-};
-
-const getNow = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
-const DETAIL_PERF_LOGGING_ENABLED = process.env.NODE_ENV !== 'production';
-
-const logVideoDetailPerf = (
-  label: string,
-  startedAt: number,
-  extra?: Record<string, unknown>
-) => {
-  if (!DETAIL_PERF_LOGGING_ENABLED) return;
-  const elapsedMs = Math.round(getNow() - startedAt);
-  console.info(`[VideoDetailPerf] ${label} ${elapsedMs}ms`, extra ?? {});
-};
-
-const mergeUniqueAssetsById = (base: AssetRecord[], incoming: AssetRecord[]) => {
-  const merged = new Map<string, AssetRecord>();
-  base.forEach((entry) => merged.set(entry.id, entry));
-  incoming.forEach((entry) => {
-    const existing = merged.get(entry.id);
-    merged.set(entry.id, existing ? { ...existing, ...entry } : entry);
-  });
-  return Array.from(merged.values());
-};
-
-const videoRecordFromSeed = (asset: AssetRecord): VideoRecord => ({
-  id: asset.id,
-  assetType: 'video',
-  filename: asset.filename,
-  displayName: asset.displayName || asset.filename,
-  uploaded: asset.uploaded,
-  parentId: asset.parentId,
-  variationSort: asset.variationSort,
-  streamUid: '',
-  playbackUrl: asset.videoPlaybackUrl,
-  hlsUrl: asset.videoHlsUrl,
-  thumbnailUrl: asset.videoThumbnailUrl,
-  previewUrl: asset.videoPreviewUrl,
-  videoStatus: 'ready',
-  folder: asset.folder,
-  tags: asset.tags ?? [],
-  description: asset.description,
-  namespace: asset.namespace,
-});
-
-type VariationDraft = {
-  id: string;
-  filename: string;
-  maxWidth: string;
-  maxOutputMb: string;
-  fps: string;
-  loop: boolean;
-};
-
-type GenerationSummary = {
-  createdCount: number;
-  failedCount: number;
-  partial: boolean;
-  variations: Array<{
-    imageId: string;
-    url: string;
-    filename: string;
-    bytes: number;
-    width?: number;
-    height?: number;
-    fps: number;
-    loop: boolean;
-    encoder?: string;
-  }>;
-  errors: Array<{ index: number; filename: string; error: string }>;
-  hints: string[];
-};
-
-type FramePreviewEntry = {
-  frameNumber: number;
-  timeSeconds: number;
-  previewUrl: string;
-};
-
-type FrameMeta = {
-  durationSeconds: number;
-  fps: number;
-  frameCount: number;
-  exactFrameCount: boolean;
-  midpointFrame: number;
-  defaultSelector: string;
-  previews: FramePreviewEntry[];
-  currentFrame?: FramePreviewEntry;
-  limits?: {
-    maxExtractFrameCount?: number;
-  };
-};
-
-type ActiveFramePreview = {
-  frameNumber: number;
-  timeSeconds: number;
-  objectUrl: string;
-};
-
-type DownloadProbeState = {
-  status: 'idle' | 'checking' | 'ready' | 'preparing' | 'unavailable' | 'error';
-  message?: string;
-};
-
-const MAX_OUTPUT_MB_DEFAULT = 10;
-const PRESET_MAP = {
-  preview: { maxWidth: '640', maxOutputMb: '2', fps: '8' },
-  balanced: { maxWidth: '960', maxOutputMb: '6', fps: '12' },
-  quality: { maxWidth: '1280', maxOutputMb: '10', fps: '15' },
-} as const;
-
-const createVariationDraft = (seed?: Partial<VariationDraft>): VariationDraft => ({
-  id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-  filename: seed?.filename ?? '',
-  maxWidth: seed?.maxWidth ?? '960',
-  maxOutputMb: seed?.maxOutputMb ?? String(MAX_OUTPUT_MB_DEFAULT),
-  fps: seed?.fps ?? '12',
-  loop: seed?.loop ?? true,
-});
-
-const toOptionalPositiveInt = (value: string): number | undefined => {
-  const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  const parsed = Number(trimmed);
-  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
-  return Math.round(parsed);
-};
-
-const toOptionalPositiveNumber = (value: string): number | undefined => {
-  const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  const parsed = Number(trimmed);
-  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
-  return parsed;
-};
-
-const formatBytes = (bytes: number) => {
-  const mb = bytes / (1024 * 1024);
-  if (mb >= 1) return `${mb.toFixed(2)} MB`;
-  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-};
-
-const formatDuration = (seconds?: number) => {
-  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) return '--';
-  const rounded = Math.max(0, Math.round(seconds));
-  const mins = Math.floor(rounded / 60);
-  const secs = rounded % 60;
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
-};
-
-const formatFrameTime = (seconds?: number) => {
-  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return '--';
-  if (seconds < 1) return `${seconds.toFixed(2)}s`;
-  return `${formatDuration(seconds)}.${Math.floor((seconds % 1) * 100).toString().padStart(2, '0')}`;
-};
-
-const normalizeTags = (value: string) =>
-  Array.from(new Set(value
-    .split(',')
-    .map((tag) => cleanString(tag))
-    .filter((tag): tag is string => Boolean(tag))
-  ));
-
-const sortFamilyAssets = (items: AssetRecord[]) => {
-  const hasSort = items.some((item) => Number.isFinite(item.variationSort));
-  if (!hasSort) {
-    return [...items].sort((a, b) => Date.parse(b.uploaded) - Date.parse(a.uploaded));
-  }
-  const baseIndex = new Map(items.map((item, index) => [item.id, index]));
-  return [...items].sort((a, b) => {
-    const aSort = Number.isFinite(a.variationSort) ? (a.variationSort as number) : null;
-    const bSort = Number.isFinite(b.variationSort) ? (b.variationSort as number) : null;
-    if (aSort === null && bSort === null) {
-      return (baseIndex.get(a.id) ?? 0) - (baseIndex.get(b.id) ?? 0);
-    }
-    if (aSort === null) return 1;
-    if (bSort === null) return -1;
-    if (aSort !== bSort) return aSort - bSort;
-    return (baseIndex.get(a.id) ?? 0) - (baseIndex.get(b.id) ?? 0);
-  });
-};
 
 export default function VideoDetailPage() {
   const params = useParams();
@@ -429,7 +164,6 @@ export default function VideoDetailPage() {
   const [framePreviewError, setFramePreviewError] = useState<string | null>(null);
   const [extractingFrames, setExtractingFrames] = useState(false);
 
-  const cloudflareAccountHash = process.env.NEXT_PUBLIC_CLOUDFLARE_ACCOUNT_HASH;
   const { shareBaseUrl, setShareBaseUrl } = usePersistentShareBaseUrl();
 
   const uniqueFolders = useMemo(
@@ -1946,286 +1680,35 @@ export default function VideoDetailPage() {
           )}
         </section>
 
-        <section className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-gray-900">Animated WebP Variations</h2>
-            <button
-              type="button"
-              onClick={() => addVariationDraft()}
-              className="inline-flex items-center gap-1 rounded border border-gray-300 bg-white px-2.5 py-1 text-xs font-mono text-gray-700 hover:bg-gray-100"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Add Variation
-            </button>
-          </div>
-          <p className="text-xs font-mono text-gray-600">
-            Each row creates one animated WebP output from this video. Start with the balanced values, then lower width/FPS if size is too large.
-          </p>
-          {video.videoStatus !== 'ready' && (
-            <p className="rounded border border-amber-200 bg-amber-50 p-2 text-xs font-mono text-amber-800">
-              Video must be ready before conversion. Click Refresh until status is ready.
-            </p>
-          )}
+        <AnimatedWebpSection
+          videoStatus={video.videoStatus}
+          variationDrafts={variationDrafts}
+          generatingAnimatedWebp={generatingAnimatedWebp}
+          generationSummary={generationSummary}
+          onAddVariationDraft={addVariationDraft}
+          onApplyPreset={applyPreset}
+          onRemoveVariationDraft={removeVariationDraft}
+          onUpdateVariationDraft={updateVariationDraft}
+          onGenerateAnimatedWebp={() => void generateAnimatedWebp()}
+        />
 
-          <div className="space-y-2">
-            {variationDrafts.map((draft, index) => (
-              <div key={draft.id} className="space-y-2 rounded border border-gray-200 bg-gray-50 p-2">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-mono font-semibold text-gray-700">Variation {index + 1}</p>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => applyPreset(draft.id, 'preview')}
-                      className="rounded border border-gray-300 bg-white px-2 py-0.5 text-[11px] font-mono text-gray-700 hover:bg-gray-100"
-                    >
-                      Preview
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => applyPreset(draft.id, 'balanced')}
-                      className="rounded border border-gray-300 bg-white px-2 py-0.5 text-[11px] font-mono text-gray-700 hover:bg-gray-100"
-                    >
-                      Balanced
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => applyPreset(draft.id, 'quality')}
-                      className="rounded border border-gray-300 bg-white px-2 py-0.5 text-[11px] font-mono text-gray-700 hover:bg-gray-100"
-                    >
-                      Quality
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => removeVariationDraft(draft.id)}
-                      disabled={variationDrafts.length <= 1}
-                      className="inline-flex items-center justify-center rounded border border-gray-300 bg-white px-2 py-1 text-xs font-mono text-gray-700 hover:bg-gray-100 disabled:opacity-50"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
-                <div className="grid gap-2 md:grid-cols-12">
-                  <label className="flex flex-col gap-1 text-[11px] font-mono text-gray-700 md:col-span-4">
-                    Output Filename (optional)
-                    <input
-                      type="text"
-                      value={draft.filename}
-                      onChange={(event) => updateVariationDraft(draft.id, { filename: event.target.value })}
-                      placeholder={`video-${index + 1}.webp`}
-                      className="rounded border border-gray-300 bg-white px-2 py-1 text-xs font-mono text-gray-800"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 text-[11px] font-mono text-gray-700 md:col-span-2">
-                    Max Width (px)
-                    <input
-                      type="text"
-                      value={draft.maxWidth}
-                      onChange={(event) => updateVariationDraft(draft.id, { maxWidth: event.target.value })}
-                      placeholder="960"
-                      className="rounded border border-gray-300 bg-white px-2 py-1 text-xs font-mono text-gray-800"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 text-[11px] font-mono text-gray-700 md:col-span-2">
-                    Max Size (MB)
-                    <input
-                      type="text"
-                      value={draft.maxOutputMb}
-                      onChange={(event) => updateVariationDraft(draft.id, { maxOutputMb: event.target.value })}
-                      placeholder="6"
-                      className="rounded border border-gray-300 bg-white px-2 py-1 text-xs font-mono text-gray-800"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 text-[11px] font-mono text-gray-700 md:col-span-2">
-                    FPS
-                    <input
-                      type="text"
-                      value={draft.fps}
-                      onChange={(event) => updateVariationDraft(draft.id, { fps: event.target.value })}
-                      placeholder="12"
-                      className="rounded border border-gray-300 bg-white px-2 py-1 text-xs font-mono text-gray-800"
-                    />
-                  </label>
-                  <label className="flex items-center gap-2 text-xs font-mono text-gray-700 md:col-span-2">
-                    <input
-                      type="checkbox"
-                      checked={draft.loop}
-                      onChange={(event) => updateVariationDraft(draft.id, { loop: event.target.checked })}
-                    />
-                    Loop
-                  </label>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <button
-            type="button"
-            onClick={() => void generateAnimatedWebp()}
-            disabled={generatingAnimatedWebp || video.videoStatus !== 'ready'}
-            className="inline-flex items-center gap-2 rounded border border-gray-300 bg-white px-3 py-1.5 text-xs font-mono text-gray-700 hover:bg-gray-100 disabled:opacity-60"
-          >
-            <WandSparkles className="h-3.5 w-3.5" />
-            {generatingAnimatedWebp
-              ? `Generating ${variationDrafts.length} Variation${variationDrafts.length === 1 ? '' : 's'}...`
-              : `Generate ${variationDrafts.length} Variation${variationDrafts.length === 1 ? '' : 's'}`}
-          </button>
-
-          {generationSummary && (
-            <div className="space-y-1 rounded border border-gray-200 bg-gray-50 p-2 text-xs font-mono text-gray-700">
-              <p>
-                generated={generationSummary.createdCount} failed={generationSummary.failedCount} partial={generationSummary.partial ? 'yes' : 'no'}
-              </p>
-              {generationSummary.variations.map((entry) => (
-                <p key={entry.imageId}>
-                  created={entry.filename} id={entry.imageId} size={formatBytes(entry.bytes)} fps={entry.fps} loop={entry.loop ? 'yes' : 'no'} encoder={entry.encoder || '--'}{' '}
-                  <Link href={`/images/${entry.imageId}`} className="text-blue-700 underline">open</Link>
-                </p>
-              ))}
-              {generationSummary.errors.map((entry) => (
-                <p key={`${entry.index}-${entry.filename}`} className="text-red-700">
-                  failed={entry.filename} reason={entry.error}
-                </p>
-              ))}
-              {generationSummary.hints.map((hint) => (
-                <p key={hint} className="text-amber-800">hint={hint}</p>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-gray-900">Frame Extraction</h2>
-            {frameMeta && (
-              <p className="text-xs font-mono text-gray-600">
-                frames={frameMeta.frameCount} fps={frameMeta.fps.toFixed(2)} exact={frameMeta.exactFrameCount ? 'yes' : 'estimated'}
-              </p>
-            )}
-          </div>
-
-          {video.videoStatus !== 'ready' ? (
-            <p className="rounded border border-amber-200 bg-amber-50 p-2 text-xs font-mono text-amber-800">
-              Video must be ready before frame extraction is available.
-            </p>
-          ) : frameMetaLoading ? (
-            <p className="text-xs font-mono text-gray-600">Loading frame metadata...</p>
-          ) : frameMetaError ? (
-            <p className="rounded border border-red-200 bg-red-50 p-2 text-xs font-mono text-red-700">
-              {frameMetaError}
-            </p>
-          ) : frameMeta ? (
-            <>
-              <p className="text-xs font-mono text-gray-600">
-                Use symbolic selectors like <span className="font-semibold">first,middle,last</span> or exact frame numbers like <span className="font-semibold">1,100</span>.
-                {typeof frameMeta.limits?.maxExtractFrameCount === 'number' && ` Max per request: ${frameMeta.limits.maxExtractFrameCount}.`}
-              </p>
-
-              <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
-                <div className="space-y-3">
-                  <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_120px_auto]">
-                    <label className="flex flex-col gap-1 text-[11px] font-mono text-gray-700">
-                      Selector
-                      <input
-                        type="text"
-                        value={frameSelectorInput}
-                        onChange={(event) => setFrameSelectorInput(event.target.value)}
-                        className="rounded border border-gray-300 bg-white px-2 py-1 text-xs font-mono text-gray-800"
-                        placeholder={frameMeta.defaultSelector || 'first,middle,last'}
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1 text-[11px] font-mono text-gray-700">
-                      Jump To Frame
-                      <input
-                        type="text"
-                        value={frameJumpInput}
-                        onChange={(event) => setFrameJumpInput(event.target.value)}
-                        className="rounded border border-gray-300 bg-white px-2 py-1 text-xs font-mono text-gray-800"
-                        placeholder="1"
-                      />
-                    </label>
-                    <div className="flex items-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => void handleJumpToFrame()}
-                        disabled={framePreviewLoading}
-                        className="rounded border border-gray-300 bg-white px-3 py-1.5 text-xs font-mono text-gray-700 hover:bg-gray-100 disabled:opacity-60"
-                      >
-                        {framePreviewLoading ? 'Loading...' : 'Load Frame'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void handleExtractFrames()}
-                        disabled={extractingFrames}
-                        className="rounded border border-gray-300 bg-white px-3 py-1.5 text-xs font-mono text-gray-700 hover:bg-gray-100 disabled:opacity-60"
-                      >
-                        {extractingFrames ? 'Downloading...' : 'Download Frames'}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    {frameMeta.previews.map((preview) => (
-                      <button
-                        key={preview.frameNumber}
-                        type="button"
-                        onClick={() => void loadExactFramePreview(preview.frameNumber)}
-                        className={`overflow-hidden rounded border text-left ${
-                          activeFramePreview?.frameNumber === preview.frameNumber
-                            ? 'border-blue-500 bg-blue-50'
-                            : 'border-gray-200 bg-gray-50 hover:border-gray-300'
-                        }`}
-                      >
-                        <Image
-                          src={preview.previewUrl}
-                          alt={`Frame ${preview.frameNumber}`}
-                          width={640}
-                          height={360}
-                          className="aspect-video w-full bg-black object-cover"
-                          unoptimized
-                        />
-                        <div className="space-y-0.5 px-2 py-1.5 text-[11px] font-mono text-gray-700">
-                          <p>frame={preview.frameNumber}</p>
-                          <p>time={formatFrameTime(preview.timeSeconds)}</p>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-2 rounded border border-gray-200 bg-gray-50 p-3">
-                  <p className="text-xs font-semibold text-gray-900">Exact Frame Preview</p>
-                  {activeFramePreview ? (
-                    <>
-                      <Image
-                        src={activeFramePreview.objectUrl}
-                        alt={`Selected frame ${activeFramePreview.frameNumber}`}
-                        width={1280}
-                        height={720}
-                        className="aspect-video w-full rounded bg-black object-contain"
-                        unoptimized
-                      />
-                      <div className="space-y-1 text-[11px] font-mono text-gray-700">
-                        <p>frame={activeFramePreview.frameNumber}</p>
-                        <p>time={formatFrameTime(activeFramePreview.timeSeconds)}</p>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="flex aspect-video items-center justify-center rounded bg-white text-xs font-mono text-gray-500">
-                      No frame selected
-                    </div>
-                  )}
-                  {framePreviewError && (
-                    <p className="rounded border border-red-200 bg-red-50 p-2 text-[11px] font-mono text-red-700">
-                      {framePreviewError}
-                    </p>
-                  )}
-                </div>
-              </div>
-            </>
-          ) : (
-            <p className="text-xs font-mono text-gray-600">Frame metadata unavailable.</p>
-          )}
-        </section>
+        <FrameExtractionSection
+          videoStatus={video.videoStatus}
+          frameMeta={frameMeta}
+          frameMetaLoading={frameMetaLoading}
+          frameMetaError={frameMetaError}
+          frameSelectorInput={frameSelectorInput}
+          frameJumpInput={frameJumpInput}
+          framePreviewLoading={framePreviewLoading}
+          extractingFrames={extractingFrames}
+          activeFramePreview={activeFramePreview}
+          framePreviewError={framePreviewError}
+          onFrameSelectorInputChange={setFrameSelectorInput}
+          onFrameJumpInputChange={setFrameJumpInput}
+          onJumpToFrame={() => void handleJumpToFrame()}
+          onExtractFrames={() => void handleExtractFrames()}
+          onLoadExactFramePreview={(frameNumber) => void loadExactFramePreview(frameNumber)}
+        />
 
         {sortedAnimatedWebpVariants.length > 0 && (
           <section className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">

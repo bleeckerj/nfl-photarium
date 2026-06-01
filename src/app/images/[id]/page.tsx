@@ -1,8 +1,6 @@
 "use client";
 
 import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Image from 'next/image';
-import Link from 'next/link';
 import { getMultipleImageUrls, getCloudflareImageUrl, getCloudflareDownloadUrl, IMAGE_VARIANTS } from '@/utils/imageUtils';
 import {
   getAssetCopyUrl,
@@ -10,14 +8,6 @@ import {
   isVideoAsset,
 } from '@/utils/assetUrls';
 import { useToast } from '@/components/Toast';
-import { Sparkles, RotateCcw, RotateCw, ChevronUp, ChevronDown, GripVertical, ExternalLink, Cpu, ChevronLeft, ChevronRight } from 'lucide-react';
-import FolderManagerButton from '@/components/FolderManagerButton';
-import MonoSelect from '@/components/MonoSelect';
-import EmbeddingStatusIcon from '@/components/EmbeddingStatusIcon';
-import ConceptRadar from '@/components/ConceptRadar';
-import SemanticNeighbors from '@/components/SemanticNeighbors';
-import HaikuDisplay from '@/components/HaikuDisplay';
-import AntipodeSearch from '@/components/AntipodeSearch';
 import { subscribeEmbeddingPending, clearPendingIfHasEmbeddings, type EmbeddingPendingEntry } from '@/utils/embeddingPending';
 import {
   cleanString,
@@ -28,38 +18,48 @@ import {
 } from '@/utils/cloudflareMetadata';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { useDropzone } from 'react-dropzone';
-import { downloadImageToFile, formatDownloadFileName } from '@/utils/downloadUtils';
-import { useImageAspectRatio } from '@/hooks/useImageAspectRatio';
 import { formatBytes } from '@/utils/formatBytes';
-import { ColorSwatches } from '@/components/ColorSwatches';
 import { normalizeColorSearchHex } from '@/components/gallery/colorSearch';
 import { buildCanonicalGalleryHref, GALLERY_NAMESPACE_STORAGE_KEY, resetGalleryPreferencesForFocus } from '@/components/gallery/focusNavigation';
-
-import { AltTextEditor } from '@/components/image-detail/AltTextEditor';
-import { CloudflareMetadataHeader } from '@/components/image-detail/CloudflareMetadataHeader';
-import { FavoriteToggle } from '@/components/image-detail/FavoriteToggle';
+import { ImageDetailMetadataPanel } from '@/components/image-detail/ImageDetailMetadataPanel';
 import {
   IMAGE_DETAIL_DRAFT_KEY_PREFIX,
   LEGACY_IMAGE_DETAIL_DRAFT_KEY_PREFIX,
   shouldRestoreImageDetailDraft,
   type ImageDetailDraft,
 } from '@/components/image-detail/detailDraft';
-import { DescriptionEditor } from '@/components/image-detail/DescriptionEditor';
-import { PromptThisEditor } from '@/components/image-detail/PromptThisEditor';
-import { ComfyWorkflowPanel, type ComfyWorkflowRecord } from '@/components/image-detail/comfy';
-import { ExifSection } from '@/components/image-detail/ExifSection';
-import { OriginalUrlSection } from '@/components/image-detail/OriginalUrlSection';
-import { ShareSection } from '@/components/image-detail/ShareSection';
-import { SourceUrlSection } from '@/components/image-detail/SourceUrlSection';
-import { NamespaceMoveSection } from '@/components/image-detail/NamespaceMoveSection';
-import { VariantLinksSection } from '@/components/image-detail/VariantLinksSection';
 import { VariationsSection } from '@/components/image-detail/VariationsSection';
 import { AdoptVariationSection } from '@/components/image-detail/AdoptVariationSection';
 import { buildAdoptVariationCandidatePage, getDefaultAdoptVariationScope } from '@/components/image-detail/adoptVariationSearch';
 import { UploadVariationSection } from '@/components/image-detail/UploadVariationSection';
+import { ImageToolsPanel } from '@/components/image-detail/image-tools/ImageToolsPanel';
 import { VARIATION_UPLOAD_ACCEPT } from '@/components/image-detail/variationUploadConfig';
 import { VariantLockedState } from '@/components/image-detail/ParentInfoSection';
+import { AnimationRepairSection } from '@/components/image-detail/AnimationRepairSection';
+import { AspectRatioDisplay } from '@/components/image-detail/AspectRatioDisplay';
+import { HoverPreviewOverlay, type HoverPreviewState } from '@/components/image-detail/HoverPreviewOverlay';
+import { ImageDetailFooterActions } from '@/components/image-detail/ImageDetailFooterActions';
+import { ImageDetailNavigation } from '@/components/image-detail/ImageDetailNavigation';
+import { ImageHeroSection } from '@/components/image-detail/ImageHeroSection';
+import { ImageSummarySection } from '@/components/image-detail/ImageSummarySection';
+import { VariantSizeModal } from '@/components/image-detail/VariantSizeModal';
+import type { CloudflareImage } from '@/components/image-detail/types';
+import { useDetailNavigationGuard } from '@/components/image-detail/useDetailNavigationGuard';
+import { usePromptThisEditor } from '@/components/image-detail/usePromptThisEditor';
 import { parseUserTagsInput, type ImageMetadataSaveResponse } from '@/components/image-detail/imageMetadataDraft';
+import {
+  ensureWebpFormat,
+  extractAssignmentCandidateAssets,
+  formatEntriesAsYaml,
+  formatFailureNames,
+  getVariantWidthLabel,
+  isAnimatedWebpAsset,
+  isMetadataLimitError,
+  mergeFamilyContextImages,
+  mergeUniqueTags,
+  sortFamilyMembers,
+  toCloudflareTextMirror,
+} from '@/components/image-detail/detailTransforms';
 
 import { useParentReassignment } from '@/hooks/useParentReassignment';
 import { useVariationUpload } from '@/hooks/useVariationUpload';
@@ -74,7 +74,6 @@ import { usePersistentShareBaseUrl } from '@/hooks/usePersistentShareBaseUrl';
 import { requestSemanticTags } from '@/services/imageAltDescriptionService';
 import { fetchDetailImageResponse } from '@/services/detailImageService';
 import { patchImageFavorite, patchImageMetadata } from '@/services/imageMetadataService';
-import type { VariantAssignmentCandidate } from '@/utils/variantAssignmentCandidates';
 import {
   getUserVisibleTags,
   hasFavoriteTag,
@@ -111,222 +110,7 @@ const handleImageDragStart = (e: React.DragEvent, image: CloudflareImage) => {
   e.dataTransfer.effectAllowed = 'copy';
 };
 
-interface CloudflareImage {
-  id: string;
-  assetType?: 'image' | 'video';
-  filename: string;
-  displayName?: string;
-  uploaded: string;
-  size?: number;
-  fileSizeBytes?: number | null;
-  variants?: string[];
-  folder?: string;
-  tags?: string[];
-  description?: string;
-  originalUrl?: string;
-  originalUrlNormalized?: string;
-  sourceUrl?: string;
-  sourceUrlNormalized?: string;
-  namespace?: string;
-  contentHash?: string;
-  altTag?: string;
-  exif?: Record<string, string | number>;
-  aspectRatio?: string;
-  dimensions?: { width: number; height: number };
-  generatedBy?: string;
-  comfyMetadataDetected?: boolean;
-  comfyMetadataSource?: string;
-  altText?: string;
-  parentId?: string;
-  linkedAssetId?: string;
-  variationSort?: number;
-  videoStatus?: 'pending' | 'ready' | 'error';
-  videoDurationSeconds?: number;
-  videoPlaybackUrl?: string;
-  videoHlsUrl?: string;
-  videoThumbnailUrl?: string;
-  videoPreviewUrl?: string;
-  // Embedding status fields
-  hasClipEmbedding?: boolean;
-  hasColorEmbedding?: boolean;
-  dominantColors?: string[];
-  averageColor?: string;
-}
-
-type ImageAssignmentCandidate = VariantAssignmentCandidate<CloudflareImage>;
-
-const extractAssignmentCandidateAssets = (data: unknown): CloudflareImage[] => {
-  const payload = data as { assignmentCandidates?: ImageAssignmentCandidate[] } | null;
-  if (!Array.isArray(payload?.assignmentCandidates)) {
-    return [];
-  }
-
-  const assets: CloudflareImage[] = [];
-  payload.assignmentCandidates.forEach((candidate) => {
-    if (candidate.asset?.id) {
-      assets.push(candidate.asset);
-    }
-    if (candidate.parentAsset?.id) {
-      assets.push(candidate.parentAsset);
-    }
-  });
-  return assets;
-};
-
 const DEFAULT_LIST_VARIANT = 'full';
-const VARIANT_DIMENSIONS = new Map(IMAGE_VARIANTS.map(variant => [variant.name, variant.width]));
-
-type BulkUpdateFailure = {
-  id: string;
-  name: string;
-  error?: string;
-  reason?: 'metadata' | 'network' | 'unknown';
-};
-
-const ensureWebpFormat = (inputUrl: string) => {
-  const parts = inputUrl.split('?');
-  const base = parts[0];
-  const params = new URLSearchParams(parts[1] || '');
-  params.set('format', 'webp');
-  return `${base}?${params.toString()}`;
-};
-const getVariantWidthLabel = (variant: string) => {
-  const width = VARIANT_DIMENSIONS.get(variant);
-  if (!width) {
-    return null;
-  }
-  return `${width}px`;
-};
-
-const isMetadataLimitError = (message?: string) => {
-  if (!message) return false;
-  const lowered = message.toLowerCase();
-  return (
-    lowered.includes('metadata') &&
-    (lowered.includes('too large') ||
-      lowered.includes('size') ||
-      lowered.includes('limit') ||
-      lowered.includes('exceed') ||
-      lowered.includes('maximum'))
-  );
-};
-
-const formatFailureNames = (failures: BulkUpdateFailure[]) => {
-  const names = failures.map((failure) => failure.name);
-  const preview = names.slice(0, 3).join(', ');
-  if (names.length <= 3) {
-    return preview;
-  }
-  return `${preview} +${names.length - 3} more`;
-};
-
-const formatEntriesAsYaml = (entries: { url: string; altText: string }[]) => {
-  const lines = ['imagesFromGridDirectory:'];
-  entries.forEach((entry) => {
-    lines.push(`  - url: ${entry.url}`);
-    lines.push(`    altText: ${JSON.stringify(entry.altText ?? '')}`);
-  });
-  return lines.join('\n');
-};
-
-const MAX_CLOUDFLARE_TEXT_MIRROR_CHARS = 160;
-const toCloudflareTextMirror = (value?: string) => {
-  if (!value) return '';
-  const compact = value.trim();
-  if (!compact) return '';
-  return compact.length <= MAX_CLOUDFLARE_TEXT_MIRROR_CHARS
-    ? compact
-    : `${compact.slice(0, MAX_CLOUDFLARE_TEXT_MIRROR_CHARS)}…`;
-};
-
-const mergeUniqueTags = (existingTags: string[], incomingTags: string[]) => {
-  const merged = new Map<string, string>();
-  existingTags.forEach((tag) => {
-    const normalized = tag.trim().toLowerCase();
-    if (normalized) {
-      merged.set(normalized, tag.trim());
-    }
-  });
-  incomingTags.forEach((tag) => {
-    const trimmed = tag.trim();
-    const normalized = trimmed.toLowerCase();
-    if (normalized && !merged.has(normalized)) {
-      merged.set(normalized, trimmed);
-    }
-  });
-  return Array.from(merged.values());
-};
-
-const mergeUniqueImagesById = (base: CloudflareImage[], incoming: CloudflareImage[]) => {
-  const merged = new Map<string, CloudflareImage>();
-  base.forEach((entry) => merged.set(entry.id, entry));
-  incoming.forEach((entry) => {
-    const existing = merged.get(entry.id);
-    merged.set(entry.id, existing ? { ...existing, ...entry } : entry);
-  });
-  return Array.from(merged.values());
-};
-
-const mergeFamilyContextImages = (
-  base: CloudflareImage[],
-  incoming: CloudflareImage[],
-  familyRootId?: string
-) => {
-  if (!familyRootId) {
-    return mergeUniqueImagesById(base, incoming);
-  }
-
-  const incomingIds = new Set(incoming.map((entry) => entry.id));
-  const pruned = base.filter((entry) => {
-    const isKnownFamilyMember = entry.id === familyRootId || entry.parentId === familyRootId;
-    return !isKnownFamilyMember || incomingIds.has(entry.id);
-  });
-
-  return mergeUniqueImagesById(pruned, incoming);
-};
-
-const sortFamilyMembers = (items: CloudflareImage[]) => {
-  const hasSort = items.some((item) => Number.isFinite(item.variationSort));
-  if (!hasSort) {
-    return [...items].sort((a, b) => {
-      const aUploaded = Date.parse(a.uploaded);
-      const bUploaded = Date.parse(b.uploaded);
-      const aTime = Number.isFinite(aUploaded) ? aUploaded : 0;
-      const bTime = Number.isFinite(bUploaded) ? bUploaded : 0;
-      if (aTime !== bTime) {
-        return aTime - bTime;
-      }
-      return a.id.localeCompare(b.id);
-    });
-  }
-
-  const fallbackIndex = new Map(
-    [...items]
-      .sort((a, b) => {
-        const aUploaded = Date.parse(a.uploaded);
-        const bUploaded = Date.parse(b.uploaded);
-        const aTime = Number.isFinite(aUploaded) ? aUploaded : 0;
-        const bTime = Number.isFinite(bUploaded) ? bUploaded : 0;
-        if (aTime !== bTime) {
-          return aTime - bTime;
-        }
-        return a.id.localeCompare(b.id);
-      })
-      .map((item, index) => [item.id, index])
-  );
-
-  return [...items].sort((a, b) => {
-    const aSort = Number.isFinite(a.variationSort) ? (a.variationSort as number) : null;
-    const bSort = Number.isFinite(b.variationSort) ? (b.variationSort as number) : null;
-    if (aSort === null && bSort === null) {
-      return (fallbackIndex.get(a.id) ?? 0) - (fallbackIndex.get(b.id) ?? 0);
-    }
-    if (aSort === null) return 1;
-    if (bSort === null) return -1;
-    if (aSort !== bSort) return aSort - bSort;
-    return (fallbackIndex.get(a.id) ?? 0) - (fallbackIndex.get(b.id) ?? 0);
-  });
-};
 
 const DETAIL_PERF_LOGGING_ENABLED = process.env.NODE_ENV !== 'production';
 
@@ -372,6 +156,8 @@ export default function ImageDetailPage() {
   const seededInputAppliedRef = useRef(false);
   const [image, setImage] = useState<CloudflareImage | null>(null);
   const [loading, setLoading] = useState(true);
+  const [animationRepairLoading, setAnimationRepairLoading] = useState<null | 'copy' | 'replace'>(null);
+  const [animationRepairError, setAnimationRepairError] = useState<string | null>(null);
   const [familyLoaded, setFamilyLoaded] = useState(false);
   const toast = useToast();
   const [galleryResultIds, setGalleryResultIds] = useState<string[]>([]);
@@ -400,10 +186,8 @@ export default function ImageDetailPage() {
   const [allImages, setAllImages] = useState<CloudflareImage[]>([]);
   const [fallbackParentImage, setFallbackParentImage] = useState<CloudflareImage | null>(null);
   const [reassignParentId, setReassignParentId] = useState('');
-  const [adoptImageId, setAdoptImageId] = useState('');
   const [childDetachingId, setChildDetachingId] = useState<string | null>(null);
   const [swappingParentId, setSwappingParentId] = useState<string | null>(null);
-  const [adoptLoading, setAdoptLoading] = useState(false);
   const [candidatePoolLoading, setCandidatePoolLoading] = useState(false);
   const [candidatePoolLoaded, setCandidatePoolLoaded] = useState(false);
   const [candidatePoolFailed, setCandidatePoolFailed] = useState(false);
@@ -420,19 +204,18 @@ export default function ImageDetailPage() {
   const LIST_VARIATION_PAGE_SIZE = 25;
   const GRID_VARIATION_PAGE_SIZE = 36;
   const ADOPT_PAGE_SIZE = 12;
-  const [hoverPreview, setHoverPreview] = useState<{
-    url: string;
-    label: string;
-    x: number;
-    y: number;
-  } | null>(null);
+  const [hoverPreview, setHoverPreview] = useState<HoverPreviewState | null>(null);
 
-  const [promptThisInput, setPromptThisInput] = useState('');
-  const [promptThisLoading, setPromptThisLoading] = useState(false);
-  const [promptThisGenerating, setPromptThisGenerating] = useState(false);
-  const [promptThisSaving, setPromptThisSaving] = useState(false);
-  const [lastSavedPromptThis, setLastSavedPromptThis] = useState<string>('');
-  const [promptThisMeta, setPromptThisMeta] = useState<{ saved?: boolean; updatedAt?: string; model?: string } | null>(null);
+  const {
+    promptThisInput,
+    setPromptThisInput,
+    promptThisLoading,
+    promptThisGenerating,
+    promptThisSaving,
+    promptThisMeta,
+    savePromptThisEdits,
+    generatePromptThis,
+  } = usePromptThisEditor({ imageId: image?.id, toastPush: toast.push });
   const [tagGenerationCount, setTagGenerationCount] = useState(6);
   const [tagGenerationLoading, setTagGenerationLoading] = useState(false);
   const [favoriteLoading, setFavoriteLoading] = useState(false);
@@ -446,7 +229,6 @@ export default function ImageDetailPage() {
     promptThis?: { text: string; provider: string; model?: string; updatedAt?: string };
     comfyWorkflow?: ComfyWorkflowRecord;
   } | null>(null);
-  const [extrasLoading, setExtrasLoading] = useState(false);
   const [shareVariant, setShareVariant] = useState('large');
   const [namespace, setNamespace] = useState('');
   const [registryNamespaces, setRegistryNamespaces] = useState<string[]>([]);
@@ -1091,7 +873,6 @@ export default function ImageDetailPage() {
       return;
     }
     let mounted = true;
-    setExtrasLoading(true);
     (async () => {
       const startedAt = getNow();
       try {
@@ -1123,8 +904,6 @@ export default function ImageDetailPage() {
         console.error('Failed to fetch image extras', err);
         // On error, keep the current image metadata values already loaded from /api/images/[id].
         if (mounted) setExtrasRecord(null);
-      } finally {
-        if (mounted) setExtrasLoading(false);
       }
     })();
     return () => {
@@ -1481,6 +1260,45 @@ export default function ImageDetailPage() {
     },
     [allImages, galleryNavSuffix, galleryResultAssetTypes]
   );
+  const handleReverseAnimation = useCallback(async (replaceOriginal: boolean) => {
+    if (!image) return;
+    if (replaceOriginal) {
+      const confirmed = window.confirm(
+        'Replace this animated WebP with a reversed version? Cloudflare image IDs cannot be reused. A new image will be uploaded, this image will be deleted after upload succeeds, and any copied or embedded old URLs will stop working.'
+      );
+      if (!confirmed) return;
+    }
+
+    setAnimationRepairLoading(replaceOriginal ? 'replace' : 'copy');
+    setAnimationRepairError(null);
+    try {
+      const response = await fetch(`/api/images/${encodeURIComponent(image.id)}/animation/reorder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'reverse', replaceOriginal }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(typeof payload?.error === 'string' ? payload.error : 'Failed to reverse animation');
+      }
+      const nextId = typeof payload?.image?.id === 'string' ? payload.image.id : '';
+      if (!nextId) {
+        throw new Error('Reverse animation response did not include a new image ID');
+      }
+      toast.push(replaceOriginal ? 'Reversed replacement created' : 'Reversed copy created');
+      if (replaceOriginal) {
+        router.replace(buildAssetHref(nextId), { scroll: false });
+      } else {
+        await refreshImageList();
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to reverse animation';
+      setAnimationRepairError(message);
+      toast.push(message);
+    } finally {
+      setAnimationRepairLoading(null);
+    }
+  }, [buildAssetHref, image, refreshImageList, router, toast]);
   const handleColorSearchNavigation = useCallback((hex: string) => {
     const normalized = normalizeColorSearchHex(hex);
     if (!normalized) return;
@@ -1540,6 +1358,13 @@ export default function ImageDetailPage() {
     if (!targetId) return;
     commitNavigation(buildAssetHref(targetId), targetId);
   }, [buildAssetHref, commitNavigation]);
+  useDetailNavigationGuard({
+    id,
+    buildAssetHref,
+    router,
+    lastUserNavIntentRef,
+    pinnedImageIdRef,
+  });
   const familyVariantSequence = useMemo(() => {
     if (!image?.parentId) return [];
     const familyVariants = allImages.filter((img) => img.parentId === image.parentId);
@@ -1754,141 +1579,6 @@ export default function ImageDetailPage() {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isMetadataDirty, pendingAutoSave]);
 
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    const NAV_INTENT_WINDOW_MS = 3000;
-    const markUserNavIntent = () => {
-      lastUserNavIntentRef.current = Date.now();
-    };
-
-    const handleIntentKeyDown = (event: KeyboardEvent) => {
-      if (!event.isTrusted) return;
-      if (event.key === 'Enter' || event.key === ' ') {
-        markUserNavIntent();
-      }
-    };
-    const handleIntentPointerDown = (event: PointerEvent) => {
-      if (!event.isTrusted) return;
-      markUserNavIntent();
-    };
-
-    const isDetailPath = (pathname: string) => /^\/(images|videos)\//.test(pathname);
-    const toPathname = (target: string | URL | null | undefined) => {
-      if (!target) return '';
-      try {
-        return new URL(String(target), window.location.href).pathname;
-      } catch {
-        return '';
-      }
-    };
-    const hasRecentIntent = () => Date.now() - lastUserNavIntentRef.current < NAV_INTENT_WINDOW_MS;
-
-    const originalPushState = window.history.pushState.bind(window.history);
-    const originalReplaceState = window.history.replaceState.bind(window.history);
-
-    window.history.pushState = ((data: unknown, unused: string, url?: string | URL | null) => {
-      const targetPath = toPathname(url);
-      if (
-        targetPath &&
-        targetPath !== window.location.pathname &&
-        isDetailPath(targetPath) &&
-        !hasRecentIntent()
-      ) {
-        console.warn('[NavGuard] Blocked non-user pushState navigation', {
-          from: window.location.pathname,
-          to: targetPath,
-        });
-        return;
-      }
-      return originalPushState(data, unused, url);
-    }) as History['pushState'];
-
-    window.history.replaceState = ((data: unknown, unused: string, url?: string | URL | null) => {
-      const targetPath = toPathname(url);
-      if (
-        targetPath &&
-        targetPath !== window.location.pathname &&
-        isDetailPath(targetPath) &&
-        !hasRecentIntent()
-      ) {
-        console.warn('[NavGuard] Blocked non-user replaceState navigation', {
-          from: window.location.pathname,
-          to: targetPath,
-        });
-        return;
-      }
-      return originalReplaceState(data, unused, url);
-    }) as History['replaceState'];
-
-    const handlePopState = () => {
-      if (hasRecentIntent()) {
-        return;
-      }
-      const pinnedId = pinnedImageIdRef.current;
-      if (!pinnedId) {
-        return;
-      }
-      const targetPath = `/images/${pinnedId}`;
-      if (window.location.pathname !== targetPath) {
-        console.warn('[NavGuard] Reverting unexpected popstate navigation', {
-          from: window.location.pathname,
-          to: targetPath,
-        });
-        router.replace(buildAssetHref(pinnedId), { scroll: false });
-      }
-    };
-
-    const handleBeforeUnloadGuard = (event: BeforeUnloadEvent) => {
-      if (hasRecentIntent()) {
-        return;
-      }
-      event.preventDefault();
-      event.returnValue = '';
-      console.warn('[NavGuard] Blocked non-user unload/navigation');
-    };
-
-    window.addEventListener('pointerdown', handleIntentPointerDown, true);
-    window.addEventListener('keydown', handleIntentKeyDown, true);
-    window.addEventListener('popstate', handlePopState, true);
-    window.addEventListener('beforeunload', handleBeforeUnloadGuard, true);
-
-    return () => {
-      window.history.pushState = originalPushState;
-      window.history.replaceState = originalReplaceState;
-      window.removeEventListener('pointerdown', handleIntentPointerDown, true);
-      window.removeEventListener('keydown', handleIntentKeyDown, true);
-      window.removeEventListener('popstate', handlePopState, true);
-      window.removeEventListener('beforeunload', handleBeforeUnloadGuard, true);
-    };
-  }, [buildAssetHref, router]);
-
-  useEffect(() => {
-    if (!id) {
-      return;
-    }
-    const pinnedId = pinnedImageIdRef.current;
-    const hasRecentIntent = Date.now() - lastUserNavIntentRef.current < 3000;
-
-    if (!pinnedId) {
-      pinnedImageIdRef.current = id;
-      return;
-    }
-
-    if (id !== pinnedId && !hasRecentIntent) {
-      console.warn('[NavGuard] Reverting unexpected route change', {
-        fromPinnedId: pinnedId,
-        unexpectedId: id,
-      });
-      router.replace(buildAssetHref(pinnedId), { scroll: false });
-      return;
-    }
-
-    pinnedImageIdRef.current = id;
-  }, [buildAssetHref, id, router]);
-
   const detailFolderOptions = useMemo(
     () => [
       { value: '', label: '[none]' },
@@ -1912,67 +1602,6 @@ export default function ImageDetailPage() {
     shareVariant,
     toast
   });
-
-  const getOrientationIcon = (aspectRatioString: string) => {
-    const parts = aspectRatioString.split(':');
-    if (parts.length === 2) {
-      const width = parseFloat(parts[0]);
-      const height = parseFloat(parts[1]);
-      const ratio = width / height;
-      
-      if (Math.abs(ratio - 1) < 0.1) {
-        return (
-          <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor" className="inline-block">
-            <rect x="1" y="1" width="6" height="6" fill="none" stroke="currentColor" strokeWidth="0.8"/>
-          </svg>
-        );
-      } else if (ratio > 1) {
-        return (
-          <svg width="10" height="6" viewBox="0 0 10 6" fill="currentColor" className="inline-block">
-            <rect x="1" y="1" width="8" height="4" fill="none" stroke="currentColor" strokeWidth="0.8"/>
-          </svg>
-        );
-      } else {
-        return (
-          <svg width="6" height="10" viewBox="0 0 6 10" fill="currentColor" className="inline-block">
-            <rect x="1" y="1" width="4" height="8" fill="none" stroke="currentColor" strokeWidth="0.8"/>
-          </svg>
-        );
-      }
-    }
-    
-    return (
-      <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor" className="inline-block">
-        <rect x="1" y="1" width="6" height="6" fill="none" stroke="currentColor" strokeWidth="0.8"/>
-      </svg>
-    );
-  };
-
-  const AspectRatioDisplay: React.FC<{ imageId: string; className?: string }> = ({ imageId, className }) => {
-    const { aspectRatio, loading, error } = useImageAspectRatio(imageId, Boolean(imageId));
-
-    if (!imageId) {
-      return null;
-    }
-
-    if (loading) {
-      return (
-        <p className={`text-[11px] font-mono text-gray-400 ${className ?? ''}`}>
-          📐 <span className="inline-block w-8 h-2 bg-gray-200 rounded animate-pulse"></span>
-        </p>
-      );
-    }
-
-    if (error || !aspectRatio) {
-      return <p className={`text-[11px] font-mono text-gray-400 ${className ?? ''}`}>📐 --</p>;
-    }
-
-    return (
-      <p className={`text-[11px] font-mono text-gray-500 flex items-center gap-1 ${className ?? ''}`}>
-        📐 {aspectRatio} {getOrientationIcon(aspectRatio)}
-      </p>
-    );
-  };
 
   const adjustRotationPreview = useCallback((delta: number) => {
     setPreviewRotation((prev) => prev + delta);
@@ -2495,23 +2124,6 @@ export default function ImageDetailPage() {
     }
   }, [image, refreshImageList, toast, variationChildren]);
 
-  const handleAdoptImage = useCallback(async () => {
-    if (!adoptImageId || !id) {
-      return;
-    }
-    setAdoptLoading(true);
-    try {
-      await patchParentAssignment(adoptImageId, id);
-      toast.push('Variation adopted');
-      setAdoptImageId('');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to adopt variation';
-      toast.push(message);
-    } finally {
-      setAdoptLoading(false);
-    }
-  }, [adoptImageId, id, patchParentAssignment, toast]);
-
   const [assigningId, setAssigningId] = useState<string | null>(null);
   const [assigningBulk, setAssigningBulk] = useState(false);
 
@@ -2600,116 +2212,6 @@ export default function ImageDetailPage() {
   const detailFileSizeBytes = image?.size ?? image?.fileSizeBytes ?? null;
   const detailFileSizeLabel = formatBytes(detailFileSizeBytes);
 
-  const refreshPromptThis = useCallback(async () => {
-    if (!image?.id) {
-      return;
-    }
-    setPromptThisLoading(true);
-    try {
-      const response = await fetch(`/api/images/${image.id}/prompt`, { method: 'GET' });
-      const data = await response.json();
-      if (!response.ok) {
-        return;
-      }
-      const record = data?.record;
-      if (record?.prompt && typeof record.prompt === 'string') {
-        setPromptThisInput(record.prompt);
-        setPromptThisMeta({ saved: true, updatedAt: record.updatedAt, model: record.model });
-        setLastSavedPromptThis(record.prompt);
-      } else {
-        setPromptThisInput('');
-        setPromptThisMeta(null);
-        setLastSavedPromptThis('');
-      }
-    } catch (error) {
-      console.warn('Failed to refresh Prompt This:', error);
-    } finally {
-      setPromptThisLoading(false);
-    }
-  }, [image?.id]);
-
-  const savePromptThisEdits = useCallback(async () => {
-    if (!image?.id) return;
-
-    const trimmed = (promptThisInput || '').trim();
-    const lastSavedTrimmed = (lastSavedPromptThis || '').trim();
-
-    if (!trimmed) {
-      return;
-    }
-
-    if (trimmed === lastSavedTrimmed) {
-      return;
-    }
-
-    setPromptThisSaving(true);
-    try {
-      const response = await fetch(`/api/images/${image.id}/prompt`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: trimmed })
-      });
-      const data = await response.json();
-      if (!response.ok || !data?.record?.prompt) {
-        toast.push(data?.error || 'Failed to save prompt');
-        return;
-      }
-
-      setPromptThisInput(data.record.prompt);
-      setLastSavedPromptThis(data.record.prompt);
-      setPromptThisMeta({
-        saved: Boolean(data?.saved),
-        updatedAt: data?.record?.updatedAt,
-        model: data?.record?.model
-      });
-      toast.push('Prompt saved');
-    } catch (error) {
-      console.error('Failed to save prompt:', error);
-      toast.push('Failed to save prompt');
-    } finally {
-      setPromptThisSaving(false);
-    }
-  }, [image?.id, lastSavedPromptThis, promptThisInput, toast]);
-
-  const generatePromptThis = useCallback(async (force?: boolean) => {
-    if (!image?.id) {
-      return;
-    }
-    setPromptThisGenerating(true);
-    try {
-      const response = await fetch(`/api/images/${image.id}/prompt`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          force: Boolean(force),
-          existingPrompt: promptThisInput || ''
-        })
-      });
-      const data = await response.json();
-      if (!response.ok || !data?.record?.prompt) {
-        toast.push(data?.error || 'Failed to generate prompt');
-        return;
-      }
-      const promptText: string = data.record.prompt;
-      setPromptThisInput(promptText);
-      setPromptThisMeta({
-        saved: Boolean(data?.saved),
-        updatedAt: data?.record?.updatedAt,
-        model: data?.record?.model
-      });
-      toast.push(data?.generated ? 'Prompt generated' : 'Prompt loaded');
-    } catch (error) {
-      console.error('Failed to generate prompt:', error);
-      toast.push('Failed to generate prompt');
-    } finally {
-      setPromptThisGenerating(false);
-    }
-  }, [image?.id, promptThisInput, toast]);
-
-  useEffect(() => {
-    refreshPromptThis();
-  }, [refreshPromptThis]);
-
   if (!id) {
     return (
       <div className="p-6">
@@ -2731,709 +2233,112 @@ export default function ImageDetailPage() {
     );
   }
 
+  const showAnimationRepair = isAnimatedWebpAsset(image);
+
   return (
     <div id="image-detail-page" className="p-6 relative">
       <div id="image-detail-container" className="max-w-5xl mx-auto bg-white rounded-lg shadow-md overflow-hidden">
         <div className="p-6">
-          <div id="detail-navigation" className="flex items-center justify-between gap-3 mb-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <button type="button" onClick={handleBackToGallery} className="text-xs text-blue-600 underline">
-                ← Back to gallery
-              </button>
-              <button
-                type="button"
-                onClick={handleShowInGalleryOrder}
-                className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-xs font-mono text-blue-700 hover:border-blue-300"
-              >
-                Show in gallery
-              </button>
-              <button
-                type="button"
-                onClick={handleShowInNamespace}
-                disabled={!image.namespace}
-                className="inline-flex items-center gap-1 rounded-md border border-blue-200 px-2 py-1 text-xs font-mono text-blue-700 hover:border-blue-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                title={image.namespace ? `Show in ${image.namespace}` : 'Image has no namespace'}
-              >
-                Show in namespace
-              </button>
-            </div>
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              {Boolean(image.parentId) && familyLoaded && familyVariantSequence.length > 0 && (
-                <div className="flex items-center gap-2">
-                  {familyVariantIndex >= 0 && (
-                    <span className="text-[11px] font-mono text-gray-500">
-                      Variant {familyVariantIndex + 1} / {familyVariantSequence.length}
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => commitAssetNavigation(prevFamilyVariantId)}
-                    disabled={!prevFamilyVariantId}
-                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-mono border rounded-md border-amber-200 text-amber-700 hover:border-amber-300 disabled:opacity-40 disabled:cursor-not-allowed"
-                    title="Previous variant in this parent family"
-                  >
-                    <ChevronLeft className="h-3.5 w-3.5" />
-                    Prev var
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => commitAssetNavigation(nextFamilyVariantId)}
-                    disabled={!nextFamilyVariantId}
-                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-mono border rounded-md border-amber-200 text-amber-700 hover:border-amber-300 disabled:opacity-40 disabled:cursor-not-allowed"
-                    title="Next variant in this parent family"
-                  >
-                    Next var
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              )}
-              {galleryResultIds.length > 0 && (
-                <div className="flex items-center gap-2">
-                  {galleryResultIndex >= 0 && (
-                    <span className="text-[11px] font-mono text-gray-500">
-                      {galleryResultIndex + 1} / {galleryResultIds.length}
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => commitAssetNavigation(prevGalleryImageId)}
-                    disabled={!prevGalleryImageId}
-                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-mono border rounded-md border-gray-200 text-gray-600 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    <ChevronLeft className="h-3.5 w-3.5" />
-                    Prev
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => commitAssetNavigation(nextGalleryImageId)}
-                    disabled={!nextGalleryImageId}
-                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-mono border rounded-md border-gray-200 text-gray-600 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    Next
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-          <div id="image-hero-section" className="w-full mb-4">
-            <div className="relative w-full aspect-[3/2] bg-gray-100 rounded overflow-hidden group">
-              <Image
-                draggable
-                onDragStart={(e) => handleImageDragStart(e, image)}
-                src={originalDeliveryUrl}
-                alt={image.filename || 'image'}
-                fill
-                className="object-contain"
-                unoptimized
-                priority
-                style={heroRotationStyle}
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  const width = Math.min(900, window.screen.width * 0.6);
-                  const height = Math.min(700, window.screen.height * 0.6);
-                  const left = (window.screen.width - width) / 2;
-                  const top = (window.screen.height - height) / 2;
-                  window.open(
-                    originalDeliveryUrl,
-                    `drag_${image.id}`,
-                    `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=no`
-                  );
-                }}
-                title="Open image in a popup window for easy drag-and-drop to other apps"
-                className="absolute top-2 right-2 p-2 bg-black/60 hover:bg-black/80 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <ExternalLink className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="mt-3 space-y-2">
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="font-semibold text-gray-600">Rotation preview</span>
-                <span className="text-gray-500">{normalizedRotation}°</span>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => adjustRotationPreview(-90)}
-                  disabled={rotationLoading}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded border border-gray-200 text-gray-700 hover:border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <RotateCcw className="h-4 w-4" />
-                  Left
-                </button>
-                <button
-                  type="button"
-                  onClick={() => adjustRotationPreview(90)}
-                  disabled={rotationLoading}
-                  className="inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded border border-gray-200 text-gray-700 hover:border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <RotateCw className="h-4 w-4" />
-                  Right
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmRotation}
-                  disabled={rotationLoading || normalizedRotation === 0}
-                  className="inline-flex items-center gap-1 px-4 py-1.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
-                >
-                  {rotationLoading ? 'Rotating…' : 'Confirm rotation'}
-                </button>
-              </div>
-              {rotationError && (
-                <p className="text-[11px] text-red-600">{rotationError}</p>
-              )}
-              {rotatedAsset && (
-                <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-[11px] text-blue-900 space-y-1">
-                  <p className="font-semibold text-blue-800">Rotated asset created</p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleCopyText(rotatedAsset.url, 'Rotated URL copied')}
-                      className="px-2 py-1 border border-blue-200 rounded text-[11px] text-blue-700 hover:border-blue-300"
-                    >
-                      Copy new CDN URL
-                    </button>
-                    <Link
-                      href={`/images/${rotatedAsset.id}`}
-                      className="text-[11px] text-blue-700 underline"
-                      prefetch={false}
-                    >
-                      View rotated asset
-                    </Link>
-                  </div>
-                  <p className="text-[10px] text-blue-700 leading-snug break-all">
-                    {rotatedAsset.url}
-                  </p>
-                  <p className="text-[10px] text-blue-700">
-                    Update any existing references—the Cloudflare delivery URL changed.
-                  </p>
-                  {rotatedAsset.info && (
-                    <p className="text-[10px] text-blue-600 italic">{rotatedAsset.info}</p>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
+          <ImageDetailNavigation
+            image={image}
+            familyLoaded={familyLoaded}
+            familyVariantSequenceLength={familyVariantSequence.length}
+            familyVariantIndex={familyVariantIndex}
+            prevFamilyVariantId={prevFamilyVariantId}
+            nextFamilyVariantId={nextFamilyVariantId}
+            galleryResultIdsLength={galleryResultIds.length}
+            galleryResultIndex={galleryResultIndex}
+            prevGalleryImageId={prevGalleryImageId}
+            nextGalleryImageId={nextGalleryImageId}
+            onBackToGallery={handleBackToGallery}
+            onShowInGalleryOrder={handleShowInGalleryOrder}
+            onShowInNamespace={handleShowInNamespace}
+            onNavigateAsset={commitAssetNavigation}
+          />
+          <ImageHeroSection
+            image={image}
+            originalDeliveryUrl={originalDeliveryUrl}
+            heroRotationStyle={heroRotationStyle}
+            normalizedRotation={normalizedRotation}
+            rotationLoading={rotationLoading}
+            rotationError={rotationError}
+            rotatedAsset={rotatedAsset}
+            onDragStart={handleImageDragStart}
+            onAdjustRotation={adjustRotationPreview}
+            onConfirmRotation={handleConfirmRotation}
+            onCopyText={handleCopyText}
+          />
 
-          <div id="image-summary-section" className="mb-6">
-            <div className="flex items-center gap-2">
-              <p className="text-xs mono font-semibold text-gray-900">{image.displayName || image.filename || 'Image'}</p>
-              {(image.generatedBy === 'comfyui' || image.comfyMetadataDetected === true) && (
-                <span
-                  id={`image-detail-comfy-indicator-${image.id}`}
-                  className="inline-flex items-center gap-1 rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-[11px] text-orange-700"
-                  title="ComfyUI output detected"
-                  aria-label="ComfyUI output detected"
-                >
-                  <Image
-                    src="/icons/comfyui.svg"
-                    alt="ComfyUI"
-                    width={14}
-                    height={14}
-                    className="h-3.5 w-3.5"
-                  />
-                  ComfyUI
-                </span>
-              )}
-              <EmbeddingStatusIcon
-                hasClipEmbedding={image.hasClipEmbedding}
-                hasColorEmbedding={image.hasColorEmbedding}
-                dominantColors={image.dominantColors}
-                averageColor={image.averageColor}
-                pendingStatus={pendingEmbedding?.status}
-                pendingLabel={pendingEmbedding?.error}
-                size={18}
-                showTooltip={true}
-              />
-              <button
-                onClick={generateEmbeddings}
-                disabled={embeddingGenerating}
-                className="inline-flex items-center gap-1 px-2 py-1 text-[10px] border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition"
-                title="Generate CLIP and color embeddings for vector search"
-              >
-                <Cpu className="h-3 w-3" />
-                {embeddingGenerating || pendingEmbedding?.status === 'embedding'
-                  ? 'Generating...'
-                  : (image.hasClipEmbedding && image.hasColorEmbedding ? 'Refresh' : 'Generate')}
-              </button>
-            </div>
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-gray-600">
-              <span className={`px-2 py-0.5 rounded-full border ${image.hasClipEmbedding ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-gray-200 bg-gray-50 text-gray-500'}`}>
-                CLIP {image.hasClipEmbedding ? 'ready' : 'missing'}
-              </span>
-              <span className={`px-2 py-0.5 rounded-full border ${image.hasColorEmbedding ? 'border-purple-200 bg-purple-50 text-purple-700' : 'border-gray-200 bg-gray-50 text-gray-500'}`}>
-                Color {image.hasColorEmbedding ? 'ready' : 'missing'}
-              </span>
-              {/* Only show pending badge if image doesn't already have all embeddings */}
-              {pendingEmbedding && !(image.hasClipEmbedding && image.hasColorEmbedding) && (
-                <span className="inline-flex items-center gap-2 px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-700">
-                  <span className="relative flex h-2 w-2">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75"></span>
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500"></span>
-                  </span>
-                  {pendingEmbedding.status === 'queued' ? 'Embedding queued' : pendingEmbedding.status === 'embedding' ? 'Embedding running' : 'Embedding failed'}
-                </span>
-              )}
-            </div>
-            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-500">
-              <span>Uploaded {new Date(image.uploaded).toLocaleString()}</span>
-              <span className="text-gray-300">•</span>
-              <span>Namespace {image.namespace || 'Missing namespace'}</span>
-            </div>
-            <ColorSwatches
-              dominantColors={image.dominantColors}
-              averageColor={image.averageColor}
-              showLabels={true}
-              className="mt-2"
-              onSelectColor={handleColorSearchNavigation}
+          {showAnimationRepair && (
+            <AnimationRepairSection
+              image={image}
+              loading={animationRepairLoading}
+              error={animationRepairError}
+              onReverse={(replaceOriginal) => void handleReverseAnimation(replaceOriginal)}
             />
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-gray-600">
-              <span className="text-gray-500">Image ID</span>
-              <span className="font-mono text-gray-800">{image.id}</span>
-              <button
-                onClick={() => handleCopyText(image.id, 'Image ID copied')}
-                className="px-2 py-0.5 border border-gray-300 rounded hover:bg-gray-100 text-[10px]"
-              >
-                Copy
-              </button>
-            </div>
-            <AspectRatioDisplay imageId={image.id} />
+          )}
 
-            {/* Semantic Analysis Section - only show if image has CLIP embedding */}
-            {image.hasClipEmbedding && (
-              <div className="mt-4 pt-4 border-t border-gray-200">
-                <details className="group">
-                  <summary className="cursor-pointer text-xs font-medium text-gray-700 hover:text-gray-900 flex items-center gap-2">
-                    <ChevronDown className="h-3 w-3 group-open:rotate-180 transition-transform" />
-                    Semantic Analysis
-                    <span className="text-[10px] text-gray-500 font-normal">(CLIP embedding visualization)</span>
-                  </summary>
-                  <div className="mt-3 space-y-4">
-                    <div className="flex items-center justify-between gap-3 rounded border border-gray-200 bg-white/60 px-3 py-2">
-                      <div className="text-[11px] text-gray-600">
-                        Scope: {semanticSearchAllNamespaces ? 'All namespaces' : (namespace || 'cf-default')}
-                      </div>
-                      <label className="flex items-center gap-2 text-[11px] text-gray-700 select-none">
-                        <input
-                          type="checkbox"
-                          checked={semanticSearchAllNamespaces}
-                          onChange={(e) => setSemanticSearchAllNamespaces(e.target.checked)}
-                          className="h-3.5 w-3.5"
-                        />
-                        All namespaces
-                      </label>
-                    </div>
-                    {/* Machine Haiku */}
-                    <HaikuDisplay imageId={image.id} hasClipEmbedding={image.hasClipEmbedding} />
-                    
-                    {/* Concept Radar and Semantic Neighbors */}
-                    <div className="grid md:grid-cols-2 gap-4">
-                      <div>
-                      {deleteFamilyOpen && (
-                        <div className="fixed inset-0 z-[70] bg-black/60 flex items-center justify-center px-4">
-                          <div className="bg-white rounded-lg shadow-2xl max-w-lg w-full overflow-hidden">
-                            <div className="p-4 border-b border-gray-100 flex items-center justify-between">
-                              <div>
-                                <h3 className="text-sm font-mono text-gray-900">Deleting image family…</h3>
-                                <p className="text-[11px] text-gray-500">This can take a while for large families.</p>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={closeDeleteFamilyModal}
-                                className="text-xs px-2 py-1 border rounded text-gray-700 hover:bg-gray-50"
-                              >
-                                Hide
-                              </button>
-                            </div>
-                            <div className="p-4 space-y-3">
-                              {deleteFamilyStatus ? (
-                                (() => {
-                                  const total = Math.max(1, deleteFamilyStatus.total);
-                                  const attempted = deleteFamilyStatus.attempted;
-                                  const pct = Math.min(100, Math.round((attempted / total) * 100));
-                                  return (
-                                    <>
-                                      <div className="flex items-center justify-between text-xs text-gray-700">
-                                        <span className="font-mono">{attempted}/{total} attempted</span>
-                                        <span className="font-mono">{pct}%</span>
-                                      </div>
-                                      <div className="h-2 w-full bg-gray-100 rounded">
-                                        <div className="h-2 bg-red-500 rounded" style={{ width: `${pct}%` }} />
-                                      </div>
-                                      <div className="flex items-center justify-between text-[11px] text-gray-600">
-                                        <span>Deleted: <span className="font-mono">{deleteFamilyStatus.deleted}</span></span>
-                                        <span>Failed: <span className="font-mono">{deleteFamilyStatus.failed}</span></span>
-                                        <span>Concurrency: <span className="font-mono">{deleteFamilyStatus.concurrency}</span></span>
-                                      </div>
-                                      {deleteFamilyStatus.lastError && (
-                                        <div className="text-[11px] text-red-700 bg-red-50 border border-red-100 rounded p-2">
-                                          {deleteFamilyStatus.lastError}
-                                        </div>
-                                      )}
-                                    </>
-                                  );
-                                })()
-                              ) : (
-                                <div className="text-xs text-gray-600">
-                                  Starting job…
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                          <ConceptRadar 
-                          imageId={image.id} 
-                          size={320}
-                          onImageClick={(result) => {
-                            if (!result?.imageId) return;
-                            commitNavigation(
-                              result.assetType === 'video'
-                                ? `/videos/${result.imageId}`
-                                : `/images/${result.imageId}`,
-                              result.imageId
-                            );
-                          }}
-                          copyVariant={listVariant}
-                          onCopySuccess={(msg) => toast.push(msg)}
-                          namespace={namespace}
-                          searchAllNamespaces={semanticSearchAllNamespaces}
-                        />
-                      </div>
-                      <div>
-                        <SemanticNeighbors 
-                          imageId={image.id} 
-                          type="clip" 
-                          limit={8}
-                          showStrangers={true}
-                          onImageClick={(clickedImageId) => {
-                            if (!clickedImageId) return;
-                            commitNavigation(`/images/${clickedImageId}`, clickedImageId);
-                          }}
-                          copyVariant={listVariant}
-                          onCopySuccess={(msg) => toast.push(msg)}
-                          namespace={namespace}
-                          searchAllNamespaces={semanticSearchAllNamespaces}
-                        />
-                      </div>
-                    </div>
-                    
-                    {/* Antipode Search */}
-                    <AntipodeSearch 
-                      imageId={image.id}
-                      className="bg-gray-900/50 border border-amber-900/30 rounded-lg p-4"
-                      onImageClick={(result) => {
-                        if (!result?.imageId) return;
-                        commitNavigation(
-                          result.assetType === 'video'
-                            ? `/videos/${result.imageId}`
-                            : `/images/${result.imageId}`,
-                          result.imageId
-                        );
-                      }}
-                      copyVariant={listVariant}
-                      onCopySuccess={(msg) => toast.push(msg)}
-                      namespace={namespace}
-                      searchAllNamespaces={semanticSearchAllNamespaces}
-                    />
-                  </div>
-                </details>
-              </div>
-            )}
-          </div>
+          <ImageSummarySection
+            image={image}
+            pendingEmbedding={pendingEmbedding}
+            embeddingGenerating={embeddingGenerating}
+            namespace={namespace}
+            semanticSearchAllNamespaces={semanticSearchAllNamespaces}
+            deleteFamilyOpen={deleteFamilyOpen}
+            deleteFamilyStatus={deleteFamilyStatus}
+            listVariant={listVariant}
+            onGenerateEmbeddings={generateEmbeddings}
+            onSelectColor={handleColorSearchNavigation}
+            onCopyText={handleCopyText}
+            onSemanticScopeChange={setSemanticSearchAllNamespaces}
+            onCloseDeleteFamilyModal={closeDeleteFamilyModal}
+            onCommitNavigation={commitNavigation}
+            onToast={toast.push}
+          />
 
           <div id="image-metadata-section" className="space-y-4">
-            {image.assetType !== 'video' && (
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs font-mono text-gray-600">Favorite status</p>
-                <FavoriteToggle
-                  favorite={hasFavoriteTag(image.tags)}
-                  loading={favoriteLoading}
-                  onToggle={handleToggleFavorite}
-                />
-              </div>
-            )}
-            <CloudflareMetadataHeader
-              metadataByteSize={metadataByteSize}
-              metadataPrunedByteSize={metadataPrunedByteSize}
-              metadataLargestFields={metadataLargestFields}
-              metadataPrunedDroppedFields={metadataPrunedDroppedFields}
+            <ImageDetailMetadataPanel
+              image={image} favorite={hasFavoriteTag(image.tags)} favoriteLoading={favoriteLoading}
+              metadataByteSize={metadataByteSize} metadataPrunedByteSize={metadataPrunedByteSize}
+              metadataLargestFields={metadataLargestFields} metadataPrunedDroppedFields={metadataPrunedDroppedFields}
               extrasBackedFields={[...CLOUDFLARE_EXTRAS_ONLY_FIELDS, 'altText']}
-              isMetadataDirty={isMetadataDirty}
-              pendingAutoSave={pendingAutoSave}
-              saving={saving}
-              onDiscard={handleCancelMetadata}
-              onSave={handleSaveMetadata}
-            />
-            <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono text-gray-500">
-              <span className="text-gray-400">Dimensions</span>
-              {detailAspectLoading && !detailDimensions ? (
-                <span className="inline-block w-20 h-2 bg-gray-200 rounded animate-pulse" />
-              ) : detailDimensions ? (
-                <span className="text-gray-700">
-                  {detailDimensions.width}×{detailDimensions.height}px
-                </span>
-              ) : (
-                <span className="text-gray-400">--</span>
-              )}
-              <span className="text-gray-300">•</span>
-              <span className="text-gray-400">Aspect</span>
-              {detailAspectLoading && !detailAspectRatio ? (
-                <span className="inline-block w-10 h-2 bg-gray-200 rounded animate-pulse" />
-              ) : detailAspectRatio ? (
-                <span className="text-gray-700">{detailAspectRatio}</span>
-              ) : (
-                <span className="text-gray-400">--</span>
-              )}
-              <span className="text-gray-300">•</span>
-              <span className="text-gray-400">File size</span>
-              <span className="text-gray-700">{detailFileSizeLabel}</span>
-            </div>
-
-            <NamespaceMoveSection
-              currentNamespace={image.namespace}
-              namespaceOptions={detailNamespaceOptions}
-              moving={namespaceMoving}
-              onCreateNamespace={registerDetailNamespace}
-              onMove={handleMoveFamilyNamespace}
-            />
-
-            <DescriptionEditor
-              descriptionInput={descriptionInput}
-              setDescriptionInput={setDescriptionInput}
-              descriptionGenerating={descriptionGenerating}
-              onGenerateDescription={generateDescription}
-              hasVariations={hasVariations}
-              bulkDescriptionApplying={bulkDescriptionApplying}
-              onApplyToVariations={applyDescriptionToVariations}
-            />
-
-            <AltTextEditor
-              imageId={image.id}
-              imageHasAlt={Boolean(image.altTag)}
-              altTextInput={altTextInput}
-              setAltTextInput={setAltTextInput}
-              altLoading={Boolean(altLoadingMap[image.id])}
-              onGenerateAlt={generateAltTag}
-              hasVariations={hasVariations}
-              bulkAltApplying={bulkAltApplying}
-              onApplyToVariations={applyAltToVariations}
-            />
-
-            <PromptThisEditor
-              promptThisInput={promptThisInput}
-              setPromptThisInput={setPromptThisInput}
-              promptThisLoading={promptThisLoading}
-              promptThisGenerating={promptThisGenerating}
-              promptThisSaving={promptThisSaving}
-              promptThisMeta={promptThisMeta}
-              onGenerate={generatePromptThis}
-              onSave={savePromptThisEdits}
-              onCopy={() => handleCopyText(promptThisInput || '', 'Prompt copied')}
-            />
-
-            <ComfyWorkflowPanel
-              imageId={image.id}
-              comfyWorkflow={extrasRecord?.comfyWorkflow ?? null}
-              detection={{
-                generatedBy: image.generatedBy,
-                comfyMetadataDetected: image.comfyMetadataDetected,
-                comfyMetadataSource: image.comfyMetadataSource,
+              isMetadataDirty={isMetadataDirty} pendingAutoSave={pendingAutoSave} saving={saving}
+              detailAspectLoading={detailAspectLoading} detailDimensions={detailDimensions}
+              detailAspectRatio={detailAspectRatio} detailFileSizeLabel={detailFileSizeLabel}
+              detailNamespaceOptions={detailNamespaceOptions} namespaceMoving={namespaceMoving}
+              descriptionInput={descriptionInput} descriptionGenerating={descriptionGenerating}
+              hasVariations={hasVariations} bulkDescriptionApplying={bulkDescriptionApplying}
+              altTextInput={altTextInput} altLoading={Boolean(altLoadingMap[image.id])} bulkAltApplying={bulkAltApplying}
+              promptThisInput={promptThisInput} promptThisLoading={promptThisLoading}
+              promptThisGenerating={promptThisGenerating} promptThisSaving={promptThisSaving}
+              promptThisMeta={promptThisMeta} comfyWorkflow={extrasRecord?.comfyWorkflow ?? null}
+              folderEditorProps={{
+                folderSelect, newFolderInput, detailFolderOptions, hasVariations, bulkFolderApplying,
+                effectiveParentFolder, tagsInput, tagGenerationCount, tagGenerationLoading, parentTags,
+                bulkTagsAppending, bulkTagsReplacing, displayNameInput, displayNameGenerating,
+                immutableFilename: image?.filename || 'Unknown',
+                onFolderSelectChange: setFolderSelect, onNewFolderInputChange: setNewFolderInput,
+                onFoldersChanged: handleFolderManagerChange, onApplyFolderToVariations: applyFolderToVariations,
+                onTagsInputChange: setTagsInput, onTagGenerationCountChange: setTagGenerationCount,
+                onGenerateSemanticTags: handleGenerateSemanticTags, onApplyTagsToVariations: applyTagsToVariations,
+                onDisplayNameInputChange: setDisplayNameInput, onGenerateDisplayName: generateDisplayName,
               }}
-              onCopyText={handleCopyText}
-            />
-
-            <div id="folder-section">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-mono font-medum text-gray-700">Folder</p>
-                <FolderManagerButton
-                  size="sm"
-                  label="Edit Folders"
-                  onFoldersChanged={handleFolderManagerChange}
-                />
-              </div>
-              <div className="mt-2">
-                <MonoSelect
-                  value={folderSelect}
-                  onChange={setFolderSelect}
-                  options={detailFolderOptions}
-                  className="w-full"
-                  placeholder="[none]"
-                  searchable
-                  searchPlaceholder="Search folders…"
-                />
-                {folderSelect === '__create__' && (
-                  <input
-                    value={newFolderInput}
-                    onChange={(e) => setNewFolderInput(e.target.value)}
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 text-xs mt-2"
-                    placeholder="Type new folder name"
-                  />
-                )}
-                {hasVariations && (
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
-                    <button
-                      onClick={applyFolderToVariations}
-                      disabled={bulkFolderApplying || !effectiveParentFolder}
-                      className="px-2 py-1 border border-gray-300 rounded text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      {bulkFolderApplying ? 'Applying…' : 'Apply folder to variations'}
-                    </button>
-                    {!effectiveParentFolder && (
-                      <span className="text-gray-500">Set a folder to enable.</span>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div id="tags-section">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs font-mono font-medum text-gray-700">Tags</p>
-                <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                  <label className="flex items-center gap-2 text-gray-600">
-                    <span>AI count</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={12}
-                      value={tagGenerationCount}
-                      onChange={(e) => setTagGenerationCount(Math.min(12, Math.max(1, Number.parseInt(e.target.value || '6', 10) || 6)))}
-                      className="w-16 rounded border border-gray-300 px-2 py-1 text-[11px]"
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    onClick={handleGenerateSemanticTags}
-                    disabled={tagGenerationLoading}
-                    className="inline-flex items-center gap-2 rounded border border-gray-200 px-2 py-1 text-[11px] text-gray-700 hover:border-gray-300 disabled:opacity-50"
-                  >
-                    <Sparkles className="h-3.5 w-3.5" />
-                    {tagGenerationLoading ? 'Generating tags…' : 'Generate semantic tags'}
-                  </button>
-                {hasVariations && (
-                  <>
-                    <button
-                      onClick={() => applyTagsToVariations('append')}
-                      disabled={bulkTagsAppending || parentTags.length === 0}
-                      className="px-2 py-1 border border-gray-300 rounded text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      {bulkTagsAppending ? 'Appending…' : 'Append to variations'}
-                    </button>
-                    <button
-                      onClick={() => applyTagsToVariations('replace')}
-                      disabled={bulkTagsReplacing}
-                      className="px-2 py-1 border border-gray-300 rounded text-gray-600 hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      {bulkTagsReplacing ? 'Replacing…' : 'Replace on variations'}
-                    </button>
-                  </>
-                )}
-                </div>
-              </div>
-              <input
-                value={tagsInput}
-                onChange={(e) => setTagsInput(e.target.value)}
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-xs mt-2"
-                placeholder="Comma-separated tags"
-              />
-              {/* Exclusion tag quick-add buttons */}
-              <div className="flex flex-wrap items-center gap-2 mt-2">
-                <span className="text-[10px] text-gray-500">Exclude from:</span>
-                {(['x-clip', 'x-color', 'x-search'] as const).map((tag) => {
-                  const hasTag = tagsInput.split(',').map(t => t.trim()).includes(tag);
-                  const toggleTag = () => {
-                    const currentTags = tagsInput.split(',').map(t => t.trim()).filter(Boolean);
-                    if (hasTag) {
-                      setTagsInput(currentTags.filter(t => t !== tag).join(', '));
-                    } else {
-                      setTagsInput([...currentTags, tag].join(', '));
-                    }
-                  };
-                  const label = tag === 'x-clip' ? 'Semantic' : tag === 'x-color' ? 'Color' : 'All Search';
-                  return (
-                    <button
-                      key={tag}
-                      onClick={toggleTag}
-                      className={`px-2 py-0.5 text-[10px] rounded border transition-colors ${
-                        hasTag 
-                          ? 'border-red-400 bg-red-50 text-red-700 hover:bg-red-100' 
-                          : 'border-gray-300 text-gray-500 hover:bg-gray-50'
-                      }`}
-                      title={hasTag ? `Remove ${tag} tag` : `Add ${tag} tag to exclude from ${label.toLowerCase()} search`}
-                    >
-                      {hasTag ? '✓ ' : ''}{label}
-                    </button>
-                  );
-                })}
-              </div>
-              {hasVariations && parentTags.length === 0 && (
-                <p className="text-[10px] text-gray-500 mt-1">Add tags to enable appending.</p>
-              )}
-            </div>
-
-            <div id="name-section">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-xs font-mono font-medum text-gray-700">Display name (editable)</p>
-                <button
-                  onClick={generateDisplayName}
-                  disabled={displayNameGenerating}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border border-gray-200 text-gray-700 hover:border-gray-300 disabled:opacity-50"
-                >
-                  <Sparkles className="h-4 w-4" />
-                  {displayNameGenerating ? 'Generating…' : 'Generate short name'}
-                </button>
-              </div>
-              <input
-                value={displayNameInput}
-                onChange={(e) => setDisplayNameInput(e.target.value)}
-                className="w-full border border-gray-300 rounded-md px-3 py-2 text-xs mt-2"
-                placeholder="Display name (defaults to filename)"
-              />
-              <p className="text-[11px] text-gray-600 mt-1">
-                Immutable filename: <span className="font-mono">{image?.filename || 'Unknown'}</span>
-              </p>
-            </div>
-
-            <OriginalUrlSection
-              originalUrlInput={originalUrlInput}
-              setOriginalUrlInput={setOriginalUrlInput}
-              originalUrlTooLong={originalUrlTooLong}
-              originalUrlByteLength={originalUrlByteLength}
-              originalDeliveryUrl={originalDeliveryUrl}
-              originalUrlNormalized={image?.originalUrlNormalized}
-              contentHash={image?.contentHash}
-              onCopyToClipboard={handleCopyText}
-            />
-
-            <SourceUrlSection
-              sourceUrlInput={sourceUrlInput}
-              setSourceUrlInput={setSourceUrlInput}
-              sourceUrlNormalized={image?.sourceUrlNormalized}
-              onCopyToClipboard={handleCopyText}
-            />
-
-            <ShareSection
-              shareBaseUrl={shareBaseUrl}
-              setShareBaseUrl={setShareBaseUrl}
-              shareVariant={shareVariant}
-              setShareVariant={setShareVariant}
-              shareVariantOptions={shareVariantOptions}
-              shareUrl={shareUrl}
-              shareQrDataUrl={shareQrDataUrl}
-              onCopyToClipboard={handleCopyText}
-            />
-
-            <ExifSection exifEntries={exifEntries} />
-
-            <VariantLinksSection
-              variants={variants}
-              getVariantWidthLabel={getVariantWidthLabel}
-              onHandleCopyUrl={handleCopyUrl}
-              imageAltTag={image.altTag}
+              originalUrlInput={originalUrlInput} originalUrlTooLong={originalUrlTooLong}
+              originalUrlByteLength={originalUrlByteLength} originalDeliveryUrl={originalDeliveryUrl}
+              sourceUrlInput={sourceUrlInput} shareBaseUrl={shareBaseUrl} shareVariant={shareVariant}
+              shareVariantOptions={shareVariantOptions} shareUrl={shareUrl} shareQrDataUrl={shareQrDataUrl}
+              exifEntries={exifEntries} variants={variants}
               imageDownloadName={displayNameInput.trim() || image.displayName || image.filename}
+              onToggleFavorite={handleToggleFavorite} onDiscard={handleCancelMetadata} onSave={handleSaveMetadata}
+              onCreateNamespace={registerDetailNamespace} onMoveNamespace={handleMoveFamilyNamespace}
+              onDescriptionInputChange={setDescriptionInput} onGenerateDescription={generateDescription}
+              onApplyDescriptionToVariations={applyDescriptionToVariations} onAltTextInputChange={setAltTextInput}
+              onGenerateAlt={generateAltTag} onApplyAltToVariations={applyAltToVariations}
+              onPromptThisInputChange={setPromptThisInput} onGeneratePromptThis={generatePromptThis}
+              onSavePromptThis={savePromptThisEdits} onCopyText={handleCopyText}
+              onOriginalUrlInputChange={setOriginalUrlInput} onSourceUrlInputChange={setSourceUrlInput}
+              onShareBaseUrlChange={setShareBaseUrl} onShareVariantChange={setShareVariant}
+              getVariantWidthLabel={getVariantWidthLabel} onCopyVariantUrl={handleCopyUrl}
             />
 
             <div className="space-y-4">
@@ -3566,150 +2471,29 @@ export default function ImageDetailPage() {
                   onThumbMouseLeave={handleThumbLeave}
                 />
               ) : null}
+
+              <ImageToolsPanel imageId={image.id} onRunComplete={refreshImageList} />
           </div>
         </div>
 
-        <div className="flex justify-end gap-3 mt-4">
-          <button
-            onClick={handleCancelMetadata}
-            className="px-4 py-2 text-xs text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleDeleteCurrent}
-            className="px-4 py-2 text-xs border border-red-300 text-red-700 rounded-md hover:bg-red-50"
-            disabled={saving}
-          >
-            Delete image
-          </button>
-          {(variationCount > 0 || isChildImage) && (
-            <button
-              onClick={handleDeleteFamily}
-              className="px-4 py-2 text-xs border border-red-500 text-red-800 rounded-md bg-red-50 hover:bg-red-100"
-              disabled={saving}
-              title="Delete this image and all variations in its family"
-            >
-              Delete family
-            </button>
-          )}
-          <button
-            onClick={handleSaveMetadata}
-            className="px-4 py-2 text-xs bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
-            disabled={isMetadataSaveDisabled}
-          >
-            {saving ? 'Saving…' : 'Save changes'}
-          </button>
-        </div>
+        <ImageDetailFooterActions
+          saving={saving} isMetadataSaveDisabled={isMetadataSaveDisabled}
+          showDeleteFamily={variationCount > 0 || isChildImage}
+          onCancel={handleCancelMetadata} onDeleteImage={handleDeleteCurrent}
+          onDeleteFamily={handleDeleteFamily} onSave={handleSaveMetadata}
+        />
         </div>
       </div>
-      {variantModalState && (() => {
-        const { target } = variantModalState;
-        const blurOverlayStyle: CSSProperties = {
-          backdropFilter: 'blur(8px)',
-          WebkitBackdropFilter: 'blur(8px)'
-        };
-
-        const variantEntries = Object.entries(
-          getMultipleImageUrls(target.id, ['thumbnail','small','medium','large','xlarge','full'])
-        ).map(([variantName, variantUrl]) => [variantName, ensureWebpFormat(variantUrl)] as [string, string]);
-
-        const handleCopyVariantList = async (
-          event: React.MouseEvent<HTMLButtonElement>,
-          variant: string,
-          url: string
-        ) => {
-          await handleCopyUrl(event, ensureWebpFormat(url), `${variant} variant`, target.altTag);
-          setVariantModalState(null);
-        };
-
-        return (
-          <>
-            <div
-              className="fixed inset-0 bg-black/30 backdrop-blur-md z-[100000]"
-              style={blurOverlayStyle}
-              onClick={() => setVariantModalState(null)}
-            />
-            <div className="fixed left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 w-80 bg-white rounded-lg shadow-xl z-[100001] text-xs text-gray-800 border">
-              <div className="flex items-center justify-between p-3 border-b">
-                <div className="text-xs font-mono font-medum">
-                  Copy Image URL
-                </div>
-                <button
-                  onClick={() => setVariantModalState(null)}
-                  className="px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded text-xs"
-                >
-                  ×
-                </button>
-              </div>
-              <div id="variant-size-modal" className="p-3 max-h-80 overflow-auto">
-                {variantEntries.map(([variant, url]) => {
-                  const widthLabel = getVariantWidthLabel(variant);
-                  return (
-                    <div key={variant} className="flex items-center justify-between gap-2 py-2 border-b border-gray-100 last:border-b-0">
-                      <div className="flex-1 min-w-0 mr-3">
-                        <div className="text-xs font-mono font-semibold text-gray-900 capitalize flex items-center gap-2">
-                          <span>{variant}</span>
-                          {widthLabel && <span className="text-gray-400 normal-case">{widthLabel}</span>}
-                        </div>
-                        <div className="text-xs text-gray-500 truncate">{String(url)}</div>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={async (event) => {
-                            await handleCopyVariantList(event, variant, String(url));
-                          }}
-                          className="px-3 py-1 bg-blue-100 hover:bg-blue-200 active:bg-blue-300 rounded text-xs font-medium flex-shrink-0 cursor-pointer transition transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-300"
-                        >
-                          Copy
-                        </button>
-                        <button
-                          onClick={async () => {
-                            try {
-                              const targetDownloadName =
-                                target.displayName?.trim() ||
-                                target.filename ||
-                                image.displayName?.trim() ||
-                                image.filename ||
-                                'image';
-                              const downloadName = formatDownloadFileName(
-                                targetDownloadName
-                              );
-                              await downloadImageToFile(String(url), downloadName);
-                              toast.push('Download started');
-                            } catch (error) {
-                              console.error('Failed to download variant', error);
-                              toast.push('Failed to download image');
-                            }
-                          }}
-                          className="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded text-xs font-medium flex-shrink-0 cursor-pointer"
-                        >
-                          Download
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="px-3 pb-3 text-[10px] text-gray-500">Tip: Shift+Copy adds ALT text.</div>
-            </div>
-          </>
-        );
-      })()}
-      {hoverPreview && (
-        <div
-          className="fixed z-50 pointer-events-none border border-black/10 shadow-lg rounded-lg overflow-hidden bg-white"
-          style={{ top: hoverPreview.y, left: hoverPreview.x, width: 340, height: 280 }}
-        >
-          <Image
-            src={hoverPreview.url}
-            alt={hoverPreview.label}
-            fill
-            className="object-contain"
-            unoptimized
-          />
-        </div>
+      {variantModalState && (
+        <VariantSizeModal
+          target={variantModalState.target}
+          fallbackImage={image}
+          onClose={() => setVariantModalState(null)}
+          onCopyUrl={handleCopyUrl}
+          onToast={toast.push}
+        />
       )}
+      {hoverPreview && <HoverPreviewOverlay preview={hoverPreview} />}
     </div>
   );
 }

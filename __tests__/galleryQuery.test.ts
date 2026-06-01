@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { queryGalleryAssets, type GalleryQueryAsset } from '@/server/galleryQuery';
+import { formatDateRangeLabel } from '@/components/gallery/utils';
 
 const hash = 'a'.repeat(64);
 
@@ -142,6 +143,35 @@ describe('queryGalleryAssets', () => {
     expect(result.images.map((image) => image.id)).toEqual(['match-end', 'match-start']);
     expect(result.total).toBe(2);
     expect(result.scopeTotal).toBe(4);
+  });
+
+  it('filters upload dates in the requested display time zone', () => {
+    const result = queryGalleryAssets(
+      [
+        asset({ id: 'local-evening', uploaded: '2026-06-01T02:48:25.565Z' }),
+        asset({ id: 'next-local-day', uploaded: '2026-06-01T08:00:00.000Z' }),
+      ],
+      {
+        dateStart: '2026-05-31',
+        dateEnd: '2026-05-31',
+        dateTimeZone: 'America/Los_Angeles',
+      },
+      1,
+      60
+    );
+
+    expect(result.images.map((image) => image.id)).toEqual(['local-evening']);
+    expect(result.total).toBe(1);
+    expect(result.scopeTotal).toBe(2);
+  });
+
+  it('formats page upload spans oldest to newest regardless of sort order', () => {
+    expect(
+      formatDateRangeLabel([
+        asset({ id: 'newest', uploaded: '2026-05-31T12:00:00.000Z' }),
+        asset({ id: 'oldest', uploaded: '2026-05-01T12:00:00.000Z' }),
+      ] as GalleryQueryAsset[])
+    ).toBe('May 1, 2026 - May 31, 2026');
   });
 
   it('locates a focused asset by sorted gallery order and returns its page', () => {

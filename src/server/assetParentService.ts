@@ -133,10 +133,45 @@ export type AssignAssetParentResult = {
   reparentedChildIds?: string[];
 };
 
+export type DetachAssetChildrenOutcome = {
+  ok: boolean;
+  id: string;
+  status?: number;
+  message?: string;
+};
+
+export type DetachAssetChildrenResult = {
+  parentId: string;
+  childIds: string[];
+  detachedIds: string[];
+  failed: Array<{ id: string; status: number; message: string }>;
+};
+
 type DirectParentAssignmentPlan = {
   target: CatalogAsset;
   nextParentId: string;
 };
+
+async function runWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let index = 0;
+
+  const runners = Array.from({ length: Math.max(1, concurrency) }, async () => {
+    while (true) {
+      const current = index;
+      if (current >= items.length) return;
+      index += 1;
+      results[current] = await worker(items[current]);
+    }
+  });
+
+  await Promise.all(runners);
+  return results;
+}
 
 const planDirectParentAssignment = (
   assets: CatalogAsset[],
@@ -248,6 +283,86 @@ export async function setAssetParentDirectly(
 
     return setAssetParentDirectlyWithAssets(targetIdRaw, parentIdRaw, assets);
   }
+}
+
+export async function detachAssetChildren(
+  parentIdRaw: string,
+  options?: {
+    concurrency?: number;
+    forceRefreshImages?: boolean;
+    includeVideos?: boolean;
+    requireCanonicalImageParent?: boolean;
+    dryRun?: boolean;
+  }
+): Promise<DetachAssetChildrenResult> {
+  const parentId = normalizeId(parentIdRaw);
+  if (!parentId) {
+    throw new ParentAssignmentError(400, 'Parent asset ID is required.');
+  }
+
+  const assets = await listCatalogAssets({
+    forceRefreshImages: options?.forceRefreshImages === true,
+    includeVideos: options?.includeVideos ?? process.env.ENABLE_VIDEO_ASSETS === '1',
+  });
+  const target = assets.find((asset) => asset.id === parentId);
+
+  if (options?.requireCanonicalImageParent) {
+    if (!target) {
+      throw new ParentAssignmentError(404, 'Image not found');
+    }
+    if (target.assetType !== 'image') {
+      throw new ParentAssignmentError(400, 'Only images can be family parents.');
+    }
+    if (normalizeId(target.parentId)) {
+      throw new ParentAssignmentError(400, 'Detach-all can only be run on canonical parent images.');
+    }
+  }
+
+  const childIds = assets
+    .filter((asset) => normalizeId(asset.parentId) === parentId)
+    .map((asset) => asset.id);
+  const concurrency = Math.min(8, Math.max(1, options?.concurrency ?? 4));
+
+  if (options?.dryRun || childIds.length === 0) {
+    return {
+      parentId,
+      childIds,
+      detachedIds: [],
+      failed: [],
+    };
+  }
+
+  const detachChild = async (id: string): Promise<DetachAssetChildrenOutcome> => {
+    try {
+      await setAssetParentDirectlyWithAssets(id, '', assets);
+      return { ok: true, id };
+    } catch (error) {
+      const parentError = error instanceof ParentAssignmentError ? error : null;
+      return {
+        ok: false,
+        id,
+        status: parentError?.status ?? 500,
+        message: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  };
+
+  const outcomes = await runWithConcurrency(childIds, concurrency, detachChild);
+  const detachedIds = outcomes.filter((outcome) => outcome.ok).map((outcome) => outcome.id);
+  const failed = outcomes
+    .filter((outcome): outcome is { ok: false; id: string; status?: number; message?: string } => !outcome.ok)
+    .map((outcome) => ({
+      id: outcome.id,
+      status: outcome.status ?? 500,
+      message: outcome.message ?? 'Unknown error',
+    }));
+
+  return {
+    parentId,
+    childIds,
+    detachedIds,
+    failed,
+  };
 }
 
 const reparentDirectChildren = async (

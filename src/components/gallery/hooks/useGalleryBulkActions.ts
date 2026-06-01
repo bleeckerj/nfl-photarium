@@ -53,6 +53,17 @@ const resolveGalleryNamespaceScope = (namespace?: string): string | null => {
   return trimmed || process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || 'cf-default';
 };
 
+export const resolveBulkAnimationIds = (
+  images: Pick<CloudflareImage, 'id'>[],
+  selectedImageIds: Set<string>,
+  orderMode: 'gallery' | 'reverse-gallery'
+) => {
+  const selectedIds = images
+    .filter((image) => selectedImageIds.has(image.id))
+    .map((image) => image.id);
+  return orderMode === 'reverse-gallery' ? [...selectedIds].reverse() : selectedIds;
+};
+
 interface UseGalleryBulkActionsOptions {
   images: CloudflareImage[];
   setImages: React.Dispatch<React.SetStateAction<CloudflareImage[]>>;
@@ -65,6 +76,7 @@ interface UseGalleryBulkActionsOptions {
   setBulkAnimateFilename: (value: string) => void;
   setBulkAnimateFps: (value: string) => void;
   setBulkAnimateLoop: (value: boolean) => void;
+  setBulkAnimateOrderMode: (value: 'gallery' | 'reverse-gallery') => void;
   setBulkAnimateTouched: (value: boolean) => void;
   bulkApplyFolder: boolean;
   bulkApplyTags: boolean;
@@ -88,6 +100,7 @@ interface UseGalleryBulkActionsOptions {
   bulkAnimateFps: string;
   bulkAnimateFilename: string;
   bulkAnimateLoop: boolean;
+  bulkAnimateOrderMode: 'gallery' | 'reverse-gallery';
   namespace?: string;
   fetchImages: (options?: { silent?: boolean; forceRefresh?: boolean }) => Promise<void>;
 }
@@ -104,6 +117,7 @@ export const useGalleryBulkActions = ({
   setBulkAnimateFilename,
   setBulkAnimateFps,
   setBulkAnimateLoop,
+  setBulkAnimateOrderMode,
   setBulkAnimateTouched,
   bulkApplyFolder,
   bulkApplyTags,
@@ -127,6 +141,7 @@ export const useGalleryBulkActions = ({
   bulkAnimateFps,
   bulkAnimateFilename,
   bulkAnimateLoop,
+  bulkAnimateOrderMode,
   namespace,
   fetchImages,
 }: UseGalleryBulkActionsOptions) => {
@@ -455,14 +470,16 @@ export const useGalleryBulkActions = ({
     setBulkAnimateLoading(true);
     setBulkAnimateError(null);
     try {
+      const orderedIds = resolveBulkAnimationIds(images, selectedImageIds, bulkAnimateOrderMode);
       const response = await fetch('/api/animate/selection', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ids: Array.from(selectedImageIds),
+          ids: orderedIds,
           fps: fpsValue,
           loop: bulkAnimateLoop,
           filename: bulkAnimateFilename.trim() || undefined,
+          orderMode: bulkAnimateOrderMode,
           namespace
         })
       });
@@ -474,6 +491,7 @@ export const useGalleryBulkActions = ({
       setBulkAnimateFilename('');
       setBulkAnimateFps('');
       setBulkAnimateLoop(true);
+      setBulkAnimateOrderMode('gallery');
       setBulkAnimateTouched(false);
       toastPush(`Animation created (${data.id ?? 'new'})`);
       await fetchImages({ forceRefresh: true });
@@ -487,13 +505,16 @@ export const useGalleryBulkActions = ({
     bulkAnimateFilename,
     bulkAnimateFps,
     bulkAnimateLoop,
+    bulkAnimateOrderMode,
     fetchImages,
+    images,
     namespace,
     selectedCount,
     selectedImageIds,
     setBulkAnimateFilename,
     setBulkAnimateFps,
     setBulkAnimateLoop,
+    setBulkAnimateOrderMode,
     setBulkAnimateTouched,
     setBulkEditOpen,
     setBulkAnimateError,

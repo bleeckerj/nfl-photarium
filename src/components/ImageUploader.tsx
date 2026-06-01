@@ -2,13 +2,11 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useDropzone } from "react-dropzone";
-import { Upload, X, CheckCircle, AlertCircle, Loader2, Zap, CloudUpload, Cpu, Sparkles } from "lucide-react";
+import { Upload, Loader2 } from "lucide-react";
 import clsx from "clsx";
-import JSZip from "jszip";
-import MonoSelect from "./MonoSelect";
 import { normalizeOriginalUrl } from "@/utils/urlNormalization";
-import { setEmbeddingPendingEntry } from "@/utils/embeddingPending";
 import { inferAssetTypeFromUrl, isImageOnlyImportError } from "@/utils/mediaAssetType";
+import { appendTextToFilename, removeFilenameExtension } from "@/utils/filename";
 import { usePageImportSession } from "@/features/page-import/hooks/usePageImportSession";
 import { usePageImportDiscovery } from "@/features/page-import/hooks/usePageImportDiscovery";
 import { useCandidateMetadataEnrichment } from "@/features/page-import/hooks/useCandidateMetadataEnrichment";
@@ -16,32 +14,30 @@ import { PageImportControls } from "@/features/page-import/components/PageImport
 import { PageImportQueue } from "@/features/page-import/components/PageImportQueue";
 import type { UploaderQueueItem } from "@/features/page-import/types";
 import { unselectAttemptedQueuedItems } from "@/features/page-import/utils/queueSelection";
-import { uploadFormDataWithRetry } from "@/services/uploadRequestService";
-
-interface UploadedImage {
-  id: string;
-  assetType: "image" | "video";
-  url: string;
-  filename: string;
-  status: "uploading" | "success" | "error";
-  embeddingStatus?: "queued" | "embedding" | "success" | "error";
-  embeddingError?: string;
-  embeddingRequested?: { clip: boolean; color: boolean };
-  error?: string;
-  folder?: string;
-  tags?: string[];
-  description?: string;
-  originalUrl?: string;
-  sourceUrl?: string;
-  file?: File;
-  remoteUrl?: string;
-  folderInput?: string;
-  tagsInput?: string;
-  descriptionInput?: string;
-  originalUrlInput?: string;
-  sourceUrlInput?: string;
-  parentId?: string;
-}
+import ActivityIndicator, { type ActivityStats } from "@/components/image-uploader/ActivityIndicator";
+import { NAMESPACE_REQUIRED_UPLOAD_ERROR, QUEUE_RENDER_LIMIT } from "@/components/image-uploader/constants";
+import type { GalleryImageSummary, UploadedImage } from "@/components/image-uploader/types";
+import { useUploadActivity } from "@/components/image-uploader/useUploadActivity";
+import { useUploaderUploadActions } from "@/components/image-uploader/useUploaderUploadActions";
+import UploadedImagesList from "@/components/image-uploader/UploadedImagesList";
+import UploaderMetadataControls from "@/components/image-uploader/UploaderMetadataControls";
+import UploadNamespaceControls from "@/components/image-uploader/UploadNamespaceControls";
+import {
+  MAX_UPLOAD_IMAGE_BYTES,
+  base64ToFile,
+  buildUploaderGallerySummaryUrl,
+  extractKeynoteImages,
+  extractZipImages,
+  getFileSourcePath,
+  inferAssetTypeFromFile,
+  isArchiveFile,
+  isImageFile,
+  isKeynoteFile,
+  isZipFile,
+  mergeTagInputs,
+  reduceImageFileToLimit,
+  resolveTagInput,
+} from "@/components/image-uploader/fileHelpers";
 
 interface ImageUploaderProps {
   onImageUploaded?: () => void;
@@ -51,443 +47,17 @@ interface ImageUploaderProps {
 
 type QueuedFile = UploaderQueueItem;
 
-interface GalleryImageSummary {
-  id: string;
-  folder?: string | null;
-  filename?: string;
-  parentId?: string | null;
-}
-
-/**
- * Kinetic Activity Indicator
- * Shows prominent, animated feedback during bulk uploads and embedding generation
- */
-interface ActivityStats {
-  total: number;
-  uploading: number;
-  uploaded: number;
-  embedding: number;
-  embedded: number;
-  errors: number;
-  embeddingQueue: number;
-}
-
-function ActivityIndicator({ stats, isActive }: { stats: ActivityStats; isActive: boolean }) {
-  const [dots, setDots] = useState(0);
-  const [pulsePhase, setPulsePhase] = useState(0);
-  
-  useEffect(() => {
-    if (!isActive) return;
-    const interval = setInterval(() => {
-      setDots(d => (d + 1) % 4);
-      setPulsePhase(p => (p + 1) % 3);
-    }, 400);
-    return () => clearInterval(interval);
-  }, [isActive]);
-
-  if (!isActive && stats.total === 0) return null;
-
-  const uploadProgress = stats.total > 0 ? (stats.uploaded / stats.total) * 100 : 0;
-  const embeddingProgress = stats.embedded > 0 || stats.embedding > 0 || stats.embeddingQueue > 0
-    ? (stats.embedded / (stats.embedded + stats.embedding + stats.embeddingQueue)) * 100
-    : 0;
-  
-  const totalWork = stats.uploading + stats.embedding + stats.embeddingQueue;
-  const isWorking = totalWork > 0;
-
-  // Calculate what phase of work we're in
-  const phase = stats.uploading > 0 ? 'upload' : stats.embedding > 0 || stats.embeddingQueue > 0 ? 'embed' : 'complete';
-  
-  return (
-    <div className={clsx(
-      "rounded-xl border-2 p-4 mb-4 transition-all duration-300",
-      isWorking 
-        ? "border-blue-400 bg-gradient-to-r from-blue-50 via-purple-50 to-blue-50 shadow-lg shadow-blue-200/50" 
-        : stats.errors > 0 
-          ? "border-amber-300 bg-amber-50"
-          : "border-emerald-300 bg-emerald-50"
-    )}>
-      {/* Main activity header */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-3">
-          {/* Animated icon */}
-          <div className={clsx(
-            "relative w-10 h-10 rounded-full flex items-center justify-center",
-            isWorking ? "bg-blue-500" : stats.errors > 0 ? "bg-amber-500" : "bg-emerald-500"
-          )}>
-            {isWorking ? (
-              <>
-                <div className="absolute inset-0 rounded-full bg-blue-400 animate-ping opacity-40" />
-                <div className="absolute inset-0 rounded-full bg-blue-300 animate-pulse opacity-30" />
-                {phase === 'upload' ? (
-                  <CloudUpload className="w-5 h-5 text-white animate-bounce" />
-                ) : (
-                  <Cpu className="w-5 h-5 text-white animate-spin" style={{ animationDuration: '2s' }} />
-                )}
-              </>
-            ) : stats.errors > 0 ? (
-              <AlertCircle className="w-5 h-5 text-white" />
-            ) : (
-              <Sparkles className="w-5 h-5 text-white" />
-            )}
-          </div>
-          
-          {/* Status text */}
-          <div>
-            <h3 className="text-sm font-bold text-gray-900">
-              {phase === 'upload' && `Uploading${'.'.repeat(dots)}`}
-              {phase === 'embed' && `Generating embeddings${'.'.repeat(dots)}`}
-              {phase === 'complete' && (stats.errors > 0 ? 'Completed with errors' : 'All done!')}
-            </h3>
-            <p className="text-xs text-gray-600">
-              {isWorking ? (
-                <>
-                  {stats.uploading > 0 && `${stats.uploading} uploading`}
-                  {stats.uploading > 0 && (stats.embedding > 0 || stats.embeddingQueue > 0) && ' · '}
-                  {(stats.embedding > 0 || stats.embeddingQueue > 0) && `${stats.embedding + stats.embeddingQueue} in embedding pipeline`}
-                </>
-              ) : (
-                `${stats.uploaded} images processed`
-              )}
-            </p>
-          </div>
-        </div>
-        
-        {/* Quick stats badges */}
-        <div className="flex items-center gap-2">
-          {stats.uploaded > 0 && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-medium">
-              <CheckCircle className="w-3 h-3" />
-              {stats.uploaded}
-            </span>
-          )}
-          {stats.errors > 0 && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-red-100 text-red-700 text-xs font-medium">
-              <AlertCircle className="w-3 h-3" />
-              {stats.errors}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Progress bars */}
-      {(stats.uploading > 0 || stats.uploaded > 0) && (
-        <div className="space-y-2">
-          {/* Upload progress */}
-          <div className="space-y-1">
-            <div className="flex justify-between text-[10px] text-gray-600">
-              <span className="flex items-center gap-1">
-                <CloudUpload className="w-3 h-3" />
-                Upload progress
-              </span>
-              <span>{stats.uploaded} / {stats.total}</span>
-            </div>
-            <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-              <div 
-                className={clsx(
-                  "h-full rounded-full transition-all duration-300",
-                  stats.uploading > 0 
-                    ? "bg-gradient-to-r from-blue-500 via-blue-400 to-blue-500 bg-[length:200%_100%] animate-[shimmer_1.5s_ease-in-out_infinite]"
-                    : "bg-emerald-500"
-                )}
-                style={{ width: `${uploadProgress}%` }}
-              />
-            </div>
-          </div>
-
-          {/* Embedding progress */}
-          {(stats.embedding > 0 || stats.embeddingQueue > 0 || stats.embedded > 0) && (
-            <div className="space-y-1">
-              <div className="flex justify-between text-[10px] text-gray-600">
-                <span className="flex items-center gap-1">
-                  <Zap className="w-3 h-3" />
-                  Embeddings
-                </span>
-                <span>{stats.embedded} / {stats.embedded + stats.embedding + stats.embeddingQueue}</span>
-              </div>
-              <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
-                <div 
-                  className={clsx(
-                    "h-full rounded-full transition-all duration-300",
-                    stats.embedding > 0 
-                      ? "bg-gradient-to-r from-purple-500 via-purple-400 to-purple-500 bg-[length:200%_100%] animate-[shimmer_1.5s_ease-in-out_infinite]"
-                      : "bg-emerald-500"
-                  )}
-                  style={{ width: `${embeddingProgress}%` }}
-                />
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Live file ticker during active upload */}
-      {isWorking && stats.uploading > 0 && (
-        <div className="mt-3 pt-3 border-t border-gray-200">
-          <div className="flex items-center gap-2 text-xs text-gray-600">
-            <Loader2 className="w-3 h-3 animate-spin" />
-            <span className="font-mono">Processing files...</span>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-const base64ToFile = (base64: string, filename: string, mimeType: string) => {
-  const byteString = atob(base64);
-  const len = byteString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i += 1) {
-    bytes[i] = byteString.charCodeAt(i);
-  }
-  return new File([bytes], filename, { type: mimeType });
-};
-
-const MAX_BYTES = 10 * 1024 * 1024;
-const VIDEO_REMOTE_UPLOAD_CONCURRENCY = 2;
-const QUEUE_RENDER_LIMIT = 250;
-const UPLOADER_GALLERY_SUMMARY_PAGE_SIZE = 500;
-const NAMESPACE_REQUIRED_UPLOAD_ERROR = 'Select a specific namespace before uploading. "All namespaces" is browse-only for uploads.';
-
-const isZipFile = (file: File) => (
-  file.type === 'application/zip' ||
-  file.type === 'application/x-zip-compressed' ||
-  file.name.toLowerCase().endsWith('.zip')
-);
-
-const isKeynoteFile = (file: File) => file.name.toLowerCase().endsWith('.key');
-
-const isArchiveFile = (file: File) => isZipFile(file) || isKeynoteFile(file);
-
-const isImageFile = (file: File) => file.type.startsWith('image/');
-const isVideoFile = (file: File) => file.type.startsWith('video/');
-const inferAssetTypeFromFile = (file: File): "image" | "video" => (isVideoFile(file) ? 'video' : 'image');
-const KEYNOTE_IMAGE_EXTENSIONS = ['.jpeg', '.jpg', '.png', '.gif', '.webp', '.svg'];
-const MIME_BY_EXTENSION: Record<string, string> = {
-  '.jpeg': 'image/jpeg',
-  '.jpg': 'image/jpeg',
-  '.png': 'image/png',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.svg': 'image/svg+xml'
-};
-
-const isSupportedImageName = (name: string) => {
-  const lower = name.toLowerCase();
-  return KEYNOTE_IMAGE_EXTENSIONS.some((ext) => lower.endsWith(ext));
-};
-
-const normalizeEntryName = (entryName: string) => {
-  const parts = entryName.split(/[\\/]/);
-  return parts[parts.length - 1] || entryName;
-};
-
-const getMimeTypeFromFilename = (filename: string) => {
-  const lower = filename.toLowerCase();
-  const match = Object.keys(MIME_BY_EXTENSION).find((ext) => lower.endsWith(ext));
-  return match ? MIME_BY_EXTENSION[match] : undefined;
-};
-
-const getFileSourcePath = (file: File) => {
-  const relative = 'webkitRelativePath' in file ? (file as File & { webkitRelativePath?: string }).webkitRelativePath : undefined;
-  return relative && relative.trim() ? relative : undefined;
-};
-
-const formatBytesMB = (bytes?: number) => {
-  if (typeof bytes !== 'number') return 'Size unknown';
-  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
-};
-
-const parseTagInput = (value?: string): string[] => {
-  if (!value) return [];
-  return value
-    .split(',')
-    .map((tag) => tag.trim())
-    .filter(Boolean);
-};
-
-const mergeTagInputs = (baseTags?: string, extraTags?: string): string => {
-  const merged = new Map<string, string>();
-  parseTagInput(baseTags).forEach((tag) => merged.set(tag.toLowerCase(), tag));
-  parseTagInput(extraTags).forEach((tag) => merged.set(tag.toLowerCase(), tag));
-  return Array.from(merged.values()).join(', ');
-};
-
-const resolveTagInput = (globalTags: string, itemTags?: string): string => {
-  if (itemTags === undefined) {
-    return globalTags;
-  }
-  if (!itemTags.trim()) {
-    return '';
-  }
-  return mergeTagInputs(globalTags, itemTags);
-};
-
-const runWithConcurrency = async <T,>(
-  items: T[],
-  concurrency: number,
-  worker: (item: T) => Promise<void>
-): Promise<void> => {
-  const safeConcurrency = Math.max(1, Math.floor(concurrency));
-  let index = 0;
-
-  const runners = Array.from({ length: Math.min(safeConcurrency, items.length) }, async () => {
-    while (true) {
-      const current = index;
-      index += 1;
-      if (current >= items.length) return;
-      await worker(items[current]);
-    }
-  });
-
-  await Promise.all(runners);
-};
-
-const buildUploaderGallerySummaryUrl = (namespace?: string) => {
-  const params = new URLSearchParams({
-    page: '1',
-    pageSize: String(UPLOADER_GALLERY_SUMMARY_PAGE_SIZE),
-  });
-  if (namespace === '') {
-    params.set('namespace', process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || 'cf-default');
-  } else if (namespace === '__all__') {
-    params.set('namespace', '__all__');
-  } else if (namespace && namespace !== '__all__') {
-    params.set('namespace', namespace);
-  }
-  return `/api/images?${params.toString()}`;
-};
-
-const renderBitmapToBlob = (bitmap: ImageBitmap, width: number, height: number, type: string, quality: number) =>
-  new Promise<Blob | null>((resolve) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      resolve(null);
-      return;
-    }
-    ctx.drawImage(bitmap, 0, 0, width, height);
-    canvas.toBlob((blob) => resolve(blob), type, quality);
-  });
-
-const reduceImageFileToLimit = async (file: File, maxBytes: number) => {
-  const bitmap = await createImageBitmap(file);
-  const startWidth = bitmap.width;
-  const startHeight = bitmap.height;
-  const candidates = ['image/webp', 'image/jpeg'];
-  const qualityByType: Record<string, number> = { 'image/webp': 0.85, 'image/jpeg': 0.85 };
-  let bestBlob: Blob | null = null;
-  let bestType = 'image/jpeg';
-
-  for (const type of candidates) {
-    const blob = await renderBitmapToBlob(bitmap, startWidth, startHeight, type, qualityByType[type]);
-    if (!blob) continue;
-    if (!bestBlob || blob.size < bestBlob.size) {
-      bestBlob = blob;
-      bestType = type;
-    }
-    if (blob.size <= maxBytes) {
-      bitmap.close();
-      return {
-        blob,
-        type,
-        width: startWidth,
-        height: startHeight,
-        note: `Converted to ${type === 'image/webp' ? 'WebP' : 'JPEG'}`
-      };
-    }
-  }
-
-  let width = startWidth;
-  let height = startHeight;
-  let resizedBlob = bestBlob;
-  let attempts = 0;
-  const minDimension = 320;
-  const targetType = bestBlob ? bestType : 'image/jpeg';
-  const targetQuality = targetType === 'image/webp' ? 0.82 : 0.8;
-
-  while (
-    resizedBlob &&
-    resizedBlob.size > maxBytes &&
-    attempts < 8 &&
-    Math.max(width, height) > minDimension
-  ) {
-    width = Math.max(minDimension, Math.round(width * 0.85));
-    height = Math.max(minDimension, Math.round(height * 0.85));
-    resizedBlob = await renderBitmapToBlob(bitmap, width, height, targetType, targetQuality);
-    attempts += 1;
-  }
-
-  bitmap.close();
-
-  if (resizedBlob && resizedBlob.size <= maxBytes) {
-    return {
-      blob: resizedBlob,
-      type: targetType,
-      width,
-      height,
-      note: `Converted to ${targetType === 'image/webp' ? 'WebP' : 'JPEG'} and resized`
-    };
-  }
-
-  return null;
-};
-
-const extractKeynoteImages = async (file: File) => {
-  const buffer = await file.arrayBuffer();
-  const zip = await JSZip.loadAsync(buffer);
-  const entries = Object.values(zip.files)
-    .filter((entry) => !entry.dir)
-    .filter((entry) => {
-      const normalized = entry.name.replace(/\\/g, '/').toLowerCase();
-      return (normalized.startsWith('data/') || normalized.includes('/data/')) && isSupportedImageName(normalized);
-    })
-    .sort((a, b) => a.name.localeCompare(b.name));
-
-  const extracted: Array<{ filename: string; file: File }> = [];
-  for (const entry of entries) {
-    const blob = await entry.async('blob');
-    const filename = normalizeEntryName(entry.name);
-    const blobType = (blob as Blob).type || '';
-    const fileType = blobType || getMimeTypeFromFilename(filename) || 'application/octet-stream';
-    extracted.push({
-      filename,
-      file: new File([blob], filename, { type: fileType })
-    });
-  }
-
-  return extracted;
-};
-
-const extractZipImages = async (file: File) => {
-  const buffer = await file.arrayBuffer();
-  const zip = await JSZip.loadAsync(buffer);
-  const entries = Object.values(zip.files)
-    .filter((entry) => !entry.dir)
-    .filter((entry) => isSupportedImageName(entry.name))
-    .sort((a, b) => a.name.localeCompare(b.name));
-
-  const extracted: Array<{ filename: string; file: File }> = [];
-  for (const entry of entries) {
-    const blob = await entry.async('blob');
-    const filename = normalizeEntryName(entry.name);
-    const blobType = (blob as Blob).type || '';
-    const fileType = blobType || getMimeTypeFromFilename(filename) || 'application/octet-stream';
-    extracted.push({
-      filename,
-      file: new File([blob], filename, { type: fileType })
-    });
-  }
-
-  return extracted;
-};
-
 export default function ImageUploader({ onImageUploaded, namespace, onNamespaceChange }: ImageUploaderProps) {
-  const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
-  const [isUploading, setIsUploading] = useState(false);
+  const {
+    uploadedImages,
+    setUploadedImages,
+    isUploading,
+    activeUploadOps,
+    embeddingQueueDepth,
+    beginUploadActivity,
+    endUploadActivity,
+    enqueueEmbedding,
+  } = useUploadActivity();
   const [embedClipOnUpload, setEmbedClipOnUpload] = useState(true);
   const [embedColorOnUpload, setEmbedColorOnUpload] = useState(true);
   const [selectedFolder, setSelectedFolder] = useState<string>("");
@@ -519,7 +89,6 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     ensureImportSession,
   } = usePageImportSession();
   const [selectedParentId, setSelectedParentId] = useState<string>('');
-  const [parentOptions, setParentOptions] = useState<GalleryImageSummary[]>([]);
   const [importUrl, setImportUrl] = useState('');
   const [importLoading, setImportLoading] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
@@ -536,11 +105,7 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
   const [showAllQueuedItems, setShowAllQueuedItems] = useState(false);
   const [aiRefiningNames, setAiRefiningNames] = useState(false);
   const [queueRenameValue, setQueueRenameValue] = useState('');
-  const [embeddingQueueDepth, setEmbeddingQueueDepth] = useState(0);
-  const [activeUploadOps, setActiveUploadOps] = useState(0);
-  const embeddingQueueRef = useRef<Array<{ id: string; clip: boolean; color: boolean }>>([]);
-  const embeddingWorkerRef = useRef(false);
-  const activeUploadOpsRef = useRef(0);
+  const [queueAppendValue, setQueueAppendValue] = useState('');
   const manualUploadInFlightRef = useRef(false);
   const galleryRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -587,26 +152,6 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     setSourceUrlIfEmpty,
   });
 
-  const updateEmbeddingPending = useCallback((
-    id: string,
-    status?: 'queued' | 'embedding' | 'error',
-    clip?: boolean,
-    color?: boolean,
-    error?: string
-  ) => {
-    if (!status || clip === undefined || color === undefined) {
-      setEmbeddingPendingEntry(id, undefined);
-      return;
-    }
-    setEmbeddingPendingEntry(id, {
-      status,
-      clip,
-      color,
-      error,
-      updatedAt: new Date().toISOString()
-    });
-  }, []);
-
   const notifyGalleryUploaded = useCallback((delayMs = 0) => {
     if (!onImageUploaded) return;
     if (galleryRefreshTimerRef.current) {
@@ -629,18 +174,6 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
         clearTimeout(galleryRefreshTimerRef.current);
       }
     };
-  }, []);
-
-  const beginUploadActivity = useCallback(() => {
-    activeUploadOpsRef.current += 1;
-    setActiveUploadOps(activeUploadOpsRef.current);
-    setIsUploading(true);
-  }, []);
-
-  const endUploadActivity = useCallback(() => {
-    activeUploadOpsRef.current = Math.max(0, activeUploadOpsRef.current - 1);
-    setActiveUploadOps(activeUploadOpsRef.current);
-    setIsUploading(activeUploadOpsRef.current > 0);
   }, []);
 
   const handlePreviewLoadError = useCallback(async (item: QueuedFile) => {
@@ -713,11 +246,11 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     const target = queuedFiles.find((item) => item.id === id);
     if (!target?.file) return;
     if (!isImageFile(target.file)) return;
-    if (target.file.size <= MAX_BYTES) return;
+    if (target.file.size <= MAX_UPLOAD_IMAGE_BYTES) return;
 
     setReducingQueueItems((prev) => ({ ...prev, [id]: true }));
     try {
-      const reduced = await reduceImageFileToLimit(target.file, MAX_BYTES);
+      const reduced = await reduceImageFileToLimit(target.file, MAX_UPLOAD_IMAGE_BYTES);
       if (!reduced) {
         updateQueuedFile(id, {
           processingNote: 'Unable to reduce below 10MB'
@@ -751,104 +284,6 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
       setReducingQueueItems((prev) => ({ ...prev, [id]: false }));
     }
   }, [queuedFiles, updateQueuedFile]);
-
-  const processEmbeddingQueue = useCallback(async () => {
-    if (embeddingWorkerRef.current) return;
-    if (activeUploadOpsRef.current > 0) return;
-    embeddingWorkerRef.current = true;
-
-    while (embeddingQueueRef.current.length > 0) {
-      if (activeUploadOpsRef.current > 0) {
-        break;
-      }
-      const job = embeddingQueueRef.current.shift();
-      setEmbeddingQueueDepth(embeddingQueueRef.current.length);
-      if (!job) continue;
-
-      updateEmbeddingPending(job.id, 'embedding', job.clip, job.color);
-      setUploadedImages((prev) =>
-        prev.map((img) =>
-          img.id === job.id
-            ? {
-                ...img,
-                embeddingStatus: "embedding",
-                embeddingError: undefined,
-                embeddingRequested: { clip: job.clip, color: job.color }
-              }
-            : img
-        )
-      );
-
-      try {
-        const response = await fetch(`/api/images/${job.id}/embeddings`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ clip: job.clip, color: job.color })
-        });
-        const data = await response.json().catch(() => null);
-        if (!response.ok) {
-          const message = typeof data?.error === 'string' ? data.error : 'Embedding failed';
-          throw new Error(message);
-        }
-
-        updateEmbeddingPending(job.id, undefined);
-        setUploadedImages((prev) =>
-          prev.map((img) =>
-            img.id === job.id
-              ? { ...img, embeddingStatus: "success", embeddingError: undefined }
-              : img
-          )
-        );
-      } catch (error) {
-        updateEmbeddingPending(
-          job.id,
-          'error',
-          job.clip,
-          job.color,
-          error instanceof Error ? error.message : 'Embedding failed'
-        );
-        setUploadedImages((prev) =>
-          prev.map((img) =>
-            img.id === job.id
-              ? {
-                  ...img,
-                  embeddingStatus: "error",
-                  embeddingError: error instanceof Error ? error.message : 'Embedding failed'
-                }
-              : img
-          )
-        );
-      }
-    }
-
-    embeddingWorkerRef.current = false;
-  }, [updateEmbeddingPending]);
-
-  const enqueueEmbedding = useCallback((imageId: string, clip: boolean, color: boolean) => {
-    if (!clip && !color) return;
-    embeddingQueueRef.current.push({ id: imageId, clip, color });
-    setEmbeddingQueueDepth(embeddingQueueRef.current.length);
-    updateEmbeddingPending(imageId, 'queued', clip, color);
-    setUploadedImages((prev) =>
-      prev.map((img) =>
-        img.id === imageId
-          ? {
-              ...img,
-              embeddingStatus: "queued",
-              embeddingError: undefined,
-              embeddingRequested: { clip, color }
-            }
-          : img
-      )
-    );
-    void processEmbeddingQueue();
-  }, [processEmbeddingQueue, updateEmbeddingPending]);
-
-  useEffect(() => {
-    if (activeUploadOps > 0) return;
-    if (embeddingQueueRef.current.length === 0) return;
-    void processEmbeddingQueue();
-  }, [activeUploadOps, processEmbeddingQueue]);
 
   const estimateMetadataBytes = useCallback((payload: Record<string, unknown>) => {
     const filtered = Object.fromEntries(
@@ -937,28 +372,6 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     [estimateMetadataBytes, uploadNamespace, selectedParentId]
   );
 
-  const formatUploadErrorMessage = useCallback((response: Response, payload: unknown) => {
-    if (response.status === 409 && payload && typeof payload === 'object' && 'duplicates' in payload) {
-      const data = payload as { error?: string; duplicates?: Array<{ id?: string; filename?: string; folder?: string }> };
-      if (Array.isArray(data.duplicates) && data.duplicates.length > 0) {
-        const summary = data.duplicates
-          .map((dup) => {
-            const label = dup.filename || 'Untitled';
-            const location = dup.folder ? `${label} (${dup.folder})` : label;
-            return dup.id ? `${location} [${dup.id}]` : location;
-          })
-          .slice(0, 3)
-          .join(', ');
-        const extra = data.duplicates.length > 3 ? '…' : '';
-        return `${data.error || 'Duplicate detected.'} Existing: ${summary}${extra}`;
-      }
-    }
-    if (payload && typeof payload === 'object' && 'error' in payload && typeof (payload as { error?: string }).error === 'string') {
-      return (payload as { error?: string }).error as string;
-    }
-    return 'Upload failed';
-  }, []);
-
   const sortedFolders = useMemo(
     () => [...folders].sort((a, b) => a.localeCompare(b)),
     [folders]
@@ -971,17 +384,6 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     ],
     [sortedFolders]
   );
-
-  const canonicalSelectOptions = useMemo(() => {
-    const canonicalItems = parentOptions.map((option) => ({
-      value: option.id,
-      label: option.filename || option.id
-    }));
-    return [
-      { value: '', label: 'No parent (upload canonical image)' },
-      ...canonicalItems
-    ];
-  }, [parentOptions]);
 
   const selectedQueuedCount = useMemo(
     () => queuedFiles.filter((item) => item.selected !== false).length,
@@ -1134,10 +536,6 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
         setFolders((prev: string[]) =>
           Array.from(new Set<string>([...prev, ...fetched]))
         );
-        const canonical = (data.images as GalleryImageSummary[]).filter(
-          (img) => !img.parentId && img.id && img.filename
-        );
-        setParentOptions(canonical);
       }
     } catch (err) {
       console.warn("Failed to fetch folders for uploader", err);
@@ -1202,690 +600,38 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     onNamespaceChange?.(nextNamespace);
   }, [onNamespaceChange, registerUploadNamespace, uploadNamespaceDraft]);
 
-  // Function to actually upload files
-  const resolveFolder = useCallback(() => {
-    if (selectedFolder && selectedFolder.trim()) {
-      return selectedFolder.trim();
-    }
-    if (newFolder && newFolder.trim()) {
-      const normalized = newFolder.trim().toLowerCase().replace(/\s+/g, "-");
-      if (!folders.includes(normalized)) {
-        setFolders((prev) => (prev.includes(normalized) ? prev : [...prev, normalized]));
-      }
-      setSelectedFolder(normalized);
-      return normalized;
-    }
-    return "";
-  }, [selectedFolder, newFolder, folders]);
-
-  const markNamespaceUploadFailures = useCallback((items: QueuedFile[]) => {
-    const failures: UploadedImage[] = items.map((item) => ({
-      id: item.id,
-      assetType: item.assetType ?? (item.file ? inferAssetTypeFromFile(item.file) : inferAssetTypeFromUrl(item.remoteUrl)),
-      url: '',
-      filename: item.filename,
-      status: 'error',
-      error: NAMESPACE_REQUIRED_UPLOAD_ERROR,
-      file: item.file,
-      remoteUrl: item.remoteUrl,
-    }));
-    setUploadedImages((prev) => {
-      const ids = new Set(failures.map((entry) => entry.id));
-      return [...prev.filter((entry) => !ids.has(entry.id)), ...failures];
-    });
+  const resetUploadForm = useCallback(() => {
+    setSelectedFolder("");
+    setNewFolder("");
+    setTags("");
+    setDescription("");
+    setOriginalUrl("");
+    setSourceUrl("");
+    setSelectedParentId("");
   }, []);
 
-  const uploadFiles = useCallback(
-    async (filesToUpload: QueuedFile[]) => {
-      if (!uploadNamespace) {
-        markNamespaceUploadFailures(filesToUpload);
-        return;
-      }
-
-      beginUploadActivity();
-      let uploadedAny = false;
-
-      const shouldEmbedClip = embedClipOnUpload;
-      const shouldEmbedColor = embedColorOnUpload;
-      const shouldEmbedAnything = shouldEmbedClip || shouldEmbedColor;
-
-      const folderToUse = resolveFolder();
-      
-      // Rate limiting configuration
-      const UPLOAD_DELAY_MS = 200; // Delay between uploads to avoid rate limits
-      const MAX_RETRIES = 3;
-      const RETRY_DELAY_MS = 2000; // Wait 2s before retry
-      const RATE_LIMIT_DELAY_MS = 5000; // Wait 5s if rate limited
-
-      // Helper to delay execution
-      const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-      // Helper to upload with retry logic
-      const uploadWithRetry = async (
-        formData: FormData
-      ): Promise<{ response: Response; result: unknown }> => {
-        return uploadFormDataWithRetry("/api/upload", formData, {
-          maxRetries: MAX_RETRIES,
-          retryDelayMs: RETRY_DELAY_MS,
-          rateLimitDelayMs: RATE_LIMIT_DELAY_MS,
-        });
-      };
-
-      const uploadVideoWithRetry = async (
-        formData: FormData
-      ): Promise<{ response: Response; result: unknown }> => {
-        return uploadFormDataWithRetry('/api/import/page/upload-video', formData, {
-          maxRetries: MAX_RETRIES,
-          retryDelayMs: RETRY_DELAY_MS,
-          rateLimitDelayMs: RATE_LIMIT_DELAY_MS,
-        });
-      };
-
-      // Create initial entries for all files
-      const initialImages: UploadedImage[] = filesToUpload.map((entry) => {
-        const originalUrlToSend = omitOriginalUrl
-          ? ''
-          : entry.originalUrl !== undefined
-            ? entry.originalUrl
-            : originalUrl.trim() || '';
-        const sourceUrlToSend =
-          entry.sourceUrl !== undefined ? entry.sourceUrl : sourceUrl.trim() || '';
-        const folderToSend = entry.folder !== undefined ? entry.folder : folderToUse;
-        const tagsToSend = resolveTagInput(tags, entry.tags);
-        const descriptionToSend = entry.description !== undefined ? entry.description : description;
-
-        return {
-          id: entry.id,
-          assetType: entry.assetType ?? (entry.file ? inferAssetTypeFromFile(entry.file) : 'image'),
-          url: "",
-          filename: entry.filename,
-          status: "uploading" as const,
-          file: entry.file,
-          folderInput: folderToSend,
-          tagsInput: tagsToSend,
-          descriptionInput: descriptionToSend,
-          originalUrlInput: originalUrlToSend || undefined,
-          sourceUrlInput: sourceUrlToSend || undefined,
-          parentId: entry.groupId ? undefined : (selectedParentId || undefined)
-        };
-      });
-
-      setUploadedImages((prev) => {
-        const ids = new Set(initialImages.map((item) => item.id));
-        return [...prev.filter((img) => !ids.has(img.id)), ...initialImages];
-      });
-
-      const groupParentMap = new Map<string, string>();
-      const groupFirstId = new Map<string, string>();
-      filesToUpload.forEach((entry) => {
-        if (entry.groupId && !groupFirstId.has(entry.groupId)) {
-          groupFirstId.set(entry.groupId, entry.id);
-        }
-      });
-
-      // Upload each file
-      for (let i = 0; i < filesToUpload.length; i++) {
-        const {
-          file,
-          assetType,
-          filename: queuedFilename,
-          originalUrl: queuedOriginalUrl,
-          sourceUrl: queuedSourceUrl,
-          sourcePath: queuedSourcePath,
-          folder: queuedFolder,
-          tags: queuedTags,
-          description: queuedDescription,
-          groupId: queuedGroupId,
-          id: queuedId
-        } = filesToUpload[i];
-        const imageId = queuedId;
-        const originalUrlToSend = omitOriginalUrl
-          ? ''
-          : queuedOriginalUrl !== undefined
-            ? queuedOriginalUrl
-            : originalUrl.trim() || '';
-        const sourceUrlToSend =
-          queuedSourceUrl !== undefined ? queuedSourceUrl : sourceUrl.trim() || '';
-        const sourcePathToSend = queuedSourcePath && queuedSourcePath.trim() ? queuedSourcePath.trim() : '';
-        const folderToSend = queuedFolder !== undefined ? queuedFolder : folderToUse;
-        const tagsToSend = resolveTagInput(tags, queuedTags);
-        const descriptionToSend =
-          queuedDescription !== undefined ? queuedDescription : description;
-        const displayNameToSend = queuedFilename?.trim() || file?.name || '';
-        const groupId = queuedGroupId || '';
-        const groupParentId = groupId ? groupParentMap.get(groupId) : undefined;
-        const isGroupParent = groupId ? groupFirstId.get(groupId) === imageId : false;
-        const parentIdToSend = groupId
-          ? (isGroupParent ? undefined : groupParentId)
-          : (selectedParentId || undefined);
-
-        if (!file) {
-          setUploadedImages((prev) =>
-            prev.map((img) =>
-              img.id === imageId
-                ? { ...img, status: "error", error: "Missing file data" }
-                : img
-            )
-          );
-          continue;
-        }
-
-        if (groupId && !isGroupParent && !groupParentId) {
-          setUploadedImages((prev) =>
-            prev.map((img) =>
-              img.id === imageId
-                ? { ...img, status: "error", error: "Missing parent image for Keynote group" }
-                : img
-            )
-          );
-          continue;
-        }
-
-        try {
-          const formData = new FormData();
-          formData.append("file", file);
-          const effectiveAssetType = assetType ?? inferAssetTypeFromFile(file);
-          if (displayNameToSend) {
-            formData.append("displayName", displayNameToSend);
-          }
-          if (folderToSend && folderToSend.trim()) {
-            formData.append("folder", folderToSend.trim());
-          }
-          if (tagsToSend && tagsToSend.trim()) {
-            formData.append("tags", tagsToSend.trim());
-          }
-          if (descriptionToSend && descriptionToSend.trim()) {
-            formData.append("description", descriptionToSend.trim());
-          }
-          if (originalUrlToSend) {
-            formData.append("originalUrl", originalUrlToSend);
-          }
-          if (sourceUrlToSend) {
-            formData.append("sourceUrl", sourceUrlToSend);
-          }
-          if (sourcePathToSend) {
-            formData.append("sourcePath", sourcePathToSend);
-          }
-          formData.append("namespace", uploadNamespace);
-          if (parentIdToSend) {
-            formData.append("parentId", parentIdToSend);
-          }
-
-          // Add delay between uploads to avoid rate limits (except first file)
-          if (i > 0) {
-            await delay(UPLOAD_DELAY_MS);
-          }
-
-          // Upload with automatic retry on rate limits/server errors
-          const { response, result } = effectiveAssetType === 'video'
-            ? await uploadVideoWithRetry(formData)
-            : await uploadWithRetry(formData);
-
-          if (response.ok) {
-            if (result && typeof result === 'object' && Array.isArray((result as { results?: unknown }).results)) {
-              const zipResult = result as {
-                results: Array<{
-                  id: string;
-                  filename: string;
-                  url: string;
-                  folder?: string;
-                  tags?: string[];
-                  description?: string;
-                  originalUrl?: string;
-                  sourceUrl?: string;
-                }>;
-                failures?: Array<{ filename: string; error: string }>;
-                skipped?: Array<{ filename: string; reason: string }>;
-              };
-              const successEntries: UploadedImage[] = zipResult.results.map((item) => ({
-                id: item.id,
-                assetType: 'image',
-                url: item.url,
-                filename: item.filename,
-                status: "success",
-                embeddingStatus: shouldEmbedAnything ? "queued" : undefined,
-                embeddingRequested: shouldEmbedAnything ? { clip: shouldEmbedClip, color: shouldEmbedColor } : undefined,
-                folder: item.folder,
-                tags: item.tags,
-                description: item.description,
-                originalUrl: item.originalUrl,
-                sourceUrl: item.sourceUrl
-              }));
-              const failureEntries: UploadedImage[] = (zipResult.failures || []).map((item) => ({
-                id: Math.random().toString(36).substring(7),
-                assetType: 'image',
-                url: "",
-                filename: item.filename,
-                status: "error",
-                error: item.error
-              }));
-              const skippedEntries: UploadedImage[] = (zipResult.skipped || []).map((item) => ({
-                id: Math.random().toString(36).substring(7),
-                assetType: 'image',
-                url: "",
-                filename: item.filename,
-                status: "error",
-                error: item.reason
-              }));
-              setUploadedImages((prev) => [
-                ...prev.filter((img) => img.id !== imageId),
-                ...successEntries,
-                ...failureEntries,
-                ...skippedEntries
-              ]);
-
-              if (shouldEmbedAnything) {
-                successEntries.forEach((entry) => enqueueEmbedding(entry.id, shouldEmbedClip, shouldEmbedColor));
-              }
-
-              if (successEntries.length > 0) {
-                uploadedAny = true;
-              }
-            } else {
-              const typedResult = result as {
-                id?: string;
-                url?: string;
-                playbackUrl?: string;
-                hlsUrl?: string;
-                thumbnailUrl?: string;
-              };
-              const serverId = typedResult && typeof typedResult === 'object' && 'id' in typedResult && typeof typedResult.id === 'string'
-                ? typedResult.id
-                : imageId;
-              if (groupId && isGroupParent && serverId) {
-                groupParentMap.set(groupId, serverId);
-              }
-              setUploadedImages((prev) =>
-                prev.map((img) =>
-                  img.id === imageId
-                    ? {
-                        ...img,
-                        id: serverId,
-                        status: "success",
-                        embeddingStatus: effectiveAssetType === 'image' && shouldEmbedAnything ? "queued" : undefined,
-                        embeddingRequested: effectiveAssetType === 'image' && shouldEmbedAnything ? { clip: shouldEmbedClip, color: shouldEmbedColor } : undefined,
-                        assetType: effectiveAssetType,
-                        url: typedResult.url || typedResult.playbackUrl || typedResult.hlsUrl || typedResult.thumbnailUrl || '',
-                        folder: folderToSend || undefined,
-                        tags: tagsToSend
-                          .trim()
-                          ? tagsToSend.trim().split(",").map((t) => t.trim())
-                          : [],
-                        description: descriptionToSend || undefined,
-                        originalUrl: originalUrlToSend || undefined,
-                        sourceUrl: sourceUrlToSend || undefined,
-                        file: undefined,
-                      }
-                    : img
-                )
-              );
-
-              if (effectiveAssetType === 'image' && shouldEmbedAnything) {
-                enqueueEmbedding(serverId, shouldEmbedClip, shouldEmbedColor);
-              }
-
-              uploadedAny = true;
-            }
-          } else {
-            const errorMessage = formatUploadErrorMessage(response, result);
-            setUploadedImages((prev) =>
-              prev.map((img) =>
-                img.id === imageId
-                  ? { ...img, status: "error", error: errorMessage }
-                  : img
-              )
-            );
-          }
-        } catch (uploadError) {
-          console.error("Upload error:", uploadError);
-          const errorMessage = uploadError instanceof Error && uploadError.message
-            ? uploadError.message
-            : "Network error";
-          setUploadedImages((prev) =>
-            prev.map((img) =>
-              img.id === imageId ? { ...img, status: "error", error: errorMessage } : img
-            )
-          );
-        }
-      }
-
-      endUploadActivity();
-      if (uploadedAny) {
-        notifyGalleryUploaded();
-      }
-
-      // Refresh available folders after upload (new folder may have been added by server)
-      void fetchFolders().catch((e) => {
-        console.warn("Failed to refresh folders after upload", e);
-      });
-
-      // Clear form inputs after successful upload
-      setSelectedFolder("");
-      setNewFolder("");
-      setTags("");
-      setDescription("");
-      setOriginalUrl("");
-      setSourceUrl("");
-      setSelectedParentId("");
-    },
-    [resolveFolder, tags, description, originalUrl, sourceUrl, uploadNamespace, selectedParentId, notifyGalleryUploaded, fetchFolders, formatUploadErrorMessage, embedClipOnUpload, embedColorOnUpload, enqueueEmbedding, omitOriginalUrl, markNamespaceUploadFailures, beginUploadActivity, endUploadActivity]
-  );
-
-  const uploadRemoteFiles = useCallback(
-    async (itemsToUpload: QueuedFile[]) => {
-      const validItems = itemsToUpload.filter((item) => Boolean(item.remoteUrl));
-      if (validItems.length === 0) return;
-      if (!uploadNamespace) {
-        markNamespaceUploadFailures(validItems);
-        return;
-      }
-      beginUploadActivity();
-
-      const shouldEmbedClip = embedClipOnUpload;
-      const shouldEmbedColor = embedColorOnUpload;
-      const shouldEmbedAnything = shouldEmbedClip || shouldEmbedColor;
-
-      const folderToUse = resolveFolder();
-      const initialImages: UploadedImage[] = validItems.map((entry) => {
-        const effectiveAssetType = entry.assetType ?? inferAssetTypeFromUrl(entry.remoteUrl);
-        const originalUrlToSend = omitOriginalUrl
-          ? ''
-          : entry.originalUrl !== undefined
-            ? entry.originalUrl
-            : originalUrl.trim() || entry.remoteUrl || '';
-        const sourceUrlToSend =
-          entry.sourceUrl !== undefined ? entry.sourceUrl : sourceUrl.trim() || '';
-        const folderToSend = entry.folder !== undefined ? entry.folder : folderToUse;
-        const tagsToSend = resolveTagInput(tags, entry.tags);
-        const descriptionToSend = entry.description !== undefined ? entry.description : description;
-
-        return {
-          id: entry.id,
-          assetType: effectiveAssetType,
-          url: "",
-          filename: entry.filename,
-          status: "uploading" as const,
-          remoteUrl: entry.remoteUrl,
-          folderInput: folderToSend,
-          tagsInput: tagsToSend,
-          descriptionInput: descriptionToSend,
-          originalUrlInput: originalUrlToSend || undefined,
-          sourceUrlInput: sourceUrlToSend || undefined,
-          parentId: selectedParentId || undefined
-        };
-      });
-
-      setUploadedImages((prev) => {
-        const ids = new Set(initialImages.map((item) => item.id));
-        return [...prev.filter((img) => !ids.has(img.id)), ...initialImages];
-      });
-
-      const imagePayloadItems = validItems
-        .filter((entry) => (entry.assetType ?? inferAssetTypeFromUrl(entry.remoteUrl)) === 'image')
-        .map((entry) => {
-        const originalUrlToSend = omitOriginalUrl
-          ? ''
-          : entry.originalUrl !== undefined
-            ? entry.originalUrl
-            : originalUrl.trim() || entry.remoteUrl || '';
-        const sourceUrlToSend =
-          entry.sourceUrl !== undefined ? entry.sourceUrl : sourceUrl.trim() || '';
-        const folderToSend = entry.folder !== undefined ? entry.folder : folderToUse;
-        const tagsToSend = resolveTagInput(tags, entry.tags);
-        const descriptionToSend =
-          entry.description !== undefined ? entry.description : description;
-        const displayNameToSend = entry.filename?.trim() || undefined;
-
-        return {
-          clientId: entry.id,
-          url: entry.remoteUrl,
-          displayName: displayNameToSend,
-          folder: folderToSend && folderToSend.trim() ? folderToSend.trim() : undefined,
-          tags: tagsToSend && tagsToSend.trim() ? tagsToSend.trim() : undefined,
-          description: descriptionToSend && descriptionToSend.trim() ? descriptionToSend.trim() : undefined,
-          originalUrl: originalUrlToSend || undefined,
-          sourceUrl: sourceUrlToSend || undefined,
-          namespace: uploadNamespace,
-          parentId: selectedParentId || undefined,
-          sessionId: entry.importSessionId,
-          tempAssetKey: entry.tempAssetKey,
-        };
-      });
-
-      const videoPayloadItems = validItems
-        .filter((entry) => (entry.assetType ?? inferAssetTypeFromUrl(entry.remoteUrl)) === 'video')
-        .map((entry) => {
-          const originalUrlToSend = omitOriginalUrl
-            ? ''
-            : entry.originalUrl !== undefined
-              ? entry.originalUrl
-              : originalUrl.trim() || entry.remoteUrl || '';
-          const sourceUrlToSend =
-            entry.sourceUrl !== undefined ? entry.sourceUrl : sourceUrl.trim() || '';
-          const folderToSend = entry.folder !== undefined ? entry.folder : folderToUse;
-          const tagsToSend = resolveTagInput(tags, entry.tags);
-          const descriptionToSend =
-            entry.description !== undefined ? entry.description : description;
-          return {
-            clientId: entry.id,
-            url: entry.remoteUrl || '',
-            filename: entry.filename,
-            isBlobSource: Boolean(entry.isBlobSource) || (entry.remoteUrl || '').startsWith('blob:'),
-            folder: folderToSend && folderToSend.trim() ? folderToSend.trim() : undefined,
-            tags: tagsToSend && tagsToSend.trim() ? tagsToSend.trim() : undefined,
-            description: descriptionToSend && descriptionToSend.trim() ? descriptionToSend.trim() : undefined,
-            originalUrl: originalUrlToSend || undefined,
-            sourceUrl: sourceUrlToSend || undefined,
-            namespace: uploadNamespace,
-          };
-        });
-
-      try {
-        const resultList: UploadResult[] = [];
-        const failureList: UploadFailure[] = [];
-
-        if (imagePayloadItems.length > 0) {
-          const imageResponse = await fetch('/api/import/page/upload', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              items: imagePayloadItems,
-              allowInsecure: pageImportAllowInsecure,
-              includeSmallAssets: pageImportIncludeSmallAssets,
-              ...(pageImportCookieHeader.trim() ? { cookieHeader: pageImportCookieHeader.trim() } : {}),
-            })
-          });
-          const imageData = await imageResponse.json();
-
-          if (!imageResponse.ok) {
-            const message = typeof imageData?.error === 'string' ? imageData.error : 'Failed to upload page images';
-            setUploadedImages((prev) =>
-              prev.map((img) =>
-                imagePayloadItems.some((item) => item.clientId === img.id)
-                  ? { ...img, status: "error", error: message }
-                  : img
-              )
-            );
-            return;
-          }
-
-          if (Array.isArray(imageData?.results)) {
-            resultList.push(...imageData.results);
-          }
-          if (Array.isArray(imageData?.failures)) {
-            failureList.push(...imageData.failures);
-          }
-        }
-
-        if (videoPayloadItems.length > 0) {
-          await runWithConcurrency(videoPayloadItems, VIDEO_REMOTE_UPLOAD_CONCURRENCY, async (item) => {
-            const isBlobSource = item.isBlobSource || item.url.startsWith('blob:');
-            let videoResponse: Response;
-            if (isBlobSource) {
-              try {
-                const blobResponse = await fetch(item.url);
-                if (!blobResponse.ok) {
-                  throw new Error(`Blob fetch failed (${blobResponse.status})`);
-                }
-                const blob = await blobResponse.blob();
-                const extension = blob.type.includes('webm') ? 'webm' : blob.type.includes('ogg') ? 'ogv' : 'mp4';
-                const filename = item.filename || `captured-video.${extension}`;
-                const file = new File([blob], filename, { type: blob.type || 'video/mp4' });
-                const formData = new FormData();
-                formData.append('file', file);
-                if (item.folder) formData.append('folder', item.folder);
-                if (item.tags) formData.append('tags', item.tags);
-                if (item.description) formData.append('description', item.description);
-                if (item.originalUrl) formData.append('originalUrl', item.originalUrl);
-                if (item.sourceUrl) formData.append('sourceUrl', item.sourceUrl);
-                if (item.namespace) formData.append('namespace', item.namespace);
-                videoResponse = await fetch('/api/import/page/upload-video', {
-                  method: 'POST',
-                  body: formData,
-                });
-              } catch (error) {
-                failureList.push({
-                  clientId: item.clientId,
-                  error: `Blob video capture failed. Open the source page and upload/download the video manually. (${error instanceof Error ? error.message : 'Unknown error'})`,
-                });
-                return;
-              }
-            } else {
-              videoResponse = await fetch('/api/import/page/upload-video', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  url: item.url,
-                  filename: item.filename,
-                  folder: item.folder,
-                  tags: item.tags,
-                  description: item.description,
-                  originalUrl: item.originalUrl,
-                  sourceUrl: item.sourceUrl,
-                  namespace: item.namespace,
-                })
-              });
-            }
-            const videoData = await videoResponse.json();
-            if (!videoResponse.ok) {
-              failureList.push({ clientId: item.clientId, error: videoData?.error || 'Video upload failed' });
-              return;
-            }
-            resultList.push({
-              clientId: item.clientId,
-              id: videoData.id,
-              url: videoData.playbackUrl || videoData.hlsUrl || videoData.thumbnailUrl || '',
-              folder: videoData.folder,
-              tags: videoData.tags,
-              description: videoData.description,
-              originalUrl: videoData.originalUrl,
-              sourceUrl: videoData.sourceUrl,
-            });
-          });
-        }
-
-        interface UploadResult {
-          clientId: string;
-          id?: string;
-          url?: string;
-          folder?: string;
-          tags?: string[];
-          description?: string;
-          originalUrl?: string;
-          sourceUrl?: string;
-        }
-
-        interface UploadFailure {
-          clientId: string;
-          error?: string;
-        }
-
-        const successMap = new Map<string, UploadResult>(
-          resultList.map((item: UploadResult) => [item.clientId, item])
-        );
-        const failureMap = new Map<string, UploadFailure>(
-          failureList.map((item: UploadFailure) => [item.clientId, item])
-        );
-
-        setUploadedImages((prev) =>
-          prev.map((img) => {
-            const success = successMap.get(img.id);
-            if (success) {
-              const sourceItem = validItems.find((item) => item.id === img.id);
-              const assetType = sourceItem?.assetType ?? inferAssetTypeFromUrl(sourceItem?.remoteUrl);
-              return {
-                ...img,
-                id: success.id ?? img.id,
-                status: "success" as const,
-                assetType,
-                embeddingStatus: assetType === 'image' && shouldEmbedAnything ? "queued" : undefined,
-                embeddingRequested: assetType === 'image' && shouldEmbedAnything ? { clip: shouldEmbedClip, color: shouldEmbedColor } : undefined,
-                url: success.url ?? img.url,
-                folder: success.folder,
-                tags: success.tags,
-                description: success.description,
-                originalUrl: success.originalUrl,
-                sourceUrl: success.sourceUrl,
-                remoteUrl: undefined
-              };
-            }
-            const failure = failureMap.get(img.id);
-            if (failure) {
-              return {
-                ...img,
-                status: "error" as const,
-                error: failure.error || 'Upload failed'
-              };
-            }
-            if (validItems.some((item) => item.id === img.id)) {
-              return {
-                ...img,
-                status: "error" as const,
-                error: "Upload failed"
-              };
-            }
-            return img;
-          })
-        );
-
-        if (shouldEmbedAnything) {
-          resultList.forEach((item: UploadResult) => {
-            const sourceItem = validItems.find((entry) => entry.id === item.clientId);
-            const assetType = sourceItem?.assetType ?? inferAssetTypeFromUrl(sourceItem?.remoteUrl);
-            if (item.id && assetType === 'image') {
-              enqueueEmbedding(item.id, shouldEmbedClip, shouldEmbedColor);
-            }
-          });
-        }
-
-        if (resultList.length > 0) {
-          notifyGalleryUploaded();
-        }
-      } catch (error) {
-        console.error('Remote upload error:', error);
-        setUploadedImages((prev) =>
-          prev.map((img) =>
-            validItems.some((item) => item.id === img.id)
-              ? { ...img, status: "error", error: "Network error" }
-              : img
-          )
-        );
-      } finally {
-        endUploadActivity();
-        void fetchFolders().catch((e) => {
-          console.warn("Failed to refresh folders after upload", e);
-        });
-        setSelectedFolder("");
-        setNewFolder("");
-        setTags("");
-        setDescription("");
-        setOriginalUrl("");
-        setSourceUrl("");
-        setSelectedParentId("");
-      }
-    },
-    [resolveFolder, tags, description, originalUrl, sourceUrl, uploadNamespace, selectedParentId, notifyGalleryUploaded, fetchFolders, embedClipOnUpload, embedColorOnUpload, enqueueEmbedding, omitOriginalUrl, pageImportAllowInsecure, pageImportCookieHeader, pageImportIncludeSmallAssets, markNamespaceUploadFailures, beginUploadActivity, endUploadActivity]
-  );
+  const { markNamespaceUploadFailures, uploadFiles, uploadRemoteFiles } = useUploaderUploadActions({
+    uploadNamespace,
+    embedClipOnUpload,
+    embedColorOnUpload,
+    omitOriginalUrl,
+    tags,
+    description,
+    originalUrl,
+    sourceUrl,
+    selectedParentId,
+    pageImportAllowInsecure,
+    pageImportCookieHeader,
+    pageImportIncludeSmallAssets,
+    resolveFolder,
+    beginUploadActivity,
+    endUploadActivity,
+    enqueueEmbedding,
+    notifyGalleryUploaded,
+    fetchFolders,
+    setUploadedImages,
+    resetUploadForm,
+  });
 
   // Handle drag and drop - either queue or upload immediately
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
@@ -2121,7 +867,29 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
       return;
     }
     setQueuedFiles((prev) => prev.map((item) => ({ ...item, filename: nextName })));
-  }, [queueRenameValue]);
+  }, [queueRenameValue, setQueuedFiles]);
+
+  const removeQueueExtensions = useCallback(() => {
+    setQueuedFiles((prev) =>
+      prev.map((item) => ({
+        ...item,
+        filename: removeFilenameExtension(item.filename),
+      }))
+    );
+  }, [setQueuedFiles]);
+
+  const appendTextToQueueNames = useCallback(() => {
+    const text = queueAppendValue.trim();
+    if (!text) {
+      return;
+    }
+    setQueuedFiles((prev) =>
+      prev.map((item) => ({
+        ...item,
+        filename: appendTextToFilename(item.filename, text),
+      }))
+    );
+  }, [queueAppendValue, setQueuedFiles]);
 
   const handleClearQueuedItems = useCallback(() => {
     clearQueue();
@@ -2550,117 +1318,25 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
         </div>
       )}
 
-      {/* Organization Controls */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 p-4 bg-gray-50 rounded-lg">
-        <div>
-          <label htmlFor="folder-select" className="block text-xs fonto-mono text-gray-700 mb-2">
-            Folder (Optional)
-          </label>
-          <div className="flex space-x-2">
-            <MonoSelect
-              id="folder-select"
-              value={selectedFolder}
-              onChange={setSelectedFolder}
-              options={folderSelectOptions}
-              placeholder="Choose folder"
-              className="flex-1"
-            />
-            <input
-              type="text"
-              placeholder="New folder"
-              value={newFolder}
-              onChange={(e) => setNewFolder(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && newFolder.trim()) {
-                  e.preventDefault();
-                  const folderName = newFolder.trim().toLowerCase().replace(/\s+/g, "-");
-                  if (!folders.includes(folderName)) {
-                    setFolders((prev) => [...prev, folderName]);
-                    setSelectedFolder(folderName);
-                  }
-                  setNewFolder("");
-                }
-              }}
-              className="w-32 border border-gray-300 rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <p className="text-xs text-gray-500 mt-1">Press Enter to create new folder</p>
-        </div>
-
-        <div>
-          <label htmlFor="tags-input" className="block text-xs font-mono font-medium text-gray-700 mb-2">
-            Tags (Optional)
-          </label>
-          <input
-            id="tags-input"
-            type="text"
-            placeholder="logo, header, banner (comma separated)"
-            value={tags}
-            onChange={(e) => setTags(e.target.value)}
-            className="w-full border border-gray-300 rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-          <p className="text-xs text-gray-500 mt-1">Separate tags with commas</p>
-        </div>
-
-        <div>
-          <label htmlFor="description-input" className="block text-xs font-mono font-medium text-gray-700 mb-2">
-            Description (Optional)
-          </label>
-          <textarea
-            id="description-input"
-            placeholder="Brief description of the image..."
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={3}
-            className="w-full border border-gray-300 rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 resize-vertical"
-          />
-          <p className="text-xs text-gray-500 mt-1">Optional description for the image</p>
-        </div>
-
-        <div>
-          <label htmlFor="original-url-input" className="block text-xs font-mono font-medium text-gray-700 mb-2">
-            Original URL (Optional)
-          </label>
-          <label className="mb-2 flex items-center gap-2 text-[11px] text-gray-600">
-            <input
-              type="checkbox"
-              checked={omitOriginalUrl}
-              onChange={(e) => {
-                setOmitOriginalUrl(e.target.checked);
-                if (e.target.checked) {
-                  setOriginalUrl('');
-                }
-              }}
-              className="h-3 w-3"
-            />
-            Do not store original URL
-          </label>
-          <input
-            id="original-url-input"
-            type="url"
-            placeholder="https://example.com/original-image.jpg"
-            value={originalUrl}
-            onChange={(e) => setOriginalUrl(e.target.value)}
-            disabled={omitOriginalUrl}
-            className="w-full border border-gray-300 rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
-          />
-          {/* <p className="text-xs text-gray-500 mt-1">Asset URL</p> */}
-        </div>
-        <div>
-          <label htmlFor="source-url-input" className="block text-xs font-mono font-medium text-gray-700 mb-2">
-            Source URL (Optional)
-          </label>
-          <input
-            id="source-url-input"
-            type="url"
-            placeholder="https://example.com/page-or-collection"
-            value={sourceUrl}
-            onChange={(e) => setSourceUrl(e.target.value)}
-            className="w-full border border-gray-300 rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-          <p className="text-xs text-gray-500 mt-1">Where the image was found (page or site)</p>
-        </div>
-      </div>
+      <UploaderMetadataControls
+        selectedFolder={selectedFolder}
+        setSelectedFolder={setSelectedFolder}
+        newFolder={newFolder}
+        setNewFolder={setNewFolder}
+        folders={folders}
+        setFolders={setFolders}
+        folderSelectOptions={folderSelectOptions}
+        tags={tags}
+        setTags={setTags}
+        description={description}
+        setDescription={setDescription}
+        originalUrl={originalUrl}
+        setOriginalUrl={setOriginalUrl}
+        omitOriginalUrl={omitOriginalUrl}
+        setOmitOriginalUrl={setOmitOriginalUrl}
+        sourceUrl={sourceUrl}
+        setSourceUrl={setSourceUrl}
+      />
 {/*  Not sure how you thought it ever made sense to show a huge list of filenames here...Leave this commented out
 A long list of filenames is not user friendly and essentially useless for selecting a parent image.
       <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
@@ -2689,61 +1365,19 @@ A long list of filenames is not user friendly and essentially useless for select
           Select an existing canonical image to group this upload as a variation. Leave empty to store a new master asset.
         </p> 
       </div> */}
-      <div className="mt-4 rounded-lg border border-dashed bg-white/70 p-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-          <div className="flex-1">
-            <p className="text-xs font-mono font-medium text-gray-900">Upload namespace</p>
-            <p className="mt-1 text-[11px] text-gray-500">
-              This mirrors the gallery namespace so you can change the upload target without scrolling back to the toolbar.
-            </p>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-[minmax(240px,320px)_minmax(180px,220px)_auto] sm:items-end">
-            <label className="block text-[11px] text-gray-700">
-              Namespace
-              <MonoSelect
-                id="upload-namespace-select"
-                value={uploadNamespaceSelectValue}
-                onChange={handleUploadNamespaceSelectChange}
-                options={uploadNamespaceOptions}
-                searchable
-                searchPlaceholder="Filter namespaces..."
-                className="mt-1"
-                disabled={isUploading}
-              />
-            </label>
-            <label className="block text-[11px] text-gray-700">
-              Custom namespace
-              <input
-                type="text"
-                value={uploadNamespaceDraft}
-                onChange={(event) => {
-                  setUploadNamespaceDraft(event.target.value);
-                  setUploadNamespaceSelectValue('__custom__');
-                }}
-                placeholder="Enter namespace"
-                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                disabled={isUploading}
-              />
-            </label>
-            <button
-              type="button"
-              onClick={handleUploadNamespaceApply}
-              disabled={isUploading || uploadNamespaceDraft.trim().length === 0}
-              className="px-3 py-2 text-xs text-blue-700 border border-blue-300 bg-blue-50 rounded-md hover:bg-blue-100 disabled:opacity-50"
-            >
-              Apply
-            </button>
-          </div>
-        </div>
-        <p className={clsx(
-          "mt-3 text-[11px]",
-          uploadNamespace ? "text-emerald-700" : "text-amber-700"
-        )}>
-          {uploadNamespace
-            ? `Uploads will go to "${uploadNamespace}".`
-            : 'Select a specific namespace before uploading. "All namespaces" remains browse-only here.'}
-        </p>
-      </div>
+      <UploadNamespaceControls
+        uploadNamespace={uploadNamespace}
+        uploadNamespaceSelectValue={uploadNamespaceSelectValue}
+        uploadNamespaceDraft={uploadNamespaceDraft}
+        uploadNamespaceOptions={uploadNamespaceOptions}
+        isUploading={isUploading}
+        onSelectChange={handleUploadNamespaceSelectChange}
+        onDraftChange={(value) => {
+          setUploadNamespaceDraft(value);
+          setUploadNamespaceSelectValue('__custom__');
+        }}
+        onApply={handleUploadNamespaceApply}
+      />
 
       <div
         {...getRootProps()}
@@ -2931,6 +1565,8 @@ A long list of filenames is not user friendly and essentially useless for select
         aiRefiningNames={aiRefiningNames}
         queueRenameValue={queueRenameValue}
         setQueueRenameValue={setQueueRenameValue}
+        queueAppendValue={queueAppendValue}
+        setQueueAppendValue={setQueueAppendValue}
         showAllQueuedItems={showAllQueuedItems}
         setShowAllQueuedItems={setShowAllQueuedItems}
         previewFailures={previewFailures}
@@ -2967,100 +1603,20 @@ A long list of filenames is not user friendly and essentially useless for select
           void handleManualUpload();
         }}
         onApplyQueueNameToAll={applyQueueNameToAll}
+        onRemoveQueueExtensions={removeQueueExtensions}
+        onAppendTextToQueueNames={appendTextToQueueNames}
       />
 
-      {uploadedImages.length > 0 && (
-        <div className="mt-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-medium text-gray-900">Uploaded Images ({uploadedImages.length})</h3>
-            <button type="button"
-              onClick={() => setUploadedImages([])}
-              className="text-sm text-gray-500 hover:text-red-600 transition-colors flex items-center gap-1"
-            >
-              <X className="h-4 w-4" />
-              Clear All
-            </button>
-          </div>
-          <div className="space-y-3">
-            {uploadedImages.map((image) => (
-              <div key={image.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div className="flex items-center space-x-3">
-                  <div className="flex-shrink-0">
-                    {image.status === "uploading" && <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500"></div>}
-                    {image.status === "success" && <CheckCircle className="h-5 w-5 text-green-500" />}
-                    {image.status === "error" && <AlertCircle className="h-5 w-5 text-red-500" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-mono font-medium text-gray-900 truncate">{image.filename}</p>
-                    {image.folder && <p className="text-xs text-gray-500">📁 {image.folder}</p>}
-                    {image.description && <p className="text-xs text-gray-500">📝 {image.description}</p>}
-                    {image.originalUrl && (
-                      <p className="text-xs text-gray-500">🔗 <a href={image.originalUrl} target="_blank" rel="noreferrer" className="underline">Original</a></p>
-                    )}
-                    {image.sourceUrl && (
-                      <p className="text-xs text-gray-500">🔗 <a href={image.sourceUrl} target="_blank" rel="noreferrer" className="underline">Source</a></p>
-                    )}
-                    {image.tags && image.tags.length > 0 && <p className="text-xs text-gray-500">🏷️ {image.tags.join(", ")}</p>}
-                    {image.embeddingRequested && (
-                      <div className="flex items-center gap-2 text-[11px] text-purple-700">
-                        {(image.embeddingStatus === "queued" || image.embeddingStatus === "embedding") && (
-                          <span className="relative flex h-2 w-2">
-                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-purple-400 opacity-75"></span>
-                            <span className="relative inline-flex h-2 w-2 rounded-full bg-purple-600"></span>
-                          </span>
-                        )}
-                        {image.embeddingStatus === "success" && (
-                          <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
-                        )}
-                        {image.embeddingStatus === "error" && (
-                          <span className="inline-flex h-2 w-2 rounded-full bg-red-500"></span>
-                        )}
-                        <span>
-                          Embedding {image.embeddingStatus ?? "queued"}
-                          {image.embeddingRequested.clip && image.embeddingRequested.color
-                            ? " (clip + color)"
-                            : image.embeddingRequested.clip
-                              ? " (clip)"
-                              : image.embeddingRequested.color
-                                ? " (color)"
-                                : ""}
-                        </span>
-                      </div>
-                    )}
-                    {image.embeddingStatus === "error" && image.embeddingError && (
-                      <p className="text-[11px] text-red-600">{image.embeddingError}</p>
-                    )}
-                    {image.status === "success" && image.url && (
-                      <button type="button" onClick={() => copyToClipboard(image.url)} className="text-xs text-blue-600 hover:text-blue-800 truncate block max-w-xs">
-                        {image.url}
-                      </button>
-                    )}
-                    {image.status === "error" && (
-                      <div className="space-y-1">
-                        <p className="text-xs text-red-600">{image.error}</p>
-                        <button
-                          type="button"
-                          onClick={() => handleRetryUpload(image)}
-                          disabled={!image.file || isUploading}
-                          className={clsx(
-                            "text-[11px] text-blue-600 hover:text-blue-800",
-                            (!image.file || isUploading) && "opacity-50 cursor-not-allowed"
-                          )}
-                        >
-                          Retry upload
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <button type="button" onClick={() => removeImage(image.id)} className="flex-shrink-0 text-gray-400 hover:text-gray-600">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <UploadedImagesList
+        uploadedImages={uploadedImages}
+        isUploading={isUploading}
+        onClearAll={() => setUploadedImages([])}
+        onCopyUrl={(url) => {
+          void copyToClipboard(url);
+        }}
+        onRemove={removeImage}
+        onRetryUpload={handleRetryUpload}
+      />
     </div>
   );
 }
