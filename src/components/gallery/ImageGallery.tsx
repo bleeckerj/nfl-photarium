@@ -20,7 +20,6 @@ import { Settings, Cpu, AlertTriangle } from 'lucide-react';
 import MonoSelect from '@/components/MonoSelect';
 import DateNavigator from '@/components/DateNavigator';
 import GalleryCommandBar from '@/components/GalleryCommandBar';
-import HoverPreview from '@/components/HoverPreview';
 import { useToast } from '@/components/Toast';
 import { subscribeEmbeddingPending, clearPendingIfHasEmbeddings, type EmbeddingPendingEntry } from '@/utils/embeddingPending';
 
@@ -32,20 +31,14 @@ import {
   useGalleryPagination,
   useGalleryActions,
   useGalleryAudit,
+  useHoverPreview,
 } from './hooks';
 import {
   ImageCard,
   ImageListItem,
   GalleryEmptyState,
 } from './index';
-import {
-  CopyUrlModal,
-  EditImageModal,
-  DeleteConfirmModal,
-  BulkEditModal,
-  NamespaceModal,
-} from './modals';
-import type { BulkEditOptions, AnimationOptions } from './modals';
+import { ImageGalleryModalStack } from './ImageGalleryModalStack';
 import {
   loadPreferences,
   persistPreferences,
@@ -59,13 +52,11 @@ import { toDateKey } from './dateFilter';
 import {
   VARIANT_OPTIONS,
   PAGE_SIZE_OPTIONS,
-  DEFAULT_PAGE_SIZE,
   AUDIT_LOG_LIMIT,
 } from './constants';
 import type {
   ImageGalleryProps,
   ImageGalleryRef,
-  CloudflareImage,
   ViewMode,
 } from './types';
 
@@ -103,13 +94,14 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     const [namespaceSettingsOpen, setNamespaceSettingsOpen] = useState(false);
     const [bulkEditOpen, setBulkEditOpen] = useState(false);
     
-    // ========================================================================
-    // Hover Preview State
-    // ========================================================================
-    const [hoveredImage, setHoveredImage] = useState<string | null>(null);
-    const [showPreview, setShowPreview] = useState(false);
-    const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
-    const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const {
+      hoveredImage,
+      showPreview,
+      mousePosition,
+      handleMouseEnter,
+      handleMouseMove,
+      handleMouseLeave,
+    } = useHoverPreview();
     
     // ========================================================================
     // Embedding Pending State
@@ -372,44 +364,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         }
       }
     }, [images]);
-    
-    // ========================================================================
-    // Hover Preview Handlers
-    // ========================================================================
-    const handleMouseEnter = useCallback((imageId: string, event: React.MouseEvent) => {
-      if (hoverTimeoutRef.current) {
-        clearTimeout(hoverTimeoutRef.current);
-      }
-      setHoveredImage(imageId);
-      setMousePosition({ x: event.clientX, y: event.clientY });
-      hoverTimeoutRef.current = setTimeout(() => {
-        setShowPreview(true);
-      }, 300);
-    }, []);
-    
-    const handleMouseMove = useCallback((imageId: string, event: React.MouseEvent) => {
-      if (hoveredImage === imageId) {
-        setMousePosition({ x: event.clientX, y: event.clientY });
-      }
-    }, [hoveredImage]);
-    
-    const handleMouseLeave = useCallback(() => {
-      if (hoverTimeoutRef.current) {
-        clearTimeout(hoverTimeoutRef.current);
-        hoverTimeoutRef.current = null;
-      }
-      setShowPreview(false);
-      setHoveredImage(null);
-    }, []);
-    
-    // Cleanup hover timeout on unmount
-    useEffect(() => {
-      return () => {
-        if (hoverTimeoutRef.current) {
-          clearTimeout(hoverTimeoutRef.current);
-        }
-      };
-    }, []);
     
     // ========================================================================
     // Action Handlers
@@ -967,119 +921,47 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           </div>
         )}
         
-        {/* ================================================================== */}
-        {/* Modals */}
-        {/* ================================================================== */}
-        
-        {/* Copy URL Modal */}
-        {copyMenuImageId && (() => {
-          const copyImage = images.find((img) => img.id === copyMenuImageId);
-          if (!copyImage) return null;
-          return (
-            <CopyUrlModal
-              image={copyImage}
-              onClose={() => setCopyMenuImageId(null)}
-              onCopyUrl={async (url, variant, altText, shiftKey) => {
-                const textToCopy = shiftKey && altText ? `${url}\n${altText}` : url;
-                await navigator.clipboard.writeText(textToCopy);
-                toast.push(`${variant} URL copied`);
-              }}
-              onDownload={async (url, filename) => {
-                // Simple download implementation
-                const link = document.createElement('a');
-                link.href = url;
-                link.download = filename || 'image';
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-              }}
-            />
-          );
-        })()}
-        
-        {/* Edit Image Modal */}
-        {editingImage && (() => {
-          const editImage = images.find((img) => img.id === editingImage);
-          if (!editImage) return null;
-          return (
-            <EditImageModal
-              image={editImage}
-              editedAltTag={editTags}
-              editedTags={editTags}
-              editedFilename={editImage.filename || ''}
-              onAltTagChange={setEditTags}
-              onTagsChange={setEditTags}
-              onFilenameChange={() => {}}
-              onSave={async () => {
-                await saveEdit(editingImage);
-              }}
-              onCancel={cancelEdit}
-              onGenerateAltTag={async () => {
-                await generateAltTag(editingImage);
-              }}
-              isGeneratingAlt={altLoadingMap[editingImage] ?? false}
-            />
-          );
-        })()}
-        
-        {/* Bulk Edit Modal */}
-        {bulkEditOpen && (
-          <BulkEditModal
-            selectedCount={selectedCount}
-            folders={uniqueFolders}
-            namespaceOptions={namespaceOptions}
-            onApply={async (options: BulkEditOptions) => {
-              await applyBulkUpdates(options);
-              closeBulkEditModal();
-            }}
-            onClose={closeBulkEditModal}
-            isUpdating={bulkUpdating}
-            onCreateAnimation={async (options: AnimationOptions) => {
-              await createBulkAnimation({
-                fps: options.fps.toString(),
-                loop: options.loop,
-                filename: options.filename,
-              });
-            }}
-            isAnimating={bulkAnimateLoading}
-            animationError={bulkAnimateError}
-          />
-        )}
-        
-        {/* Delete Confirm Modal */}
-        {deleteConfirmId && (
-          <DeleteConfirmModal
-            count={1}
-            onConfirm={handleDeleteImage}
-            onCancel={() => setDeleteConfirmId(null)}
-          />
-        )}
-        
-        {/* Namespace Settings Modal */}
-        {namespaceSettingsOpen && (
-          <NamespaceModal
-            availableNamespaces={registryNamespaces}
-            currentNamespace={namespace || ''}
-            onNamespaceChange={(ns: string) => {
-              if (onNamespaceChange) {
-                onNamespaceChange(ns);
-              }
-            }}
-            onClose={() => setNamespaceSettingsOpen(false)}
-          />
-        )}
-        
-        {/* Hover Preview */}
-        {hoveredImage && showPreview && (
-          <HoverPreview
-            imageId={hoveredImage}
-            filename={images.find((img) => img.id === hoveredImage)?.filename || 'Unknown'}
-            isVisible={showPreview}
-            mousePosition={mousePosition}
-            onClose={handleMouseLeave}
-            dimensions={images.find((img) => img.id === hoveredImage)?.dimensions}
-          />
-        )}
+        <ImageGalleryModalStack
+          images={images}
+          copyMenuImageId={copyMenuImageId}
+          onCloseCopyMenu={() => setCopyMenuImageId(null)}
+          onToast={toast.push}
+          editingImage={editingImage}
+          editTags={editTags}
+          onEditTagsChange={setEditTags}
+          onSaveEdit={saveEdit}
+          onCancelEdit={cancelEdit}
+          onGenerateAltTag={generateAltTag}
+          altLoadingMap={altLoadingMap}
+          bulkEditOpen={bulkEditOpen}
+          selectedCount={selectedCount}
+          folders={uniqueFolders}
+          namespaceOptions={namespaceOptions}
+          onApplyBulkUpdates={applyBulkUpdates}
+          onCloseBulkEdit={closeBulkEditModal}
+          bulkUpdating={bulkUpdating}
+          onCreateBulkAnimation={async (options) => {
+            await createBulkAnimation({
+              fps: options.fps.toString(),
+              loop: options.loop,
+              filename: options.filename,
+            });
+          }}
+          bulkAnimateLoading={bulkAnimateLoading}
+          bulkAnimateError={bulkAnimateError}
+          deleteConfirmId={deleteConfirmId}
+          onConfirmDelete={handleDeleteImage}
+          onCancelDelete={() => setDeleteConfirmId(null)}
+          namespaceSettingsOpen={namespaceSettingsOpen}
+          registryNamespaces={registryNamespaces}
+          currentNamespace={namespace || ''}
+          onNamespaceChange={onNamespaceChange}
+          onCloseNamespaceSettings={() => setNamespaceSettingsOpen(false)}
+          hoveredImage={hoveredImage}
+          showPreview={showPreview}
+          mousePosition={mousePosition}
+          onClosePreview={handleMouseLeave}
+        />
       </div>
     );
   }

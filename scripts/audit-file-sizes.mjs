@@ -86,12 +86,6 @@ const ALLOWED_OVERSIZED_FILES = new Map([
     reason: 'uploader shell awaiting archive/queue helper extraction',
     expires: '2026-07-15',
   }],
-  ['src/components/gallery/ImageGallery.tsx', {
-    category: 'component',
-    owner: 'maintainability-refactor',
-    reason: 'legacy gallery component awaiting consolidation',
-    expires: '2026-07-15',
-  }],
 ]);
 
 const color = {

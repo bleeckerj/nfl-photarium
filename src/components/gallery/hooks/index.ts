@@ -11,3 +11,4 @@ export { useGalleryPagination } from './useGalleryPagination';
 export { useGalleryActions } from './useGalleryActions';
 export { useGalleryAudit } from './useGalleryAudit';
 export { useGalleryEmbedding } from './useGalleryEmbedding';
+export { useHoverPreview } from './useHoverPreview';
