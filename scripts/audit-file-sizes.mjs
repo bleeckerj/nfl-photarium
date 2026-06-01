@@ -98,12 +98,6 @@ const ALLOWED_OVERSIZED_FILES = new Map([
     reason: 'legacy gallery component awaiting consolidation',
     expires: '2026-07-15',
   }],
-  ['src/server/cloudflareImageCache.ts', {
-    category: 'service',
-    owner: 'maintainability-refactor',
-    reason: 'cache service awaiting storage/fetch split',
-    expires: '2026-07-15',
-  }],
 ]);
 
 const color = {
