@@ -10,7 +10,6 @@ import {
   logDuplicateFamilySelection,
   logOriginalUrlReuseWarning,
 } from '@/server/uploadDuplicatePolicy';
-import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { enforceCloudflareMetadataLimit } from '@/utils/cloudflareMetadata';
 import { extractSnagx } from '@/utils/snagx';
 import { extractExifSummary } from '@/utils/exif';
@@ -23,11 +22,10 @@ import { validateParentForNewChild } from '@/server/parentValidation';
 import { patchImageExtrasRecord } from '@/server/imageExtras';
 import {
   applyWorkflowOverride,
-  parseOptionalPromptField,
-  parseOptionalWorkflowJson,
+  parseCloudflareUploadApiResponse,
+  parseExternalUploadFormFields,
   persistUploadPrompt,
   withCors,
-  type CloudflareUploadApiResult,
 } from '@/server/uploadExternalRoute';
 
 export async function OPTIONS() {
@@ -36,7 +34,6 @@ export async function OPTIONS() {
 
 export async function POST(request: NextRequest) {
   try {
-    // 0. Feature Flag: Check if API is disabled
     if (process.env.DISABLE_EXTERNAL_API === 'true') {
       return withCors(NextResponse.json(
         { error: 'External upload API is disabled by configuration.' },
@@ -74,20 +71,29 @@ export async function POST(request: NextRequest) {
       ));
     }
 
-    const computeContentHash = (payload: Buffer) =>
-      createHash('sha256').update(payload).digest('hex');
-
-    const folder = formData.get('folder') as string;
-    const tags = formData.get('tags') as string;
-    const description = formData.get('description') as string;
-    const promptField = parseOptionalPromptField(formData.get('prompt'));
-    const displayName = formData.get('displayName') as string;
-    const originalUrl = formData.get('originalUrl') as string;
-    const sourceUrl = formData.get('sourceUrl') as string;
-    const namespace = formData.get('namespace') as string;
-    const parentIdRaw = formData.get('parentId');
-    const duplicateAction = formData.get('duplicateAction');
-    const workflowJsonField = parseOptionalWorkflowJson(formData.get('comfyWorkflowJson'));
+    const computeContentHash = (payload: Buffer) => createHash('sha256').update(payload).digest('hex');
+    const parsedFields = parseExternalUploadFormFields(formData);
+    if (!parsedFields.ok) {
+      return withCors(NextResponse.json(
+        { error: parsedFields.error },
+        { status: parsedFields.status }
+      ));
+    }
+    const {
+      cleanFolder,
+      cleanTags,
+      cleanDescription,
+      cleanDisplayName,
+      cleanOriginalUrl,
+      normalizedOriginalUrl,
+      cleanSourceUrl,
+      normalizedSourceUrl,
+      effectiveNamespace,
+      cleanParentId,
+      duplicateAction,
+      promptField,
+      workflowJsonField,
+    } = parsedFields.fields;
 
     if (!promptField.ok) {
       logExternalIssue('Rejected invalid prompt payload');
@@ -106,33 +112,6 @@ export async function POST(request: NextRequest) {
       ));
     }
 
-    const cleanFolder = folder && folder.trim() && folder !== 'undefined' ? folder.trim() : undefined;
-    const cleanTags = tags && tags.trim() ? tags.trim().split(',').map(t => t.trim()).filter(Boolean) : [];
-    const cleanDescription = description && description.trim() && description !== 'undefined' ? description.trim() : undefined;
-    const cleanDisplayName = displayName && displayName.trim() && displayName !== 'undefined' ? displayName.trim() : undefined;
-    const cleanOriginalUrl = originalUrl && originalUrl.trim() && originalUrl !== 'undefined' ? originalUrl.trim() : undefined;
-    const normalizedOriginalUrl = normalizeOriginalUrl(cleanOriginalUrl);
-    const cleanSourceUrl = sourceUrl && sourceUrl.trim() && sourceUrl !== 'undefined' ? sourceUrl.trim() : undefined;
-    const normalizedSourceUrl = normalizeOriginalUrl(cleanSourceUrl);
-    const rawNamespace = typeof namespace === 'string' ? namespace.trim() : '';
-    const cleanNamespace =
-      rawNamespace && rawNamespace !== 'undefined' && rawNamespace !== '__all__' && rawNamespace !== '__none__'
-        ? rawNamespace
-        : undefined;
-    if (!cleanNamespace) {
-      return withCors(
-        NextResponse.json(
-          {
-            error: 'A specific namespace is required for uploads. Select a namespace instead of All.',
-          },
-          { status: 400 }
-        )
-      );
-    }
-    const effectiveNamespace = cleanNamespace;
-    const parentIdValue = typeof parentIdRaw === 'string' ? parentIdRaw.trim() : '';
-    const cleanParentId = parentIdValue && parentIdValue !== 'undefined' ? parentIdValue : undefined;
-
     const parentValidation = await validateParentForNewChild(cleanParentId);
     if (!parentValidation.ok) {
       return withCors(
@@ -148,7 +127,6 @@ export async function POST(request: NextRequest) {
     const originalBuffer = Buffer.from(bytes);
     let workingBuffer: Buffer = originalBuffer;
     let workingType = file.type;
-    // Sanitize filename: truncate, clean, and handle Google Photos blobs
     let workingName = sanitizeFilename(file.name);
 
     if (isSnagx) {
@@ -156,7 +134,6 @@ export async function POST(request: NextRequest) {
         const extracted = extractSnagx(originalBuffer, file.name);
         workingBuffer = extracted.buffer;
         workingType = 'image/png';
-        // Sanitize the extracted filename too
         workingName = sanitizeFilename(extracted.filename);
       } catch {
         logExternalIssue('Failed to extract .snagx image', { filename: file.name });
@@ -307,56 +284,9 @@ export async function POST(request: NextRequest) {
       }
     );
 
-    // Handle non-JSON responses (rate limits, timeouts, HTML error pages)
-    const contentType = cloudflareResponse.headers.get('content-type') || '';
-    let result: CloudflareUploadApiResult = {};
-    let textBody: string | undefined;
-
-    if (contentType.includes('application/json')) {
-      const jsonPayload = await cloudflareResponse.json();
-      if (jsonPayload && typeof jsonPayload === 'object') {
-        result = jsonPayload as CloudflareUploadApiResult;
-      }
-    } else {
-      textBody = await cloudflareResponse.text();
-      try {
-        const parsedPayload = JSON.parse(textBody);
-        if (parsedPayload && typeof parsedPayload === 'object') {
-          result = parsedPayload as CloudflareUploadApiResult;
-        }
-      } catch {
-        console.error('Cloudflare returned non-JSON response:', {
-          status: cloudflareResponse.status,
-          statusText: cloudflareResponse.statusText,
-          contentType,
-          bodyPreview: textBody.slice(0, 500)
-        });
-        
-        let errorMessage = 'Cloudflare returned an unexpected response';
-        if (cloudflareResponse.status === 429) {
-          errorMessage = 'Rate limited by Cloudflare. Please wait and try again.';
-        } else if (cloudflareResponse.status === 503 || cloudflareResponse.status === 502) {
-          errorMessage = 'Cloudflare service temporarily unavailable. Please retry.';
-        } else if (cloudflareResponse.status === 408 || textBody.includes('timeout')) {
-          errorMessage = 'Request timed out. The file may be too large or the connection is slow.';
-        } else if (cloudflareResponse.status >= 500) {
-          errorMessage = `Cloudflare server error (${cloudflareResponse.status}). Please retry.`;
-        }
-        
-        return withCors(NextResponse.json(
-          { error: errorMessage },
-          { status: cloudflareResponse.status || 502 }
-        ));
-      }
-    }
-
-    if (!cloudflareResponse.ok) {
-      console.error('Cloudflare API error:', result);
-      return withCors(NextResponse.json(
-        { error: result.errors?.[0]?.message || 'Failed to upload to Cloudflare' },
-        { status: cloudflareResponse.status }
-      ));
-    }
+    const parsedUploadResult = await parseCloudflareUploadApiResponse(cloudflareResponse);
+    if (!parsedUploadResult.ok) return parsedUploadResult.response;
+    const result = parsedUploadResult.result;
 
     const imageData = result.result ?? {};
     const primaryId = imageData?.id;

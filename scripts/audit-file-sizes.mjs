@@ -62,12 +62,6 @@ const ALLOWED_OVERSIZED_FILES = new Map([
     reason: 'legacy ingest awaiting capture metadata split',
     expires: '2026-07-15',
   }],
-  ['src/app/api/import/page/scroll/route.ts', {
-    category: 'route',
-    owner: 'maintainability-refactor',
-    reason: 'route adapter awaiting page-import service extraction',
-    expires: '2026-07-15',
-  }],
   ['src/app/api/import/page/scroll/stream/route.ts', {
     category: 'route',
     owner: 'maintainability-refactor',
@@ -78,12 +72,6 @@ const ALLOWED_OVERSIZED_FILES = new Map([
     category: 'route',
     owner: 'maintainability-refactor',
     reason: 'search route awaiting vector query adapter extraction',
-    expires: '2026-07-15',
-  }],
-  ['src/app/api/upload/external/route.ts', {
-    category: 'route',
-    owner: 'maintainability-refactor',
-    reason: 'upload route awaiting request orchestration split',
     expires: '2026-07-15',
   }],
   ['src/app/images/[id]/page.tsx', {

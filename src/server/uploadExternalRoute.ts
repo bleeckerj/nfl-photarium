@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getPromptThisRecord, setPromptThisRecord, type PromptThisRecord } from '@/server/promptThis';
 import type { ComfyWorkflowExtraction } from '@/utils/comfyMetadata';
+import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -30,6 +31,22 @@ export type PromptSaveSummary = {
   failed: number;
   imageIds: string[];
   errors?: Array<{ imageId: string; error: string }>;
+};
+
+export type ExternalUploadFormFields = {
+  cleanFolder?: string;
+  cleanTags: string[];
+  cleanDescription?: string;
+  cleanDisplayName?: string;
+  cleanOriginalUrl?: string;
+  normalizedOriginalUrl?: string;
+  cleanSourceUrl?: string;
+  normalizedSourceUrl?: string;
+  effectiveNamespace: string;
+  cleanParentId?: string;
+  duplicateAction: FormDataEntryValue | null;
+  promptField: ReturnType<typeof parseOptionalPromptField>;
+  workflowJsonField: ReturnType<typeof parseOptionalWorkflowJson>;
 };
 
 export function withCors(response: NextResponse) {
@@ -62,6 +79,116 @@ export function parseOptionalWorkflowJson(
   } catch {
     return { ok: false, error: 'Invalid comfyWorkflowJson: malformed JSON' };
   }
+}
+
+const cleanOptionalText = (value: FormDataEntryValue | null): string | undefined => {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed && trimmed !== 'undefined' ? trimmed : undefined;
+};
+
+export function parseExternalUploadFormFields(
+  formData: FormData
+): { ok: true; fields: ExternalUploadFormFields } | { ok: false; error: string; status: number } {
+  const rawNamespace = cleanOptionalText(formData.get('namespace'));
+  const effectiveNamespace =
+    rawNamespace && rawNamespace !== '__all__' && rawNamespace !== '__none__'
+      ? rawNamespace
+      : undefined;
+
+  if (!effectiveNamespace) {
+    return {
+      ok: false,
+      error: 'A specific namespace is required for uploads. Select a namespace instead of All.',
+      status: 400,
+    };
+  }
+
+  const cleanOriginalUrl = cleanOptionalText(formData.get('originalUrl'));
+  const cleanSourceUrl = cleanOptionalText(formData.get('sourceUrl'));
+  const tags = cleanOptionalText(formData.get('tags'));
+  const parentId = cleanOptionalText(formData.get('parentId'));
+
+  return {
+    ok: true,
+    fields: {
+      cleanFolder: cleanOptionalText(formData.get('folder')),
+      cleanTags: tags ? tags.split(',').map((tag) => tag.trim()).filter(Boolean) : [],
+      cleanDescription: cleanOptionalText(formData.get('description')),
+      cleanDisplayName: cleanOptionalText(formData.get('displayName')),
+      cleanOriginalUrl,
+      normalizedOriginalUrl: normalizeOriginalUrl(cleanOriginalUrl),
+      cleanSourceUrl,
+      normalizedSourceUrl: normalizeOriginalUrl(cleanSourceUrl),
+      effectiveNamespace,
+      cleanParentId: parentId,
+      duplicateAction: formData.get('duplicateAction'),
+      promptField: parseOptionalPromptField(formData.get('prompt')),
+      workflowJsonField: parseOptionalWorkflowJson(formData.get('comfyWorkflowJson')),
+    },
+  };
+}
+
+export async function parseCloudflareUploadApiResponse(
+  cloudflareResponse: Response
+): Promise<{ ok: true; result: CloudflareUploadApiResult } | { ok: false; response: NextResponse }> {
+  const contentType = cloudflareResponse.headers.get('content-type') || '';
+  let result: CloudflareUploadApiResult = {};
+  let textBody: string | undefined;
+
+  if (contentType.includes('application/json')) {
+    const jsonPayload = await cloudflareResponse.json();
+    if (jsonPayload && typeof jsonPayload === 'object') {
+      result = jsonPayload as CloudflareUploadApiResult;
+    }
+  } else {
+    textBody = await cloudflareResponse.text();
+    try {
+      const parsedPayload = JSON.parse(textBody);
+      if (parsedPayload && typeof parsedPayload === 'object') {
+        result = parsedPayload as CloudflareUploadApiResult;
+      }
+    } catch {
+      console.error('Cloudflare returned non-JSON response:', {
+        status: cloudflareResponse.status,
+        statusText: cloudflareResponse.statusText,
+        contentType,
+        bodyPreview: textBody.slice(0, 500),
+      });
+
+      let errorMessage = 'Cloudflare returned an unexpected response';
+      if (cloudflareResponse.status === 429) {
+        errorMessage = 'Rate limited by Cloudflare. Please wait and try again.';
+      } else if (cloudflareResponse.status === 503 || cloudflareResponse.status === 502) {
+        errorMessage = 'Cloudflare service temporarily unavailable. Please retry.';
+      } else if (cloudflareResponse.status === 408 || textBody.includes('timeout')) {
+        errorMessage = 'Request timed out. The file may be too large or the connection is slow.';
+      } else if (cloudflareResponse.status >= 500) {
+        errorMessage = `Cloudflare server error (${cloudflareResponse.status}). Please retry.`;
+      }
+
+      return {
+        ok: false,
+        response: withCors(NextResponse.json(
+          { error: errorMessage },
+          { status: cloudflareResponse.status || 502 }
+        )),
+      };
+    }
+  }
+
+  if (!cloudflareResponse.ok) {
+    console.error('Cloudflare API error:', result);
+    return {
+      ok: false,
+      response: withCors(NextResponse.json(
+        { error: result.errors?.[0]?.message || 'Failed to upload to Cloudflare' },
+        { status: cloudflareResponse.status }
+      )),
+    };
+  }
+
+  return { ok: true, result };
 }
 
 export function applyWorkflowOverride(
