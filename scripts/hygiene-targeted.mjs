@@ -55,6 +55,9 @@ function testsForFile(file) {
   if (file.includes('uploadExternalRoute') || file.includes('/api/upload/external')) {
     tests.push('__tests__/uploadExternalRoute.test.ts');
   }
+  if (file.includes('imageSearchRoute') || file.includes('/api/images/search')) {
+    tests.push('__tests__/imageSearchRoute.test.ts');
+  }
   if (file.includes('assetParentService') || file.includes('detach-children')) {
     tests.push('__tests__/assetParentService.test.ts', '__tests__/detachChildrenRoute.test.ts');
   }

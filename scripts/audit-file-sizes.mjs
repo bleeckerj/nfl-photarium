@@ -68,12 +68,6 @@ const ALLOWED_OVERSIZED_FILES = new Map([
     reason: 'route adapter awaiting page-import service extraction',
     expires: '2026-07-15',
   }],
-  ['src/app/api/images/search/route.ts', {
-    category: 'route',
-    owner: 'maintainability-refactor',
-    reason: 'search route awaiting vector query adapter extraction',
-    expires: '2026-07-15',
-  }],
   ['src/app/images/[id]/page.tsx', {
     category: 'component',
     owner: 'maintainability-refactor',
