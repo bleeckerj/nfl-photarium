@@ -44,12 +44,6 @@ const ALLOWED_OVERSIZED_FILES = new Map([
     reason: 'video detail page awaiting workflow hook extraction',
     expires: '2026-07-15',
   }],
-  ['src/components/ImageGallery.tsx', {
-    category: 'component',
-    owner: 'maintainability-refactor',
-    reason: 'gallery shell awaiting state/helper extraction',
-    expires: '2026-07-15',
-  }],
 ]);
 
 const color = {
