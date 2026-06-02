@@ -52,7 +52,8 @@ const buildSnagxDescription = (
     details.push(`CaptureDate: ${captureDate}`);
   }
   if (metadata) {
-    const { CaptureDate, ...rest } = metadata;
+    const rest = { ...metadata };
+    delete rest.CaptureDate;
     if (Object.keys(rest).length > 0) {
       details.push(`Snagx metadata: ${JSON.stringify(rest)}`);
     }
@@ -202,7 +203,7 @@ export async function POST(request: NextRequest) {
         captureDate = extracted.captureDate;
         snagxMetadata = extracted.metadata;
         snagxDescription = buildSnagxDescription(captureDate, snagxMetadata);
-      } catch (error) {
+      } catch {
         return NextResponse.json(
           { error: 'Failed to extract image from .snagx file' },
           { status: 400 }

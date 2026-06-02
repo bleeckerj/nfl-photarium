@@ -287,7 +287,7 @@ export class ClientSiteDeployService {
         });
       }
 
-      const nextClientSite = await this.clientSiteService.updateStoredClientSite({
+      await this.clientSiteService.updateStoredClientSite({
         ...clientSite,
         status: 'inactive',
         deployment: {

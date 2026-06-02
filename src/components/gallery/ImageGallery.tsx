@@ -82,7 +82,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     const [selectedVariant, setSelectedVariant] = useState<string>(
       storedPreferencesRef.current.variant
     );
-    const [filtersCollapsed, setFiltersCollapsed] = useState(
+    const [filtersCollapsed] = useState(
       storedPreferencesRef.current.filtersCollapsed ?? false
     );
     
@@ -169,7 +169,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       hideTagByName,
       unhideTagByName,
       clearHiddenTags,
-      filteredImages,
       sortedImages,
       duplicateGroups,
       duplicateIds,
@@ -207,7 +206,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     // ========================================================================
     const {
       currentPage,
-      setCurrentPage,
       pageSize,
       setPageSize,
       totalPages,
@@ -223,9 +221,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       jumpBackTenPages,
       jumpForwardTenPages,
       currentPageRangeLabel,
-      prevPageRangeLabel,
-      nextPageRangeLabel,
-      scrollGalleryToTop,
     } = useGalleryPagination({
       filteredImages: sortedImages,
       initialPage: storedPreferencesRef.current.currentPage,
@@ -242,10 +237,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       editingImage,
       editTags,
       setEditTags,
-      editFolderSelect,
-      setEditFolderSelect,
-      newEditFolder,
-      setNewEditFolder,
       startEdit,
       cancelEdit,
       saveEdit,
@@ -263,7 +254,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       queueEmbeddingsForSelected,
       bulkAnimateLoading,
       bulkAnimateError,
-      setBulkAnimateError,
       createBulkAnimation,
     } = useGalleryActions({
       images,

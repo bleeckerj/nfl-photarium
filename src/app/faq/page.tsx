@@ -11,11 +11,11 @@ export default function FAQPage() {
       </p>
       <ul>
         <li>
-          <b>Semantic search</b> (the search bar with "semantic" or "CLIP" mode):
+          <b>Semantic search</b> (the search bar with &quot;semantic&quot; or &quot;CLIP&quot; mode):
           <ul>
             <li>Uses OpenAI CLIP embeddings to find images that are conceptually similar to your query.</li>
             <li>CLIP encodes the <i>entire scene</i> (objects, style, context, mood) into a vector.</li>
-            <li>A query like "dog" will find images that look like typical dogs, but a painting of dogs playing poker may not rank highly unless you search for "dogs playing poker" or something more specific.</li>
+            <li>A query like &quot;dog&quot; will find images that look like typical dogs, but a painting of dogs playing poker may not rank highly unless you search for &quot;dogs playing poker&quot; or something more specific.</li>
             <li>This is because CLIP considers all aspects of the image, not just the presence of a single object.</li>
           </ul>
         </li>
@@ -27,7 +27,7 @@ export default function FAQPage() {
           </ul>
         </li>
       </ul>
-      <p><b>Tip:</b> Use semantic search for "find images like this concept" and text filter for "find images where someone wrote this word".</p>
+      <p><b>Tip:</b> Use semantic search for &quot;find images like this concept&quot; and text filter for &quot;find images where someone wrote this word&quot;.</p>
       <hr />
       <h2>How do I set up Redis for Photarium?</h2>
       <ol>

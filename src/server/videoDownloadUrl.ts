@@ -21,33 +21,6 @@ const normalizeUrl = (value?: string) => {
   }
 };
 
-const extractLikelyStreamUid = (value?: string) => {
-  const trimmed = value?.trim();
-  if (!trimmed) return '';
-
-  // Typical Cloudflare stream UIDs are URL-safe tokens; keep this permissive
-  // while avoiding obvious path fragments.
-  const isUidToken = (token: string) => /^[A-Za-z0-9_-]{8,}$/.test(token);
-
-  if (!trimmed.includes('/')) {
-    return isUidToken(trimmed) ? trimmed : '';
-  }
-
-  const asUrl = normalizeUrl(trimmed);
-  if (asUrl) {
-    try {
-      const parts = new URL(asUrl).pathname.split('/').filter(Boolean);
-      const candidate = parts[0] || '';
-      return isUidToken(candidate) ? candidate : '';
-    } catch {
-      return '';
-    }
-  }
-
-  const pathCandidate = trimmed.split('/').filter(Boolean)[0] || '';
-  return isUidToken(pathCandidate) ? pathCandidate : '';
-};
-
 const isLikelyDownloadableVideoUrl = (value?: string) => {
   const normalized = normalizeUrl(value);
   if (!normalized) return false;

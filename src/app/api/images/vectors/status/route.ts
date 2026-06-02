@@ -5,7 +5,7 @@
  * Returns status of vector search system and embedding progress
  */
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { getCachedImages } from '@/server/cloudflareImageCache';
 import {
   isVectorSearchAvailable,
@@ -16,7 +16,7 @@ import {
 const formatTimestamp = () =>
   new Date().toLocaleString('en-US', { hour12: false });
 
-export async function GET(request: NextRequest): Promise<NextResponse> {
+export async function GET(): Promise<NextResponse> {
   const startedAt = Date.now();
   console.info(`[${formatTimestamp()}] [API] GET /api/images/vectors/status`);
   try {
@@ -73,7 +73,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 // POST to trigger index creation
-export async function POST(request: NextRequest): Promise<NextResponse> {
+export async function POST(): Promise<NextResponse> {
   const startedAt = Date.now();
   console.info(`[${formatTimestamp()}] [API] POST /api/images/vectors/status`);
   try {

@@ -35,6 +35,8 @@ const createLogger = () => (message: string) => {
 
 const sanitizeClientSite = (clientSite: ClientSiteRecord | ClientSiteListItem) => {
   const { publishSecret: _publishSecret, runtimeSecrets: _runtimeSecrets, ...safeClientSite } = clientSite;
+  void _publishSecret;
+  void _runtimeSecrets;
   return safeClientSite;
 };
 

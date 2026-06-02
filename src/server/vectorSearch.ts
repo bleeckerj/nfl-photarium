@@ -594,7 +594,7 @@ function getNeighborBins(binIndex: number): number[] {
  * Parse FT.SEARCH results into VectorSearchResult array
  */
 function parseSearchResults(result: [number, ...unknown[]]): VectorSearchResult[] {
-  const [count, ...items] = result;
+  const [, ...items] = result;
   const results: VectorSearchResult[] = [];
 
   // Results come in pairs: [key, [field, value, field, value, ...]]

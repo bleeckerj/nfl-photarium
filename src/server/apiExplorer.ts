@@ -46,7 +46,6 @@ function parseExportedHttpMethods(fileContents: string): HttpMethod[] {
   const methodRegex = /export\s+(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\b/g;
   const methods = new Set<HttpMethod>();
   let match: RegExpExecArray | null;
-  // eslint-disable-next-line no-cond-assign
   while ((match = methodRegex.exec(fileContents)) !== null) {
     methods.add(match[1] as HttpMethod);
   }

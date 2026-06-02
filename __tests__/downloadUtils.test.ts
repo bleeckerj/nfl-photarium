@@ -17,6 +17,11 @@ describe('formatDownloadFileName', () => {
 
 describe('downloadImageToFile', () => {
   const originalFetch = global.fetch;
+  const testGlobal = globalThis as unknown as {
+    fetch: typeof fetch;
+    document?: Document;
+    window?: Window;
+  };
   let windowBackup: typeof window | undefined;
   let documentBackup: typeof document | undefined;
   let appendChildSpy: ReturnType<typeof vi.fn>;
@@ -26,10 +31,10 @@ describe('downloadImageToFile', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    (globalThis as any).fetch = vi.fn(async () => ({
+    testGlobal.fetch = vi.fn(async () => ({
       ok: true,
       blob: async () => new Blob(['mock-image'], { type: 'image/png' })
-    }));
+    })) as unknown as typeof fetch;
 
     appendChildSpy = vi.fn();
     removeChildSpy = vi.fn();
@@ -37,38 +42,38 @@ describe('downloadImageToFile', () => {
     const mockLink = { click: clickSpy, style: {} } as unknown as HTMLAnchorElement;
     createElementSpy = vi.fn(() => mockLink);
 
-    documentBackup = (globalThis as any).document;
-    (globalThis as any).document = {
+    documentBackup = testGlobal.document;
+    testGlobal.document = {
       createElement: createElementSpy,
       body: {
         appendChild: appendChildSpy,
         removeChild: removeChildSpy
       }
-    };
+    } as unknown as Document;
 
-    windowBackup = (globalThis as any).window;
-    (globalThis as any).window = {
+    windowBackup = testGlobal.window;
+    testGlobal.window = {
       URL: {
         createObjectURL: vi.fn(() => 'blob:mock'),
         revokeObjectURL: vi.fn()
       },
       setTimeout: global.setTimeout.bind(global)
-    };
+    } as unknown as Window;
   });
 
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
-    (globalThis as any).fetch = originalFetch;
+    testGlobal.fetch = originalFetch;
     if (documentBackup) {
-      (globalThis as any).document = documentBackup;
+      testGlobal.document = documentBackup;
     } else {
-      delete (globalThis as any).document;
+      delete testGlobal.document;
     }
     if (windowBackup) {
-      (globalThis as any).window = windowBackup;
+      testGlobal.window = windowBackup;
     } else {
-      delete (globalThis as any).window;
+      delete testGlobal.window;
     }
   });
 
@@ -86,7 +91,7 @@ describe('downloadImageToFile', () => {
   });
 
   it('throws when fetch fails', async () => {
-    (globalThis as any).fetch = vi.fn(async () => ({ ok: false, status: 500 }));
+    testGlobal.fetch = vi.fn(async () => ({ ok: false, status: 500 })) as unknown as typeof fetch;
     await expect(downloadImageToFile('https://example.com/bad', 'error.webp')).rejects.toThrow(
       /Failed to fetch image/
     );

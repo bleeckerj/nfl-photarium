@@ -53,7 +53,7 @@ export function RedisInfoModal({ isOpen, onClose }: RedisInfoModalProps) {
             </p>
             
             <p className="leading-relaxed">
-              This means the <strong>AI Semantic Search</strong> features ("blue sky", "similar images", "find by color") are disabled. 
+              This means the <strong>AI Semantic Search</strong> features (&quot;blue sky&quot;, &quot;similar images&quot;, &quot;find by color&quot;) are disabled. 
               The application is strictly using your local file system to store basic metadata.
             </p>
           </div>

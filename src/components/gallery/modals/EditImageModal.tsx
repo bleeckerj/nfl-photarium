@@ -6,7 +6,7 @@
 
 'use client';
 
-import React, { CSSProperties, useState, useEffect } from 'react';
+import React, { CSSProperties, useCallback, useState, useEffect } from 'react';
 import type { CloudflareImage } from '../types';
 
 interface EditImageModalProps {
@@ -43,14 +43,14 @@ export const EditImageModal: React.FC<EditImageModalProps> = ({
     WebkitBackdropFilter: 'blur(8px)',
   };
 
-  const handleSave = async () => {
+  const handleSave = useCallback(async () => {
     setIsSaving(true);
     try {
       await onSave();
     } finally {
       setIsSaving(false);
     }
-  };
+  }, [onSave]);
 
   // Handle keyboard shortcuts
   useEffect(() => {
@@ -65,7 +65,7 @@ export const EditImageModal: React.FC<EditImageModalProps> = ({
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [onCancel]);
+  }, [handleSave, onCancel]);
 
   return (
     <>

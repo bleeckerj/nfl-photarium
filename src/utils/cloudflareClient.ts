@@ -17,6 +17,14 @@ export interface CloudflareImageRecord {
   linkedAssetId?: string;
 }
 
+type CloudflareImageApiRecord = {
+  id: string;
+  filename?: string;
+  uploaded: string;
+  variants?: unknown;
+  meta?: unknown;
+};
+
 async function apiFetch(url: string, init?: RequestInit) {
   if (!ACCOUNT_ID || !API_TOKEN) {
     throw new Error('Cloudflare credentials not configured');
@@ -38,7 +46,7 @@ export async function fetchCloudflareImages(): Promise<CloudflareImageRecord[]> 
     throw new Error(json.errors?.[0]?.message || 'Failed to fetch Cloudflare images');
   }
   const records: CloudflareImageRecord[] = Array.isArray(json.result?.images)
-    ? json.result.images.map((image: any) => {
+    ? json.result.images.map((image: CloudflareImageApiRecord) => {
         const meta = parseCloudflareMetadata(image.meta);
         const folder = cleanString(typeof meta.folder === 'string' ? meta.folder : undefined);
         const namespace = cleanString(typeof meta.namespace === 'string' ? meta.namespace : undefined);

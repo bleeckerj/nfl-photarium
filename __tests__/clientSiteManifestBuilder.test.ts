@@ -5,10 +5,12 @@ const {
   getCachedImagesMock,
   listVideoAssetRecordsWithSyncMock,
   resolveVideoDownloadUrlMock,
+  resolveVideoDownloadUrlsMock,
 } = vi.hoisted(() => ({
   getCachedImagesMock: vi.fn(),
   listVideoAssetRecordsWithSyncMock: vi.fn(),
   resolveVideoDownloadUrlMock: vi.fn(),
+  resolveVideoDownloadUrlsMock: vi.fn(),
 }));
 
 vi.mock('@/server/cloudflareImageCache', () => ({
@@ -21,6 +23,7 @@ vi.mock('@/server/videoCatalogStorage', () => ({
 
 vi.mock('@/server/videoDownloadUrl', () => ({
   resolveVideoDownloadUrl: resolveVideoDownloadUrlMock,
+  resolveVideoDownloadUrls: resolveVideoDownloadUrlsMock,
 }));
 
 const baseRequest = {
@@ -45,6 +48,7 @@ describe('buildPublishedProjectManifest', () => {
         description: 'Hero image',
         uploaded: '2026-04-26T01:00:00.000Z',
         tags: ['hero', 'launch'],
+        size: 123456,
         aspectRatio: '4:3',
         dimensions: { width: 1600, height: 1200 },
         parentId: undefined,
@@ -61,6 +65,7 @@ describe('buildPublishedProjectManifest', () => {
         description: 'Office tour',
         uploaded: '2026-04-26T02:00:00.000Z',
         tags: ['hero', 'motion'],
+        fileSizeBytes: 987654,
         aspectRatio: '16:9',
         width: 1920,
         height: 1080,
@@ -79,6 +84,7 @@ describe('buildPublishedProjectManifest', () => {
       },
     ]);
     resolveVideoDownloadUrlMock.mockReturnValue('https://videodelivery.net/vid-1/downloads/default.mp4');
+    resolveVideoDownloadUrlsMock.mockReturnValue(['https://videodelivery.net/vid-1/downloads/default.mp4']);
   });
 
   it('builds an image-only manifest payload', async () => {

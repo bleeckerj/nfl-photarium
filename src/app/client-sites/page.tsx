@@ -14,7 +14,7 @@ export default async function ClientSitesPage() {
             Create and deploy client sites through the CLI, then link client-page projects to those workers from the app.
           </p>
           <div className="mt-4 rounded-md border border-stone-200 bg-stone-50 p-3 text-xs font-mono text-stone-600">
-            <div><code>npm run client-sites:create -- --name "Client Name"</code></div>
+            <div><code>npm run client-sites:create -- --name &quot;Client Name&quot;</code></div>
             <div><code>npm run client-sites:list</code></div>
             <div><code>npm run client-sites:deploy -- --site &lt;client-site-id&gt;</code></div>
           </div>

@@ -29,7 +29,7 @@ describe('GET /api/images/:id/download', () => {
     });
     getCloudflareCredentialsMock.mockReturnValue({ accountId: 'acct', apiToken: 'token' });
 
-    const mockFetch = vi.spyOn(globalThis, 'fetch').mockImplementation((input: any, init?: any) => {
+    const mockFetch = vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/images/v1/img/blob')) {
         expect(init?.headers?.Authorization).toBe('Bearer token');
@@ -58,7 +58,7 @@ describe('GET /api/images/:id/download', () => {
     });
     getCloudflareCredentialsMock.mockReturnValue({ accountId: 'acct', apiToken: 'token' });
 
-    const mockFetch = vi.spyOn(globalThis, 'fetch').mockImplementation((input: any) => {
+    const mockFetch = vi.spyOn(globalThis, 'fetch').mockImplementation((input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes('/images/v1/img/blob')) {
         return Promise.resolve(new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'image/webp' } }));

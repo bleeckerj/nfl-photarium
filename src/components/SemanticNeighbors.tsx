@@ -47,7 +47,6 @@ interface HoverPreview {
 export function SemanticNeighbors({
   imageId,
   type = 'clip',
-  limit = 8,
   showStrangers = true,
   className = '',
   onImageClick,

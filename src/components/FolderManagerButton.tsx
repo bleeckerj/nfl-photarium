@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useToast } from './Toast';
 
 interface FolderManagerButtonProps {
@@ -31,26 +31,20 @@ export default function FolderManagerButton({
   const [renameValue, setRenameValue] = useState('');
   const toast = useToast();
 
-  useEffect(() => {
-    if (open) {
-      void loadFolders();
-    }
-  }, [open]);
-
   const buttonClasses = size === 'sm'
     ? 'text-[0.7em] font-mono font-mono px-2 py-1 border border-gray-300 rounded-md hover:bg-gray-100'
     : 'text-sm font-mono px-3 py-1.5 border border-gray-300 rounded-md hover:bg-gray-100';
 
-  const getNamespaceQuery = () => {
+  const getNamespaceQuery = useCallback(() => {
     if (namespace === undefined) return '';
     if (namespace === '__all__') return 'namespace=__all__';
     if (namespace === '') return `namespace=${encodeURIComponent(process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || 'cf-default')}`;
     return `namespace=${encodeURIComponent(namespace)}`;
-  };
+  }, [namespace]);
 
   const isAllNamespacesView = namespace === '__all__';
 
-  const loadFolders = async () => {
+  const loadFolders = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -67,7 +61,13 @@ export default function FolderManagerButton({
     } finally {
       setLoading(false);
     }
-  };
+  }, [getNamespaceQuery]);
+
+  useEffect(() => {
+    if (open) {
+      void loadFolders();
+    }
+  }, [loadFolders, open]);
 
   const afterMutation = async (message: string) => {
     toast.push(message);

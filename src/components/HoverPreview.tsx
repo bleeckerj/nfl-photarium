@@ -27,8 +27,7 @@ const HoverPreview: React.FC<HoverPreviewProps> = ({
   const [isLoaded, setIsLoaded] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
 
-  // Calculate optimal preview size based on original dimensions
-  const getPreviewSize = () => {
+  const previewSize = useMemo(() => {
     const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1200;
     const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 800;
     const maxAllowedWidth = Math.max(200, viewportWidth - VIEWPORT_PADDING * 2);
@@ -66,11 +65,8 @@ const HoverPreview: React.FC<HoverPreviewProps> = ({
       width: Math.round(previewWidth), 
       height: Math.round(previewHeight) 
     };
-  };
-
-  const previewSize = useMemo(() => getPreviewSize(), [
-    dimensions?.width,
-    dimensions?.height
+  }, [
+    dimensions
   ]);
 
   // Calculate position to keep preview within viewport

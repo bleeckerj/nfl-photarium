@@ -64,13 +64,12 @@ export async function extractColorsFromUrl(imageUrl: string): Promise<ColorInfo 
 export async function extractColorsFromBuffer(imageBuffer: Buffer): Promise<ColorInfo | null> {
   try {
     // Resize to small size for faster processing (color doesn't need high res)
-    const { data, info } = await sharp(imageBuffer)
+    const { data } = await sharp(imageBuffer)
       .resize(100, 100, { fit: 'inside' })
       .removeAlpha()
       .raw()
       .toBuffer({ resolveWithObject: true });
 
-    const pixelCount = info.width * info.height;
     const pixels: RGB[] = [];
 
     // Extract all pixel colors

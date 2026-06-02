@@ -229,40 +229,27 @@ export function getCloudflareDownloadUrl(
   }
 
   let mime = 'image/jpeg';
-  let formatParam = 'jpeg';
-
   switch (ext) {
     case 'png':
       mime = 'image/png';
-      formatParam = 'png';
       break;
     case 'gif':
       mime = 'image/gif';
-      formatParam = 'gif';
       break;
     case 'svg':
       mime = 'image/svg+xml';
-      formatParam = ''; // Don't force format for SVG
       break;
     case 'webp':
       mime = 'image/webp';
-      formatParam = 'webp';
       break;
     case 'avif':
       mime = 'image/avif';
-      formatParam = 'avif';
-      break;
-    case 'avif':
-      mime = 'image/avif';
-      formatParam = 'avif';
       break;
     case 'bmp':
       mime = 'image/bmp';
-      formatParam = ''; 
       break;
     default:
       mime = 'image/jpeg';
-      formatParam = 'jpeg';
   }
 
   const base = `https://imagedelivery.net/${hash}/${imageId}/public`;

@@ -69,7 +69,7 @@ const NamespaceModal = ({
             </div>
           </label>
           <p className="text-[0.7em] text-gray-500">
-            Only images in this namespace are shown and used for duplicate checks (unless you pick "All namespaces").
+            Only images in this namespace are shown and used for duplicate checks (unless you pick &quot;All namespaces&quot;).
           </p>
         </div>
         <div className="flex items-center justify-end gap-2 p-3 border-t">

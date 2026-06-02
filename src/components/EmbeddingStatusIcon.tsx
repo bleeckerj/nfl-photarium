@@ -30,7 +30,6 @@ export function EmbeddingStatusIcon({
   hasClipEmbedding = false,
   hasColorEmbedding = false,
   dominantColors,
-  averageColor,
   pendingStatus,
   pendingLabel,
   size = 16,

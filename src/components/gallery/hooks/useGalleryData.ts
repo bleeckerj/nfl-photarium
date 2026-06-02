@@ -25,6 +25,8 @@ interface UseGalleryDataReturn {
   setImages: React.Dispatch<React.SetStateAction<CloudflareImage[]>>;
 }
 
+const COLOR_METADATA_RETRY_MS = 5 * 60 * 1000;
+
 export function useGalleryData({ namespace, refreshTrigger }: UseGalleryDataOptions): UseGalleryDataReturn {
   const [images, setImages] = useState<CloudflareImage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,7 +34,6 @@ export function useGalleryData({ namespace, refreshTrigger }: UseGalleryDataOpti
   const [colorMetadataMap, setColorMetadataMap] = useState<Record<string, ColorMetadata>>({});
   const [registryNamespaces, setRegistryNamespaces] = useState<string[]>([]);
   const requestedColorIdsRef = useRef<Map<string, number>>(new Map());
-  const COLOR_METADATA_RETRY_MS = 5 * 60 * 1000;
   const ENABLE_COLOR_METADATA = process.env.NEXT_PUBLIC_ENABLE_COLOR_METADATA === '1';
   
   const abortControllerRef = useRef<AbortController | null>(null);

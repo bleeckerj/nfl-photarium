@@ -6,7 +6,7 @@
 
 'use client';
 
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import type { CloudflareImage } from '../types';
 import { DEFAULT_PAGE_SIZE } from '../constants';
 import { formatDateRangeLabel } from '../utils';
@@ -54,8 +54,6 @@ export function useGalleryPagination({
 }: UseGalleryPaginationOptions): UseGalleryPaginationReturn {
   const [currentPage, setCurrentPage] = useState(initialPage);
   const [pageSize, setPageSize] = useState(initialPageSize || DEFAULT_PAGE_SIZE);
-  const galleryTopRef = useRef<HTMLDivElement | null>(null);
-  const didInitFilterPageRef = useRef(false);
 
   const totalPages = Math.max(1, Math.ceil(filteredImages.length / pageSize));
   const pageIndex = Math.min(currentPage, totalPages);

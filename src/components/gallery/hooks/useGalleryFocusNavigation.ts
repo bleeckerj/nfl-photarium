@@ -23,6 +23,8 @@ export const useGalleryFocusNavigation = ({
   pageIndex,
   serverFocus,
   setCurrentPage,
+  focusAppliedRef,
+  focusReconcileSkipRef,
 }: {
   initialFocusTargetRef: MutableRefObject<CanonicalGalleryFocusTarget | null>;
   namespace?: string;
@@ -34,16 +36,12 @@ export const useGalleryFocusNavigation = ({
   pageIndex: number;
   serverFocus: GalleryServerFocus;
   setCurrentPage: (page: number) => void;
+  focusAppliedRef: MutableRefObject<boolean>;
+  focusReconcileSkipRef: MutableRefObject<boolean>;
 }) => {
   const [focusedGalleryAssetId, setFocusedGalleryAssetId] = useState<string | null>(null);
   const [focusNotice, setFocusNotice] = useState<string | null>(null);
   const focusCanonicalizedRef = useRef(false);
-  const focusAppliedRef = useRef(false);
-  // Set true to skip the next refetch that would otherwise be triggered by a
-  // currentPage change. Used during focus reconciliation: the server's first
-  // response already returned the focus page's data, so when we sync the client
-  // currentPage to match serverFocus.page, there's no reason to refetch.
-  const focusReconcileSkipRef = useRef(false);
 
   useEffect(() => {
     const focusTarget = initialFocusTargetRef.current;
@@ -121,7 +119,18 @@ export const useGalleryFocusNavigation = ({
     });
     // Highlight is persistent: it stays until the user navigates away from
     // the focus page or unmounts the gallery. See the page-change effect below.
-  }, [filteredImages, galleryImages, initialFocusTargetRef, loading, namespace, pageIndex, serverFocus, setCurrentPage]);
+  }, [
+    filteredImages,
+    focusAppliedRef,
+    focusReconcileSkipRef,
+    galleryImages,
+    initialFocusTargetRef,
+    loading,
+    namespace,
+    pageIndex,
+    serverFocus,
+    setCurrentPage,
+  ]);
 
   // Clear the focus highlight when the user navigates to a different page.
   // This makes the highlight feel like an "I just landed here" cue rather than
@@ -133,7 +142,7 @@ export const useGalleryFocusNavigation = ({
     if (pageIndex !== serverFocus.page) {
       setFocusedGalleryAssetId(null);
     }
-  }, [pageIndex, serverFocus, focusedGalleryAssetId]);
+  }, [focusAppliedRef, pageIndex, serverFocus, focusedGalleryAssetId]);
 
   return {
     focusedGalleryAssetId,

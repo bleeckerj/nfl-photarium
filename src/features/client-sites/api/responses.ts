@@ -6,6 +6,8 @@ const omitSecret = (clientSite: ClientSiteRecord | ClientSiteListItem) => {
     runtimeSecrets: _runtimeSecrets,
     ...safeClientSite
   } = clientSite;
+  void _publishSecret;
+  void _runtimeSecrets;
   return safeClientSite;
 };
 

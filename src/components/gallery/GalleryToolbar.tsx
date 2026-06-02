@@ -9,7 +9,7 @@
 import React from 'react';
 import MonoSelect from '@/components/MonoSelect';
 import { VARIANT_OPTIONS, PAGE_SIZE_OPTIONS } from './constants';
-import type { ViewMode, NamespaceInfo } from './types';
+import type { ViewMode } from './types';
 
 interface GalleryToolbarProps {
   // View

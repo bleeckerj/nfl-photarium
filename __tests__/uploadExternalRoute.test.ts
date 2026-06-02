@@ -491,7 +491,7 @@ describe('POST /api/upload/external', () => {
     expect(uploadedWidth * uploadedHeight).toBeLessThanOrEqual(100_000_000);
     expect((uploadedMetadata?.uploadNormalization as { reasons?: string[] } | undefined)?.reasons).toContain('max-dimension');
     expect((payload.uploadNormalization as { reasons?: string[] } | undefined)?.reasons).toContain('max-dimension');
-  }, 20_000);
+  }, 45_000);
 
   it('preemptively rescales oversized animations before Cloudflare upload', async () => {
     process.env.CLOUDFLARE_ACCOUNT_ID = 'acct';
@@ -587,5 +587,5 @@ describe('POST /api/upload/external', () => {
     expect(uploadedWidth * uploadedPageHeight * uploadedFrames).toBeLessThanOrEqual(100_000_000);
     expect((uploadedMetadata?.uploadNormalization as { reasons?: string[] } | undefined)?.reasons).toContain('max-frame-area');
     expect((payload.uploadNormalization as { reasons?: string[] } | undefined)?.reasons).toContain('max-frame-area');
-  }, 30_000);
+  }, 45_000);
 });

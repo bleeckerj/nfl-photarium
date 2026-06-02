@@ -578,7 +578,6 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
                     <div key={image.id} className="w-24 shrink-0 space-y-1">
                       <div className="relative aspect-square overflow-hidden rounded border border-gray-200 bg-white">
                         {previewUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
                           <img src={previewUrl} alt="" className="h-full w-full object-cover" />
                         ) : (
                           <div className="flex h-full w-full items-center justify-center text-[0.6rem] text-gray-400">

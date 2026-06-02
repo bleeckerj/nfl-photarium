@@ -145,7 +145,6 @@ const resolvePythonExecutable = async (repoRoot: string) => {
   candidates.push('python3', 'python');
 
   for (const candidate of candidates) {
-    // eslint-disable-next-line no-await-in-loop
     if (await checkPythonHasSentenceTransformers(candidate)) {
       globalScope[PYTHON_RESOLVE_KEY] = candidate;
       return candidate;

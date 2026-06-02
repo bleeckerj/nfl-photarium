@@ -1354,22 +1354,6 @@ async function getPromptRecord(imageId: string): Promise<{ imageId: string; reco
   return apiRequest(`/api/images/${imageId}/prompt`);
 }
 
-async function generatePromptRecord(imageId: string, options: {
-  force?: boolean;
-  existingPrompt?: string;
-} = {}): Promise<{ imageId: string; record?: unknown; generated?: boolean; saved?: boolean; prompt?: string }> {
-  const params = new URLSearchParams();
-  if (options.force) params.set('force', '1');
-  const query = params.toString();
-  return apiRequest(`/api/images/${imageId}/prompt${query ? `?${query}` : ''}`, {
-    method: 'POST',
-    body: JSON.stringify({
-      force: options.force,
-      existingPrompt: options.existingPrompt,
-    }),
-  });
-}
-
 function normalizeManualPrompt(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
@@ -2110,21 +2094,6 @@ function formatImageResult(img: ImageResult): ImageResult {
     dimensions: img.dimensions,
     score: img.score,
   };
-}
-
-function formatImageSummary(img: ImageResult): string {
-  const parts = [`ID: ${img.id}`];
-  if (img.filename) parts.push(`File: ${img.filename}`);
-  if (img.folder || img.meta?.folder) parts.push(`Folder: ${img.folder || img.meta?.folder}`);
-  if (img.description || img.meta?.description) {
-    const desc = img.description || img.meta?.description || '';
-    parts.push(`Desc: ${desc.slice(0, 100)}${desc.length > 100 ? '...' : ''}`);
-  }
-  if (img.tags?.length || img.meta?.tags?.length) {
-    parts.push(`Tags: ${(img.tags || img.meta?.tags || []).join(', ')}`);
-  }
-  if (img.score !== undefined) parts.push(`Score: ${img.score.toFixed(3)}`);
-  return parts.join(' | ');
 }
 
 function buildShareUrl(imageId: string, variant?: string): string {

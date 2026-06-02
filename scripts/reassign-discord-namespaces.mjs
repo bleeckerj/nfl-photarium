@@ -246,7 +246,6 @@ async function main() {
   let ignoredUnknownPrefix = 0;
   let ignoredUnmapped = 0;
   let ignoredNonUploaded = 0;
-  let conflicts = 0;
 
   for (const [entryKey, entryValue] of scopedEntries) {
     const entry = entryValue && typeof entryValue === "object" ? entryValue : null;
@@ -290,7 +289,6 @@ async function main() {
     if (relPath) existing.relPaths.add(relPath);
     if (existing.desiredNamespace !== desiredNamespace) {
       existing.conflict = true;
-      conflicts += 1;
     }
   }
 

@@ -180,7 +180,7 @@ const getImageSources = (image: CachedCloudflareImage): ResolvedSource[] =>
     toLocalSource(image.originalUrl),
     toRemoteSource(image.sourceUrl),
     toLocalSource(image.sourceUrl),
-    toRemoteSource(image.variants.find((value) => value.includes('/public')) || image.variants[0]),
+    toRemoteSource(image.variants?.find((value) => value.includes('/public')) || image.variants?.[0]),
     (() => {
       try {
         return toRemoteSource(getCloudflareImageUrl(image.id, 'public'));
@@ -228,13 +228,6 @@ const hasImageMetadata = (image: CachedCloudflareImage) =>
   image.size > 0 &&
   Boolean(image.aspectRatio) &&
   hasImageDimensions(image);
-
-const hasVideoMetadata = (video: VideoAssetRecord) =>
-  typeof video.fileSizeBytes === 'number' &&
-  video.fileSizeBytes > 0 &&
-  typeof video.durationSeconds === 'number' &&
-  video.durationSeconds > 0 &&
-  Boolean(video.aspectRatio || (video.width && video.height));
 
 export async function enrichImageAssetMetadata(
   input: string | CachedCloudflareImage

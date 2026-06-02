@@ -153,6 +153,12 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const requestedPromptIdsRef = useRef<Map<string, number>>(new Map());
   const ENABLE_COLOR_METADATA = process.env.NEXT_PUBLIC_ENABLE_COLOR_METADATA === '1';
   const didRestoreReturnStateRef = useRef(false);
+  const focusAppliedRef = useRef(false);
+  // Set true to skip the next refetch that would otherwise be triggered by a
+  // currentPage change. Used during focus reconciliation: the server's first
+  // response already returned the focus page's data, so when we sync the client
+  // currentPage to match serverFocus.page, there's no reason to refetch.
+  const focusReconcileSkipRef = useRef(false);
 
   // Restore scroll position when returning from a detail page.
   // Page is restored during initial state hydration to avoid a visible jump.
@@ -174,7 +180,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         window.scrollTo({ top: parsed.scrollY, behavior: 'auto' });
       });
     });
-  }, [loading, namespace]);
+  }, [initialGalleryReturnStateRef, loading, namespace]);
 
   // If we arrived via `/?gpage=...&gns=...`, clean up the URL once mounted.
   useEffect(() => {
@@ -311,7 +317,15 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         }
       }
     }
-  }, [namespace, PERF_LOGGING_ENABLED, videoLimitOverride, includeExtrasForGallery, fetchNamespaces]);
+  }, [
+    fetchNamespaces,
+    focusAppliedRef,
+    includeExtrasForGallery,
+    initialFocusTargetRef,
+    namespace,
+    PERF_LOGGING_ENABLED,
+    videoLimitOverride,
+  ]);
 
   const handleFoldersChanged = async () => {
     await fetchImages({ silent: true });
@@ -383,7 +397,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       return;
     }
     setOpenCopyMenu((prev) => (prev === id ? null : id));
-  }, [images, toast.push]);
+  }, [images, toast]);
 
   const downloadVariantToFile = async (url: string, filenameHint?: string) => {
     try {
@@ -505,8 +519,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     focusedGalleryAssetId,
     focusNotice,
     setFocusNotice,
-    focusAppliedRef,
-    focusReconcileSkipRef,
   } = useGalleryFocusNavigation({
     initialFocusTargetRef,
     namespace,
@@ -518,6 +530,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     pageIndex,
     serverFocus,
     setCurrentPage,
+    focusAppliedRef,
+    focusReconcileSkipRef,
   });
 
   useGalleryNamespaceLifecycle({
@@ -607,7 +621,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       return;
     }
     void fetchImages({ silent: true });
-  }, [fetchImages, serverGalleryQueryKey, serverGalleryQuery]);
+  }, [fetchImages, focusReconcileSkipRef, serverGalleryQueryKey, serverGalleryQuery]);
 
   const uniqueFolders = useMemo(() => {
     const selectedFolderValue =

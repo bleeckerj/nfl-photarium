@@ -46,18 +46,6 @@ const getMimeFromExtension = (value: string) => {
   return undefined;
 };
 
-const getFilenameFromContentDisposition = (value: string | null) => {
-  if (!value) return undefined;
-  const match = /filename\*=UTF-8''([^;]+)|filename="?([^\";]+)"?/i.exec(value);
-  const encoded = match?.[1] || match?.[2];
-  if (!encoded) return undefined;
-  try {
-    return decodeURIComponent(encoded);
-  } catch {
-    return encoded;
-  }
-};
-
 type UploadItem = {
   clientId: string;
   url: string;

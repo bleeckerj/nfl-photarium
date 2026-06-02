@@ -1,8 +1,6 @@
 import { getCachedImages, getCachedImagesSync, CachedCloudflareImage } from './cloudflareImageCache';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 
-const normalize = (value?: string | null) => (value ?? '').trim().toLowerCase();
-
 export interface DuplicateSummary {
   id: string;
   filename: string;

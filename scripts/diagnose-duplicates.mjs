@@ -7,8 +7,6 @@
  *   node scripts/diagnose-duplicates.mjs          # hits http://localhost:3000
  *   DIAG_API_BASE=https://your-host DIAG_REFRESH=1 node scripts/diagnose-duplicates.mjs
  */
-import { inspect } from 'node:util';
-
 const API_BASE = process.env.DIAG_API_BASE ?? 'http://localhost:3000';
 const FORCE_REFRESH = process.env.DIAG_REFRESH === '1';
 const MIN_GROUP_SIZE = Number(process.env.DIAG_MIN_GROUP_SIZE ?? '2');

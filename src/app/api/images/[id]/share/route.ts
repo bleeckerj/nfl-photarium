@@ -14,7 +14,7 @@ export async function GET(
   try {
     const url = getCloudflareImageUrl(id, variant);
     return NextResponse.redirect(url, 307);
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Failed to build share URL' }, { status: 500 });
   }
 }
