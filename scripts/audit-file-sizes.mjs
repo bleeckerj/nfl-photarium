@@ -38,12 +38,6 @@ const ALLOWED_OVERSIZED_FILES = new Map([
     reason: 'legacy ingest awaiting provider module split',
     expires: '2026-07-15',
   }],
-  ['scripts/snagit-ingest.mjs', {
-    category: 'script',
-    owner: 'maintainability-refactor',
-    reason: 'legacy ingest awaiting capture metadata split',
-    expires: '2026-07-15',
-  }],
   ['src/app/images/[id]/page.tsx', {
     category: 'component',
     owner: 'maintainability-refactor',

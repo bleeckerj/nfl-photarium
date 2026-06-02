@@ -80,6 +80,9 @@ function testsForFile(file) {
   if (file.includes('dng-ingest')) {
     tests.push('__tests__/dngIngestScript.test.ts');
   }
+  if (file.includes('snagit-ingest')) {
+    tests.push('__tests__/snagitIngestScript.test.ts');
+  }
   if (file.includes('audit-file-sizes') || file.includes('hygiene-targeted')) {
     tests.push();
   }
