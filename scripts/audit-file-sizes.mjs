@@ -32,12 +32,6 @@ const ALLOWED_OVERSIZED_FILES = new Map([
     reason: 'legacy MCP runtime deferred from first-pass app refactor',
     expires: '2026-07-15',
   }],
-  ['scripts/instagram-ingest.mjs', {
-    category: 'script',
-    owner: 'maintainability-refactor',
-    reason: 'legacy ingest awaiting provider module split',
-    expires: '2026-07-15',
-  }],
   ['src/app/images/[id]/page.tsx', {
     category: 'component',
     owner: 'maintainability-refactor',
