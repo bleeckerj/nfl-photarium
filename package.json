@@ -15,7 +15,7 @@
     "lint": "eslint",
     "size:audit": "node scripts/audit-file-sizes.mjs",
     "hygiene:targeted": "node scripts/hygiene-targeted.mjs",
-    "hygiene": "npm run size:audit && npm run lint && npm test",
+    "hygiene": "npm run size:audit && npm run lint && npm test && npm run build",
     "test": "vitest run",
     "redis:start": "docker compose up -d",
     "redis:stop": "docker compose down",
