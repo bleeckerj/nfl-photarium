@@ -328,28 +328,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     serverPagination,
   });
 
-  useGalleryNamespaceLifecycle({
-    abortControllerRef,
-    deferInitialFetchRef,
-    fetchImages,
-    initialGalleryReturnStateRef,
-    initialSilentFetchRef,
-    namespace,
-    perfLoggingEnabled: PERF_LOGGING_ENABLED,
-    requestedPromptIdsRef,
-    setAspectRatioFilters,
-    setOnlyCanonical,
-    setPromptThisMap,
-    setSearchTerm,
-    setSelectedFolder,
-    setSelectedTag,
-    setServerFocus,
-    setShowMotionAssetsOnly,
-    setVideoLimitOverride,
-    setVideoMeta,
-    setVideoResultsNotice,
-  });
-
   const clearColorSearch = useCallback(() => {
     setColorSearchHex(null);
     setColorSearchRows([]);
@@ -540,6 +518,28 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     pageIndex,
     serverFocus,
     setCurrentPage,
+  });
+
+  useGalleryNamespaceLifecycle({
+    abortControllerRef,
+    deferInitialFetchRef,
+    fetchImages,
+    initialGalleryReturnStateRef,
+    initialSilentFetchRef,
+    namespace,
+    perfLoggingEnabled: PERF_LOGGING_ENABLED,
+    requestedPromptIdsRef,
+    setAspectRatioFilters,
+    setOnlyCanonical,
+    setPromptThisMap,
+    setSearchTerm,
+    setSelectedFolder,
+    setSelectedTag,
+    setServerFocus,
+    setShowMotionAssetsOnly,
+    setVideoLimitOverride,
+    setVideoMeta,
+    setVideoResultsNotice,
   });
 
   const hiddenFolderSet = useMemo(() => new Set(hiddenFolders), [hiddenFolders]);

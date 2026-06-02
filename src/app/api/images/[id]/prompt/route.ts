@@ -269,7 +269,7 @@ export async function PATCH(
       return NextResponse.json({ error: 'Missing prompt' }, { status: 400 });
     }
 
-    const prompt = cleanString(body?.prompt);
+    const prompt = cleanString(typeof body?.prompt === 'string' ? body.prompt : undefined);
     if (!prompt) {
       return NextResponse.json({ error: 'Prompt is empty' }, { status: 422 });
     }

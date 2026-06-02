@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
+import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import type { CanonicalGalleryFocusTarget } from '../focusNavigation';
 import type { CloudflareImage } from '../types';
 
@@ -33,7 +33,7 @@ export const useGalleryFocusNavigation = ({
   loading: boolean;
   pageIndex: number;
   serverFocus: GalleryServerFocus;
-  setCurrentPage: Dispatch<SetStateAction<number>>;
+  setCurrentPage: (page: number) => void;
 }) => {
   const [focusedGalleryAssetId, setFocusedGalleryAssetId] = useState<string | null>(null);
   const [focusNotice, setFocusNotice] = useState<string | null>(null);

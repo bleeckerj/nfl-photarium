@@ -13,6 +13,7 @@ import type { UploadFailure, UploadSuccess } from '@/server/uploadService';
 import { resolveUploadSource } from '@/server/import-metadata/uploadSourceResolver';
 import { isPrivateHost, isValidRemoteUrl } from '@/server/import-metadata/http';
 import { resolveUploadNamespace, SPECIFIC_NAMESPACE_REQUIRED_ERROR } from '@/server/uploadNamespace';
+import type { UploadDuplicateAction } from '@/server/uploadDuplicatePolicy';
 
 const IMAGE_EXTENSION_MIME_MAP: Record<string, string> = {
   jpg: 'image/jpeg',
@@ -74,6 +75,9 @@ type UploadItem = {
   sessionId?: string;
   tempAssetKey?: string;
 };
+
+const normalizeDuplicateAction = (value: unknown): UploadDuplicateAction | undefined =>
+  value === 'reject' || value === 'family' ? value : undefined;
 
 export async function POST(request: NextRequest) {
   try {
@@ -266,7 +270,7 @@ export async function POST(request: NextRequest) {
             sourceUrl: sourceUrl,
             namespace: effectiveNamespace,
             parentId: resolvedParentId,
-            duplicateAction: typeof item.duplicateAction === 'string' ? item.duplicateAction : undefined,
+            duplicateAction: normalizeDuplicateAction(item.duplicateAction),
           }
         });
 

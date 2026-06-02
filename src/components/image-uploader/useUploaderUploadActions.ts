@@ -3,10 +3,10 @@ import { useCallback, type Dispatch, type SetStateAction } from 'react';
 import type { UploaderQueueItem } from '@/features/page-import/types';
 import { runWithConcurrency } from '@/components/image-uploader/concurrency';
 import { NAMESPACE_REQUIRED_UPLOAD_ERROR } from '@/components/image-uploader/constants';
-import { resolveTagInput } from '@/components/image-uploader/fileHelpers';
+import { inferAssetTypeFromFile, resolveTagInput } from '@/components/image-uploader/fileHelpers';
 import type { UploadedImage } from '@/components/image-uploader/types';
 import { uploadFormDataWithRetry } from '@/services/uploadRequestService';
-import { inferAssetTypeFromFile, inferAssetTypeFromUrl } from '@/utils/mediaAssetType';
+import { inferAssetTypeFromUrl } from '@/utils/mediaAssetType';
 
 type QueuedFile = UploaderQueueItem;
 

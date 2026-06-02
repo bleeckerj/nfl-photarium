@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import ImageUploader from '@/components/ImageUploader';
 import ImageGallery from '@/components/ImageGallery';
 import {
@@ -9,7 +9,7 @@ import {
 } from '@/components/gallery/focusNavigation';
 import { useSearchParams } from 'next/navigation';
 
-export default function Home() {
+function HomeContent() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const galleryRef = useRef<{ refreshImages: () => void }>(null);
   const envDefaultNamespace = process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || 'cf-default';
@@ -101,5 +101,13 @@ export default function Home() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<main className="min-h-screen bg-gray-50" />}>
+      <HomeContent />
+    </Suspense>
   );
 }

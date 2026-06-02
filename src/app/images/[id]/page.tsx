@@ -20,8 +20,10 @@ import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { useDropzone } from 'react-dropzone';
 import { formatBytes } from '@/utils/formatBytes';
 import { normalizeColorSearchHex } from '@/components/gallery/colorSearch';
+import { useImageAspectRatio } from '@/hooks/useImageAspectRatio';
 import { buildCanonicalGalleryHref, GALLERY_NAMESPACE_STORAGE_KEY, resetGalleryPreferencesForFocus } from '@/components/gallery/focusNavigation';
 import { ImageDetailMetadataPanel } from '@/components/image-detail/ImageDetailMetadataPanel';
+import type { ComfyWorkflowRecord } from '@/components/image-detail/comfy';
 import {
   IMAGE_DETAIL_DRAFT_KEY_PREFIX,
   LEGACY_IMAGE_DETAIL_DRAFT_KEY_PREFIX,

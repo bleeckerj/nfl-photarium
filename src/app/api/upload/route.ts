@@ -7,6 +7,7 @@ import { getPromptThisRecord, setPromptThisRecord, type PromptThisRecord } from 
 import { resolveUploadNamespace, SPECIFIC_NAMESPACE_REQUIRED_ERROR } from '@/server/uploadNamespace';
 import { SUPPORTED_IMAGE_TYPES, uploadImageBuffer } from '@/server/uploadService';
 import type { UploadFailure, UploadSuccess } from '@/server/uploadService';
+import type { UploadDuplicateAction } from '@/server/uploadDuplicatePolicy';
 
 const logIssue = (message: string, details?: Record<string, unknown>) => {
   console.warn('[upload] ' + message, details);
@@ -28,6 +29,9 @@ const isZipFile = (file: File) =>
 const isKeynoteFile = (file: File) => file.name.toLowerCase().endsWith('.key');
 
 const isArchiveFile = (file: File) => isZipFile(file) || isKeynoteFile(file);
+
+const normalizeDuplicateAction = (value: unknown): UploadDuplicateAction | undefined =>
+  value === 'reject' || value === 'family' ? value : undefined;
 
 const getMimeTypeFromFilename = (filename: string) => {
   const lower = filename.toLowerCase();
@@ -233,7 +237,7 @@ export async function POST(request: NextRequest) {
       sourcePath: cleanSourcePath,
       namespace: effectiveNamespace,
       parentId: resolvedParentId,
-      duplicateAction: typeof duplicateActionRaw === 'string' ? duplicateActionRaw : undefined,
+      duplicateAction: normalizeDuplicateAction(duplicateActionRaw),
     };
 
     if (isArchiveFile(file)) {

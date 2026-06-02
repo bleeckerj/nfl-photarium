@@ -382,9 +382,12 @@ const uploadArtifactToPhotarium = async (params: {
   if (!namespace) {
     throw new Error('Source image is missing namespace metadata');
   }
+  const { accountId, apiToken } = getCloudflareCredentials();
 
   const outputFilename = buildOutputFilename(params.sourceFilename, params.request, params.artifact.filename);
   const commonContext = {
+    accountId,
+    apiToken,
     folder: extras?.folder ?? source.folder,
     tags: Array.from(new Set([
       ...getUserVisibleTags(source.tags),

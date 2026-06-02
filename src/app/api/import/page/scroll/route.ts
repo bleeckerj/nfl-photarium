@@ -32,33 +32,6 @@ const DEFAULT_TIMEOUT_MS = 30000;
 // For scroll mode, we trust puppeteer found real images, so use a very low threshold
 const SCROLL_MODE_MIN_BYTES = 1024; // 1KB - just filter out tiny tracking pixels
 
-const isValidUrl = (value: string) => {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
-  } catch {
-    return false;
-  }
-};
-
-const isPrivateHost = (hostname: string) => {
-  const lowered = hostname.toLowerCase();
-  if (lowered === 'localhost') return true;
-  const ipv4Match = /^(\d{1,3}\.){3}\d{1,3}$/.test(lowered);
-  if (!ipv4Match) return false;
-  const octets = lowered.split('.').map((part) => Number(part));
-  if (octets.some((value) => Number.isNaN(value) || value < 0 || value > 255)) {
-    return true;
-  }
-  const [a, b] = octets;
-  if (a === 10) return true;
-  if (a === 127) return true;
-  if (a === 192 && b === 168) return true;
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  if (a === 169 && b === 254) return true;
-  return false;
-};
-
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();

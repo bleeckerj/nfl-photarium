@@ -4,17 +4,18 @@ import type {
   CloudflareImage,
   GalleryFamilySummary,
 } from '../types';
+import type { EmbeddingPendingEntry } from '@/utils/embeddingPending';
 import type { GalleryServerPagination } from '../serverState';
 
 type UseGalleryViewFiltersOptions = {
   activeColorSearchHex: string | null;
   altLoadingMap: Record<string, boolean>;
   bulkSelectionMode: boolean;
-  childrenMap: Map<string, string[]>;
+  childrenMap: Record<string, CloudflareImage[]>;
   colorMetadataMap: Record<string, { dominantColors?: string[]; averageColor?: string }>;
   displayNameLoadingMap: Record<string, boolean>;
   duplicateIds: Set<string>;
-  embeddingPendingMap: Record<string, boolean>;
+  embeddingPendingMap: Record<string, EmbeddingPendingEntry>;
   familySummaryMap: Record<string, GalleryFamilySummary>;
   favoriteLoadingMap: Record<string, boolean>;
   focusedGalleryAssetId: string | null;
