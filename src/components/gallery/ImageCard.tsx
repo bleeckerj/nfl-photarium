@@ -330,6 +330,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
             )}
             {/* Color metadata display */}
             <ColorSwatches
+              assetId={image.id}
               dominantColors={swatchDominantColors}
               averageColor={swatchAverageColor}
               size="compact"

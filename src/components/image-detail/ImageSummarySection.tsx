@@ -117,6 +117,7 @@ export const ImageSummarySection = ({
       <span>Namespace {image.namespace || 'Missing namespace'}</span>
     </div>
     <ColorSwatches
+      assetId={image.id}
       dominantColors={image.dominantColors}
       averageColor={image.averageColor}
       showLabels={true}

@@ -298,6 +298,7 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
           </p>
         )}
         <ColorSwatches
+          assetId={image.id}
           dominantColors={swatchDominantColors}
           averageColor={swatchAverageColor}
           showLabels={true}

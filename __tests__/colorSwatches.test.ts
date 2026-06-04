@@ -1,7 +1,7 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { ColorSwatches } from '@/components/ColorSwatches';
+import { ColorSwatches, formatPaletteJson, normalizePaletteHex } from '@/components/ColorSwatches';
 import { ImageCard } from '@/components/gallery/ImageCard';
 import { ImageListItem } from '@/components/gallery/ImageListItem';
 import { normalizeColorSearchHex, resolveColorSearchAssets } from '@/components/gallery/colorSearch';
@@ -29,6 +29,7 @@ vi.mock('next/link', () => ({
 
 type ElementWithChildren = React.ReactElement<{ children?: React.ReactNode }>;
 type ClickableElement = React.ReactElement<{ onClick: () => void }>;
+type ButtonElement = React.ReactElement<{ onClick: (event: Pick<React.MouseEvent<HTMLButtonElement>, 'preventDefault' | 'stopPropagation'>) => void }>;
 
 describe('ColorSwatches', () => {
   it('renders nothing when no colors are provided', () => {
@@ -54,6 +55,7 @@ describe('ColorSwatches', () => {
     );
 
     expect(markup).toContain('palette');
+    expect(markup).toContain('Copy palette JSON');
     expect(markup).toContain('#111111');
     expect(markup).toContain('#555555');
     expect(markup).not.toContain('#666666');
@@ -101,6 +103,45 @@ describe('ColorSwatches', () => {
     secondButton.props.onClick();
 
     expect(onSelectColor).toHaveBeenCalledWith('#222222');
+  });
+
+  it('formats dominant palette colors as id-scoped hex JSON', () => {
+    expect(normalizePaletteHex('#0F1E2D')).toBe('#0f1e2d');
+    expect(normalizePaletteHex('#abc')).toBe('#aabbcc');
+    expect(normalizePaletteHex('not-a-color')).toBeNull();
+    expect(formatPaletteJson('asset-1', ['#0F1E2D', '#abc', 'not-a-color'])).toBe(JSON.stringify({
+      id: 'asset-1',
+      palette: ['#0f1e2d', '#aabbcc'],
+    }, null, 2));
+  });
+
+  it('copies the dominant palette hex JSON from the palette label', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+
+    const tree = ColorSwatches({
+      assetId: 'asset-1',
+      dominantColors: ['#111111', '#223344'],
+      showLabels: true,
+    }) as ElementWithChildren;
+    const groups = React.Children.toArray(tree.props.children) as ElementWithChildren[];
+    const paletteGroup = groups[0];
+    const paletteChildren = React.Children.toArray(paletteGroup.props.children) as ButtonElement[];
+    const labelButton = paletteChildren[0];
+    const event = {
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    };
+
+    labelButton.props.onClick(event);
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.stopPropagation).toHaveBeenCalled();
+    expect(writeText).toHaveBeenCalledWith(JSON.stringify({
+      id: 'asset-1',
+      palette: ['#111111', '#223344'],
+    }, null, 2));
+    vi.unstubAllGlobals();
   });
 });
 
