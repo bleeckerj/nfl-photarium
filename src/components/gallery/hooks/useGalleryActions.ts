@@ -8,6 +8,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type { CloudflareImage } from '../types';
+import { applyEmbeddingResultToImage } from '../embeddingResult';
 import { truncateMiddle } from '../utils';
 import { setEmbeddingPendingEntry } from '@/utils/embeddingPending';
 import { requestSemanticTags } from '@/services/imageAltDescriptionService';
@@ -781,14 +782,11 @@ export function useGalleryActions({
           const imgResult = result.results?.find((r: { imageId: string }) => r.imageId === img.id);
           if (imgResult?.success && !imgResult?.skipped) {
             setEmbeddingPendingEntry(img.id, undefined);
-            return {
-              ...img,
-              hasClipEmbedding: imgResult.clipGenerated || img.hasClipEmbedding,
-              hasColorEmbedding: imgResult.colorGenerated || img.hasColorEmbedding,
-            };
+            return applyEmbeddingResultToImage(img, imgResult);
           }
           if (imgResult?.success && imgResult?.skipped) {
             setEmbeddingPendingEntry(img.id, undefined);
+            return applyEmbeddingResultToImage(img, imgResult);
           } else if (imgResult && !imgResult.success) {
             setEmbeddingPendingEntry(img.id, {
               status: 'error',
@@ -878,11 +876,7 @@ export function useGalleryActions({
               if (!item) return img;
               if (item.success) {
                 setEmbeddingPendingEntry(img.id, undefined);
-                return {
-                  ...img,
-                  hasClipEmbedding: item.clipGenerated || img.hasClipEmbedding,
-                  hasColorEmbedding: item.colorGenerated || img.hasColorEmbedding,
-                };
+                return applyEmbeddingResultToImage(img, item);
               }
               setEmbeddingPendingEntry(img.id, {
                 status: 'error',

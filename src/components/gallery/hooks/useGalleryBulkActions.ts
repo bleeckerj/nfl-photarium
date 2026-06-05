@@ -3,6 +3,7 @@ import type { CloudflareImage } from '../types';
 import { truncateMiddle } from '@/components/gallery/utils';
 import { requestSemanticTags } from '@/services/imageAltDescriptionService';
 import { mergeUserTagsPreservingSystemTags } from '@/utils/systemTags';
+import { applyEmbeddingResultToImage } from '../embeddingResult';
 
 const BULK_UPDATE_CONCURRENCY = 4;
 
@@ -621,11 +622,7 @@ export const useGalleryBulkActions = ({
         if (selectedImageIds.has(img.id)) {
           const imgResult = result.results?.find((r: { imageId: string }) => r.imageId === img.id);
           if (imgResult?.success && !imgResult?.skipped) {
-            return {
-              ...img,
-              hasClipEmbedding: imgResult.clipGenerated || img.hasClipEmbedding,
-              hasColorEmbedding: imgResult.colorGenerated || img.hasColorEmbedding,
-            };
+            return applyEmbeddingResultToImage(img, imgResult);
           }
         }
         return img;

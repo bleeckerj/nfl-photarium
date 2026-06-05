@@ -15,6 +15,12 @@ import { getCachedImage, upsertCachedImage } from '@/server/cloudflareImageCache
 import { generateClipEmbedding } from '@/server/embeddingService';
 import { extractColorsFromUrl } from '@/server/colorExtraction';
 import {
+  applyEmbeddingReadinessToImage,
+  assessEmbeddingReadiness,
+  needsCachedEmbeddingUpdate,
+  pickEmbeddingImageUrl,
+} from '@/server/embeddingRequestService';
+import {
   storeImageVectors,
   isVectorSearchAvailable,
   ensureVectorIndex,
@@ -68,37 +74,46 @@ export async function POST(
     const force = body.force === true;
 
     const existingVectors = await getImageVectors(id);
-    const hasStoredClip = Boolean(existingVectors?.clipEmbedding?.length);
-    const hasStoredColor = Boolean(existingVectors?.colorHistogram?.length);
+    const readiness = assessEmbeddingReadiness(image, existingVectors, {
+      generateClip,
+      generateColor,
+      force,
+    });
 
-    // Check if we need to do anything (Redis vectors are the source of truth)
-    const needsClip = generateClip && (force || !hasStoredClip);
-    const needsColor = generateColor && (force || !hasStoredColor);
-
-    if (!needsClip && !needsColor) {
+    if (!readiness.needsClip && !readiness.needsColor) {
+      if (needsCachedEmbeddingUpdate(image, readiness)) {
+        await upsertCachedImage(applyEmbeddingReadinessToImage(image, readiness));
+      }
       return NextResponse.json({
         imageId: id,
         message: 'Embeddings already exist',
-        hasClipEmbedding: hasStoredClip,
-        hasColorEmbedding: hasStoredColor,
+        hasClipEmbedding: readiness.hasClipEmbedding,
+        hasColorEmbedding: readiness.hasColorEmbedding,
+        dominantColors: readiness.dominantColors,
+        averageColor: readiness.averageColor,
         skipped: true,
       });
     }
 
     // Get image URL (use w=300 variant for efficiency)
-    const variant = image.variants.find(v => v.includes('w=300')) || image.variants[0];
-    const imageUrl = `${variant}?format=webp`;
+    const imageUrl = pickEmbeddingImageUrl(image);
+    if (!imageUrl) {
+      return NextResponse.json(
+        { error: 'Image has no variants' },
+        { status: 400 }
+      );
+    }
 
     let clipEmbedding: number[] | null = null;
     let colorInfo: Awaited<ReturnType<typeof extractColorsFromUrl>> = null;
 
     // Generate CLIP embedding
-    if (needsClip) {
+    if (readiness.needsClip) {
       clipEmbedding = await generateClipEmbedding(imageUrl);
     }
 
     // Generate color embedding
-    if (needsColor) {
+    if (readiness.needsColor) {
       colorInfo = await extractColorsFromUrl(imageUrl);
     }
 
@@ -115,14 +130,14 @@ export async function POST(
       });
 
       // Update cache flags
-      const nextHasClip = Boolean(clipEmbedding) || hasStoredClip || Boolean(image.hasClipEmbedding);
-      const nextHasColor = Boolean(colorInfo) || hasStoredColor || Boolean(image.hasColorEmbedding);
+      const nextHasClip = Boolean(clipEmbedding) || readiness.hasClipEmbedding;
+      const nextHasColor = Boolean(colorInfo) || readiness.hasColorEmbedding;
       await upsertCachedImage({
         ...image,
         hasClipEmbedding: nextHasClip,
         hasColorEmbedding: nextHasColor,
-        dominantColors: colorInfo?.dominantColors ?? image.dominantColors,
-        averageColor: colorInfo?.averageColor ?? image.averageColor,
+        dominantColors: colorInfo?.dominantColors ?? readiness.dominantColors,
+        averageColor: colorInfo?.averageColor ?? readiness.averageColor,
       });
     }
 
@@ -131,10 +146,10 @@ export async function POST(
       success: true,
       clipGenerated: !!clipEmbedding,
       colorGenerated: !!colorInfo,
-      hasClipEmbedding: Boolean(clipEmbedding) || hasStoredClip || Boolean(image.hasClipEmbedding),
-      hasColorEmbedding: Boolean(colorInfo) || hasStoredColor || Boolean(image.hasColorEmbedding),
-      dominantColors: colorInfo?.dominantColors ?? image.dominantColors,
-      averageColor: colorInfo?.averageColor ?? image.averageColor,
+      hasClipEmbedding: Boolean(clipEmbedding) || readiness.hasClipEmbedding,
+      hasColorEmbedding: Boolean(colorInfo) || readiness.hasColorEmbedding,
+      dominantColors: colorInfo?.dominantColors ?? readiness.dominantColors,
+      averageColor: colorInfo?.averageColor ?? readiness.averageColor,
     });
   } catch (error) {
     console.error('[API] Error generating embeddings:', error);

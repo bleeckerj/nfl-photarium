@@ -16,6 +16,12 @@ import { getCachedImage, upsertCachedImage } from '@/server/cloudflareImageCache
 import { generateClipEmbedding } from '@/server/embeddingService';
 import { extractColorsFromUrl } from '@/server/colorExtraction';
 import {
+  applyEmbeddingReadinessToImage,
+  assessEmbeddingReadiness,
+  needsCachedEmbeddingUpdate,
+  pickEmbeddingImageUrl,
+} from '@/server/embeddingRequestService';
+import {
   storeImageVectors,
   isVectorSearchAvailable,
   ensureVectorIndex,
@@ -34,6 +40,10 @@ interface BatchResult {
   success: boolean;
   clipGenerated?: boolean;
   colorGenerated?: boolean;
+  hasClipEmbedding?: boolean;
+  hasColorEmbedding?: boolean;
+  dominantColors?: string[];
+  averageColor?: string;
   skipped?: boolean;
   error?: string;
 }
@@ -92,32 +102,58 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         }
 
         const existingVectors = await getImageVectors(imageId);
-        const hasStoredClip = Boolean(existingVectors?.clipEmbedding?.length);
-        const hasStoredColor = Boolean(existingVectors?.colorHistogram?.length);
+        const readiness = assessEmbeddingReadiness(image, existingVectors, {
+          generateClip,
+          generateColor,
+          force,
+        });
 
-        // Redis vectors are the source of truth for whether embeddings exist.
-        const needsClip = generateClip && (force || !hasStoredClip);
-        const needsColor = generateColor && (force || !hasStoredColor);
-
-        if (!needsClip && !needsColor) {
-          results.push({ imageId, success: true, skipped: true });
-          skippedCount++;
+        if (!readiness.needsClip && !readiness.needsColor) {
+          if (needsCachedEmbeddingUpdate(image, readiness)) {
+            await upsertCachedImage(applyEmbeddingReadinessToImage(image, readiness));
+            results.push({
+              imageId,
+              success: true,
+              clipGenerated: false,
+              colorGenerated: false,
+              hasClipEmbedding: readiness.hasClipEmbedding,
+              hasColorEmbedding: readiness.hasColorEmbedding,
+              dominantColors: readiness.dominantColors,
+              averageColor: readiness.averageColor,
+            });
+            successCount++;
+          } else {
+            results.push({
+              imageId,
+              success: true,
+              skipped: true,
+              hasClipEmbedding: readiness.hasClipEmbedding,
+              hasColorEmbedding: readiness.hasColorEmbedding,
+              dominantColors: readiness.dominantColors,
+              averageColor: readiness.averageColor,
+            });
+            skippedCount++;
+          }
           continue;
         }
 
         // Get image URL
-        const variant = image.variants.find(v => v.includes('w=300')) || image.variants[0];
-        const imageUrl = `${variant}?format=webp`;
+        const imageUrl = pickEmbeddingImageUrl(image);
+        if (!imageUrl) {
+          results.push({ imageId, success: false, error: 'Image has no variants' });
+          errorCount++;
+          continue;
+        }
 
         let clipEmbedding: number[] | null = null;
         let colorInfo: Awaited<ReturnType<typeof extractColorsFromUrl>> = null;
 
         // Generate embeddings
-        if (needsClip) {
+        if (readiness.needsClip) {
           clipEmbedding = await generateClipEmbedding(imageUrl);
         }
 
-        if (needsColor) {
+        if (readiness.needsColor) {
           colorInfo = await extractColorsFromUrl(imageUrl);
         }
 
@@ -136,18 +172,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           // Update cache flags
           await upsertCachedImage({
             ...image,
-            hasClipEmbedding: Boolean(clipEmbedding) || hasStoredClip || Boolean(image.hasClipEmbedding),
-            hasColorEmbedding: Boolean(colorInfo) || hasStoredColor || Boolean(image.hasColorEmbedding),
-            dominantColors: colorInfo?.dominantColors ?? image.dominantColors,
-            averageColor: colorInfo?.averageColor ?? image.averageColor,
+            hasClipEmbedding: Boolean(clipEmbedding) || readiness.hasClipEmbedding,
+            hasColorEmbedding: Boolean(colorInfo) || readiness.hasColorEmbedding,
+            dominantColors: colorInfo?.dominantColors ?? readiness.dominantColors,
+            averageColor: colorInfo?.averageColor ?? readiness.averageColor,
           });
         }
 
+        const hasClipEmbedding = Boolean(clipEmbedding) || readiness.hasClipEmbedding;
+        const hasColorEmbedding = Boolean(colorInfo) || readiness.hasColorEmbedding;
         results.push({
           imageId,
           success: true,
           clipGenerated: !!clipEmbedding,
           colorGenerated: !!colorInfo,
+          hasClipEmbedding,
+          hasColorEmbedding,
+          dominantColors: colorInfo?.dominantColors ?? readiness.dominantColors,
+          averageColor: colorInfo?.averageColor ?? readiness.averageColor,
         });
         successCount++;
 
