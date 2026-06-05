@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCloudflareCredentials } from '@/server/cloudflareClient';
 import { cleanupImageArtifacts } from '@/server/imageArtifactCleanup';
 import { isVectorSearchAvailable } from '@/server/vectorSearch';
 import { listCatalogAssets } from '@/server/assetCatalog';
@@ -14,6 +13,10 @@ import {
   completeDeleteFamilyJob,
   createDeleteFamilyJob,
 } from '@/server/deleteFamilyJobs';
+import {
+  CloudflareImageDeleteError,
+  deleteCloudflareImageAsset,
+} from '@/server/cloudflareImageDeletion';
 
 type DeleteFamilyRequestBody = {
   /** Required unless dryRun=true */
@@ -101,8 +104,6 @@ export async function POST(
     });
   }
 
-  const { accountId, apiToken } = getCloudflareCredentials();
-
   const redisAvailable = await isVectorSearchAvailable().catch(() => false);
 
   const performDelete = async (imageId: string): Promise<{ ok: boolean; id: string; status?: number; message?: string }> => {
@@ -137,40 +138,15 @@ export async function POST(
         return { ok: true, id: imageId };
       }
 
-      const response = await fetch(
-        `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${imageId}`,
-        {
-          method: 'DELETE',
-          headers: {
-            Authorization: `Bearer ${apiToken}`,
-          },
-        }
-      );
-
-      if (response.status === 404) {
-        const cleanup = await cleanupImageArtifacts(imageId, {
-          includeVectors: redisAvailable,
-          includeWorkflowIntentEmbedding: true,
-        });
-        if (!cleanup.success) {
-          console.warn('[DeleteFamily] Local artifact cleanup had failures (404 path)', {
-            imageId,
-            steps: cleanup.steps,
-          });
-        }
-        return { ok: true, id: imageId };
-      }
-
-      const result = await response.json().catch(() => null);
-      if (!response.ok) {
+      try {
+        await deleteCloudflareImageAsset(imageId);
+      } catch (error) {
+        const cloudflareError = error instanceof CloudflareImageDeleteError ? error : null;
         return {
           ok: false,
           id: imageId,
-          status: response.status,
-          message:
-            result?.errors?.[0]?.message ||
-            result?.error ||
-            'Failed to delete image from Cloudflare',
+          status: cloudflareError?.status ?? 500,
+          message: error instanceof Error ? error.message : 'Failed to delete image from Cloudflare',
         };
       }
 

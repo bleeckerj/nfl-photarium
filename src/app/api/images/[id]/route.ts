@@ -5,7 +5,7 @@ import {
   transformApiImageToCached,
   upsertCachedImage
 } from '@/server/cloudflareImageCache';
-import { fetchCloudflareImage, getCloudflareCredentials } from '@/server/cloudflareClient';
+import { fetchCloudflareImage } from '@/server/cloudflareClient';
 import { probeAnimatedImageFromOriginalBlob } from '@/server/animatedImageProbe';
 import { cleanupImageArtifacts } from '@/server/imageArtifactCleanup';
 import { deleteStreamVideo } from '@/server/cloudflareStreamClient';
@@ -20,6 +20,10 @@ import {
 } from '@/server/videoCatalogStorage';
 import { getImageExtrasRecord } from '@/server/imageExtras';
 import { detachAssetChildren, ParentAssignmentError } from '@/server/assetParentService';
+import {
+  CloudflareImageDeleteError,
+  deleteCloudflareImageAsset,
+} from '@/server/cloudflareImageDeletion';
 
 const pickVariantUrl = (variants: string[] | undefined): string | undefined => {
   if (!Array.isArray(variants) || variants.length === 0) return undefined;
@@ -248,8 +252,10 @@ export async function DELETE(
 
     let detachedChildIds: string[] = [];
     try {
+      // Single-image delete must not block on a full Cloudflare catalog refresh.
+      // The delete call below is authoritative; this warm-catalog pass only detaches known children.
       const detachResult = await detachAssetChildren(imageId, {
-        forceRefreshImages: true,
+        forceRefreshImages: false,
         includeVideos: process.env.ENABLE_VIDEO_ASSETS === '1',
       });
       detachedChildIds = detachResult.detachedIds;
@@ -272,26 +278,16 @@ export async function DELETE(
       );
     }
 
-    const { accountId, apiToken } = getCloudflareCredentials();
-
-    // Delete image from Cloudflare
-    const response = await fetch(
-      `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${imageId}`,
-      {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${apiToken}`,
-        },
-      }
-    );
-
-    const result = await response.json().catch(() => null);
-
-    if (!response.ok && response.status !== 404) {
-      console.error('Cloudflare API error:', result);
+    try {
+      await deleteCloudflareImageAsset(imageId);
+    } catch (error) {
+      const cloudflareError = error instanceof CloudflareImageDeleteError ? error : null;
+      console.error('Cloudflare API error:', error);
       return NextResponse.json(
-        { error: result?.errors?.[0]?.message || 'Failed to delete image from Cloudflare' },
-        { status: response.status }
+        {
+          error: error instanceof Error ? error.message : 'Failed to delete image from Cloudflare',
+        },
+        { status: cloudflareError?.status ?? 502 }
       );
     }
 

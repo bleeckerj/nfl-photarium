@@ -113,7 +113,7 @@ describe('DELETE /api/images/:id', () => {
     expect(response.status).toBe(200);
     expect(events).toEqual(['detach', 'delete']);
     expect(detachAssetChildrenMock).toHaveBeenCalledWith('parent-1', {
-      forceRefreshImages: true,
+      forceRefreshImages: false,
       includeVideos: false,
     });
     expect(payload.detachedChildIds).toEqual(['child-1']);
@@ -133,5 +133,19 @@ describe('DELETE /api/images/:id', () => {
     expect(response.status).toBe(502);
     expect(payload.error).toMatch(/detach/i);
     expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('returns a timeout response when the Cloudflare delete aborts', async () => {
+    const abortError = new Error('The operation was aborted');
+    abortError.name = 'AbortError';
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(abortError);
+
+    const response = await DELETE(createRequest(), createParams('parent-1'));
+    const payload = await response.json();
+
+    expect(response.status).toBe(504);
+    expect(payload.error).toMatch(/timed out/i);
+    expect(cleanupImageArtifactsMock).not.toHaveBeenCalled();
   });
 });
