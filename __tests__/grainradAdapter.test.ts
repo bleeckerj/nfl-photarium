@@ -98,12 +98,14 @@ describe('grainradAdapter', () => {
   });
 
   it('renders a still artifact and uploads it as a child image', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
       const value = String(url);
       if (value.includes('/images/v1/source-1/blob')) {
         return new Response('source-bytes', { status: 200, headers: { 'content-type': 'image/png' } });
       }
       if (value === 'http://grainrad.local/api/render') {
+        expect(init?.body).toBeInstanceOf(FormData);
+        expect((init?.body as FormData).get('sourceFile')).toBeInstanceOf(File);
         return new Response(JSON.stringify({
           ok: true,
           artifact: { filename: 'artifact.png', url: '/artifacts/artifact.png', contentType: 'image/png' },
@@ -205,22 +207,38 @@ describe('grainradAdapter', () => {
     );
   });
 
-  it('fails when Grainrad is unreachable', async () => {
+  it('explains Grainrad network failures with the failed phase and service hint', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
       const value = String(url);
       if (value.includes('/images/v1/source-1/blob')) {
         return new Response('source-bytes', { status: 200, headers: { 'content-type': 'image/png' } });
       }
-      throw new Error('connection refused');
+      const error = new Error('fetch failed');
+      Object.defineProperty(error, 'cause', {
+        value: new Error('connect ECONNREFUSED 127.0.0.1:4173'),
+      });
+      throw error;
     });
 
-    await expect(grainradAdapter.run({
-      runId: 'run-3',
-      imageId: 'source-1',
-      request: baseRequest,
-      updateRun: vi.fn(),
-      addEvent: vi.fn(),
-    })).rejects.toThrow(/connection refused/i);
+    let caught: unknown;
+    try {
+      await grainradAdapter.run({
+        runId: 'run-3',
+        imageId: 'source-1',
+        request: baseRequest,
+        updateRun: vi.fn(),
+        addEvent: vi.fn(),
+      });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    const message = (caught as Error).message;
+    expect(message).toContain('Grainrad still render request failed at /api/render');
+    expect(message).toContain('fetch failed (connect ECONNREFUSED <host>)');
+    expect(message).toContain('Check that the Grainrad service is running, set GRAINRAD_BASE_URL, or enable managed startup with GRAINRAD_MANAGED_ENABLED=1.');
+    expect(message).not.toContain('127.0.0.1');
   });
 
   it('renders an ephemeral preview without uploading to Photarium', async () => {
@@ -251,6 +269,59 @@ describe('grainradAdapter', () => {
 
     expect(result?.artifact.filename).toBe('preview.png');
     expect(result?.artifact.buffer.toString()).toBe('preview-bytes');
+    expect(uploadImageBufferMock).not.toHaveBeenCalled();
+    expect(uploadVideoBufferMock).not.toHaveBeenCalled();
+  });
+
+  it('renders animated previews through the export endpoint without uploading to Photarium', async () => {
+    const updatePreview = vi.fn();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      const value = String(url);
+      if (value.includes('/images/v1/source-1/blob')) {
+        return new Response('source-bytes', { status: 200, headers: { 'content-type': 'image/png' } });
+      }
+      if (value === 'http://grainrad.local/api/export') {
+        expect(init?.body).toBeInstanceOf(FormData);
+        expect((init?.body as FormData).get('sourceFile')).toBeInstanceOf(File);
+        return new Response(JSON.stringify({ ok: true, jobId: 'preview-job-1' }), { status: 202 });
+      }
+      if (value === 'http://grainrad.local/api/jobs/preview-job-1') {
+        return new Response(JSON.stringify({
+          ok: true,
+          job: {
+            id: 'preview-job-1',
+            status: 'completed',
+            message: 'preview done',
+            percent: 1,
+            result: {
+              artifact: { filename: 'preview.mp4', url: '/artifacts/preview.mp4', contentType: 'video/mp4' },
+            },
+          },
+        }), { status: 200 });
+      }
+      if (value === 'http://grainrad.local/artifacts/preview.mp4') {
+        return new Response('preview-mp4-bytes', { status: 200, headers: { 'content-type': 'video/mp4' } });
+      }
+      return new Response('{}', { status: 404 });
+    });
+
+    const result = await grainradAdapter.preview?.({
+      previewId: 'preview-animated-1',
+      imageId: 'source-1',
+      request: {
+        ...baseRequest,
+        effectId: 'vhs',
+        output: { mode: 'animated', format: 'mp4', preset: 'preview' },
+      },
+      updatePreview,
+      addEvent: vi.fn(),
+    });
+
+    expect(result?.externalJobId).toBe('preview-job-1');
+    expect(result?.artifact.filename).toBe('preview.mp4');
+    expect(result?.artifact.contentType).toBe('video/mp4');
+    expect(result?.artifact.buffer.toString()).toBe('preview-mp4-bytes');
+    expect(updatePreview).toHaveBeenCalledWith(expect.objectContaining({ externalJobId: 'preview-job-1' }));
     expect(uploadImageBufferMock).not.toHaveBeenCalled();
     expect(uploadVideoBufferMock).not.toHaveBeenCalled();
   });

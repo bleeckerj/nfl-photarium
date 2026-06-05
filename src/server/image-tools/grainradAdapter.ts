@@ -6,6 +6,7 @@ import { getImageExtrasRecord, patchImageExtrasRecord } from '@/server/imageExtr
 import { getUserVisibleTags } from '@/utils/systemTags';
 import { uploadImageBuffer } from '@/server/uploadService';
 import { uploadVideoBuffer } from '@/server/videoUploadService';
+import { ensureGrainradBaseUrl } from '@/server/image-tools/grainradManagedRuntime';
 import type {
   ImageToolAdapter,
   ImageToolDiagnosticEventInput,
@@ -42,7 +43,6 @@ type GrainradJobResponse = {
   error?: { message?: string } | string;
 };
 
-const DEFAULT_GRAINRAD_BASE_URL = 'http://127.0.0.1:4177';
 const DEFAULT_TIMEOUT_MS = 180_000;
 const POLL_INTERVAL_MS = 1_000;
 
@@ -237,15 +237,85 @@ const manifest: ImageToolManifest = {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const getGrainradBaseUrl = () =>
-  (process.env.GRAINRAD_BASE_URL || DEFAULT_GRAINRAD_BASE_URL).replace(/\/+$/, '');
-
 const getErrorMessage = (value: unknown, fallback: string) => {
   if (typeof value === 'string' && value.trim()) return value.trim();
   if (value && typeof value === 'object' && typeof (value as { message?: unknown }).message === 'string') {
     return (value as { message: string }).message;
   }
   return fallback;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+const sanitizeFailureDetail = (value: string) =>
+  value
+    .replace(/https?:\/\/[^\s)]+/g, '<url>')
+    .replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b/g, '<host>')
+    .replace(/\[?::1\]?(?::\d+)?/g, '<host>')
+    .replace(/\b(ENOTFOUND|ECONNREFUSED|EHOSTUNREACH|ETIMEDOUT)\s+[a-zA-Z0-9.-]+(?::\d+)?/g, '$1 <host>');
+
+const getErrorCauseMessage = (error: unknown) => {
+  if (!(error instanceof Error)) return undefined;
+  const cause = error.cause;
+  if (cause instanceof Error) return cause.message;
+  if (isRecord(cause)) {
+    const parts = ['code', 'message']
+      .map((key) => cause[key])
+      .filter((value): value is string | number => typeof value === 'string' || typeof value === 'number')
+      .map(String);
+    return parts.length ? parts.join(' ') : undefined;
+  }
+  return undefined;
+};
+
+const getEndpointPath = (url: string) => {
+  try {
+    return new URL(url).pathname || 'configured endpoint';
+  } catch {
+    return 'configured endpoint';
+  }
+};
+
+const grainradAvailabilityHint = 'Check that the Grainrad service is running, set GRAINRAD_BASE_URL, or enable managed startup with GRAINRAD_MANAGED_ENABLED=1.';
+
+const formatGrainradFetchError = (action: string, url: string, error: unknown) => {
+  const message = sanitizeFailureDetail(error instanceof Error ? error.message : String(error));
+  const cause = getErrorCauseMessage(error);
+  const causeSuffix = cause && sanitizeFailureDetail(cause) !== message
+    ? ` (${sanitizeFailureDetail(cause)})`
+    : '';
+  return `${action} failed at ${getEndpointPath(url)}: ${message}${causeSuffix}. ${grainradAvailabilityHint}`;
+};
+
+const fetchGrainrad = async (url: string, init: RequestInit, action: string) => {
+  try {
+    return await fetch(url, init);
+  } catch (error) {
+    throw new Error(formatGrainradFetchError(action, url, error));
+  }
+};
+
+const readJsonObject = async (response: Response): Promise<Record<string, unknown>> => {
+  const text = await response.text().catch(() => '');
+  if (!text.trim()) return {};
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return isRecord(parsed) ? parsed : {};
+  } catch {
+    return { error: text.slice(0, 240) };
+  }
+};
+
+const formatGrainradHttpError = (
+  action: string,
+  url: string,
+  response: Response,
+  payload: Record<string, unknown>
+) => {
+  const status = `${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
+  const message = getErrorMessage(payload.error, 'Grainrad returned an error');
+  return `${action} failed at ${getEndpointPath(url)} (HTTP ${status}): ${message}`;
 };
 
 const assertOutputFormat = (mode: ImageToolOutputMode, format: string) => {
@@ -263,13 +333,19 @@ const assertOutputFormat = (mode: ImageToolOutputMode, format: string) => {
 const downloadOriginalImage = async (imageId: string) => {
   const { accountId, apiToken } = getCloudflareCredentials();
   const source = await fetchCloudflareImage(imageId, { accountId, apiToken });
-  const response = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${imageId}/blob`,
-    {
-      headers: { Authorization: `Bearer ${apiToken}` },
-      cache: 'no-store',
-    }
-  );
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${imageId}/blob`,
+      {
+        headers: { Authorization: `Bearer ${apiToken}` },
+        cache: 'no-store',
+      }
+    );
+  } catch (error) {
+    const message = sanitizeFailureDetail(error instanceof Error ? error.message : String(error));
+    throw new Error(`Source image download failed: ${message}. Check Cloudflare credentials and source asset availability.`);
+  }
 
   if (!response.ok) {
     throw new Error(`Failed to download source image from Cloudflare (${response.status})`);
@@ -287,19 +363,37 @@ const postMultipart = async (url: string, fields: Record<string, unknown>, file:
   buffer: Buffer;
   contentType: string;
   filename: string;
-}) => {
+}, action: string) => {
   const formData = new FormData();
-  formData.append('file', new Blob([new Uint8Array(file.buffer)], { type: file.contentType }), file.filename);
+  formData.append('sourceFile', new Blob([new Uint8Array(file.buffer)], { type: file.contentType }), file.filename);
   Object.entries(fields).forEach(([key, value]) => {
     formData.append(key, typeof value === 'string' ? value : JSON.stringify(value));
   });
-  const response = await fetch(url, { method: 'POST', body: formData });
-  const payload = await response.json().catch(() => ({}));
+  const response = await fetchGrainrad(url, { method: 'POST', body: formData }, action);
+  const payload = await readJsonObject(response);
   if (!response.ok) {
-    throw new Error(getErrorMessage((payload as { error?: unknown }).error, `Grainrad request failed (${response.status})`));
+    throw new Error(formatGrainradHttpError(action, url, response, payload));
   }
   return payload;
 };
+
+const buildGrainradTimeline = (request: ImageToolRequest) => (
+  request.output.mode === 'animated'
+    ? {
+        mode: 'animated',
+        sourceTimeMode: 'synthetic',
+        ...(request.timeline ?? {}),
+      }
+    : { mode: 'still' }
+);
+
+const buildGrainradFields = (request: ImageToolRequest) => ({
+  effectId: request.effectId,
+  params: request.params,
+  renderContext: request.renderContext ?? {},
+  output: request.output,
+  timeline: buildGrainradTimeline(request),
+});
 
 const waitForGrainradJob = async (
   baseUrl: string,
@@ -309,12 +403,13 @@ const waitForGrainradJob = async (
 ): Promise<GrainradRenderResponse> => {
   const startedAt = Date.now();
   while (Date.now() - startedAt < DEFAULT_TIMEOUT_MS) {
-    const response = await fetch(`${baseUrl}/api/jobs/${encodeURIComponent(jobId)}`, { cache: 'no-store' });
-    const payload = (await response.json().catch(() => ({}))) as GrainradJobResponse;
+    const url = `${baseUrl}/api/jobs/${encodeURIComponent(jobId)}`;
+    const response = await fetchGrainrad(url, { cache: 'no-store' }, 'Grainrad job status request');
+    const payload = await readJsonObject(response);
     if (!response.ok) {
-      throw new Error(getErrorMessage(payload.error, `Grainrad job status failed (${response.status})`));
+      throw new Error(formatGrainradHttpError('Grainrad job status request', url, response, payload));
     }
-    const job = payload.job;
+    const job = (payload as GrainradJobResponse).job;
     updateRun({
       externalJobId: jobId,
       message: job?.message || `Grainrad job ${job?.status || 'running'}`,
@@ -347,9 +442,9 @@ const downloadArtifact = async (baseUrl: string, artifact: GrainradArtifact) => 
   const artifactUrl = artifact.url.startsWith('http')
     ? artifact.url
     : `${baseUrl}${artifact.url.startsWith('/') ? '' : '/'}${artifact.url}`;
-  const response = await fetch(artifactUrl, { cache: 'no-store' });
+  const response = await fetchGrainrad(artifactUrl, { cache: 'no-store' }, 'Grainrad artifact download');
   if (!response.ok) {
-    throw new Error(`Failed to download Grainrad artifact (${response.status})`);
+    throw new Error(formatGrainradHttpError('Grainrad artifact download', artifactUrl, response, {}));
   }
   const contentType = response.headers.get('content-type') || artifact.contentType || 'application/octet-stream';
   return {
@@ -435,33 +530,58 @@ const uploadArtifactToPhotarium = async (params: {
 export const grainradAdapter: ImageToolAdapter = {
   manifest,
   async preview({ imageId, request, updatePreview, addEvent }): Promise<ImageToolPreviewResult> {
-    assertOutputFormat('still', request.output.format);
-    const baseUrl = getGrainradBaseUrl();
-    const previewRequest: ImageToolRequest = {
-      ...request,
-      output: {
-        ...request.output,
-        mode: 'still',
-        preset: 'preview',
-      },
-      timeline: { mode: 'still' } as ImageToolRequest['timeline'],
-    };
+    assertOutputFormat(request.output.mode, request.output.format);
+    const baseUrl = await ensureGrainradBaseUrl(addEvent);
+    let externalJobId: string | undefined;
 
     addEvent({ phase: 'source.download', message: 'Downloading source image for preview' });
     updatePreview({ message: 'Downloading source image', percent: 0.1 });
     const source = await downloadOriginalImage(imageId);
 
-    const fields = {
-      effectId: previewRequest.effectId,
-      params: previewRequest.params,
-      renderContext: previewRequest.renderContext ?? {},
-      output: previewRequest.output,
-      timeline: { mode: 'still' },
-    };
+    const fields = buildGrainradFields(request);
 
-    addEvent({ phase: 'grainrad.submit', message: 'Submitting Grainrad preview render' });
-    updatePreview({ message: 'Submitting Grainrad preview', percent: 0.35 });
-    const grainradResult = (await postMultipart(`${baseUrl}/api/render`, fields, source)) as GrainradRenderResponse;
+    addEvent({
+      phase: 'grainrad.submit',
+      message: request.output.mode === 'animated'
+        ? 'Submitting Grainrad preview export job'
+        : 'Submitting Grainrad preview render',
+    });
+    updatePreview({
+      message: request.output.mode === 'animated'
+        ? 'Submitting Grainrad preview export'
+        : 'Submitting Grainrad preview',
+      percent: 0.35,
+    });
+    const grainradResult = request.output.mode === 'animated'
+      ? await (async () => {
+          const queued = (await postMultipart(
+            `${baseUrl}/api/export`,
+            fields,
+            source,
+            'Grainrad preview export request'
+          )) as { jobId?: string };
+          if (!queued.jobId) {
+            throw new Error('Grainrad did not return a job id');
+          }
+          externalJobId = queued.jobId;
+          addEvent({
+            phase: 'grainrad.queued',
+            message: 'Grainrad preview export job queued',
+            details: { externalJobId: queued.jobId },
+          });
+          updatePreview({
+            externalJobId: queued.jobId,
+            message: 'Waiting for Grainrad preview export',
+            percent: 0.45,
+          });
+          return waitForGrainradJob(baseUrl, queued.jobId, updatePreview, addEvent);
+        })()
+      : (await postMultipart(
+          `${baseUrl}/api/render`,
+          fields,
+          source,
+          'Grainrad preview render request'
+        )) as GrainradRenderResponse;
     if (!grainradResult.artifact) {
       throw new Error('Grainrad did not return an artifact');
     }
@@ -479,30 +599,18 @@ export const grainradAdapter: ImageToolAdapter = {
       },
     });
 
-    return { artifact };
+    return { artifact, externalJobId };
   },
   async run({ imageId, request, updateRun, addEvent }): Promise<ImageToolRunResult> {
     assertOutputFormat(request.output.mode, request.output.format);
-    const baseUrl = getGrainradBaseUrl();
+    const baseUrl = await ensureGrainradBaseUrl(addEvent);
     let externalJobId: string | undefined;
 
     addEvent({ phase: 'source.download', message: 'Downloading source image' });
     updateRun({ message: 'Downloading source image', percent: 0.05 });
     const source = await downloadOriginalImage(imageId);
 
-    const fields = {
-      effectId: request.effectId,
-      params: request.params,
-      renderContext: request.renderContext ?? {},
-      output: request.output,
-      timeline: request.output.mode === 'animated'
-        ? {
-            mode: 'animated',
-            sourceTimeMode: 'synthetic',
-            ...(request.timeline ?? {}),
-          }
-        : { mode: 'still' },
-    };
+    const fields = buildGrainradFields(request);
 
     addEvent({
       phase: 'grainrad.submit',
@@ -511,7 +619,12 @@ export const grainradAdapter: ImageToolAdapter = {
     updateRun({ message: 'Submitting Grainrad render', percent: 0.12 });
     const grainradResult = request.output.mode === 'animated'
       ? await (async () => {
-          const queued = (await postMultipart(`${baseUrl}/api/export`, fields, source)) as { jobId?: string };
+          const queued = (await postMultipart(
+            `${baseUrl}/api/export`,
+            fields,
+            source,
+            'Grainrad export request'
+          )) as { jobId?: string };
           if (!queued.jobId) {
             throw new Error('Grainrad did not return a job id');
           }
@@ -523,7 +636,12 @@ export const grainradAdapter: ImageToolAdapter = {
           });
           return waitForGrainradJob(baseUrl, queued.jobId, updateRun, addEvent);
         })()
-      : (await postMultipart(`${baseUrl}/api/render`, fields, source)) as GrainradRenderResponse;
+      : (await postMultipart(
+          `${baseUrl}/api/render`,
+          fields,
+          source,
+          'Grainrad still render request'
+        )) as GrainradRenderResponse;
 
     if (!grainradResult.artifact) {
       throw new Error('Grainrad did not return an artifact');
