@@ -4,6 +4,7 @@ import {
   setAllQueuedItemsSelected,
   unselectAttemptedQueuedItems,
 } from '@/features/page-import/utils/queueSelection';
+import { toQueueItem } from '@/features/page-import/hooks/usePageImportDiscovery';
 
 const makeItem = (id: string, selected = true): UploaderQueueItem => ({
   id,
@@ -37,5 +38,34 @@ describe('page import queue selection helpers', () => {
     const next = unselectAttemptedQueuedItems(items, new Set(['a', 'c']));
 
     expect(next.map((item) => item.selected)).toEqual([false, true, false]);
+  });
+
+  it('starts below-threshold import candidates unselected', () => {
+    const item = toQueueItem(
+      {
+        id: 'candidate-1',
+        kind: 'image',
+        url: 'https://example.com/spinner.png',
+        filename: 'spinner.png',
+        isBlobSource: false,
+        metadata: {
+          status: 'resolved',
+          fileSizeBytes: 24000,
+        },
+        smallAssetReview: {
+          thresholdBytes: 50000,
+          reason: 'file-size',
+        },
+      },
+      'queue-1',
+      'session-1',
+      true
+    );
+
+    expect(item.selected).toBe(false);
+    expect(item.smallAssetReview).toEqual({
+      thresholdBytes: 50000,
+      reason: 'file-size',
+    });
   });
 });

@@ -10,6 +10,7 @@ import {
   resolveQueueItemDimensions,
   resolveQueueItemFileSize,
 } from '@/features/page-import/utils/formatters';
+import { formatSmallAssetThresholdMb } from '@/features/page-import/utils/smallAssetPolicy';
 
 type PageImportQueueItemProps = {
   item: UploaderQueueItem;
@@ -86,13 +87,28 @@ export function PageImportQueueItem(props: PageImportQueueItemProps) {
     sourceUrl: effectiveSourceUrl,
   });
   const metadataOverLimit = metadataBytes >= 1024;
+  const isSelected = item.selected !== false;
+  const isSmallAssetPendingReview = Boolean(item.smallAssetReview) && !isSelected;
+  const smallAssetThresholdLabel = item.smallAssetReview
+    ? formatSmallAssetThresholdMb(item.smallAssetReview.thresholdBytes)
+    : null;
 
   return (
-    <div className="w-full rounded-lg border border-blue-200 bg-blue-50 p-3">
+    <div
+      className={`w-full rounded-lg border p-3 transition-colors ${
+        isSmallAssetPendingReview
+          ? 'border-amber-200 bg-amber-50/70'
+          : 'border-blue-200 bg-blue-50'
+      }`}
+    >
       <div className="flex items-start gap-3">
         {previewUrl && !previewFailed ? (
           effectiveAssetType === 'video' ? (
-            <div className="relative h-28 w-28 overflow-hidden rounded border border-blue-200 bg-black">
+            <div
+              className={`relative h-28 w-28 overflow-hidden rounded border border-blue-200 bg-black transition-opacity ${
+                isSmallAssetPendingReview ? 'opacity-60' : 'opacity-100'
+              }`}
+            >
               {(item.posterUrl || (!item.file ? previewUrl : undefined)) ? (
                 <img
                   src={item.posterUrl || previewUrl}
@@ -110,7 +126,9 @@ export function PageImportQueueItem(props: PageImportQueueItemProps) {
             <img
               src={previewUrl}
               alt={item.filename}
-              className="h-28 w-28 rounded border border-blue-200 bg-white object-cover"
+              className={`h-28 w-28 rounded border border-blue-200 bg-white object-cover transition-opacity ${
+                isSmallAssetPendingReview ? 'opacity-60' : 'opacity-100'
+              }`}
               onError={() => onPreviewLoadError(item)}
               referrerPolicy="no-referrer"
             />
@@ -148,6 +166,11 @@ export function PageImportQueueItem(props: PageImportQueueItemProps) {
             <span>{formatImportBytes(displaySizeBytes)}</span>
             <span>{formatImportDimensions(displayDimensions)}</span>
             <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] uppercase text-gray-600">{effectiveAssetType}</span>
+            {isSmallAssetPendingReview && smallAssetThresholdLabel && (
+              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
+                Below {smallAssetThresholdLabel} MB threshold
+              </span>
+            )}
           </div>
 
           <p className="mt-1 text-[11px] text-gray-600">{describeImportMetadataStatus(item.metadata)}</p>
@@ -181,7 +204,7 @@ export function PageImportQueueItem(props: PageImportQueueItemProps) {
         <label className="flex items-center gap-1 text-[11px] text-gray-600">
           <input
             type="checkbox"
-            checked={item.selected !== false}
+            checked={isSelected}
             onChange={(e) => updateQueuedFile(item.id, { selected: e.target.checked })}
             className="h-3 w-3"
             disabled={isUploading}

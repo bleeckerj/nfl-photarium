@@ -49,7 +49,7 @@ describe('POST /api/import/page', () => {
           status: 200,
           headers: {
             'content-type': 'image/jpeg',
-            'content-length': '20480',
+            'content-length': '60000',
           },
         }));
       }
@@ -113,7 +113,7 @@ describe('POST /api/import/page', () => {
           status: 200,
           headers: {
             'content-type': 'image/jpeg',
-            'content-length': '24576',
+            'content-length': '60000',
           },
         }));
       }
@@ -155,7 +155,7 @@ describe('POST /api/import/page', () => {
     );
   });
 
-  it('keeps small substantive icon assets that are not generic ui chrome', async () => {
+  it('keeps substantive assets above the configured small-asset threshold', async () => {
     const html = `
       <html>
         <body>
@@ -184,7 +184,7 @@ describe('POST /api/import/page', () => {
           status: 200,
           headers: {
             'content-type': 'image/png',
-            'content-length': '2048',
+            'content-length': '60000',
           },
         }));
       }
@@ -193,14 +193,14 @@ describe('POST /api/import/page', () => {
           status: 200,
           headers: {
             'content-type': 'image/png',
-            'content-length': '3072',
+            'content-length': '75000',
           },
         }));
       }
       return Promise.resolve(new Response(null, { status: 404 }));
     });
 
-    const response = await POST(createRequest({ url: 'https://example.com/page', minBytes: 1024 }));
+    const response = await POST(createRequest({ url: 'https://example.com/page' }));
     const payload = await response.json();
 
     expect(response.status).toBe(200);
@@ -224,7 +224,7 @@ describe('POST /api/import/page', () => {
     );
   });
 
-  it('includes ui chrome and small assets when explicitly requested', async () => {
+  it('returns small assets as review candidates when explicitly requested', async () => {
     const html = `
       <html>
         <body>
@@ -262,7 +262,7 @@ describe('POST /api/import/page', () => {
       url: 'https://example.com/page',
       includeUiChrome: true,
       includeSmallAssets: true,
-      minBytes: 1024,
+      smallAssetThresholdBytes: 50000,
     }));
     const payload = await response.json();
 
@@ -275,13 +275,78 @@ describe('POST /api/import/page', () => {
     );
     expect(payload.includeUiChrome).toBe(true);
     expect(payload.includeSmallAssets).toBe(true);
+    expect(payload.smallAssetThresholdBytes).toBe(50000);
+    expect(payload.images).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          url: 'https://www.example.com/img/folder_applications.png',
+          smallAssetReview: {
+            thresholdBytes: 50000,
+            reason: 'file-size',
+          },
+        }),
+      ])
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       'https://www.example.com/img/logo.png',
       expect.objectContaining({ method: 'HEAD' })
     );
   });
 
-  it('filters tiny tracker-like pixels using size hints even when minBytes is low', async () => {
+  it('hides below-threshold assets when small assets are not included', async () => {
+    const html = `
+      <html>
+        <body>
+          <img src="https://cdn.example.com/products/thumb.jpg" />
+          <img src="https://cdn.example.com/products/hero.jpg" />
+        </body>
+      </html>
+    `;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = String(input);
+      if (url === 'https://example.com/page') {
+        return Promise.resolve(new Response(html, {
+          status: 200,
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        }));
+      }
+      if (url === 'https://cdn.example.com/products/thumb.jpg' && init?.method === 'HEAD') {
+        return Promise.resolve(new Response(null, {
+          status: 200,
+          headers: {
+            'content-type': 'image/jpeg',
+            'content-length': '49999',
+          },
+        }));
+      }
+      if (url === 'https://cdn.example.com/products/hero.jpg' && init?.method === 'HEAD') {
+        return Promise.resolve(new Response(null, {
+          status: 200,
+          headers: {
+            'content-type': 'image/jpeg',
+            'content-length': '50000',
+          },
+        }));
+      }
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+
+    const response = await POST(createRequest({
+      url: 'https://example.com/page',
+      smallAssetThresholdBytes: 50000,
+    }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.images).toEqual([
+      expect.objectContaining({
+        url: 'https://cdn.example.com/products/hero.jpg',
+      }),
+    ]);
+  });
+
+  it('filters tiny tracker-like pixels using size hints before threshold classification', async () => {
     const html = `
       <html>
         <body>
@@ -313,14 +378,14 @@ describe('POST /api/import/page', () => {
           status: 200,
           headers: {
             'content-type': 'image/jpeg',
-            'content-length': '24576',
+            'content-length': '60000',
           },
         }));
       }
       return Promise.resolve(new Response(null, { status: 404 }));
     });
 
-    const response = await POST(createRequest({ url: 'https://example.com/page', minBytes: 0 }));
+    const response = await POST(createRequest({ url: 'https://example.com/page' }));
     const payload = await response.json();
 
     expect(response.status).toBe(200);
@@ -352,7 +417,7 @@ describe('POST /api/import/page', () => {
           status: 200,
           headers: {
             'content-type': 'image/jpeg',
-            'content-length': '32768',
+            'content-length': '60000',
           },
         }));
       }
@@ -400,7 +465,7 @@ describe('POST /api/import/page', () => {
           status: 200,
           headers: {
             'content-type': 'image/jpeg',
-            'content-length': '32768',
+            'content-length': '60000',
           },
         }));
       }
@@ -441,7 +506,7 @@ describe('POST /api/import/page', () => {
           status: 200,
           headers: {
             'content-type': 'image/jpeg',
-            'content-length': '32768',
+            'content-length': '60000',
           },
         }));
       }

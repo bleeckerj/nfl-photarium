@@ -1,3 +1,5 @@
+import type { SmallAssetReview } from '@/features/page-import/utils/smallAssetPolicy';
+
 export type ImportMetadataStatus = 'pending' | 'partial' | 'resolved' | 'failed';
 
 export type ImportDimensions = {
@@ -35,6 +37,7 @@ export type ImportCandidate = {
   isBlobSource: boolean;
   metadata: ImportCandidateMetadata;
   tempAssetKey?: string;
+  smallAssetReview?: SmallAssetReview;
 };
 
 export type HeaderProbeResult = {

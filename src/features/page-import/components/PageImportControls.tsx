@@ -3,6 +3,11 @@
 import { FileText, Loader2 } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import type { ImportProgressState } from '@/features/page-import/types';
+import {
+  MIN_SMALL_ASSET_THRESHOLD_MB,
+  SMALL_ASSET_THRESHOLD_STEP_MB,
+  normalizeSmallAssetThresholdMb,
+} from '@/features/page-import/utils/smallAssetPolicy';
 
 type PageImportControlsProps = {
   pageImportUrl: string;
@@ -13,6 +18,8 @@ type PageImportControlsProps = {
   setPageImportAutoScroll: (value: boolean) => void;
   pageImportIncludeSmallAssets: boolean;
   setPageImportIncludeSmallAssets: (value: boolean) => void;
+  pageImportSmallAssetThresholdMb: string;
+  setPageImportSmallAssetThresholdMb: (value: string) => void;
   pageImportIncludeUiChrome: boolean;
   setPageImportIncludeUiChrome: (value: boolean) => void;
   setPageImportScrollMode: (value: boolean) => void;
@@ -46,6 +53,8 @@ export function PageImportControls(props: PageImportControlsProps) {
     setPageImportAutoScroll,
     pageImportIncludeSmallAssets,
     setPageImportIncludeSmallAssets,
+    pageImportSmallAssetThresholdMb,
+    setPageImportSmallAssetThresholdMb,
     pageImportIncludeUiChrome,
     setPageImportIncludeUiChrome,
     setPageImportScrollMode,
@@ -185,15 +194,28 @@ export function PageImportControls(props: PageImportControlsProps) {
         )}
 
         <div className="mt-3 grid gap-2 md:grid-cols-2">
-          <label className="flex items-center gap-2 text-xs text-gray-700">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-700">
             <input
               type="checkbox"
               checked={pageImportIncludeSmallAssets}
               onChange={(e) => setPageImportIncludeSmallAssets(e.target.checked)}
               disabled={pageImportLoading}
             />
-            Include small assets
-          </label>
+            <span>Include small assets</span>
+            <label className="ml-1 flex items-center gap-1 text-[11px] text-gray-600">
+              Threshold MB
+              <input
+                type="number"
+                min={MIN_SMALL_ASSET_THRESHOLD_MB}
+                step={SMALL_ASSET_THRESHOLD_STEP_MB}
+                value={pageImportSmallAssetThresholdMb}
+                onChange={(e) => setPageImportSmallAssetThresholdMb(e.target.value)}
+                onBlur={(e) => setPageImportSmallAssetThresholdMb(normalizeSmallAssetThresholdMb(e.target.value))}
+                disabled={pageImportLoading}
+                className="w-20 rounded border border-blue-200 px-2 py-1 text-[11px]"
+              />
+            </label>
+          </div>
           <label className="flex items-center gap-2 text-xs text-gray-700">
             <input
               type="checkbox"

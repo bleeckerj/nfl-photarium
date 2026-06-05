@@ -96,6 +96,19 @@ const makeMediaResults = (count: number) =>
     inUiChrome: false,
   }));
 
+const makeSmallMediaResult = () => ({
+  mediaKind: 'image',
+  src: 'https://example.com/assets/tiny-product-photo.jpg',
+  srcset: '',
+  dataSrcset: '',
+  dataSrc: '',
+  naturalWidth: 24,
+  naturalHeight: 24,
+  poster: '',
+  inMainContent: true,
+  inUiChrome: false,
+});
+
 afterEach(() => {
   delete (globalThis as typeof globalThis & { __PHOTARIUM_TEST_PUPPETEER__?: unknown })
     .__PHOTARIUM_TEST_PUPPETEER__;
@@ -192,6 +205,38 @@ describe('POST /api/import/page/scroll/stream', () => {
     expect((text.match(/event: media/g) || []).length).toBe(2);
     expect(text).toContain('event: done');
     expect(text).not.toContain('event: error');
+    expect(browser.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('streams below-threshold dimension candidates as review items when small assets are included', async () => {
+    const { browser } = createMockBrowser({
+      mediaBatches: [[makeSmallMediaResult()]],
+    });
+
+    (globalThis as typeof globalThis & { __PHOTARIUM_TEST_PUPPETEER__?: unknown })
+      .__PHOTARIUM_TEST_PUPPETEER__ = {
+      launch: vi.fn(async () => browser),
+    };
+
+    const response = await POST(
+      createRequest({
+        url: 'https://example.com/page',
+        autoScrollUntilStable: false,
+        maxScrolls: 1,
+        maxAssets: 1,
+        maxPages: 1,
+        scrollDelayMs: 500,
+        includeSmallAssets: true,
+        smallAssetThresholdBytes: 50000,
+      })
+    );
+
+    const text = await response.text();
+
+    expect(response.status).toBe(200);
+    expect((text.match(/event: media/g) || []).length).toBe(1);
+    expect(text).toContain('"smallAssetReview":{"thresholdBytes":50000,"reason":"dimensions"}');
+    expect(text).toContain('event: done');
     expect(browser.close).toHaveBeenCalledTimes(1);
   });
 });

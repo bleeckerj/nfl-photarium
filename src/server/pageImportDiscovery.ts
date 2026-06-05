@@ -4,8 +4,12 @@ import {
   looksLikeUiChromeAsset,
 } from '@/server/pageImportFilters';
 import { toImportCandidate } from '@/server/import-metadata/candidates';
+import {
+  buildSmallAssetFileSizeReview,
+  DEFAULT_SMALL_ASSET_THRESHOLD_BYTES,
+} from '@/features/page-import/utils/smallAssetPolicy';
 
-export const DEFAULT_PAGE_IMPORT_MIN_BYTES = 8 * 1024;
+export const DEFAULT_PAGE_IMPORT_MIN_BYTES = DEFAULT_SMALL_ASSET_THRESHOLD_BYTES;
 
 export type PageImportHeadInfo = {
   contentLength?: number;
@@ -15,9 +19,10 @@ export type PageImportHeadInfo = {
 type DiscoverPageMediaParams = {
   html: string;
   sourceUrl?: string;
-  minBytes: number;
+  smallAssetThresholdBytes: number;
   maxImages?: number;
   includeUiChrome: boolean;
+  includeSmallAssets: boolean;
   fetchHeadInfo: (url: string) => Promise<PageImportHeadInfo>;
 };
 
@@ -262,9 +267,10 @@ const mapWithConcurrency = async <T, R>(
 export const discoverPageMediaFromHtml = async ({
   html,
   sourceUrl,
-  minBytes,
+  smallAssetThresholdBytes,
   maxImages,
   includeUiChrome,
+  includeSmallAssets,
   fetchHeadInfo,
 }: DiscoverPageMediaParams) => {
   const { baseHref, baseUrl } = resolveHtmlBaseUrl(html, sourceUrl);
@@ -309,6 +315,10 @@ export const discoverPageMediaFromHtml = async ({
   }));
 
   const images = headInfos
+    .map((info) => ({
+      ...info,
+      smallAssetReview: buildSmallAssetFileSizeReview(info.contentLength, smallAssetThresholdBytes),
+    }))
     .filter((info) => {
       if (looksLikeTinyTrackingPixel({
         url: info.url,
@@ -318,7 +328,7 @@ export const discoverPageMediaFromHtml = async ({
         return false;
       }
       if (info.contentType && !info.contentType.startsWith('image/')) return false;
-      if (typeof info.contentLength === 'number' && info.contentLength < minBytes) return false;
+      if (info.smallAssetReview && !includeSmallAssets) return false;
       return true;
     })
     .map((info) => ({
@@ -326,6 +336,7 @@ export const discoverPageMediaFromHtml = async ({
       filename: info.filename || getFilenameFromUrl(info.url),
       contentType: info.contentType,
       contentLength: info.contentLength,
+      smallAssetReview: info.smallAssetReview,
     }));
 
   const videos = videoCandidates.map((candidate) => ({
@@ -353,6 +364,7 @@ export const discoverPageMediaFromHtml = async ({
       ...candidate,
       contentType: image.contentType,
       contentLength: image.contentLength,
+      smallAssetReview: image.smallAssetReview,
     };
   });
 

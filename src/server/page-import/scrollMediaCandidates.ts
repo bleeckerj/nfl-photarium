@@ -6,6 +6,12 @@ import {
   looksLikeUiChromeAsset,
 } from '@/server/pageImportFilters';
 import { toImportCandidate } from '@/server/import-metadata/candidates';
+import {
+  buildSmallAssetDimensionReview,
+  buildSmallAssetFileSizeReview,
+  DEFAULT_SMALL_ASSET_THRESHOLD_BYTES,
+  type SmallAssetReview,
+} from '@/features/page-import/utils/smallAssetPolicy';
 
 export interface ImageInfo {
   kind: 'image';
@@ -16,6 +22,7 @@ export interface ImageInfo {
   contentLength?: number;
   inMainContent?: boolean;
   inUiChrome?: boolean;
+  smallAssetReview?: SmallAssetReview;
 }
 
 export interface VideoInfo {
@@ -27,8 +34,6 @@ export interface VideoInfo {
 }
 
 export type MediaInfo = ImageInfo | VideoInfo;
-
-const MIN_DIMENSION = 50;
 
 export const isValidUrl = (value: string) => {
   try {
@@ -101,6 +106,7 @@ export const serializeMediaCandidate = (mediaInfo: MediaInfo) => {
     contentLength: mediaInfo.contentLength,
     inMainContent: mediaInfo.inMainContent,
     inUiChrome: mediaInfo.inUiChrome,
+    smallAssetReview: mediaInfo.smallAssetReview,
   };
 };
 
@@ -177,12 +183,40 @@ export const resolveCandidateUrl = (rawUrl: string, baseUrl: string): string | n
 const urlHasSizeHints = (url: string): boolean =>
   /(\d{2,}x\d{2,})|(_\d{3,}w)|(@[23]x)/i.test(url);
 
+export const resolveSmallAssetReviewForImage = (
+  img: ImageInfo,
+  thresholdBytes: number
+): SmallAssetReview | undefined => {
+  const fileSizeReview = buildSmallAssetFileSizeReview(img.contentLength, thresholdBytes);
+  if (fileSizeReview) return fileSizeReview;
+
+  // Preserve the existing lazy-loader exception for URLs that already carry size hints.
+  if (urlHasSizeHints(img.url)) {
+    return undefined;
+  }
+
+  if (img.naturalWidth && img.naturalHeight) {
+    return buildSmallAssetDimensionReview(
+      { width: img.naturalWidth, height: img.naturalHeight },
+      thresholdBytes
+    );
+  }
+
+  return undefined;
+};
+
 export const shouldIncludeImageWithOptions = (
   img: ImageInfo,
-  options?: { includeUiChrome?: boolean; includeSmallAssets?: boolean }
+  options?: {
+    includeUiChrome?: boolean;
+    includeSmallAssets?: boolean;
+    smallAssetThresholdBytes?: number;
+  }
 ): boolean => {
   const includeUiChrome = Boolean(options?.includeUiChrome);
   const includeSmallAssets = Boolean(options?.includeSmallAssets);
+  const smallAssetThresholdBytes =
+    options?.smallAssetThresholdBytes ?? DEFAULT_SMALL_ASSET_THRESHOLD_BYTES;
   if (isBlockedMediaDomain(img.url)) return false;
   if (!includeUiChrome && looksLikeUiChromeAsset(img.url, img.filename)) return false;
   if (looksLikeTrackingOrUtilityAsset(img.url, img.filename)) return false;
@@ -193,15 +227,17 @@ export const shouldIncludeImageWithOptions = (
     naturalHeight: img.naturalHeight,
     contentLength: img.contentLength,
   })) return false;
+
+  if (!includeSmallAssets && resolveSmallAssetReviewForImage(img, smallAssetThresholdBytes)) {
+    return false;
+  }
+
   // Lazy-loaded images can report tiny dimensions before the real asset loads.
   if (urlHasSizeHints(img.url)) {
     return true;
   }
 
   if (img.naturalWidth && img.naturalHeight) {
-    if (!includeSmallAssets && img.naturalWidth < MIN_DIMENSION && img.naturalHeight < MIN_DIMENSION) {
-      return false;
-    }
     return true;
   }
 

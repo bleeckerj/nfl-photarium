@@ -1,5 +1,6 @@
 import { normalizeCookieHeader } from '@/server/pageImportCookies';
 import { isPrivateHost, isValidUrl } from '@/server/page-import/scrollMediaCandidates';
+import { normalizeSmallAssetThresholdBytes } from '@/features/page-import/utils/smallAssetPolicy';
 
 const DEFAULT_MAX_SCROLLS = 10;
 const AUTO_SCROLL_SAFETY_CAP = 200;
@@ -12,6 +13,7 @@ export interface ScrollImportRequestConfig {
   pageUrl: string;
   includeUiChrome: boolean;
   includeSmallAssets: boolean;
+  smallAssetThresholdBytes: number;
   cookieHeader: string | null;
   maxScrolls: number;
   autoScrollUntilStable: boolean;
@@ -36,6 +38,7 @@ export const parseScrollImportRequest = (
   const pageUrl = typeof body?.url === 'string' ? body.url.trim() : '';
   const includeUiChrome = Boolean(body?.includeUiChrome);
   const includeSmallAssets = Boolean(body?.includeSmallAssets);
+  const smallAssetThresholdBytes = normalizeSmallAssetThresholdBytes(body?.smallAssetThresholdBytes);
   let cookieHeader: string | null = null;
   try {
     cookieHeader = normalizeCookieHeader(body?.cookieHeader);
@@ -82,6 +85,7 @@ export const parseScrollImportRequest = (
       pageUrl,
       includeUiChrome,
       includeSmallAssets,
+      smallAssetThresholdBytes,
       cookieHeader,
       maxScrolls,
       autoScrollUntilStable,

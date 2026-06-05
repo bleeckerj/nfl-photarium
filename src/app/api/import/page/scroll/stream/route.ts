@@ -29,6 +29,7 @@ import {
   inferVideoFileName,
   pickBestFromSrcset,
   resolveCandidateUrl,
+  resolveSmallAssetReviewForImage,
   serializeMediaCandidate,
   shouldIncludeImageWithOptions,
   type ImageInfo,
@@ -47,6 +48,8 @@ import {
   registerScrollStreamNetworkCapture,
 } from '@/server/page-import/scrollStreamNetwork';
 const NO_NEW_IMAGE_STOP_THRESHOLD = 3;
+type LoadedPuppeteer = NonNullable<Awaited<ReturnType<typeof loadPuppeteer>>>;
+type ScrollStreamBrowser = Awaited<ReturnType<LoadedPuppeteer['launch']>>;
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
@@ -56,6 +59,7 @@ export async function POST(request: NextRequest) {
     pageUrl,
     includeUiChrome,
     includeSmallAssets,
+    smallAssetThresholdBytes,
     cookieHeader,
     maxScrolls,
     autoScrollUntilStable,
@@ -81,30 +85,7 @@ export async function POST(request: NextRequest) {
         return;
       }
 
-      let browser:
-        | {
-            close: () => Promise<void>;
-            newPage: () => Promise<{
-              evaluate: <T>(pageFunction: () => T | Promise<T>) => Promise<T>;
-              goto: (url: string, options: { waitUntil: 'load' | 'domcontentloaded' | 'networkidle0' | 'networkidle2'; timeout: number }) => Promise<{ status?: () => number } | null>;
-              on: (
-                event: string,
-                listener: (response: {
-                  request: () => { resourceType?: () => string };
-                  url: () => string;
-                  headers: () => Record<string, string>;
-                  status: () => number;
-                }) => void
-              ) => void;
-              setCookie: (...cookies: unknown[]) => Promise<void>;
-              setUserAgent: (userAgent: string) => Promise<void>;
-              setViewport: (viewport: { width: number; height: number }) => Promise<void>;
-              title: () => Promise<string>;
-              url: () => string;
-              waitForNetworkIdle: (options: { timeout: number }) => Promise<void>;
-            }>;
-          }
-        | undefined;
+      let browser: ScrollStreamBrowser | undefined;
       let stopReason: 'aborted' | 'max-assets' | null = null;
       let totalMediaSent = 0;
       const closeBrowser = async () => {
@@ -218,7 +199,21 @@ export async function POST(request: NextRequest) {
                       inUiChrome: img.inUiChrome || undefined,
                     };
 
-              if (mediaInfo.kind === 'image' && !shouldIncludeImageWithOptions(mediaInfo, { includeUiChrome, includeSmallAssets })) {
+              if (mediaInfo.kind === 'image') {
+                mediaInfo.smallAssetReview = resolveSmallAssetReviewForImage(
+                  mediaInfo,
+                  smallAssetThresholdBytes
+                );
+              }
+
+              if (
+                mediaInfo.kind === 'image' &&
+                !shouldIncludeImageWithOptions(mediaInfo, {
+                  includeUiChrome,
+                  includeSmallAssets,
+                  smallAssetThresholdBytes,
+                })
+              ) {
                 seenMedia.add(dedupeKey);
                 continue;
               }
@@ -264,6 +259,10 @@ export async function POST(request: NextRequest) {
               filename: getFilenameFromUrl(networkUrl),
               contentLength: metadata.contentLength,
             };
+            mediaInfo.smallAssetReview = resolveSmallAssetReviewForImage(
+              mediaInfo,
+              smallAssetThresholdBytes
+            );
 
             if (looksLikeTinyTrackingPixel({
               url: mediaInfo.url,
@@ -273,7 +272,14 @@ export async function POST(request: NextRequest) {
               seenMedia.add(dedupeKey);
               continue;
             }
-            if (!metadata.trusted && !shouldIncludeImageWithOptions(mediaInfo, { includeUiChrome, includeSmallAssets })) {
+            if (
+              !metadata.trusted &&
+              !shouldIncludeImageWithOptions(mediaInfo, {
+                includeUiChrome,
+                includeSmallAssets,
+                smallAssetThresholdBytes,
+              })
+            ) {
               seenMedia.add(dedupeKey);
               continue;
             }

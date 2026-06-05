@@ -8,10 +8,10 @@ import {
 } from '@/server/archiveDiagnostics';
 import { normalizeCookieHeader } from '@/server/pageImportCookies';
 import {
-  DEFAULT_PAGE_IMPORT_MIN_BYTES,
   discoverPageMediaFromHtml,
   isPrivateHost,
 } from '@/server/pageImportDiscovery';
+import { normalizeSmallAssetThresholdBytes } from '@/features/page-import/utils/smallAssetPolicy';
 
 // Use a browser-like User-Agent to avoid sites (e.g. Google Drive) redirecting to login pages
 const BROWSER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -127,9 +127,10 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid cookie header' }, { status: 400 });
     }
-    const minBytes = Number.isFinite(body?.minBytes)
-      ? Number(body.minBytes)
-      : (includeSmallAssets ? 1024 : DEFAULT_PAGE_IMPORT_MIN_BYTES);
+    const smallAssetThresholdBytes = normalizeSmallAssetThresholdBytes(
+      body?.smallAssetThresholdBytes ?? body?.minBytes
+    );
+    const minBytes = smallAssetThresholdBytes;
     const maxImages = Number.isFinite(body?.maxImages) ? Math.max(0, Number(body.maxImages)) : undefined;
     const allowInsecureEnv = process.env.IMPORT_ALLOW_INSECURE_TLS === 'true';
     const allowInsecure = allowInsecureEnv && Boolean(body?.allowInsecure);
@@ -174,9 +175,10 @@ export async function POST(request: NextRequest) {
       const discovery = await discoverPageMediaFromHtml({
         html: htmlBody,
         sourceUrl: htmlSourceUrl || undefined,
-        minBytes,
+        smallAssetThresholdBytes,
         maxImages,
         includeUiChrome,
+        includeSmallAssets,
         fetchHeadInfo: (url) => fetchHeadInfo(url, allowInsecure),
       });
 
@@ -184,6 +186,7 @@ export async function POST(request: NextRequest) {
         sourceUrl: htmlSourceUrl || null,
         sourceFilename: sourceFilename || null,
         minBytes,
+        smallAssetThresholdBytes,
         maxImages: typeof maxImages === 'number' ? maxImages : null,
         allowInsecure,
         includeUiChrome,
@@ -300,15 +303,17 @@ export async function POST(request: NextRequest) {
     const discovery = await discoverPageMediaFromHtml({
       html,
       sourceUrl: pageUrl,
-      minBytes,
+      smallAssetThresholdBytes,
       maxImages,
       includeUiChrome,
+      includeSmallAssets,
       fetchHeadInfo: (url) => fetchHeadInfo(url, allowInsecure),
     });
 
     return NextResponse.json({
       sourceUrl: pageUrl,
       minBytes,
+      smallAssetThresholdBytes,
       maxImages: typeof maxImages === 'number' ? maxImages : null,
       allowInsecure,
       includeUiChrome,

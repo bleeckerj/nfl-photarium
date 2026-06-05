@@ -1,5 +1,7 @@
 'use client';
 
+import type { SmallAssetReview } from '@/features/page-import/utils/smallAssetPolicy';
+
 export type ImportMetadataStatus = 'pending' | 'partial' | 'resolved' | 'failed';
 
 export type ImportDimensions = {
@@ -33,6 +35,7 @@ export type ImportCandidate = {
   naturalWidth?: number;
   naturalHeight?: number;
   isBlob?: boolean;
+  smallAssetReview?: SmallAssetReview;
 };
 
 export type ImportSessionState = {
@@ -66,6 +69,7 @@ export type UploaderQueueItem = {
   metadata?: ImportCandidateMetadata;
   tempAssetKey?: string;
   importSessionId?: string;
+  smallAssetReview?: SmallAssetReview;
 };
 
 export type ImportProgressState = {

@@ -20,17 +20,17 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   isPrivateHost,
   isValidUrl,
+  resolveSmallAssetReviewForImage,
   serializeMediaCandidate,
   shouldIncludeImageWithOptions,
 } from '@/server/page-import/scrollMediaCandidates';
 import { extractMediaFromPage } from '@/server/page-import/scrollPuppeteer';
 import { normalizeCookieHeader } from '@/server/pageImportCookies';
+import { normalizeSmallAssetThresholdBytes } from '@/features/page-import/utils/smallAssetPolicy';
 
 const DEFAULT_MAX_SCROLLS = 10;
 const DEFAULT_SCROLL_DELAY_MS = 1500;
 const DEFAULT_TIMEOUT_MS = 30000;
-// For scroll mode, we trust puppeteer found real images, so use a very low threshold
-const SCROLL_MODE_MIN_BYTES = 1024; // 1KB - just filter out tiny tracking pixels
 
 export async function POST(request: NextRequest) {
   try {
@@ -44,9 +44,10 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid cookie header' }, { status: 400 });
     }
-    const minBytes = Number.isFinite(body?.minBytes)
-      ? Number(body.minBytes)
-      : (includeSmallAssets ? 1024 : SCROLL_MODE_MIN_BYTES);
+    const smallAssetThresholdBytes = normalizeSmallAssetThresholdBytes(
+      body?.smallAssetThresholdBytes ?? body?.minBytes
+    );
+    const minBytes = smallAssetThresholdBytes;
     const maxImages = Number.isFinite(body?.maxImages) ? Math.max(0, Number(body.maxImages)) : undefined;
     const maxScrolls = Number.isFinite(body?.maxScrolls) 
       ? Math.max(1, Math.min(50, Number(body.maxScrolls))) 
@@ -88,7 +89,12 @@ export async function POST(request: NextRequest) {
       if (protectionMode) {
         return /\/contents\/gfx\/imagecache\//i.test(img.url);
       }
-      return shouldIncludeImageWithOptions(img, { includeUiChrome, includeSmallAssets });
+      img.smallAssetReview = resolveSmallAssetReviewForImage(img, smallAssetThresholdBytes);
+      return shouldIncludeImageWithOptions(img, {
+        includeUiChrome,
+        includeSmallAssets,
+        smallAssetThresholdBytes,
+      });
     });
 
     if (protectionMode && filteredImages.length === 0) {
@@ -117,6 +123,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       sourceUrl: pageUrl,
       minBytes,
+      smallAssetThresholdBytes,
       maxImages: typeof maxImages === 'number' ? maxImages : null,
       includeUiChrome,
       includeSmallAssets,

@@ -6,6 +6,11 @@ import type {
   ImportProgressState,
   UploaderQueueItem,
 } from '@/features/page-import/types';
+import {
+  DEFAULT_SMALL_ASSET_THRESHOLD_MB,
+  mbToSmallAssetThresholdBytes,
+  normalizeSmallAssetThresholdMb,
+} from '@/features/page-import/utils/smallAssetPolicy';
 
 const PAGE_IMPORT_PREVIEW_LIMIT = 60;
 const DEFAULT_PAGE_IMPORT_MAX_ASSETS = '250';
@@ -57,7 +62,7 @@ const readImportPageResponse = async (response: Response) => {
   return data as PageImportDiscoveryResponse;
 };
 
-const toQueueItem = (
+export const toQueueItem = (
   candidate: ImportCandidate,
   queueId: string,
   sessionId: string,
@@ -73,10 +78,11 @@ const toQueueItem = (
   sizeBytes: candidate.metadata?.fileSizeBytes,
   contentType: candidate.metadata?.contentType ?? candidate.contentType,
   originalUrl: candidate.url,
-  selected: true,
+  selected: candidate.smallAssetReview ? false : true,
   metadata: candidate.metadata,
   tempAssetKey: candidate.tempAssetKey,
   importSessionId: sessionId,
+  smallAssetReview: candidate.smallAssetReview,
 });
 
 type UsePageImportDiscoveryParams = {
@@ -98,6 +104,9 @@ export function usePageImportDiscovery({
   const [pageImportAllowInsecure, setPageImportAllowInsecure] = useState(false);
   const [pageImportIncludeUiChrome, setPageImportIncludeUiChrome] = useState(false);
   const [pageImportIncludeSmallAssets, setPageImportIncludeSmallAssets] = useState(false);
+  const [pageImportSmallAssetThresholdMb, setPageImportSmallAssetThresholdMb] = useState(
+    String(DEFAULT_SMALL_ASSET_THRESHOLD_MB)
+  );
   const [pageImportScrollMode, setPageImportScrollMode] = useState(true);
   const [pageImportAutoScroll, setPageImportAutoScroll] = useState(true);
   const [pageImportMaxScrolls, setPageImportMaxScrolls] = useState('10');
@@ -138,6 +147,9 @@ export function usePageImportDiscovery({
     async (cookieHeaderOverride?: string) => {
       if (!pageImportUrl.trim()) return;
       const cookieHeaderValue = (cookieHeaderOverride ?? pageImportCookieHeader).trim();
+      const smallAssetThresholdBytes = mbToSmallAssetThresholdBytes(
+        Number(normalizeSmallAssetThresholdMb(pageImportSmallAssetThresholdMb))
+      );
 
       setPageImportLoading(true);
       setPageImportError(null);
@@ -162,6 +174,7 @@ export function usePageImportDiscovery({
               maxAssets: Number(pageImportMaxAssets) || Number(DEFAULT_PAGE_IMPORT_MAX_ASSETS),
               includeUiChrome: pageImportIncludeUiChrome,
               includeSmallAssets: pageImportIncludeSmallAssets,
+              smallAssetThresholdBytes,
               ...(cookieHeaderValue ? { cookieHeader: cookieHeaderValue } : {}),
             }),
           });
@@ -266,7 +279,7 @@ export function usePageImportDiscovery({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             url: pageImportUrl.trim(),
-            minBytes: pageImportIncludeSmallAssets ? 1024 : 8 * 1024,
+            smallAssetThresholdBytes,
             allowInsecure: pageImportAllowInsecure,
             includeUiChrome: pageImportIncludeUiChrome,
             includeSmallAssets: pageImportIncludeSmallAssets,
@@ -317,6 +330,7 @@ export function usePageImportDiscovery({
       pageImportMaxScrolls,
       pageImportScrollDelayMs,
       pageImportScrollMode,
+      pageImportSmallAssetThresholdMb,
       pageImportUrl,
       setSourceUrlIfEmpty,
     ]
@@ -342,6 +356,9 @@ export function usePageImportDiscovery({
 
         const sessionId = await ensureImportSession();
         const sourceUrl = isValidHttpUrl(pageImportUrl.trim()) ? pageImportUrl.trim() : '';
+        const smallAssetThresholdBytes = mbToSmallAssetThresholdBytes(
+          Number(normalizeSmallAssetThresholdMb(pageImportSmallAssetThresholdMb))
+        );
         const response = await fetch('/api/import/page', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -349,7 +366,7 @@ export function usePageImportDiscovery({
             html,
             sourceFilename: file.name,
             ...(sourceUrl ? { sourceUrl } : {}),
-            minBytes: pageImportIncludeSmallAssets ? 1024 : 8 * 1024,
+            smallAssetThresholdBytes,
             allowInsecure: pageImportAllowInsecure,
             includeUiChrome: pageImportIncludeUiChrome,
             includeSmallAssets: pageImportIncludeSmallAssets,
@@ -397,6 +414,7 @@ export function usePageImportDiscovery({
       pageImportIncludeSmallAssets,
       pageImportIncludeUiChrome,
       pageImportLoading,
+      pageImportSmallAssetThresholdMb,
       pageImportUrl,
       setSourceUrlIfEmpty,
     ]
@@ -439,6 +457,8 @@ export function usePageImportDiscovery({
     setPageImportIncludeUiChrome,
     pageImportIncludeSmallAssets,
     setPageImportIncludeSmallAssets,
+    pageImportSmallAssetThresholdMb,
+    setPageImportSmallAssetThresholdMb,
     pageImportScrollMode,
     setPageImportScrollMode,
     pageImportAutoScroll,

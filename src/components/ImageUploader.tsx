@@ -124,6 +124,8 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     setPageImportIncludeUiChrome,
     pageImportIncludeSmallAssets,
     setPageImportIncludeSmallAssets,
+    pageImportSmallAssetThresholdMb,
+    setPageImportSmallAssetThresholdMb,
     pageImportScrollMode,
     setPageImportScrollMode,
     pageImportAutoScroll,
@@ -875,6 +877,8 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
         setPageImportAutoScroll={setPageImportAutoScroll}
         pageImportIncludeSmallAssets={pageImportIncludeSmallAssets}
         setPageImportIncludeSmallAssets={setPageImportIncludeSmallAssets}
+        pageImportSmallAssetThresholdMb={pageImportSmallAssetThresholdMb}
+        setPageImportSmallAssetThresholdMb={setPageImportSmallAssetThresholdMb}
         pageImportIncludeUiChrome={pageImportIncludeUiChrome}
         setPageImportIncludeUiChrome={setPageImportIncludeUiChrome}
         setPageImportScrollMode={setPageImportScrollMode}
