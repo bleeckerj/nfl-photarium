@@ -1,7 +1,7 @@
 import React from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { ChevronDown, ChevronUp, GripVertical } from 'lucide-react';
+import { ChevronDown, ChevronUp, Crop, GripVertical } from 'lucide-react';
 
 import MonoSelect from '@/components/MonoSelect';
 import {
@@ -48,6 +48,7 @@ export interface VariationsSectionProps {
   setListVariant: (value: string) => void;
   listVariantOptions: SelectOption[];
   onCopyList: () => void | Promise<void>;
+  onCreateCropVariant?: () => void;
 
   variationCandidatesLength: number;
   variationOrderSaving: boolean;
@@ -122,6 +123,7 @@ export function VariationsSection(props: VariationsSectionProps) {
     setListVariant,
     listVariantOptions,
     onCopyList,
+    onCreateCropVariant,
     variationCandidatesLength,
     variationOrderSaving,
     onResetVariationOrder,
@@ -276,11 +278,20 @@ export function VariationsSection(props: VariationsSectionProps) {
                 <span className="text-[10px] text-gray-400">used for copy actions</span>
               </div>
               <button
-          onClick={() => void onCopyList()}
-          className="px-2 py-1 text-[10px] border border-gray-300 rounded-md text-blue-600 hover:bg-blue-50"
+                onClick={() => void onCopyList()}
+                className="px-2 py-1 text-[10px] border border-gray-300 rounded-md text-blue-600 hover:bg-blue-50"
               >
-          Copy list
+                Copy list
               </button>
+              {onCreateCropVariant && (
+                <button
+                  onClick={() => void onCreateCropVariant()}
+                  className="inline-flex items-center gap-1 px-2 py-1 text-[10px] border border-blue-300 rounded-md text-blue-700 hover:bg-blue-50"
+                >
+                  <Crop className="h-3 w-3" aria-hidden="true" />
+                  Crop variant
+                </button>
+              )}
               <button
           onClick={() => void onResetVariationOrder()}
           disabled={variationOrderSaving || !variationCandidatesLength}

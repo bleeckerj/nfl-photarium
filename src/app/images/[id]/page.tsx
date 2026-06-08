@@ -45,6 +45,7 @@ import { ImageDetailNavigation } from '@/components/image-detail/ImageDetailNavi
 import { ImageHeroSection } from '@/components/image-detail/ImageHeroSection';
 import { ImageSummarySection } from '@/components/image-detail/ImageSummarySection';
 import { VariantSizeModal } from '@/components/image-detail/VariantSizeModal';
+import { CropVariantModal } from '@/components/image-detail/CropVariantModal';
 import type { CloudflareImage } from '@/components/image-detail/types';
 import { useDetailNavigationGuard } from '@/components/image-detail/useDetailNavigationGuard';
 import { usePromptThisEditor } from '@/components/image-detail/usePromptThisEditor';
@@ -263,6 +264,7 @@ export default function ImageDetailPage() {
     markSaved: markMetadataSaved,
   } = metadataDraft;
   const [variantModalState, setVariantModalState] = useState<{ target: CloudflareImage } | null>(null);
+  const [cropVariantOpen, setCropVariantOpen] = useState(false);
   const [variationOrderOverride, setVariationOrderOverride] = useState<string[] | null>(null);
   const [variationOrderSaving, setVariationOrderSaving] = useState(false);
   const [draggingVariationId, setDraggingVariationId] = useState<string | null>(null);
@@ -590,6 +592,11 @@ export default function ImageDetailPage() {
       console.error('Failed to refresh images', error);
     }
   }, [buildFamilyContextUrl, id, mergeContextImages, syncImageState]);
+
+  const handleCropVariantCreated = useCallback(async () => {
+    toast.push('Crop variant created');
+    await refreshImageList();
+  }, [refreshImageList, toast]);
 
   const registerDetailNamespace = useCallback(async (nextNamespace: string, description?: string) => {
     const cleanNamespace = nextNamespace.trim();
@@ -1152,6 +1159,10 @@ export default function ImageDetailPage() {
   const originalDeliveryUrl = useMemo(
     () => (id ? getCloudflareImageUrl(id, 'original') : ''),
     [id]
+  );
+  const imageToolSourcePreviewUrl = useMemo(
+    () => (image ? getAssetPreviewUrl(image, { imageVariant: 'public' }) : ''),
+    [image]
   );
 
   const heroRotationStyle = useMemo<CSSProperties>(
@@ -2355,6 +2366,7 @@ export default function ImageDetailPage() {
                 setListVariant={setListVariant}
                 listVariantOptions={listVariantOptions}
                 onCopyList={handleCopyList}
+                onCreateCropVariant={!isChildImage ? () => setCropVariantOpen(true) : undefined}
                 variationCandidatesLength={variationCandidates.length}
                 variationOrderSaving={variationOrderSaving}
                 onResetVariationOrder={handleResetVariationOrder}
@@ -2493,6 +2505,14 @@ export default function ImageDetailPage() {
           onClose={() => setVariantModalState(null)}
           onCopyUrl={handleCopyUrl}
           onToast={toast.push}
+        />
+      )}
+      {cropVariantOpen && image && (
+        <CropVariantModal
+          image={image}
+          previewUrl={imageToolSourcePreviewUrl}
+          onClose={() => setCropVariantOpen(false)}
+          onCreated={handleCropVariantCreated}
         />
       )}
       {hoverPreview && <HoverPreviewOverlay preview={hoverPreview} />}
