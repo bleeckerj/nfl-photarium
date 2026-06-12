@@ -89,9 +89,8 @@ export function useGalleryNamespaceLifecycle({
     if (deferInitialFetchRef.current) {
       deferInitialFetchRef.current = false;
       if (perfLoggingEnabled) {
-        console.info('[GalleryPerf] skipped_return_fetch using restored snapshot');
+        console.info('[GalleryPerf] restored snapshot; refreshing current gallery page');
       }
-      return;
     }
     const silent = initialSilentFetchRef.current;
     initialSilentFetchRef.current = false;

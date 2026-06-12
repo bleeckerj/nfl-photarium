@@ -24,3 +24,9 @@ Example (copyable):
 Considerations:
 - Resized images are cached at the edge. Purging the original image will purge resized variants.
 - Avoid using `original` in email; use smaller sizes to improve deliverability and load times.
+
+## Crop Variants
+
+Crop variants are separate uploaded child images, not Cloudflare delivery-size transformations. Use **Crop variant** on a parent image detail page when a real derivative asset is needed for a specific composition. The crop is generated from original bytes, preserves source width, outputs WebP, and supports still images plus animated WebP/GIF sources.
+
+Supported preset ratios are `1:1`, `3:2`, `4:5`, `5:4`, `9:16`, and `16:9`, with custom `width:height` values available through the modal/API. Crops can anchor from the top, center, or bottom. If the requested full-width crop would be taller than the source image or animation frame, Photarium rejects it instead of padding or scaling.

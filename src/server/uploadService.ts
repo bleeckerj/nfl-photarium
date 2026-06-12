@@ -53,6 +53,9 @@ export type UploadContext = {
   namespace?: string;
   parentId?: string;
   duplicateAction?: UploadDuplicateAction;
+  generatedBy?: string;
+  comfyMetadataDetected?: boolean;
+  comfyMetadataSource?: string;
 };
 
 export type UploadSuccess = {
@@ -502,6 +505,9 @@ export async function uploadImageBuffer({
     namespace,
     parentId,
     duplicateAction,
+    generatedBy,
+    comfyMetadataDetected,
+    comfyMetadataSource,
   } = context;
   const isSnagx = fileName.toLowerCase().endsWith('.snagx');
   const normalizedNamespace = typeof namespace === 'string' && namespace.trim()
@@ -624,6 +630,9 @@ export async function uploadImageBuffer({
 
   const exifSummary = await extractExifSummary(workingOriginalBuffer);
   const comfyExtraction = await extractComfyWorkflowMetadata(workingOriginalBuffer, { mimeType: workingFileType });
+  const effectiveGeneratedBy = comfyExtraction.detected ? 'comfyui' : generatedBy;
+  const effectiveComfyMetadataDetected = comfyExtraction.detected ? true : comfyMetadataDetected;
+  const effectiveComfyMetadataSource = comfyExtraction.source ?? comfyMetadataSource;
 
   if (deduplication.contentHashDuplicates.length && !deduplication.duplicateFamilySelection) {
     logContentHashDuplicate({
@@ -657,9 +666,9 @@ export async function uploadImageBuffer({
     variationParentId: resolvedParentId,
     duplicateFamilyOverride: deduplication.duplicateFamilySelection ? true : undefined,
     uploadNormalization: prepared.data.uploadNormalization,
-    generatedBy: comfyExtraction.detected ? 'comfyui' : undefined,
-    comfyMetadataDetected: comfyExtraction.detected ? true : undefined,
-    comfyMetadataSource: comfyExtraction.source,
+    generatedBy: effectiveGeneratedBy,
+    comfyMetadataDetected: effectiveComfyMetadataDetected,
+    comfyMetadataSource: effectiveComfyMetadataSource,
   };
   const extrasMetadata: Record<string, unknown> = {
     originalUrl: originalUrl || undefined,

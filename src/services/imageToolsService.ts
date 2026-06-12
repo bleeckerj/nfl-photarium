@@ -6,6 +6,8 @@ export type ImageToolDiagnosticLevel = 'info' | 'warn' | 'error';
 export type ImageToolControlOption = {
   value: string | number | boolean;
   label: string;
+  helpText?: string;
+  effectId?: string;
 };
 
 export type ImageToolControl = {
@@ -19,6 +21,9 @@ export type ImageToolControl = {
   step?: number;
   options?: ImageToolControlOption[];
   helpText?: string;
+  group?: string;
+  effectIds?: string[];
+  advanced?: boolean;
 };
 
 export type ImageToolPresentation = {
@@ -30,6 +35,7 @@ export type ImageToolPresentation = {
 
 export type ImageToolRequest = {
   effectId: string;
+  paramPreset?: string;
   params: Record<string, unknown>;
   output: {
     mode: ImageToolOutputMode;
@@ -119,6 +125,38 @@ export type ImageToolPreview = {
   events: ImageToolDiagnosticEvent[];
 };
 
+const STATUS_FETCH_TIMEOUT_MS = 15000;
+export const IMAGE_TOOL_STATUS_TIMEOUT_MESSAGE = 'Image tool status refresh timed out. The local server may be busy rendering this effect.';
+
+const isAbortError = (error: unknown) => (
+  error instanceof DOMException && error.name === 'AbortError'
+) || (
+  error instanceof Error && error.name === 'AbortError'
+);
+
+export const isImageToolTransientStatusError = (error: unknown) => {
+  if (isAbortError(error)) return true;
+  return error instanceof Error && error.message === IMAGE_TOOL_STATUS_TIMEOUT_MESSAGE;
+};
+
+const fetchWithTimeout = async (url: string, init: RequestInit = {}, timeoutMs = STATUS_FETCH_TIMEOUT_MS) => {
+  const controller = new AbortController();
+  const timer = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new Error(IMAGE_TOOL_STATUS_TIMEOUT_MESSAGE);
+    }
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timer);
+  }
+};
+
 export const listImageTools = async (): Promise<ImageToolManifest[]> => {
   const response = await fetch('/api/image-tools', { cache: 'no-store' });
   const payload = await response.json().catch(() => ({}));
@@ -169,8 +207,17 @@ export const createImageToolPreview = async (params: {
   return payload.preview as ImageToolPreview;
 };
 
+export const getImageToolPreview = async (previewId: string): Promise<ImageToolPreview> => {
+  const response = await fetchWithTimeout(`/api/image-tools/previews/${encodeURIComponent(previewId)}`, { cache: 'no-store' });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to load image tool preview');
+  }
+  return payload.preview as ImageToolPreview;
+};
+
 export const getImageToolRun = async (runId: string): Promise<ImageToolRun> => {
-  const response = await fetch(`/api/image-tools/runs/${encodeURIComponent(runId)}`, { cache: 'no-store' });
+  const response = await fetchWithTimeout(`/api/image-tools/runs/${encodeURIComponent(runId)}`, { cache: 'no-store' });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to load image tool run');

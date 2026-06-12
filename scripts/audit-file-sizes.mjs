@@ -26,12 +26,6 @@ const CATEGORY_THRESHOLDS = {
 };
 
 const ALLOWED_OVERSIZED_FILES = new Map([
-  ['mcp-server/src/legacy/runtime.ts', {
-    category: 'source',
-    owner: 'maintainability-refactor',
-    reason: 'legacy MCP runtime deferred from first-pass app refactor',
-    expires: '2026-07-15',
-  }],
   ['src/app/images/[id]/page.tsx', {
     category: 'component',
     owner: 'maintainability-refactor',

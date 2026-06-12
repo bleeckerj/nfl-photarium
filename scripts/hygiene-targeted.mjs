@@ -72,7 +72,14 @@ function testsForFile(file) {
     tests.push('__tests__/assetParentService.test.ts', '__tests__/detachChildrenRoute.test.ts');
   }
   if (file.includes('image-tools/')) {
-    tests.push('__tests__/imageToolsRegistry.test.ts', '__tests__/imageToolsRoutes.test.ts');
+    tests.push(
+      '__tests__/grainradEngine.test.ts',
+      '__tests__/grainradAdapter.test.ts',
+      '__tests__/imageToolsPreviewRequest.test.ts',
+      '__tests__/imageToolsRegistry.test.ts',
+      '__tests__/imageToolsRoutes.test.ts',
+      '__tests__/sourceImageValidation.test.ts'
+    );
   }
   if (file.includes('fs-ingest')) {
     tests.push('__tests__/fsIngestScript.test.ts', '__tests__/fsIngestFlickrSidecar.test.ts');
@@ -99,7 +106,7 @@ run('npm', ['run', 'size:audit']);
 
 const lintFiles = files.filter((file) => SOURCE_EXTENSIONS.test(file));
 if (lintFiles.length > 0) {
-  run('npx', ['eslint', ...lintFiles]);
+  run('npx', ['eslint', '--no-warn-ignored', ...lintFiles]);
 } else {
   console.log('[hygiene:targeted] no changed lintable files');
 }

@@ -8,6 +8,7 @@ import {
   updateVideoAssetRecord,
 } from '@/server/videoCatalogStorage';
 import { uploadImageBuffer } from '@/server/uploadService';
+import { buildVideoAnimatedWebpImageTags } from '@/server/videoAnimatedWebpImageTags';
 
 type AnimatedWebpVariationInput = {
   maxWidth?: number;
@@ -231,11 +232,14 @@ export async function POST(
             accountId,
             apiToken,
             folder: video.folder,
-            tags: Array.from(new Set([...(video.tags || []), 'animated-webp', 'video-derivative'])),
+            tags: buildVideoAnimatedWebpImageTags(video.tags),
             description: video.description,
             originalUrl: video.originalUrl,
             sourceUrl: video.sourceUrl || sourceUrl,
             namespace: video.namespace,
+            generatedBy: video.generatedBy,
+            comfyMetadataDetected: video.comfyMetadataDetected,
+            comfyMetadataSource: video.comfyMetadataSource,
           },
         });
 

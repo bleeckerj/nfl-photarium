@@ -1,4 +1,4 @@
-import { createLegacyToolContract } from './legacy-support.js';
+import { createRuntimeToolContract } from './runtime-support.js';
 
 const SYSTEM_TOOL_NAMES = [
   'photarium_vector_status',
@@ -13,4 +13,4 @@ const SYSTEM_TOOL_NAMES = [
   'photarium_debug_raw',
 ] as const;
 
-export const systemContracts = SYSTEM_TOOL_NAMES.map(createLegacyToolContract);
+export const systemContracts = SYSTEM_TOOL_NAMES.map(createRuntimeToolContract);

@@ -174,7 +174,8 @@ export const addImageToolPreviewEvent = (
 
 export const completeImageToolPreview = (
   previewId: string,
-  artifact: { buffer: Buffer; contentType: string; filename: string }
+  artifact: { buffer: Buffer; contentType: string; filename: string },
+  externalJobId?: string
 ) => {
   const current = state.previews.get(previewId);
   if (!current) return undefined;
@@ -187,6 +188,7 @@ export const completeImageToolPreview = (
     artifactUrl: `/api/image-tools/previews/${encodeURIComponent(previewId)}/artifact`,
     contentType: artifact.contentType,
     filename: artifact.filename,
+    externalJobId: externalJobId ?? current.externalJobId,
     updatedAt: now(),
   };
   state.previews.set(previewId, next);

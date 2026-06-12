@@ -15,8 +15,9 @@
 
 - `__tests__/imageToolsRegistry.test.ts`
 - `__tests__/imageToolsRoutes.test.ts`
-- `__tests__/imageToolsFakeGrainradHarness.test.ts`
+- `__tests__/grainradEngine.test.ts`
 - `__tests__/grainradAdapter.test.ts`
+- `__tests__/sourceImageValidation.test.ts`
 
 ## Do Not Add
 

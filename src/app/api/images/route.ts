@@ -7,7 +7,7 @@ import {
   getImageFolderOverrides,
   getImageFolderOverridesVersion,
 } from '@/server/imageExtras';
-import { queryGalleryAssets, type GalleryQueryAsset } from '@/server/galleryQuery';
+import { queryGalleryAssets, sortGalleryAssetsByUploadedDesc, type GalleryQueryAsset } from '@/server/galleryQuery';
 import {
   applyFolderOverridesToAssets,
   collectDirectFamilyAssets,
@@ -21,6 +21,10 @@ import {
   toListableImage,
   type ScopedAsset,
 } from '@/server/galleryQueryRoute';
+import {
+  applyVideoAnimatedWebpComfyProvenance,
+  buildVideoAnimatedWebpComfyProvenanceMap,
+} from '@/server/videoAnimatedWebpComfyProvenance';
 
 export async function GET(request: NextRequest) {
   const startedAt = performance.now();
@@ -107,10 +111,13 @@ export async function GET(request: NextRequest) {
       : Promise.resolve([] as Awaited<ReturnType<typeof listVideoAssetRecordsWithSync>>);
 
     const images = await cachePromise;
-    const filteredImages = images.filter((image) => matchesNamespace(image.namespace, namespace));
+    const allVideos = await videosPromise;
+    const animatedWebpComfyProvenance = buildVideoAnimatedWebpComfyProvenanceMap(allVideos);
+    const imagesWithVideoProvenance = applyVideoAnimatedWebpComfyProvenance(images, animatedWebpComfyProvenance);
+    diagnostics.animated_webp_comfy_provenance_count = animatedWebpComfyProvenance.size;
+    const filteredImages = imagesWithVideoProvenance.filter((image) => matchesNamespace(image.namespace, namespace));
     diagnostics.filtered_image_count = filteredImages.length;
 
-    const allVideos = await videosPromise;
     const mappedVideos = allVideos.map((video) => ({
       id: video.id,
       assetType: 'video' as const,
@@ -159,7 +166,7 @@ export async function GET(request: NextRequest) {
       truncated: scopedVideos.length > limitedVideos.length,
     };
     const familyAssets = includeFamilyFor
-      ? await markStage('family_collect', () => collectDirectFamilyAssets([...images, ...mappedVideos], includeFamilyFor))
+      ? await markStage('family_collect', () => collectDirectFamilyAssets([...imagesWithVideoProvenance, ...mappedVideos], includeFamilyFor))
       : [];
     const mergedScopedAssets = mergeUniqueAssets(
       [...filteredImages, ...limitedVideos],
@@ -179,7 +186,7 @@ export async function GET(request: NextRequest) {
     
     // Optional: merge embedding status from Redis.
     // Keep this off by default so gallery can render immediately and enrich asynchronously.
-    let imagesWithEmbeddings = images.filter((image) => scopedImageIds.has(image.id));
+    let imagesWithEmbeddings = imagesWithVideoProvenance.filter((image) => scopedImageIds.has(image.id));
     if (includeVectorMeta) {
       try {
         const redisCheckStart = performance.now();
@@ -356,6 +363,8 @@ export async function GET(request: NextRequest) {
     const totalBeforePagination = queryResult?.total ?? finalImages.length;
     if (queryResult && (hasPagination || hasGalleryQueryParams)) {
       finalImages = queryResult.images;
+    } else if (!queryResult) {
+      finalImages = sortGalleryAssetsByUploadedDesc(finalImages);
     }
     diagnostics.pagination_enabled = hasPagination;
     diagnostics.page = hasPagination && queryResult ? queryResult.page : null;
@@ -442,6 +451,7 @@ export async function GET(request: NextRequest) {
     const payloadBytes = Buffer.byteLength(JSON.stringify(responseBody));
     diagnostics.payload_kb = mark(payloadBytes / 1024);
     const response = NextResponse.json(responseBody);
+    response.headers.set('Cache-Control', 'no-store, no-cache, max-age=0, must-revalidate');
     response.headers.set(
       'Server-Timing',
       Object.entries(timings)

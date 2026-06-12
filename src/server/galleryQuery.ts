@@ -236,6 +236,21 @@ const matchesComfy = (asset: GalleryQueryAsset) => {
   return generatedBy === 'comfyui' || asset.comfyMetadataDetected === true || Boolean(asset.comfyMetadataSource);
 };
 
+const getUploadedTime = (asset: GalleryQueryAsset) => {
+  const uploadedTime = Date.parse(asset.uploaded ?? '');
+  return Number.isFinite(uploadedTime) ? uploadedTime : Number.NEGATIVE_INFINITY;
+};
+
+export const compareGalleryAssetsByNewestUpload = <T extends GalleryQueryAsset>(a: T, b: T) => {
+  const aTime = getUploadedTime(a);
+  const bTime = getUploadedTime(b);
+  if (aTime !== bTime) return bTime > aTime ? 1 : -1;
+  return a.id.localeCompare(b.id);
+};
+
+export const sortGalleryAssetsByUploadedDesc = <T extends GalleryQueryAsset>(assets: T[]): T[] =>
+  [...assets].sort(compareGalleryAssetsByNewestUpload);
+
 const buildFacets = <T extends GalleryQueryAsset>(assets: T[]): GalleryQueryFacets => {
   const folders = new Map<string, number>();
   const tags = new Map<string, number>();
@@ -396,7 +411,7 @@ export const queryGalleryAssets = <T extends GalleryQueryAsset>(
   const duplicateFiltered = filters.duplicates
     ? baseFiltered.filter((asset) => duplicateIds.has(asset.id))
     : baseFiltered;
-  const sorted = [...duplicateFiltered].sort((a, b) => Date.parse(b.uploaded ?? '') - Date.parse(a.uploaded ?? ''));
+  const sorted = sortGalleryAssetsByUploadedDesc(duplicateFiltered);
   const safePage = Math.max(1, Math.floor(page));
   const safePageSize = Math.max(1, Math.floor(pageSize));
   const total = sorted.length;

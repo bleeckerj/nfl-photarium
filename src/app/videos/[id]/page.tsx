@@ -15,6 +15,7 @@ import { UploadVariationSection } from '@/components/image-detail/UploadVariatio
 import { VARIATION_UPLOAD_ACCEPT } from '@/components/image-detail/variationUploadConfig';
 import { AssetFamilyList } from '@/components/asset-detail/AssetFamilyList';
 import { AssetTypeBadge } from '@/components/asset-detail/AssetTypeBadge';
+import { ComfyIndicator } from '@/components/asset-detail/ComfyIndicator';
 import AnimatedWebpSection from '@/components/video-detail/AnimatedWebpSection';
 import FrameExtractionSection from '@/components/video-detail/FrameExtractionSection';
 
@@ -393,6 +394,9 @@ export default function VideoDetailPage() {
     return {
       id: video.id,
       assetType: 'video' as const,
+      generatedBy: video.generatedBy,
+      comfyMetadataDetected: video.comfyMetadataDetected,
+      comfyMetadataSource: video.comfyMetadataSource,
       filename: video.filename,
       displayName: video.displayName || video.filename,
       uploaded: video.uploaded,
@@ -1267,6 +1271,7 @@ export default function VideoDetailPage() {
         <section className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
           <div className="flex items-center gap-2">
             <AssetTypeBadge assetType="video" />
+            <ComfyIndicator asset={video} id={`video-detail-comfy-indicator-${video.id}`} />
             <h1 className="text-lg font-semibold text-gray-900">{video.displayName || video.filename}</h1>
           </div>
           <p className="text-xs font-mono text-gray-600">

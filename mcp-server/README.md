@@ -37,9 +37,34 @@ MCP (Model Context Protocol) server that exposes the full Photarium API surface 
 
 - `photarium_upload_url`
 - `photarium_upload_image`
+- `photarium_crop_variant` (width-preserving still/animated WebP crop uploaded as a source image variant)
 - `photarium_fs_ingest` (recursive local image/video ingest from a directory tree)
   - includes local checkpointing to skip unchanged files on reruns (avoids repeat AI/API work)
 - `photarium_instagram_ingest_single_url` (single Instagram post/reel ingest through the existing authenticated CLI/profile flow)
+
+#### Crop Variants
+
+`photarium_crop_variant` creates a width-preserving WebP crop from original Photarium image bytes and uploads it as a variant. It supports still images and animated WebP/GIF sources. Animated output preserves frame delays when source metadata includes them.
+
+Defaults:
+
+- `aspectRatio`: `4:5`
+- `anchor`: `bottom`
+- `quality`: `90`
+- `parentId`: source `imageId`
+
+Common ratios exposed in the UI are `1:1`, `3:2`, `4:5`, `5:4`, `9:16`, and `16:9`. The tool also accepts any positive `width:height` value. It rejects crops that cannot fit the source height because v1 preserves full width without padding or scaling.
+
+Example:
+
+```json
+{
+  "imageId": "source-image-id",
+  "aspectRatio": "1:1",
+  "anchor": "center",
+  "filename": "source-square-center.webp"
+}
+```
 
 
 ### AI Features

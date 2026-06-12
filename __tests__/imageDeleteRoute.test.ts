@@ -5,6 +5,7 @@ const {
   detachAssetChildrenMock,
   getVideoAssetRecordMock,
   deleteVideoAssetRecordMock,
+  listVideoAssetRecordsMock,
   deleteStreamVideoMock,
   cleanupImageArtifactsMock,
   getCloudflareCredentialsMock,
@@ -12,6 +13,7 @@ const {
   detachAssetChildrenMock: vi.fn(),
   getVideoAssetRecordMock: vi.fn(),
   deleteVideoAssetRecordMock: vi.fn(),
+  listVideoAssetRecordsMock: vi.fn(),
   deleteStreamVideoMock: vi.fn(),
   cleanupImageArtifactsMock: vi.fn(),
   getCloudflareCredentialsMock: vi.fn(),
@@ -32,6 +34,7 @@ vi.mock('@/server/assetParentService', () => ({
 vi.mock('@/server/videoCatalogStorage', () => ({
   getVideoAssetRecord: getVideoAssetRecordMock,
   deleteVideoAssetRecord: deleteVideoAssetRecordMock,
+  listVideoAssetRecords: listVideoAssetRecordsMock,
 }));
 
 vi.mock('@/server/cloudflareStreamClient', () => ({

@@ -15,6 +15,9 @@ export type DeleteFamilyJobStatus = {
 };
 
 type DeleteImagePayload = {
+  success?: boolean;
+  assetType?: 'image' | 'video';
+  detachedChildIds?: string[];
   error?: string;
 };
 
@@ -23,8 +26,16 @@ type DeleteFamilyPayload = {
   error?: string;
 };
 
+export const buildImageDeleteUrl = (imageId: string) => {
+  return `/api/images/${encodeURIComponent(imageId)}`;
+};
+
+const buildDeleteFamilyUrl = (imageId: string) => {
+  return `/api/images/${encodeURIComponent(imageId)}/delete-family`;
+};
+
 export const deleteImage = async (imageId: string) => {
-  const response = await fetch(`/api/images/${imageId}`, { method: 'DELETE' });
+  const response = await fetch(buildImageDeleteUrl(imageId), { method: 'DELETE' });
   const payload = (await response.json().catch(() => ({}))) as DeleteImagePayload;
   if (!response.ok) {
     throw new Error(payload.error || 'Failed to delete image');
@@ -33,7 +44,7 @@ export const deleteImage = async (imageId: string) => {
 };
 
 export const startDeleteFamilyJob = async (imageId: string) => {
-  const response = await fetch(`/api/images/${imageId}/delete-family`, {
+  const response = await fetch(buildDeleteFamilyUrl(imageId), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ confirm: 'DELETE_FAMILY', async: true })

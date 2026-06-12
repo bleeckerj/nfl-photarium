@@ -1,8 +1,19 @@
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const projectRoot = dirname(fileURLToPath(import.meta.url));
+const workspaceRoot = resolve(projectRoot, '..');
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   turbopack: {
-    root: import.meta.dirname,
+    root: workspaceRoot,
   },
+  // Keep the in-process grainrad effects engine (and sharp) as runtime externals
+  // rather than bundling them. grainrad is pure ESM and reads a sibling
+  // docs/feature-map.json relative to its own module path, so it must run from
+  // its on-disk location.
+  serverExternalPackages: ['nfl-grainrad-clone', 'sharp'],
   webpack: (config, { dev }) => {
     if (dev) {
       const existingIgnored = config.watchOptions?.ignored;

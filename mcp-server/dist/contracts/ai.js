@@ -1,4 +1,4 @@
-import { createLegacyToolContract } from './legacy-support.js';
+import { createRuntimeToolContract } from './runtime-support.js';
 const AI_TOOL_NAMES = [
     'photarium_generate_alt',
     'photarium_generate_description',
@@ -11,4 +11,4 @@ const AI_TOOL_NAMES = [
     'photarium_concepts',
     'photarium_haiku',
 ];
-export const aiContracts = AI_TOOL_NAMES.map(createLegacyToolContract);
+export const aiContracts = AI_TOOL_NAMES.map(createRuntimeToolContract);

@@ -43,6 +43,9 @@ const createParams = (id: string) => ({ params: Promise.resolve({ id }) });
 const baseVideo = {
   id: 'video-1',
   filename: 'clip.mp4',
+  generatedBy: 'comfyui',
+  comfyMetadataDetected: true,
+  comfyMetadataSource: 'video:prompt',
   uploaded: '2026-03-01T10:00:00.000Z',
   streamUid: 'stream-1',
   hlsUrl: 'https://videodelivery.net/stream-1/manifest/video.m3u8',
@@ -89,7 +92,7 @@ describe('POST /api/videos/[id]/animated-webp', () => {
         url: 'https://imagedelivery.net/hash/img-1/public',
         variants: ['https://imagedelivery.net/hash/img-1/public'],
         uploaded: '2026-03-01T10:00:10.000Z',
-        tags: ['animated-webp', 'video-derivative'],
+        tags: ['loop'],
       },
     });
   });
@@ -177,7 +180,13 @@ describe('POST /api/videos/[id]/animated-webp', () => {
     expect(uploadImageBufferMock).toHaveBeenCalledWith(
       expect.objectContaining({
         fileType: 'image/webp',
-        context: expect.objectContaining({ namespace: 'ns-a' }),
+        context: expect.objectContaining({
+          namespace: 'ns-a',
+          tags: ['loop'],
+          generatedBy: 'comfyui',
+          comfyMetadataDetected: true,
+          comfyMetadataSource: 'video:prompt',
+        }),
       })
     );
     expect(updateVideoAssetRecordMock).toHaveBeenCalledWith(
@@ -191,6 +200,21 @@ describe('POST /api/videos/[id]/animated-webp', () => {
       })
     );
     expect(payload.animatedWebp.url).toBe('/api/images/img-1/download?variant=original&disposition=inline');
+  });
+
+  it('filters animated webp marker tags from generated image uploads', async () => {
+    getVideoAssetRecordWithSyncMock.mockResolvedValueOnce({
+      ...baseVideo,
+      tags: ['loop', 'animated-webp', 'video-derivative', 'keep'],
+    });
+
+    const response = await POST(createRequest(), createParams('video-1'));
+    await response.json();
+
+    const uploadArg = uploadImageBufferMock.mock.calls[0]?.[0] as {
+      context: { tags?: string[] };
+    };
+    expect(uploadArg.context.tags).toEqual(['loop', 'keep']);
   });
 
   it('supports generating multiple variations in one request', async () => {
@@ -235,7 +259,7 @@ describe('POST /api/videos/[id]/animated-webp', () => {
           url: 'https://imagedelivery.net/hash/img-a/public',
           variants: ['https://imagedelivery.net/hash/img-a/public'],
           uploaded: '2026-03-01T10:00:10.000Z',
-          tags: ['animated-webp', 'video-derivative'],
+          tags: ['loop'],
         },
       })
       .mockResolvedValueOnce({
@@ -246,7 +270,7 @@ describe('POST /api/videos/[id]/animated-webp', () => {
           url: 'https://imagedelivery.net/hash/img-b/public',
           variants: ['https://imagedelivery.net/hash/img-b/public'],
           uploaded: '2026-03-01T10:00:11.000Z',
-          tags: ['animated-webp', 'video-derivative'],
+          tags: ['loop'],
         },
       });
 

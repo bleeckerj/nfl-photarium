@@ -104,6 +104,52 @@ describe('GET /api/images video integration', () => {
     );
   });
 
+  it('marks existing animated WebP derivatives as Comfy when their source video is Comfy', async () => {
+    getCachedImagesMock.mockResolvedValueOnce([
+      {
+        id: 'webp-1',
+        filename: 'clip.webp',
+        uploaded: '2026-02-20T02:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/webp-1/public'],
+        tags: ['animated-webp'],
+      },
+    ]);
+    listVideoAssetRecordsWithSyncMock.mockResolvedValueOnce([
+      {
+        id: 'vid-comfy',
+        assetType: 'video',
+        generatedBy: 'comfyui',
+        comfyMetadataDetected: true,
+        comfyMetadataSource: 'video:prompt',
+        filename: 'clip.mp4',
+        uploaded: '2026-02-20T01:00:00.000Z',
+        streamUid: 'stream-uid',
+        hlsUrl: 'https://videodelivery.net/stream-uid/manifest/video.m3u8',
+        videoStatus: 'ready',
+        tags: [],
+        animatedWebpImageId: 'webp-1',
+        animatedWebpVariants: [],
+        createdAt: '2026-02-20T01:00:00.000Z',
+        updatedAt: '2026-02-20T01:00:00.000Z',
+      },
+    ]);
+
+    const response = await GET(new NextRequest('http://localhost/api/images?mediaFilter=animated'));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.images).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'webp-1',
+          generatedBy: 'comfyui',
+          comfyMetadataDetected: true,
+          comfyMetadataSource: 'video:prompt',
+        }),
+      ])
+    );
+  });
+
   it('applies videoLimit query and reports truncation metadata', async () => {
     listVideoAssetRecordsWithSyncMock.mockResolvedValue([
       {
@@ -537,6 +583,44 @@ describe('GET /api/images video integration', () => {
         totalPages: 3,
       })
     );
+  });
+
+  it('returns unpaginated assets newest first even when cache order is stale', async () => {
+    getCachedImagesMock.mockResolvedValue([
+      {
+        id: 'img-oldest',
+        filename: 'oldest.jpg',
+        uploaded: '2026-02-18T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/img-oldest/public'],
+        tags: [],
+      },
+      {
+        id: 'img-newest',
+        filename: 'newest.jpg',
+        uploaded: '2026-02-20T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/img-newest/public'],
+        tags: [],
+      },
+      {
+        id: 'img-middle',
+        filename: 'middle.jpg',
+        uploaded: '2026-02-19T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/img-middle/public'],
+        tags: [],
+      },
+    ]);
+    listVideoAssetRecordsWithSyncMock.mockResolvedValue([]);
+
+    const response = await GET(new NextRequest('http://localhost/api/images'));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.pagination).toBeNull();
+    expect(payload.images.map((image: { id: string }) => image.id)).toEqual([
+      'img-newest',
+      'img-middle',
+      'img-oldest',
+    ]);
   });
 
   it('returns page-sized server gallery query payloads with facets and summaries', async () => {

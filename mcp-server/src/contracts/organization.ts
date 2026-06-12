@@ -1,4 +1,4 @@
-import { createLegacyToolContract } from './legacy-support.js';
+import { createRuntimeToolContract } from './runtime-support.js';
 
 const ORGANIZATION_TOOL_NAMES = [
   'photarium_list_folders',
@@ -15,4 +15,4 @@ const ORGANIZATION_TOOL_NAMES = [
   'photarium_delete',
 ] as const;
 
-export const organizationContracts = ORGANIZATION_TOOL_NAMES.map(createLegacyToolContract);
+export const organizationContracts = ORGANIZATION_TOOL_NAMES.map(createRuntimeToolContract);

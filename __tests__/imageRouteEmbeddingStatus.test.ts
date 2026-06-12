@@ -11,6 +11,7 @@ const {
   batchGetColorMetadataMock,
   batchGetAspectMetadataMock,
   getImageExtrasRecordMock,
+  listVideoAssetRecordsMock,
 } = vi.hoisted(() => ({
   getCachedImageMock: vi.fn(),
   transformApiImageToCachedMock: vi.fn(),
@@ -21,6 +22,7 @@ const {
   batchGetColorMetadataMock: vi.fn(),
   batchGetAspectMetadataMock: vi.fn(),
   getImageExtrasRecordMock: vi.fn(),
+  listVideoAssetRecordsMock: vi.fn(),
 }));
 
 vi.mock('@/server/cloudflareImageCache', () => ({
@@ -58,6 +60,7 @@ vi.mock('@/server/vectorSearch', () => ({
 vi.mock('@/server/videoCatalogStorage', () => ({
   deleteVideoAssetRecord: vi.fn(),
   getVideoAssetRecord: vi.fn(),
+  listVideoAssetRecords: listVideoAssetRecordsMock,
 }));
 
 vi.mock('@/server/imageExtras', () => ({
@@ -102,6 +105,7 @@ describe('GET /api/images/:id embedding status', () => {
       ])
     );
     getImageExtrasRecordMock.mockResolvedValue(null);
+    listVideoAssetRecordsMock.mockResolvedValue([]);
     probeAnimatedImageFromOriginalBlobMock.mockResolvedValue({
       contentType: 'image/webp',
       format: 'webp',

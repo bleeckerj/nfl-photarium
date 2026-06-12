@@ -13,7 +13,8 @@ import {
   failImageToolPreview,
   updateImageToolPreview,
 } from '@/server/image-tools/previewStore';
-import type { ImageToolRequest, ImageToolRunInput } from '@/server/image-tools/types';
+import { buildImageToolPreviewRequest } from '@/server/image-tools/previewRequest';
+import type { ImageToolRunInput } from '@/server/image-tools/types';
 
 const logImageToolEvent = (params: {
   level: 'info' | 'warn' | 'error';
@@ -59,63 +60,64 @@ export const startImageToolRun = (toolId: string, input: ImageToolRunInput) => {
     imageId: input.imageId,
     request,
   });
+  const startedRun = updateImageToolRun(run.id, {
+    status: 'running',
+    message: 'Starting',
+    percent: 0.01,
+  }) ?? run;
 
-  queueMicrotask(async () => {
-    updateImageToolRun(run.id, {
-      status: 'running',
-      message: 'Starting',
-      percent: 0.01,
-    });
+  setTimeout(() => {
+    void (async () => {
+      try {
+        const result = await adapter.run({
+          runId: run.id,
+          imageId: input.imageId,
+          request,
+          updateRun: (patch) => {
+            updateImageToolRun(run.id, {
+              status: 'running',
+              ...patch,
+            });
+          },
+          addEvent: (event) => {
+            addImageToolRunEvent(run.id, event);
+            logImageToolEvent({
+              level: event.level ?? 'info',
+              operation: 'run',
+              operationId: run.id,
+              toolId,
+              imageId: input.imageId,
+              phase: event.phase,
+              message: event.message,
+              externalJobId: event.details?.externalJobId ? String(event.details.externalJobId) : undefined,
+            });
+          },
+        });
+        addImageToolRunEvent(run.id, {
+          phase: 'run.completed',
+          message: 'Image tool run completed',
+        });
+        completeImageToolRun(run.id, result);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Image tool run failed';
+        logImageToolEvent({
+          level: 'error',
+          operation: 'run',
+          operationId: run.id,
+          toolId,
+          imageId: input.imageId,
+          phase: 'run.failed',
+          message,
+        });
+        failImageToolRun(run.id, message);
+      }
+    })();
+  }, 0);
 
-    try {
-      const result = await adapter.run({
-        runId: run.id,
-        imageId: input.imageId,
-        request,
-        updateRun: (patch) => {
-          updateImageToolRun(run.id, {
-            status: 'running',
-            ...patch,
-          });
-        },
-        addEvent: (event) => {
-          addImageToolRunEvent(run.id, event);
-          logImageToolEvent({
-            level: event.level ?? 'info',
-            operation: 'run',
-            operationId: run.id,
-            toolId,
-            imageId: input.imageId,
-            phase: event.phase,
-            message: event.message,
-            externalJobId: event.details?.externalJobId ? String(event.details.externalJobId) : undefined,
-          });
-        },
-      });
-      addImageToolRunEvent(run.id, {
-        phase: 'run.completed',
-        message: 'Image tool run completed',
-      });
-      completeImageToolRun(run.id, result);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Image tool run failed';
-      logImageToolEvent({
-        level: 'error',
-        operation: 'run',
-        operationId: run.id,
-        toolId,
-        imageId: input.imageId,
-        phase: 'run.failed',
-        message,
-      });
-      failImageToolRun(run.id, message);
-    }
-  });
-
-  return run;
+  return startedRun;
 };
 
-export const createImageToolPreviewRun = async (toolId: string, input: ImageToolRunInput) => {
+export const startImageToolPreviewRun = (toolId: string, input: ImageToolRunInput) => {
   const registry = getImageToolRegistry();
   const adapter = registry.getAdapter(toolId);
   if (!adapter) {
@@ -124,73 +126,71 @@ export const createImageToolPreviewRun = async (toolId: string, input: ImageTool
   if (!adapter.preview) {
     throw new Error(`Image tool ${toolId} does not support previews`);
   }
+  const previewAdapter = adapter.preview;
   if (!input.imageId || typeof input.imageId !== 'string') {
     throw new Error('imageId is required');
   }
 
   const request = registry.buildRequest(toolId, input.request ?? {});
-  const previewRequest: ImageToolRequest = {
-    ...request,
-    output: {
-      ...request.output,
-      mode: 'still' as const,
-      format: ['png', 'webp', 'jpg', 'jpeg'].includes(request.output.format) ? request.output.format : 'png',
-      preset: 'preview',
-    },
-    timeline: request.timeline ? { ...request.timeline } : undefined,
-  };
+  const previewRequest = buildImageToolPreviewRequest(request);
   const preview = createImageToolPreview({
     toolId,
     imageId: input.imageId,
     request: previewRequest,
   });
-  updateImageToolPreview(preview.id, {
+  const startedPreview = updateImageToolPreview(preview.id, {
     status: 'running',
     message: 'Starting preview',
     percent: 0.01,
-  });
+  }) ?? preview;
 
-  try {
-    const result = await adapter.preview({
-      previewId: preview.id,
-      imageId: input.imageId,
-      request: previewRequest,
-      updatePreview: (patch) => {
-        updateImageToolPreview(preview.id, {
-          status: 'running',
-          ...patch,
+  setTimeout(() => {
+    void (async () => {
+      try {
+        const result = await previewAdapter({
+          previewId: preview.id,
+          imageId: input.imageId,
+          request: previewRequest,
+          updatePreview: (patch) => {
+            updateImageToolPreview(preview.id, {
+              status: 'running',
+              ...patch,
+            });
+          },
+          addEvent: (event) => {
+            addImageToolPreviewEvent(preview.id, event);
+            logImageToolEvent({
+              level: event.level ?? 'info',
+              operation: 'preview',
+              operationId: preview.id,
+              toolId,
+              imageId: input.imageId,
+              phase: event.phase,
+              message: event.message,
+              externalJobId: event.details?.externalJobId ? String(event.details.externalJobId) : undefined,
+            });
+          },
         });
-      },
-      addEvent: (event) => {
-        addImageToolPreviewEvent(preview.id, event);
+        addImageToolPreviewEvent(preview.id, {
+          phase: 'preview.completed',
+          message: 'Image tool preview completed',
+        });
+        completeImageToolPreview(preview.id, result.artifact, result.externalJobId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Image tool preview failed';
         logImageToolEvent({
-          level: event.level ?? 'info',
+          level: 'error',
           operation: 'preview',
           operationId: preview.id,
           toolId,
           imageId: input.imageId,
-          phase: event.phase,
-          message: event.message,
-          externalJobId: event.details?.externalJobId ? String(event.details.externalJobId) : undefined,
+          phase: 'preview.failed',
+          message,
         });
-      },
-    });
-    addImageToolPreviewEvent(preview.id, {
-      phase: 'preview.completed',
-      message: 'Image tool preview completed',
-    });
-    return completeImageToolPreview(preview.id, result.artifact);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Image tool preview failed';
-    logImageToolEvent({
-      level: 'error',
-      operation: 'preview',
-      operationId: preview.id,
-      toolId,
-      imageId: input.imageId,
-      phase: 'preview.failed',
-      message,
-    });
-    return failImageToolPreview(preview.id, message);
-  }
+        failImageToolPreview(preview.id, message);
+      }
+    })();
+  }, 0);
+
+  return startedPreview;
 };

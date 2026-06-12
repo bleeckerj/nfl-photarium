@@ -7,93 +7,66 @@ import { useEffect, useMemo, useState } from 'react';
 
 import {
   createImageToolPreview,
+  getImageToolPreview,
   getImageToolRun,
+  isImageToolTransientStatusError,
   listImageTools,
   startImageToolRun,
   type ImageToolControl,
   type ImageToolDiagnosticEvent,
   type ImageToolManifest,
   type ImageToolPreview,
-  type ImageToolRequest,
   type ImageToolRun,
 } from '@/services/imageToolsService';
+import {
+  formatDiagnosticDetails,
+  hasDiagnosticError,
+  resolveImageToolPreviewMedia,
+} from '@/components/image-detail/image-tools/previewMedia';
+import {
+  buildInitialValues,
+  buildRequest,
+  groupVisibleControls,
+  updateToolValues,
+  type ToolValues,
+} from '@/components/image-detail/image-tools/controlModel';
+import { ControlGroupConsole } from '@/components/image-detail/image-tools/ControlFields';
 
 type ImageToolsPanelProps = {
   imageId: string;
+  sourcePreviewUrl?: string;
+  sourceLabel?: string;
   onRunComplete?: () => void | Promise<void>;
 };
 
-type ToolValues = Record<string, string | number | boolean>;
-
 const RUN_POLL_MS = 1200;
-
-const valueFromRequest = (request: ImageToolRequest, path: string) => {
-  const parts = path.split('.');
-  let current: unknown = request;
-  for (const part of parts) {
-    if (!current || typeof current !== 'object') return undefined;
-    current = (current as Record<string, unknown>)[part];
-  }
-  return current;
-};
-
-const buildInitialValues = (tool: ImageToolManifest): ToolValues => {
-  const values: ToolValues = {};
-  tool.controls.forEach((control) => {
-    const existing = valueFromRequest(tool.defaultRequest, control.id);
-    const value = existing ?? control.defaultValue;
-    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-      values[control.id] = value;
-    }
-  });
-  return values;
-};
-
-const assignPath = (target: Record<string, unknown>, path: string, value: unknown) => {
-  const parts = path.split('.');
-  let current = target;
-  parts.slice(0, -1).forEach((part) => {
-    const next = current[part];
-    if (!next || typeof next !== 'object' || Array.isArray(next)) {
-      current[part] = {};
-    }
-    current = current[part] as Record<string, unknown>;
-  });
-  current[parts[parts.length - 1]] = value;
-};
-
-const buildRequest = (tool: ImageToolManifest, values: ToolValues): ImageToolRequest => {
-  const request = JSON.parse(JSON.stringify(tool.defaultRequest)) as ImageToolRequest;
-  Object.entries(values).forEach(([path, value]) => assignPath(request as unknown as Record<string, unknown>, path, value));
-  return request;
-};
-
-const normalizeControlValue = (control: ImageToolControl, value: string | boolean) => {
-  if (control.type === 'switch') return Boolean(value);
-  if (control.type === 'number' || control.type === 'slider') {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : Number(control.defaultValue ?? 0);
-  }
-  return String(value);
-};
+const PREVIEW_POLL_MS = 900;
 
 const isTerminalRun = (run: ImageToolRun | null) => run?.status === 'completed' || run?.status === 'failed';
+const isTerminalPreview = (preview: ImageToolPreview | null) => preview?.status === 'completed' || preview?.status === 'failed';
 
 const DiagnosticList = ({ events }: { events: ImageToolDiagnosticEvent[] }) => {
   if (!events.length) return null;
+  const open = hasDiagnosticError(events);
   return (
-    <details className="rounded border border-gray-200 bg-gray-50/70 px-2 py-1.5 text-[10px] text-gray-600">
+    <details open={open} className="rounded border border-gray-200 bg-gray-50/70 px-2 py-1.5 text-[10px] text-gray-600">
       <summary className="cursor-pointer font-mono text-gray-700">Diagnostics</summary>
       <div className="mt-2 max-h-44 space-y-1 overflow-auto">
-        {events.slice(-12).map((event) => (
-          <div key={event.id} className="grid gap-1 border-t border-gray-200 pt-1 first:border-t-0 first:pt-0 sm:grid-cols-[5.5rem_7rem_1fr]">
-            <span className={event.level === 'error' ? 'text-red-600' : event.level === 'warn' ? 'text-amber-700' : 'text-gray-500'}>
-              {event.level}
-            </span>
-            <span className="font-mono text-gray-500">{event.phase}</span>
-            <span>{event.message}</span>
-          </div>
-        ))}
+        {events.slice(-12).map((event) => {
+          const details = formatDiagnosticDetails(event.details);
+          return (
+            <div key={event.id} className="grid gap-1 border-t border-gray-200 pt-1 first:border-t-0 first:pt-0 sm:grid-cols-[5.5rem_7rem_1fr]">
+              <span className={event.level === 'error' ? 'text-red-600' : event.level === 'warn' ? 'text-amber-700' : 'text-gray-500'}>
+                {event.level}
+              </span>
+              <span className="font-mono text-gray-500">{event.phase}</span>
+              <span>
+                <span>{event.message}</span>
+                {details && <span className="mt-0.5 block font-mono text-[9px] text-gray-400">{details}</span>}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </details>
   );
@@ -136,7 +109,7 @@ const PluginCard = ({
   );
 };
 
-export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps) {
+export function ImageToolsPanel({ imageId, sourcePreviewUrl, sourceLabel, onRunComplete }: ImageToolsPanelProps) {
   const [tools, setTools] = useState<ImageToolManifest[]>([]);
   const [selectedToolId, setSelectedToolId] = useState<string | null>(null);
   const [values, setValues] = useState<ToolValues>({});
@@ -144,8 +117,10 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
   const [toolError, setToolError] = useState<string | null>(null);
   const [run, setRun] = useState<ImageToolRun | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
+  const [runWarning, setRunWarning] = useState<string | null>(null);
   const [preview, setPreview] = useState<ImageToolPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewWarning, setPreviewWarning] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
 
   const loadTools = () => {
@@ -186,6 +161,10 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
     () => tools.find((tool) => tool.id === selectedToolId) ?? null,
     [selectedToolId, tools]
   );
+  const controlGroups = useMemo(
+    () => selectedTool ? groupVisibleControls(selectedTool, values) : [],
+    [selectedTool, values]
+  );
 
   useEffect(() => {
     if (!run || isTerminalRun(run)) return;
@@ -193,37 +172,78 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
       getImageToolRun(run.id)
         .then((nextRun) => {
           setRun(nextRun);
+          setRunError(null);
+          setRunWarning(null);
           if (nextRun.status === 'completed') {
             void onRunComplete?.();
           }
         })
         .catch((error) => {
-          setRunError(error instanceof Error ? error.message : 'Failed to refresh image tool run');
+          const message = error instanceof Error ? error.message : 'Failed to refresh image tool run';
+          if (isImageToolTransientStatusError(error)) {
+            setRunWarning(`${message} Still checking until the render finishes.`);
+            return;
+          }
+          setRunError(message);
+          setRun((current) => current?.id === run.id
+            ? { ...current, status: 'failed', message, error: message, percent: 1 }
+            : current
+          );
         });
     }, RUN_POLL_MS);
     return () => window.clearInterval(timer);
   }, [onRunComplete, run]);
+
+  useEffect(() => {
+    if (!preview || isTerminalPreview(preview)) return;
+    const timer = window.setInterval(() => {
+      getImageToolPreview(preview.id)
+        .then((nextPreview) => {
+          setPreview(nextPreview);
+          setPreviewWarning(null);
+          if (nextPreview.status === 'failed') {
+            setPreviewError(nextPreview.error || nextPreview.message);
+          } else {
+            setPreviewError(null);
+          }
+        })
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : 'Failed to refresh image tool preview';
+          if (isImageToolTransientStatusError(error)) {
+            setPreviewWarning(`${message} Still checking until the render finishes.`);
+            return;
+          }
+          setPreviewError(message);
+          setPreview((current) => current?.id === preview.id
+            ? { ...current, status: 'failed', message, error: message, percent: 1 }
+            : current
+          );
+        });
+    }, PREVIEW_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [preview]);
 
   const handleSelectTool = (tool: ImageToolManifest) => {
     setSelectedToolId(tool.id);
     setValues(buildInitialValues(tool));
     setRun(null);
     setRunError(null);
+    setRunWarning(null);
     setPreview(null);
     setPreviewError(null);
+    setPreviewWarning(null);
   };
 
   const updateControl = (control: ImageToolControl, value: string | boolean) => {
-    setValues((prev) => ({
-      ...prev,
-      [control.id]: normalizeControlValue(control, value),
-    }));
+    if (!selectedTool) return;
+    setValues((prev) => updateToolValues(selectedTool, prev, control, value));
   };
 
   const handlePreview = async () => {
     if (!selectedTool) return;
     setPreviewing(true);
     setPreviewError(null);
+    setPreviewWarning(null);
     setPreview(null);
     try {
       const nextPreview = await createImageToolPreview({
@@ -245,6 +265,7 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
   const handleRun = async () => {
     if (!selectedTool) return;
     setRunError(null);
+    setRunWarning(null);
     try {
       const nextRun = await startImageToolRun({
         toolId: selectedTool.id,
@@ -258,11 +279,28 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
   };
 
   const running = Boolean(run && !isTerminalRun(run));
-  const busy = running || previewing;
+  const previewRunning = Boolean(preview && !isTerminalPreview(preview));
+  const busy = running || previewing || previewRunning;
   const uploadedAsset = run?.result?.uploadedAsset;
   const detailHref = uploadedAsset?.id
     ? `${uploadedAsset.assetType === 'video' ? '/videos' : '/images'}/${uploadedAsset.id}`
     : undefined;
+  const previewMedia = selectedTool
+    ? resolveImageToolPreviewMedia({
+        tool: selectedTool,
+        preview,
+        sourcePreviewUrl,
+        sourceLabel,
+      })
+    : null;
+  const effectControl = selectedTool?.controls.find((control) => control.id === 'effectId' && control.type === 'select') ?? null;
+  const activeEffectValue = String(values.effectId ?? effectControl?.defaultValue ?? selectedTool?.defaultRequest.effectId ?? '');
+  const consoleGroups = controlGroups
+    .map((group) => ({
+      ...group,
+      controls: group.controls.filter((control) => control.id !== 'effectId'),
+    }))
+    .filter((group) => group.controls.length > 0);
 
   return (
     <section id="image-tools-section" className="space-y-3 border-t border-gray-200 pt-4">
@@ -286,7 +324,7 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
 
       {toolError && <p className="font-mono text-[11px] text-red-600">{toolError}</p>}
 
-      {tools.length > 0 && (
+      {tools.length > 0 && !selectedTool && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {tools.map((tool) => (
             <PluginCard
@@ -300,11 +338,11 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
       )}
 
       {selectedTool && (
-        <div className="rounded-md border border-gray-200 bg-white p-3">
-          <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+        <div className="overflow-hidden rounded-md border border-gray-200 bg-white">
+          <div className="flex flex-wrap items-start justify-between gap-2 border-b border-gray-200 p-3">
             <div className="font-mono">
               <p className="text-[11px] font-semibold text-gray-900">{selectedTool.label}</p>
-              <p className="mt-1 max-w-2xl text-[10px] leading-snug text-gray-500">{selectedTool.description}</p>
+              <p className="mt-1 max-w-3xl text-[10px] leading-snug text-gray-500">{selectedTool.description}</p>
             </div>
             <button
               type="button"
@@ -312,147 +350,169 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
                 setSelectedToolId(null);
                 setRun(null);
                 setPreview(null);
+                setRunWarning(null);
+                setPreviewWarning(null);
+                setPreviewing(false);
               }}
               className="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 font-mono text-[10px] text-gray-600 hover:border-gray-300"
-              disabled={busy}
             >
               <ChevronLeft className="h-3 w-3" />
               Catalog
             </button>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)]">
-            <div className="grid gap-3 sm:grid-cols-2">
-              {selectedTool.controls.map((control) => {
-                const currentValue = values[control.id] ?? control.defaultValue ?? '';
-                if (control.type === 'switch') {
-                  return (
-                    <label key={control.id} className="flex items-center justify-between gap-3 rounded border border-gray-100 px-2 py-2 font-mono text-[11px] text-gray-700">
-                      <span>
-                        <span className="block">{control.label}</span>
-                        {control.helpText && <span className="block text-[10px] text-gray-500">{control.helpText}</span>}
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={Boolean(currentValue)}
-                        onChange={(event) => updateControl(control, event.target.checked)}
-                        disabled={busy}
-                        className="h-4 w-4"
-                      />
-                    </label>
-                  );
-                }
-                if (control.type === 'select') {
-                  return (
-                    <label key={control.id} className="block font-mono text-[11px] text-gray-600">
-                      {control.label}
-                      <select
-                        value={String(currentValue)}
-                        onChange={(event) => updateControl(control, event.target.value)}
-                        disabled={busy}
-                        className="mt-1 w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-800"
-                      >
-                        {(control.options ?? []).map((option) => (
-                          <option key={String(option.value)} value={String(option.value)}>{option.label}</option>
-                        ))}
-                      </select>
-                      {control.helpText && <span className="mt-1 block text-[10px] font-normal text-gray-500">{control.helpText}</span>}
-                    </label>
-                  );
-                }
-                const inputType = control.type === 'color' ? 'color' : control.type === 'text' ? 'text' : 'number';
-                return (
-                  <label key={control.id} className="block font-mono text-[11px] text-gray-600">
-                    <span className="flex items-center justify-between gap-2">
-                      <span>{control.label}</span>
-                      {control.type === 'slider' && <span className="text-[10px] text-gray-400">{String(currentValue)}</span>}
-                    </span>
-                    <input
-                      type={control.type === 'slider' ? 'range' : inputType}
-                      value={String(currentValue)}
-                      min={control.min}
-                      max={control.max}
-                      step={control.step}
-                      onChange={(event) => updateControl(control, event.target.value)}
-                      disabled={busy}
-                      className={control.type === 'slider'
-                        ? 'mt-2 w-full'
-                        : 'mt-1 w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-800'}
-                    />
-                    {control.helpText && <span className="mt-1 block text-[10px] font-normal text-gray-500">{control.helpText}</span>}
-                  </label>
-                );
-              })}
-            </div>
-
-            <div className="space-y-2">
-              <div className="relative aspect-square overflow-hidden rounded-md border border-gray-200 bg-gray-50">
-                {preview?.artifactUrl ? (
+          <div className="grid gap-0 bg-gray-50/70 xl:grid-cols-[minmax(0,1fr)_26rem]">
+            <div className="min-w-0 border-b border-gray-200 xl:border-b-0 xl:border-r">
+              <div className="relative h-[clamp(18rem,58vh,40rem)] overflow-hidden bg-gray-50">
+                {previewMedia?.kind === 'video' ? (
+                  <video
+                    src={previewMedia.src}
+                    aria-label={previewMedia.alt}
+                    className="h-full w-full object-contain"
+                    autoPlay
+                    controls
+                    loop
+                    muted
+                    playsInline
+                  />
+                ) : previewMedia ? (
                   <Image
-                    src={preview.artifactUrl}
-                    alt={`${selectedTool.label} preview`}
+                    src={previewMedia.src}
+                    alt={previewMedia.alt}
                     fill
-                    sizes="22rem"
-                    className="object-contain"
+                    sizes="(max-width: 1279px) 100vw, calc(100vw - 26rem)"
+                    className={previewMedia.objectFit === 'cover' ? 'object-contain opacity-80' : 'object-contain'}
                     unoptimized
                   />
-                ) : (
-                  <Image
-                    src={selectedTool.presentation.previewUrl || selectedTool.presentation.thumbnailUrl}
-                    alt=""
-                    fill
-                    sizes="22rem"
-                    className="object-cover opacity-80"
-                    unoptimized
-                  />
+                ) : null}
+                {previewMedia && (
+                  <span className="absolute bottom-3 left-3 rounded bg-white/90 px-2 py-1 font-mono text-[10px] text-gray-700 shadow-sm">
+                    {previewMedia.badge}
+                  </span>
                 )}
               </div>
-              {(previewError || preview?.error) && (
-                <p className="font-mono text-[11px] text-red-600">{previewError || preview?.error}</p>
+
+              {(previewError || previewWarning || preview?.error || preview) && (
+                <div className="space-y-2 border-t border-gray-200 bg-gray-50/60 px-3 py-2">
+                  {(previewError || preview?.error) && (
+                    <p className="font-mono text-[11px] text-red-600">{previewError || preview?.error}</p>
+                  )}
+                  {previewWarning && (
+                    <p className="font-mono text-[11px] text-amber-700">{previewWarning}</p>
+                  )}
+                  {preview?.message && <p className="font-mono text-[10px] text-gray-500">{preview.message}</p>}
+                  {preview && <DiagnosticList events={preview.events ?? []} />}
+                </div>
               )}
-              {preview && <DiagnosticList events={preview.events ?? []} />}
+            </div>
+
+            <div className="min-w-0 space-y-4 p-3">
+              <div>
+                <div className="mb-2 border-b border-gray-200 pb-1 font-mono text-[11px] font-semibold text-gray-800">Actions</div>
+                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                  <button
+                    type="button"
+                    onClick={handlePreview}
+                    disabled={busy}
+                    className="inline-flex items-center justify-center gap-1 rounded border border-gray-300 bg-white px-3 py-2 font-mono text-xs text-gray-800 hover:border-gray-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                    {previewing || previewRunning ? 'Previewing' : 'Preview'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRun}
+                    disabled={busy}
+                    className="inline-flex items-center justify-center gap-1 rounded bg-gray-900 px-3 py-2 font-mono text-xs text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Play className="h-3.5 w-3.5" />
+                    {running ? 'Running' : 'Run tool'}
+                  </button>
+                </div>
+                {run && (
+                  <div className="mt-2">
+                    <div className="h-1.5 overflow-hidden rounded bg-gray-100">
+                      <div
+                        className={`h-full ${run.status === 'failed' ? 'bg-red-500' : 'bg-blue-600'}`}
+                        style={{ width: `${Math.max(4, Math.min(100, Math.round((run.percent ?? 0) * 100)))}%` }}
+                      />
+                    </div>
+                    <p className="mt-1 font-mono text-[10px] text-gray-500">{run.message}</p>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-2 border-b border-gray-200 pb-1 font-mono text-[11px] font-semibold text-gray-800">
+                  <span>Effect</span>
+                  <span className="text-[10px] font-normal text-gray-500">{activeEffectValue}</span>
+                </div>
+                {effectControl ? (
+                  <div className="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-1">
+                    {(effectControl.options ?? []).map((option) => {
+                      const optionValue = String(option.value);
+                      const active = optionValue === activeEffectValue;
+                      return (
+                        <button
+                          key={optionValue}
+                          type="button"
+                          onClick={() => updateControl(effectControl, optionValue)}
+                          disabled={busy}
+                          className={`rounded border px-2 py-2 text-left font-mono text-[10px] transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                            active
+                              ? 'border-gray-900 bg-white text-gray-950 ring-1 ring-gray-900'
+                              : 'border-gray-200 bg-white text-gray-600 hover:border-gray-400'
+                          }`}
+                        >
+                          {option.label}
+                          {option.helpText && <span className="mt-0.5 block text-[9px] text-gray-500">{option.helpText}</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="font-mono text-[10px] text-gray-500">No effect selector available.</p>
+                )}
+              </div>
             </div>
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={handlePreview}
-              disabled={busy}
-              className="inline-flex items-center gap-1 rounded border border-gray-300 bg-white px-3 py-1.5 font-mono text-xs text-gray-800 hover:border-gray-500 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Eye className="h-3.5 w-3.5" />
-              {previewing ? 'Previewing' : 'Preview'}
-            </button>
-            <button
-              type="button"
-              onClick={handleRun}
-              disabled={busy}
-              className="inline-flex items-center gap-1 rounded bg-gray-900 px-3 py-1.5 font-mono text-xs text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Play className="h-3.5 w-3.5" />
-              {running ? 'Running' : 'Run tool'}
-            </button>
-            {run && (
-              <div className="min-w-[12rem] flex-1">
-                <div className="h-1.5 overflow-hidden rounded bg-gray-100">
-                  <div
-                    className={`h-full ${run.status === 'failed' ? 'bg-red-500' : 'bg-blue-600'}`}
-                    style={{ width: `${Math.max(4, Math.min(100, Math.round((run.percent ?? 0) * 100)))}%` }}
+          <div className="border-t border-gray-200 bg-gray-50/70 p-3">
+            <div className="mb-2 flex items-center justify-between gap-2 border-b border-gray-200 pb-1 font-mono text-[11px] font-semibold text-gray-800">
+              <span>Parameters</span>
+              <span className="text-[10px] font-normal text-gray-500">{consoleGroups.length} group{consoleGroups.length === 1 ? '' : 's'}</span>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+              {consoleGroups.length > 0 ? (
+                consoleGroups.map((group) => (
+                  <ControlGroupConsole
+                    key={group.id}
+                    group={group}
+                    values={values}
+                    busy={busy}
+                    onChange={updateControl}
                   />
-                </div>
-                <p className="mt-1 font-mono text-[10px] text-gray-500">{run.message}</p>
-              </div>
-            )}
+                ))
+              ) : (
+                <p className="font-mono text-[10px] text-gray-500">No parameter controls for this effect.</p>
+              )}
+            </div>
           </div>
 
-          {(runError || run?.error) && (
-            <p className="mt-2 font-mono text-[11px] text-red-600">{runError || run?.error}</p>
+          {(runError || runWarning || run?.error || run) && (
+            <div className="space-y-2 border-t border-gray-200 px-3 py-2">
+              {(runError || run?.error) && (
+                <p className="font-mono text-[11px] text-red-600">{runError || run?.error}</p>
+              )}
+              {runWarning && (
+                <p className="font-mono text-[11px] text-amber-700">{runWarning}</p>
+              )}
+              {run && <DiagnosticList events={run.events ?? []} />}
+            </div>
           )}
-          {run && <div className="mt-2"><DiagnosticList events={run.events ?? []} /></div>}
 
           {run?.status === 'completed' && uploadedAsset?.id && (
-            <div className="mt-3 rounded border border-blue-200 bg-blue-50 p-3 font-mono text-[11px] text-blue-900">
+            <div className="border-t border-blue-200 bg-blue-50 p-3 font-mono text-[11px] text-blue-900">
               <p className="font-semibold">Generated asset created</p>
               <div className="mt-1 flex flex-wrap items-center gap-2">
                 {detailHref && (

@@ -1,9 +1,3 @@
-/**
- * useGalleryActions Hook
- * 
- * Handles image operations: delete, edit, generate ALT, etc.
- */
-
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
@@ -13,6 +7,7 @@ import { truncateMiddle } from '../utils';
 import { setEmbeddingPendingEntry } from '@/utils/embeddingPending';
 import { requestSemanticTags } from '@/services/imageAltDescriptionService';
 import { patchImageFavorite } from '@/services/imageMetadataService';
+import { deleteImage as requestDeleteImage } from '@/services/imageDeletionService';
 import {
   getUserVisibleTags,
   hasFavoriteTag,
@@ -234,17 +229,16 @@ export function useGalleryActions({
   // Delete single image
   const deleteImage = useCallback(async (imageId: string) => {
     try {
-      const response = await fetch(`/api/images/${imageId}`, {
-        method: 'DELETE',
-      });
-
-      if (response.ok) {
-        setImages(prev => prev.filter(img => img.id !== imageId));
-      }
+      await requestDeleteImage(imageId);
+      setImages(prev => prev.filter(img => img.id !== imageId));
+      toast.push('Image deleted');
     } catch (error) {
       console.error('Failed to delete image:', error);
+      const message = error instanceof Error ? error.message : 'Failed to delete image';
+      toast.push(message);
+      throw error;
     }
-  }, [setImages]);
+  }, [setImages, toast]);
 
   // Generate ALT tag
   const generateAltTag = useCallback(async (imageId: string) => {
@@ -728,15 +722,32 @@ export function useGalleryActions({
 
     setBulkDeleting(true);
     try {
-      await Promise.all(
-        Array.from(selectedImageIds).map(id =>
-          fetch(`/api/images/${id}`, { method: 'DELETE' })
-        )
+      const ids = Array.from(selectedImageIds);
+      const settled = await Promise.allSettled(
+        ids.map(async (id) => {
+          await requestDeleteImage(id);
+          return id;
+        })
       );
-      setImages(prev => prev.filter(img => !selectedImageIds.has(img.id)));
-      toast.push('Images deleted');
-      clearSelection();
-      setBulkSelectionMode(false);
+      const deletedIds = settled
+        .filter((result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled')
+        .map(result => result.value);
+      const failedCount = settled.length - deletedIds.length;
+
+      if (deletedIds.length > 0) {
+        const deletedSet = new Set(deletedIds);
+        setImages(prev => prev.filter(img => !deletedSet.has(img.id)));
+      }
+
+      if (failedCount === 0) {
+        toast.push(`Deleted ${deletedIds.length} image${deletedIds.length === 1 ? '' : 's'}`);
+        clearSelection();
+        setBulkSelectionMode(false);
+      } else if (deletedIds.length > 0) {
+        toast.push(`Deleted ${deletedIds.length}, failed ${failedCount}`);
+      } else {
+        toast.push('Bulk delete failed');
+      }
     } catch (error) {
       console.error('Bulk delete failed', error);
       toast.push('Bulk delete failed');

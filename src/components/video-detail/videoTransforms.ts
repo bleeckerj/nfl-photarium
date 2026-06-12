@@ -71,6 +71,9 @@ export type VideoRecord = {
 export type AssetRecord = {
   id: string;
   assetType?: 'image' | 'video';
+  generatedBy?: string;
+  comfyMetadataDetected?: boolean;
+  comfyMetadataSource?: string;
   filename: string;
   displayName?: string;
   uploaded: string;
@@ -200,6 +203,9 @@ export const mergeUniqueAssetsById = (base: AssetRecord[], incoming: AssetRecord
 export const videoRecordFromSeed = (asset: AssetRecord): VideoRecord => ({
   id: asset.id,
   assetType: 'video',
+  generatedBy: asset.generatedBy,
+  comfyMetadataDetected: asset.comfyMetadataDetected,
+  comfyMetadataSource: asset.comfyMetadataSource,
   filename: asset.filename,
   displayName: asset.displayName || asset.filename,
   uploaded: asset.uploaded,

@@ -19,9 +19,31 @@
 ## Upload
 - `photarium_upload_url`
 - `photarium_upload_image`
+- `photarium_crop_variant` (width-preserving still/animated WebP crop uploaded as a source image variant)
 - `photarium_fs_ingest` (recursive local image/video ingest by directory tree)
   - supports `throttleMs` to pace upload requests globally
   - automatically caches successful uploads locally and skips unchanged files on reruns
+
+### Crop Variants
+
+`photarium_crop_variant` downloads a Photarium image's original bytes, creates a full-width crop, uploads the result as WebP, and attaches it as a variant of the source image unless `parentId` is supplied.
+
+Supported anchors are `top`, `center`, and `bottom`. The default is `bottom`. The default aspect ratio is `4:5`; common UI/API presets are `1:1`, `3:2`, `4:5`, `5:4`, `9:16`, and `16:9`. Still images and animated WebP/GIF sources are supported. Animated outputs preserve frame delays when the source metadata provides them.
+
+Example:
+
+```json
+{
+  "imageId": "source-image-id",
+  "aspectRatio": "1:1",
+  "anchor": "center",
+  "quality": 90,
+  "filename": "source-square-center.webp",
+  "tags": ["square-crop"]
+}
+```
+
+The crop preserves source width. If the requested ratio needs more height than the source image or animation frame has, the tool fails clearly instead of padding or scaling.
 
 ## AI Features
 - `photarium_generate_alt`

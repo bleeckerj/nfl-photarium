@@ -113,7 +113,11 @@ npm install puppeteer
 **Options:**
 - **Scroll mode** — Enable headless browser with auto-scroll
 - **Max scrolls** — Number of times to scroll down (default: 10)
+- **Include small assets** — Show media candidates below the small-asset threshold instead of hiding them
+- **Small-asset threshold** — Minimum size used to classify small assets; defaults to `0.05 MB` and increments by `0.025 MB`
 - **Allow insecure TLS** — Accept expired/self-signed certificates
+
+Small assets are hidden by default so icons, spacers, and loading art do not enter the upload queue. When **Include small assets** is enabled, below-threshold candidates are shown for review, start unselected, and render with a muted preview/background. Select the row-level **Include** checkbox to upload a specific below-threshold item.
 
 **Environment variables:**
 - `IMPORT_ALLOW_INSECURE_TLS=true` — Enable insecure TLS option
@@ -405,6 +409,9 @@ Assign images as variants of a parent:
 - **Thumbnail** — Small preview version
 - **Social Share** — Open Graph / social media
 - **Custom variants** — Any named variant
+- **Crop Variant** — Create a new WebP child variant from the original image bytes.
+
+The image detail variation controls include **Crop variant** for parent images. The modal previews the source image with a crop overlay, supports `1:1`, `3:2`, `4:5`, `5:4`, `9:16`, `16:9`, and custom `width:height` ratios, and anchors the full-width crop from the top, center, or bottom. The server preserves the original width and rejects ratios that would need more height than the source image or animated frame provides. Still images and animated WebP/GIF inputs are uploaded back as WebP variants.
 
 ### Semantic Cluster
 

@@ -13,6 +13,7 @@ import Link from 'next/link';
 import { Trash2, Copy, ExternalLink, Layers, AlertTriangle, Star } from 'lucide-react';
 import { getCloudflareImageUrl, getCloudflareDownloadUrl } from '@/utils/imageUtils';
 import { formatBytes } from '@/utils/formatBytes';
+import { ComfyIndicator, isComfyDetected } from '@/components/asset-detail/ComfyIndicator';
 import { ColorSwatches } from '@/components/ColorSwatches';
 import { EmbeddingStatusDot } from '@/components/EmbeddingStatusIcon';
 import { SearchExclusionIcon } from './icons';
@@ -92,7 +93,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
 }) => {
   const isVideoAsset = image.assetType === 'video';
   const svgImage = isSvgImage(image);
-  const isComfyOutput = image.generatedBy === 'comfyui' || image.comfyMetadataDetected === true;
+  const isComfyOutput = isComfyDetected(image);
   const imageUrl = isVideoAsset
     ? image.videoThumbnailUrl || image.videoPreviewUrl || image.videoPlaybackUrl || image.videoHlsUrl || ''
     : getCloudflareImageUrl(image.id, selectedVariant === 'public' ? 'original' : selectedVariant);
@@ -230,20 +231,9 @@ export const ImageCard: React.FC<ImageCardProps> = ({
           </div>
         )}
         {isComfyOutput && (
-          <div
-            id={`image-card-comfy-indicator-${image.id}`}
-            className="absolute top-2 right-2 inline-flex items-center justify-center rounded-md border border-gray-200 bg-white/95 p-1 shadow"
-            title="ComfyUI output detected"
-            aria-label="ComfyUI output detected"
-          >
-            <Image
-              src="/icons/comfyui.svg"
-              alt="ComfyUI"
-              width={12}
-              height={12}
-              className="h-3 w-3"
-            />
-          </div>
+          <span className="absolute top-2 right-2">
+            <ComfyIndicator asset={image} id={`image-card-comfy-indicator-${image.id}`} showLabel={false} />
+          </span>
         )}
       </Link>
 

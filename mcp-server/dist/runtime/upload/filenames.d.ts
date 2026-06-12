@@ -1,0 +1,12 @@
+export declare function decodeUrlComponentSafe(value: string): string;
+export declare function extractFilenameFromSearchParams(params: URLSearchParams): string | undefined;
+export declare function extractFilenameFromQueryBlob(value: string): string | undefined;
+export declare function cleanUploadFilename(value: string): string;
+export declare function camelizeUploadStem(value: string): string;
+export declare function extensionFromMimeType(value?: string | null): string | undefined;
+export declare function extensionFromFilename(value: string): string | undefined;
+export declare function withExtension(stem: string, extension?: string): string;
+export declare function detectImageMimeFromBuffer(buffer: Buffer): string | undefined;
+export declare function extractUploadFilenameFromUrl(url: string, mimeType?: string | null): string;
+export declare function looksLikeTransportFilename(filename: string): boolean;
+export declare function estimateBase64Bytes(value?: string): number | undefined;

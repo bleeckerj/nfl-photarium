@@ -34,7 +34,7 @@ interface GalleryResultsRegionProps {
   onSelectColor: (hex: string) => void;
   onToggleCopyMenu: (id: string) => void;
   onStartEdit: (image: CloudflareImage) => void;
-  onDelete: (imageId: string) => Promise<void>;
+  onDelete: (imageId: string) => void;
   onToggleFavorite: (imageId: string) => Promise<void>;
   onGenerateAlt: (imageId: string) => Promise<void>;
   onGenerateDisplayName: (imageId: string) => Promise<void>;

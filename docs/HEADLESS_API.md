@@ -364,6 +364,92 @@ const uploadResponse = await fetch("/api/upload/external", {
 
 ---
 
+### Scan Page for Media
+
+Discover image and video candidates from a page or posted HTML.
+
+```
+POST /api/import/page
+Content-Type: application/json
+```
+
+**Request Body:**
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `url` | string | Conditional | Page URL to fetch and scan. Required unless `html` is supplied. |
+| `html` | string | Conditional | Raw HTML to scan without fetching a page. |
+| `sourceUrl` | string | No | Base/source URL used to resolve relative media URLs in posted HTML. |
+| `sourceFilename` | string | No | Label for posted HTML diagnostics. |
+| `includeSmallAssets` | boolean | No | When `false`, below-threshold image candidates are hidden. When `true`, they are returned with `smallAssetReview` and should start unselected in review UIs. |
+| `smallAssetThresholdBytes` | number | No | Minimum byte size for normal inclusion. Defaults to `50000` (`0.05 MB`). UI controls step by `0.025 MB`. |
+| `includeUiChrome` | boolean | No | Include likely UI chrome such as logos/icons that are otherwise filtered. |
+| `allowInsecure` | boolean | No | Honor insecure TLS only when server-side `IMPORT_ALLOW_INSECURE_TLS=true`. |
+| `cookieHeader` | string | No | Cookie header for authenticated scans. |
+| `maxImages` | number | No | Optional cap for image HEAD probes/results. |
+
+**Small Asset Behavior:**
+
+By default, image candidates below `smallAssetThresholdBytes` are omitted. When `includeSmallAssets` is `true`, below-threshold candidates are returned with:
+
+```json
+{
+  "smallAssetReview": {
+    "thresholdBytes": 50000,
+    "reason": "file-size"
+  }
+}
+```
+
+Review UIs should show these candidates unselected by default. Users can still include individual rows manually before upload.
+
+**Response:**
+
+```json
+{
+  "sourceUrl": "https://example.com/gallery",
+  "minBytes": 50000,
+  "smallAssetThresholdBytes": 50000,
+  "includeSmallAssets": true,
+  "includeUiChrome": false,
+  "images": [
+    {
+      "kind": "image",
+      "url": "https://cdn.example.com/thumb.jpg",
+      "filename": "thumb.jpg",
+      "metadata": {
+        "fileSizeBytes": 24000,
+        "status": "partial"
+      },
+      "smallAssetReview": {
+        "thresholdBytes": 50000,
+        "reason": "file-size"
+      }
+    }
+  ],
+  "videos": [],
+  "media": [
+    {
+      "kind": "image",
+      "url": "https://cdn.example.com/thumb.jpg",
+      "filename": "thumb.jpg",
+      "metadata": {
+        "fileSizeBytes": 24000,
+        "status": "partial"
+      },
+      "smallAssetReview": {
+        "thresholdBytes": 50000,
+        "reason": "file-size"
+      }
+    }
+  ]
+}
+```
+
+Use `/api/import/page/scroll/stream` for browser-backed scroll scans. It accepts the same `includeSmallAssets` and `smallAssetThresholdBytes` controls and streams candidates with the same `smallAssetReview` marker.
+
+---
+
 ### Upload Video (Page Import)
 
 Upload short video assets for catalog ingestion via Cloudflare Stream.
@@ -1142,6 +1228,81 @@ Notes:
 - Requires the video to be in `ready` stream status.
 - Uses technical constraints (dimension/bytes/fps/timeout), not duration gating policy.
 - If FFmpeg lacks WebP encoder support, response includes troubleshooting hints.
+
+---
+
+## Image Crop Variants
+
+### Create Crop Variant
+
+Create a full-width crop from an image's original bytes and upload the result as a child variant. The output is always WebP. Still images and animated WebP/GIF sources are supported; animated crops preserve frame count and per-frame delays when available.
+
+```
+POST /api/images/{id}/crop-variant
+Content-Type: application/json
+```
+
+**Request Body:**
+
+```json
+{
+  "aspectRatio": "4:5",
+  "anchor": "bottom",
+  "quality": 90,
+  "filename": "image-crop-4x5-bottom",
+  "description": "Optional description",
+  "tags": ["hero", "crop"]
+}
+```
+
+| Field | Required | Default | Notes |
+|-------|----------|---------|-------|
+| `aspectRatio` | No | `"4:5"` | `width:height` format. UI presets include `1:1`, `3:2`, `4:5`, `5:4`, `9:16`, `16:9`, and custom ratios. |
+| `anchor` | No | `"bottom"` | One of `top`, `center`, or `bottom`. |
+| `quality` | No | `90` | WebP quality from `1` to `100`. |
+| `filename` | No | Source filename with crop suffix | Uploaded file name; `.webp` is applied server-side. |
+| `description` | No | Source description | Stored with the uploaded crop variant. |
+| `tags` | No | Source tags | Replaces inherited tags when supplied. |
+| `folder` | No | Source folder | Available for API clients. |
+| `namespace` | No | Source namespace | Available for API clients. |
+| `parentId` | No | Source image ID | Override only when intentionally attaching the crop to another parent. |
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "id": "cropped-image-id",
+  "url": "https://imagedelivery.net/.../public",
+  "variants": ["https://imagedelivery.net/.../public"],
+  "filename": "image-crop-4x5-bottom.webp",
+  "displayName": "image-crop-4x5-bottom.webp",
+  "parentId": "source-image-id",
+  "sourceImageId": "source-image-id",
+  "sourceWidth": 1024,
+  "sourceHeight": 1536,
+  "crop": {
+    "width": 1024,
+    "height": 1280,
+    "aspectRatio": "4:5",
+    "anchor": "bottom",
+    "x": 0,
+    "y": 256
+  },
+  "animated": {
+    "frameCount": 12,
+    "delaysPreserved": true
+  },
+  "bytes": 431287,
+  "mimeType": "image/webp"
+}
+```
+
+Notes:
+- Crop width always equals the original source width.
+- Crop height is `round(sourceWidth * ratioHeight / ratioWidth)`.
+- The endpoint returns `400` when the requested ratio requires a height larger than the source image or animated frame height.
+- This creates a new Photarium child variant. It does not replace the source image.
 
 ---
 

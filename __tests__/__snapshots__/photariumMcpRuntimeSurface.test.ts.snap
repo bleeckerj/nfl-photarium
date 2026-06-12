@@ -1,0 +1,478 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Photarium MCP runtime surface > snapshots representative high-risk tool schemas 1`] = `
+{
+  "photarium_backup": {
+    "properties": {
+      "dryRun": {
+        "description": "If true, show what would be done without actually backing up (default: false)",
+        "type": "boolean",
+      },
+      "keepCount": {
+        "description": "Number of backups to retain (default: 10)",
+        "type": "number",
+      },
+    },
+    "type": "object",
+  },
+  "photarium_crop_variant": {
+    "properties": {
+      "anchor": {
+        "description": "Vertical crop anchor. Default: bottom.",
+        "enum": [
+          "top",
+          "center",
+          "bottom",
+        ],
+        "type": "string",
+      },
+      "aspectRatio": {
+        "description": "Target aspect ratio such as 4:5, 1:1, or 9:16. Default: 4:5.",
+        "type": "string",
+      },
+      "description": {
+        "description": "Description to store with the cropped variant.",
+        "type": "string",
+      },
+      "filename": {
+        "description": "Optional output filename. The uploaded crop is always encoded as .webp.",
+        "type": "string",
+      },
+      "folder": {
+        "description": "Folder to organize the cropped variant in.",
+        "type": "string",
+      },
+      "imageId": {
+        "description": "Photarium image ID to crop from the original uploaded artifact.",
+        "type": "string",
+      },
+      "namespace": {
+        "description": "Namespace to store the cropped variant in. Defaults to the source image namespace when available.",
+        "type": "string",
+      },
+      "originalUrl": {
+        "description": "Original URL for provenance. Defaults to the source image originalUrl when available.",
+        "type": "string",
+      },
+      "parentId": {
+        "description": "Parent image ID for variant relationship. Defaults to imageId.",
+        "type": "string",
+      },
+      "prompt": {
+        "description": "Optional manual prompt text to save to the image PromptThis record after upload.",
+        "type": "string",
+      },
+      "quality": {
+        "description": "WebP output quality from 1 to 100. Default: 90.",
+        "type": "number",
+      },
+      "sourceUrl": {
+        "description": "Source page URL. Defaults to the source image sourceUrl when available.",
+        "type": "string",
+      },
+      "tags": {
+        "description": "Tags to apply. Defaults to the source image tags when omitted.",
+        "items": {
+          "type": "string",
+        },
+        "type": "array",
+      },
+    },
+    "required": [
+      "imageId",
+    ],
+    "type": "object",
+  },
+  "photarium_fs_ingest": {
+    "properties": {
+      "aiDisplayName": {
+        "description": "Generate image displayName using AI",
+        "type": "boolean",
+      },
+      "aiMetadata": {
+        "description": "Generate both displayName and tags for images using AI",
+        "type": "boolean",
+      },
+      "aiTags": {
+        "description": "Generate image tags using AI",
+        "type": "boolean",
+      },
+      "apiBase": {
+        "description": "Photarium base URL override (default: PHOTARIUM_BASE_URL)",
+        "type": "string",
+      },
+      "concurrency": {
+        "description": "Parallel upload concurrency (default: 2)",
+        "type": "number",
+      },
+      "descriptionPrefix": {
+        "description": "Optional prefix prepended to generated descriptions",
+        "type": "string",
+      },
+      "dryRun": {
+        "description": "Scan only; do not upload",
+        "type": "boolean",
+      },
+      "folder": {
+        "description": "Optional folder value applied to all uploads",
+        "type": "string",
+      },
+      "includeFilename": {
+        "description": "Include filename in generated description",
+        "type": "boolean",
+      },
+      "includePathTags": {
+        "description": "Add subdirectory names as tags",
+        "type": "boolean",
+      },
+      "limit": {
+        "description": "Stop after N matching files",
+        "type": "number",
+      },
+      "namespace": {
+        "description": "Target namespace (required, must be specific)",
+        "type": "string",
+      },
+      "rootPath": {
+        "description": "Directory to scan recursively",
+        "type": "string",
+      },
+      "tagCount": {
+        "description": "AI tag count target (default: 4)",
+        "type": "number",
+      },
+      "tags": {
+        "description": "Base tags for all files",
+        "items": {
+          "type": "string",
+        },
+        "type": "array",
+      },
+      "throttleMs": {
+        "description": "Minimum delay between upload requests in milliseconds (global throttle)",
+        "type": "number",
+      },
+      "verbose": {
+        "description": "Print detailed per-file logs",
+        "type": "boolean",
+      },
+    },
+    "required": [
+      "rootPath",
+      "namespace",
+    ],
+    "type": "object",
+  },
+  "photarium_generate_image": {
+    "properties": {
+      "background": {
+        "description": "Background behavior for GPT image models.",
+        "enum": [
+          "transparent",
+          "opaque",
+          "auto",
+        ],
+        "type": "string",
+      },
+      "description": {
+        "description": "Description to store on the generated image.",
+        "type": "string",
+      },
+      "displayName": {
+        "description": "Display name hint for the generated image filename.",
+        "type": "string",
+      },
+      "dryRun": {
+        "description": "If true, return the planned OpenAI/upload request without generating or uploading.",
+        "type": "boolean",
+      },
+      "filename": {
+        "description": "Optional filename for the uploaded generated image.",
+        "type": "string",
+      },
+      "folder": {
+        "description": "Photarium folder for the generated image.",
+        "type": "string",
+      },
+      "model": {
+        "description": "OpenAI image model. Defaults to PHOTARIUM_OPENAI_IMAGE_MODEL or gpt-image-1.5.",
+        "type": "string",
+      },
+      "namespace": {
+        "description": "Photarium namespace for the generated image.",
+        "type": "string",
+      },
+      "outputFormat": {
+        "description": "Output image format. Defaults to png.",
+        "enum": [
+          "png",
+          "jpeg",
+          "jpg",
+          "webp",
+        ],
+        "type": "string",
+      },
+      "prompt": {
+        "description": "Text-to-image prompt.",
+        "type": "string",
+      },
+      "quality": {
+        "description": "Image quality, e.g. low, medium, high, or auto.",
+        "type": "string",
+      },
+      "size": {
+        "description": "Image size, e.g. 1024x1024, 1536x1024, 1024x1536, or auto when supported.",
+        "type": "string",
+      },
+      "tags": {
+        "description": "Tags to apply to the generated image.",
+        "items": {
+          "type": "string",
+        },
+        "type": "array",
+      },
+    },
+    "required": [
+      "prompt",
+    ],
+    "type": "object",
+  },
+  "photarium_search": {
+    "properties": {
+      "limit": {
+        "description": "Maximum number of results (default: 20, max: 100)",
+        "type": "number",
+      },
+      "namespace": {
+        "description": "Optional namespace filter. Use "__all__" for all namespaces, "__none__" for no namespace, or a specific namespace string.",
+        "type": [
+          "string",
+          "null",
+        ],
+      },
+      "query": {
+        "description": "Natural language search query (e.g., "sunset over mountains", "minimalist product photography", "vibe coding illustration")",
+        "type": "string",
+      },
+    },
+    "required": [
+      "query",
+    ],
+    "type": "object",
+  },
+  "photarium_semantic_merge": {
+    "properties": {
+      "background": {
+        "description": "Background behavior for GPT image models.",
+        "enum": [
+          "transparent",
+          "opaque",
+          "auto",
+        ],
+        "type": "string",
+      },
+      "description": {
+        "description": "Description to store on the generated image.",
+        "type": "string",
+      },
+      "displayName": {
+        "description": "Display name hint for the generated image filename.",
+        "type": "string",
+      },
+      "dryRun": {
+        "description": "If true, return the planned OpenAI/upload request without generating or uploading.",
+        "type": "boolean",
+      },
+      "filename": {
+        "description": "Optional filename for the uploaded generated image.",
+        "type": "string",
+      },
+      "folder": {
+        "description": "Photarium folder for the generated image.",
+        "type": "string",
+      },
+      "mergeBrief": {
+        "description": "Description of how the source images should be semantically merged.",
+        "type": "string",
+      },
+      "model": {
+        "description": "OpenAI image model. Defaults to PHOTARIUM_OPENAI_IMAGE_MODEL or gpt-image-1.5.",
+        "type": "string",
+      },
+      "namespace": {
+        "description": "Photarium namespace for the generated image.",
+        "type": "string",
+      },
+      "outputFormat": {
+        "description": "Output image format. Defaults to png.",
+        "enum": [
+          "png",
+          "jpeg",
+          "jpg",
+          "webp",
+        ],
+        "type": "string",
+      },
+      "prompt": {
+        "description": "Optional additional output prompt or constraints.",
+        "type": "string",
+      },
+      "quality": {
+        "description": "Image quality, e.g. low, medium, high, or auto.",
+        "type": "string",
+      },
+      "size": {
+        "description": "Image size, e.g. 1024x1024, 1536x1024, 1024x1536, or auto when supported.",
+        "type": "string",
+      },
+      "sources": {
+        "description": "Source images. Each entry must include imageId or url.",
+        "items": {
+          "properties": {
+            "imageId": {
+              "description": "Photarium image ID to use as a semantic source.",
+              "type": "string",
+            },
+            "instructions": {
+              "description": "Source-specific semantic merge instructions.",
+              "type": "string",
+            },
+            "role": {
+              "description": "How the source should guide the semantic merge.",
+              "enum": [
+                "style_reference",
+                "subject_reference",
+                "composition_reference",
+                "brand_reference",
+                "logo_reference",
+                "semantic_source",
+              ],
+              "type": "string",
+            },
+            "url": {
+              "description": "Direct image URL to use as a semantic source.",
+              "type": "string",
+            },
+          },
+          "type": "object",
+        },
+        "type": "array",
+      },
+      "tags": {
+        "description": "Tags to apply to the generated image.",
+        "items": {
+          "type": "string",
+        },
+        "type": "array",
+      },
+    },
+    "required": [
+      "mergeBrief",
+      "sources",
+    ],
+    "type": "object",
+  },
+  "photarium_upload_from_path": {
+    "properties": {
+      "description": {
+        "description": "Description to store with the image",
+        "type": "string",
+      },
+      "filePath": {
+        "description": "Absolute file path to the image file (e.g., /Users/username/Desktop/image.png)",
+        "type": "string",
+      },
+      "filename": {
+        "description": "Optional filename override. If not provided, uses the filename from the path.",
+        "type": "string",
+      },
+      "folder": {
+        "description": "Folder to organize the image in",
+        "type": "string",
+      },
+      "namespace": {
+        "description": "Namespace to store the image in",
+        "type": "string",
+      },
+      "originalUrl": {
+        "description": "Original URL for duplicate detection",
+        "type": "string",
+      },
+      "parentId": {
+        "description": "Optional parent image ID to set variant relationship",
+        "type": "string",
+      },
+      "prompt": {
+        "description": "Optional manual prompt text to save to the image PromptThis record after upload",
+        "type": "string",
+      },
+      "sourceUrl": {
+        "description": "Source page URL for provenance",
+        "type": "string",
+      },
+      "tags": {
+        "description": "Tags to apply",
+        "items": {
+          "type": "string",
+        },
+        "type": "array",
+      },
+    },
+    "required": [
+      "filePath",
+    ],
+    "type": "object",
+  },
+  "photarium_upload_url": {
+    "properties": {
+      "description": {
+        "description": "Optional description for the image",
+        "type": "string",
+      },
+      "displayName": {
+        "description": "Optional semantic display name. If omitted, a clean CamelCase name is generated pre-upload.",
+        "type": "string",
+      },
+      "folder": {
+        "description": "Folder to organize the image in",
+        "type": "string",
+      },
+      "namespace": {
+        "description": "Namespace to store the image in",
+        "type": "string",
+      },
+      "originalUrl": {
+        "description": "Original URL for duplicate detection",
+        "type": "string",
+      },
+      "parentId": {
+        "description": "Optional parent image ID to set variant relationship",
+        "type": "string",
+      },
+      "prompt": {
+        "description": "Optional manual prompt text to save to the image PromptThis record after upload",
+        "type": "string",
+      },
+      "sourceUrl": {
+        "description": "Source page URL for provenance",
+        "type": "string",
+      },
+      "tags": {
+        "description": "Tags to apply to the image",
+        "items": {
+          "type": "string",
+        },
+        "type": "array",
+      },
+      "url": {
+        "description": "The URL of the image to upload",
+        "type": "string",
+      },
+    },
+    "required": [
+      "url",
+    ],
+    "type": "object",
+  },
+}
+`;

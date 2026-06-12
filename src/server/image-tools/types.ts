@@ -1,7 +1,9 @@
 import type { UploadSuccess } from '@/server/uploadService';
 import type { VideoUploadSuccess } from '@/server/videoUploadService';
 
-export type ImageToolAdapterKind = 'grainrad-http';
+// 'grainrad-inproc' is the active in-process adapter. 'grainrad-http' is retained
+// only so historical provenance records (imageExtras.imageToolRun) still type-check.
+export type ImageToolAdapterKind = 'grainrad-inproc' | 'grainrad-http';
 export type ImageToolInputAssetType = 'image' | 'video';
 export type ImageToolOutputMode = 'still' | 'animated';
 export type ImageToolControlType = 'text' | 'number' | 'slider' | 'switch' | 'select' | 'color';
@@ -11,6 +13,8 @@ export type ImageToolDiagnosticLevel = 'info' | 'warn' | 'error';
 export type ImageToolControlOption = {
   value: string | number | boolean;
   label: string;
+  helpText?: string;
+  effectId?: string;
 };
 
 export type ImageToolControl = {
@@ -24,6 +28,9 @@ export type ImageToolControl = {
   step?: number;
   options?: ImageToolControlOption[];
   helpText?: string;
+  group?: string;
+  effectIds?: string[];
+  advanced?: boolean;
 };
 
 export type ImageToolPresentation = {
@@ -35,6 +42,7 @@ export type ImageToolPresentation = {
 
 export type ImageToolRequest = {
   effectId: string;
+  paramPreset?: string;
   params: Record<string, unknown>;
   output: {
     mode: ImageToolOutputMode;
@@ -87,6 +95,7 @@ export type ImageToolRunInput = {
   imageId: string;
   request: Partial<ImageToolRequest> & {
     effectId?: string;
+    paramPreset?: string;
     params?: Record<string, unknown>;
     output?: Partial<ImageToolRequest['output']>;
   };

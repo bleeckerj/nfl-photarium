@@ -18,6 +18,7 @@ import { useGalleryAudit } from './gallery/hooks/useGalleryAudit';
 import { useGalleryBackup } from './gallery/hooks/useGalleryBackup';
 import { useGalleryEmbedding } from './gallery/hooks/useGalleryEmbedding';
 import { useGalleryFavoriteToggle } from './gallery/hooks/useGalleryFavoriteToggle';
+import { useGalleryDeleteConfirmation } from './gallery/hooks/useGalleryDeleteConfirmation';
 import { useGalleryFocusNavigation } from './gallery/hooks/useGalleryFocusNavigation';
 import { rememberGalleryWarmCache, useGalleryInitialLoadState } from './gallery/hooks/useGalleryInitialLoadState';
 import { useGalleryMetadataEffects } from './gallery/hooks/useGalleryMetadataEffects';
@@ -279,7 +280,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         serverQuery: galleryServerQueryRef.current,
         focusAssetId,
       });
-      const response = await fetch(url, { signal: controller.signal });
+      const response = await fetch(url, { signal: controller.signal, cache: 'no-store' });
       const data = await response.json();
       if (response.ok) {
         const uniqueImages = dedupeGalleryImages(data.images || []);
@@ -707,6 +708,13 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     images, setImages, toastPush: toast.push, setAltLoadingMap, setDisplayNameLoadingMap,
     editFolderSelect, newEditFolder, editTags, setEditingImage, setEditFolderSelect, setNewEditFolder, setEditTags,
   });
+  const {
+    deleteConfirmId,
+    deleteConfirmDeleting,
+    requestDeleteImage,
+    cancelDeleteImage,
+    confirmDeleteImage,
+  } = useGalleryDeleteConfirmation(deleteImage);
 
   const toggleFavorite = useGalleryFavoriteToggle({
     images, setFavoriteLoadingMap, setImages, toastPush: toast.push,
@@ -922,7 +930,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         onClearFilters: handleClearFilters, onToggleSelection: toggleSelection, onBeforeNavigate: saveGalleryReturnState,
         onCopyNamespace: (ns) => { void copyToClipboard(ns, 'Namespace', toast.push); },
         onSelectColor: handleSelectColor, onToggleCopyMenu: handleOpenCopyMenu, onStartEdit: startEdit,
-        onDelete: deleteImage, onToggleFavorite: toggleFavorite, onGenerateAlt: generateAltTag,
+        onDelete: requestDeleteImage, onToggleFavorite: toggleFavorite, onGenerateAlt: generateAltTag,
         onGenerateDisplayName: generateDisplayName, onDragStart: (event, img) => setDragPayloadForImage(event, img),
         onMouseEnter: handleMouseEnter, onMouseMove: handleMouseMove, onMouseLeave: handleMouseLeave,
         onVariantChange: setSelectedVariant, onFoldersChanged: handleFoldersChanged, onRunBrokenAudit: runBrokenAudit,
@@ -942,6 +950,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             void saveEdit(editingImage);
           }
         },
+        deleteConfirmImageId: deleteConfirmId, deleteConfirmDeleting,
+        onDeleteConfirm: confirmDeleteImage, onDeleteCancel: cancelDeleteImage,
         bulkEditOpen, selectedCount, selectedImagesForPayload, selectedAnimationPreview, bulkAnimateOrderMode,
         onBulkAnimateOrderModeChange: setBulkAnimateOrderMode, bulkAnimateSelectionOrderDiffers,
         onCopySelectionPayload: handleCopySelectionPayload, bulkApplyFolder, onBulkApplyFolderChange: setBulkApplyFolder,

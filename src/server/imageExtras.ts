@@ -53,6 +53,7 @@ export type ImageToolRunRecord = {
   adapterKind: string;
   sourceImageId: string;
   effectId?: string;
+  paramPreset?: string;
   params?: Record<string, unknown>;
   output?: Record<string, unknown>;
   externalJobId?: string;

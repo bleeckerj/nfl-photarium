@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import type { CloudflareImage } from '../types';
 import { truncateMiddle } from '@/components/gallery/utils';
 import { requestSemanticTags } from '@/services/imageAltDescriptionService';
+import { deleteImage as requestDeleteImage } from '@/services/imageDeletionService';
 import { mergeUserTagsPreservingSystemTags } from '@/utils/systemTags';
 import { applyEmbeddingResultToImage } from '../embeddingResult';
 
@@ -542,21 +543,7 @@ export const useGalleryBulkActions = ({
       const ids = Array.from(selectedImageIds);
       const settled = await Promise.allSettled(
         ids.map(async (id) => {
-          const response = await fetch(`/api/images/${id}`, {
-            method: 'DELETE'
-          });
-          if (!response.ok) {
-            let message = `HTTP ${response.status}`;
-            try {
-              const payload = await response.json();
-              if (typeof payload?.error === 'string' && payload.error.trim()) {
-                message = payload.error;
-              }
-            } catch {
-              // ignore JSON parse failure and keep HTTP status message
-            }
-            throw new Error(message);
-          }
+          await requestDeleteImage(id);
           return id;
         })
       );

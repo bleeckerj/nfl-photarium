@@ -1,4 +1,4 @@
-import { createLegacyToolContract } from './legacy-support.js';
+import { createRuntimeToolContract } from './runtime-support.js';
 
 const DISCOVERY_TOOL_NAMES = [
   'list_tools',
@@ -16,4 +16,4 @@ const DISCOVERY_TOOL_NAMES = [
   'photarium_extract_workflow',
 ] as const;
 
-export const discoveryContracts = DISCOVERY_TOOL_NAMES.map(createLegacyToolContract);
+export const discoveryContracts = DISCOVERY_TOOL_NAMES.map(createRuntimeToolContract);

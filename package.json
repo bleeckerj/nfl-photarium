@@ -81,6 +81,7 @@
     "jszip": "^3.10.1",
     "lucide-react": "^0.545.0",
     "next": "^16.1.1-canary.31",
+    "nfl-grainrad-clone": "file:../nfl-grainrad-clone",
     "puppeteer": "^24.35.0",
     "qrcode": "^1.5.3",
     "react": "19.1.0",

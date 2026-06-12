@@ -11,6 +11,7 @@ import { GalleryCopyModal } from './GalleryCopyModal';
 import { GalleryBulkEditModal } from './GalleryBulkEditModal';
 import { GalleryEditModal } from './GalleryEditModal';
 import { GalleryNamespaceModal } from './GalleryNamespaceModal';
+import { DeleteConfirmModal } from './modals';
 import type { CloudflareImage, SelectOption } from './types';
 
 interface GalleryModalsProps {
@@ -50,6 +51,11 @@ interface GalleryModalsProps {
   onEditTagsChange: (value: string) => void;
   onEditCancel: () => void;
   onEditSave: () => void;
+
+  deleteConfirmImageId: string | null;
+  deleteConfirmDeleting: boolean;
+  onDeleteConfirm: () => Promise<void>;
+  onDeleteCancel: () => void;
 
   bulkEditOpen: boolean;
   selectedCount: number;
@@ -146,6 +152,10 @@ export const GalleryModals: React.FC<GalleryModalsProps> = ({
   onEditTagsChange,
   onEditCancel,
   onEditSave,
+  deleteConfirmImageId,
+  deleteConfirmDeleting,
+  onDeleteConfirm,
+  onDeleteCancel,
   bulkEditOpen,
   selectedCount,
   selectedImagesForPayload,
@@ -249,6 +259,15 @@ export const GalleryModals: React.FC<GalleryModalsProps> = ({
         onCancel={onEditCancel}
         onSave={onEditSave}
       />
+
+      {deleteConfirmImageId && (
+        <DeleteConfirmModal
+          count={1}
+          onConfirm={onDeleteConfirm}
+          onCancel={onDeleteCancel}
+          isDeleting={deleteConfirmDeleting}
+        />
+      )}
 
       {bulkEditOpen && (
         <GalleryBulkEditModal

@@ -4,18 +4,19 @@ import { NextRequest } from 'next/server';
 import { POST } from '@/app/api/image-tools/[toolId]/runs/route';
 import { POST as POST_PREVIEW } from '@/app/api/image-tools/[toolId]/previews/route';
 import { GET as GET_RUN } from '@/app/api/image-tools/runs/[runId]/route';
+import { GET as GET_PREVIEW } from '@/app/api/image-tools/previews/[previewId]/route';
 import { GET as GET_PREVIEW_ARTIFACT } from '@/app/api/image-tools/previews/[previewId]/artifact/route';
 import { createImageToolRun, addImageToolRunEvent } from '@/server/image-tools/runStore';
 import { completeImageToolPreview, createImageToolPreview } from '@/server/image-tools/previewStore';
 
-const { startImageToolRunMock, createImageToolPreviewRunMock } = vi.hoisted(() => ({
+const { startImageToolRunMock, startImageToolPreviewRunMock } = vi.hoisted(() => ({
   startImageToolRunMock: vi.fn(),
-  createImageToolPreviewRunMock: vi.fn(),
+  startImageToolPreviewRunMock: vi.fn(),
 }));
 
 vi.mock('@/server/image-tools/executor', () => ({
   startImageToolRun: startImageToolRunMock,
-  createImageToolPreviewRun: createImageToolPreviewRunMock,
+  startImageToolPreviewRun: startImageToolPreviewRunMock,
 }));
 
 const createPostRequest = (body: Record<string, unknown>) =>
@@ -111,14 +112,13 @@ describe('image tool run routes', () => {
   });
 
   it('creates a preview through the executor', async () => {
-    createImageToolPreviewRunMock.mockResolvedValueOnce({
+    startImageToolPreviewRunMock.mockReturnValueOnce({
       id: 'preview-1',
       toolId: 'grainrad',
       imageId: 'img-1',
-      status: 'completed',
-      message: 'Preview ready',
-      percent: 1,
-      artifactUrl: '/api/image-tools/previews/preview-1/artifact',
+      status: 'running',
+      message: 'Rendering Grainrad preview',
+      percent: 0.5,
       events: [],
     });
 
@@ -128,15 +128,37 @@ describe('image tool run routes', () => {
     );
     const payload = await response.json();
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     expect(payload.preview.id).toBe('preview-1');
-    expect(createImageToolPreviewRunMock).toHaveBeenCalledWith(
+    expect(startImageToolPreviewRunMock).toHaveBeenCalledWith(
       'grainrad',
       expect.objectContaining({
         imageId: 'img-1',
         request: { effectId: 'threshold' },
       })
     );
+  });
+
+  it('returns a stored preview by id', async () => {
+    const preview = createImageToolPreview({
+      toolId: 'grainrad',
+      imageId: 'img-4',
+      request: {
+        effectId: 'vhs',
+        params: {},
+        output: { mode: 'still', format: 'png' },
+      },
+    });
+
+    const response = await GET_PREVIEW(
+      new Request(`http://localhost/api/image-tools/previews/${preview.id}`),
+      { params: Promise.resolve({ previewId: preview.id }) }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.preview.id).toBe(preview.id);
+    expect(payload.preview.status).toBe('queued');
   });
 
   it('streams a stored preview artifact', async () => {

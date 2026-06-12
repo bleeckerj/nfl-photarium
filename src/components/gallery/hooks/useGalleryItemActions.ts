@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import type { CloudflareImage } from '../types';
 import { getUserVisibleTags, mergeUserTagsPreservingSystemTags } from '@/utils/systemTags';
+import { deleteImage as requestDeleteImage } from '@/services/imageDeletionService';
 
 interface UseGalleryItemActionsOptions {
   images: CloudflareImage[];
@@ -33,17 +34,16 @@ export const useGalleryItemActions = ({
 }: UseGalleryItemActionsOptions) => {
   const deleteImage = useCallback(async (imageId: string) => {
     try {
-      const response = await fetch(`/api/images/${imageId}`, {
-        method: 'DELETE',
-      });
-      
-      if (response.ok) {
-        setImages(prev => prev.filter(img => img.id !== imageId));
-      }
+      await requestDeleteImage(imageId);
+      setImages(prev => prev.filter(img => img.id !== imageId));
+      toastPush('Image deleted');
     } catch (error) {
       console.error('Failed to delete image:', error);
+      const message = error instanceof Error ? error.message : 'Failed to delete image';
+      toastPush(message);
+      throw error;
     }
-  }, [setImages]);
+  }, [setImages, toastPush]);
 
   const generateAltTag = useCallback(async (imageId: string) => {
     setAltLoadingMap(prev => ({ ...prev, [imageId]: true }));

@@ -1,0 +1,73 @@
+export declare function runFilesystemIngest(options: {
+    rootPath: string;
+    namespace: string;
+    apiBase?: string;
+    folder?: string;
+    tags?: string[];
+    descriptionPrefix?: string;
+    includeFilename?: boolean;
+    includePathTags?: boolean;
+    aiMetadata?: boolean;
+    aiDisplayName?: boolean;
+    aiTags?: boolean;
+    tagCount?: number;
+    concurrency?: number;
+    throttleMs?: number;
+    limit?: number;
+    dryRun?: boolean;
+    verbose?: boolean;
+}): Promise<{
+    ok: boolean;
+    exitCode: number;
+    command: string[];
+    stdout: string;
+    stderr: string;
+}>;
+export declare function runInstagramSingleUrlIngest(options: {
+    url: string;
+    username?: string;
+    namespace?: string;
+    apiBase?: string;
+    profileDir?: string;
+    output?: string;
+    requestDelayMs?: number;
+    headful?: boolean;
+    verbose?: boolean;
+}): Promise<{
+    ok: boolean;
+    exitCode: number;
+    command: string[];
+    stdout: string;
+    stderr: string;
+}>;
+export declare function runDiscordRefreshAndIngest(options: {
+    discordRepo?: string;
+    imagesRoot?: string;
+    namespace?: string;
+    visuallyNamespace?: string;
+    autotraderNamespace?: string;
+    apiBase?: string;
+    checkpointFile?: string;
+    tags?: string[];
+    appendImageTag?: string;
+    descriptionPrefix?: string;
+    tagCount?: number;
+    concurrency?: number;
+    throttleMs?: number;
+    noAiMetadata?: boolean;
+    includePathTags?: boolean;
+    includeFilename?: boolean;
+    hashCacheBackfillOnly?: boolean;
+    reportCache?: boolean;
+    assumeUploaded?: boolean;
+    skipDiscordRefresh?: boolean;
+    skipIngest?: boolean;
+    dryRun?: boolean;
+    verbose?: boolean;
+}): Promise<{
+    ok: boolean;
+    exitCode: number;
+    command: string[];
+    stdout: string;
+    stderr: string;
+}>;

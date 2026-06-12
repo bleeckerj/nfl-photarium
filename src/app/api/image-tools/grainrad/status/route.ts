@@ -1,17 +1,13 @@
 import { NextResponse } from 'next/server';
 
-import { getGrainradManagedStatus } from '@/server/image-tools/grainradManagedRuntime';
-
-export const GET = async () => {
-  try {
-    return NextResponse.json({
-      status: await getGrainradManagedStatus(),
-    });
-  } catch (error) {
-    console.error('[image-tools] Failed to read Grainrad status', error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to read Grainrad status' },
-      { status: 500 }
-    );
-  }
-};
+// Grainrad now runs in-process as a library (no separate service to start or
+// health-check). This endpoint is retained for backward compatibility and
+// always reports ready.
+export const GET = async () =>
+  NextResponse.json({
+    status: {
+      mode: 'in-process',
+      managedEnabled: false,
+      message: 'Grainrad runs in-process; no external service is required.',
+    },
+  });

@@ -76,6 +76,7 @@ import { patchParentAssignment as patchParentAssignmentService } from '@/service
 import { usePersistentShareBaseUrl } from '@/hooks/usePersistentShareBaseUrl';
 import { requestSemanticTags } from '@/services/imageAltDescriptionService';
 import { fetchDetailImageResponse } from '@/services/detailImageService';
+import { deleteImage as requestDeleteImage } from '@/services/imageDeletionService';
 import { patchImageFavorite, patchImageMetadata } from '@/services/imageMetadataService';
 import {
   getUserVisibleTags,
@@ -2015,11 +2016,7 @@ export default function ImageDetailPage() {
   const handleDeleteChild = useCallback(async (childId: string) => {
     if (!confirm('Delete this variation permanently?')) return;
     try {
-      const response = await fetch(`/api/images/${childId}`, { method: 'DELETE' });
-      if (!response.ok) {
-        const payload = await response.json();
-        throw new Error(payload.error || 'Failed to delete asset');
-      }
+      await requestDeleteImage(childId);
       toast.push('Variation deleted');
       setAllImages(prev => prev.filter(img => img.id !== childId));
       setVariationPage(1);
@@ -2045,11 +2042,7 @@ export default function ImageDetailPage() {
     try {
       for (const idValue of ids) {
         try {
-          const response = await fetch(`/api/images/${idValue}`, { method: 'DELETE' });
-          if (!response.ok) {
-            failedIds.push(idValue);
-            continue;
-          }
+          await requestDeleteImage(idValue);
           deletedCount += 1;
         } catch {
           failedIds.push(idValue);
@@ -2486,7 +2479,12 @@ export default function ImageDetailPage() {
                 />
               ) : null}
 
-              <ImageToolsPanel imageId={image.id} onRunComplete={refreshImageList} />
+              <ImageToolsPanel
+                imageId={image.id}
+                sourcePreviewUrl={imageToolSourcePreviewUrl}
+                sourceLabel={image.filename || image.id}
+                onRunComplete={refreshImageList}
+              />
           </div>
         </div>
 

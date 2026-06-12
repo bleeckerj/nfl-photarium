@@ -96,6 +96,7 @@ export const mergeImageToolRequest = (
   defaults: ImageToolRequest,
   incoming: {
     effectId?: string;
+    paramPreset?: string;
     params?: Record<string, unknown>;
     output?: Partial<ImageToolRequest['output']>;
     timeline?: ImageToolRequest['timeline'];
@@ -111,6 +112,9 @@ export const mergeImageToolRequest = (
     effectId: typeof incoming.effectId === 'string' && incoming.effectId.trim()
       ? incoming.effectId.trim()
       : defaults.effectId,
+    paramPreset: typeof incoming.paramPreset === 'string'
+      ? incoming.paramPreset.trim() || undefined
+      : defaults.paramPreset,
     params: {
       ...defaults.params,
       ...(isRecord(incoming.params) ? incoming.params : {}),

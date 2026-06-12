@@ -17,8 +17,13 @@ import {
 import {
   deleteVideoAssetRecord,
   getVideoAssetRecord,
+  listVideoAssetRecords,
 } from '@/server/videoCatalogStorage';
 import { getImageExtrasRecord } from '@/server/imageExtras';
+import {
+  applyVideoAnimatedWebpComfyProvenance,
+  buildVideoAnimatedWebpComfyProvenanceMap,
+} from '@/server/videoAnimatedWebpComfyProvenance';
 import { detachAssetChildren, ParentAssignmentError } from '@/server/assetParentService';
 import {
   CloudflareImageDeleteError,
@@ -112,6 +117,12 @@ const shouldProbeAnimatedState = (image: CachedCloudflareImage) => {
   return image.filename.trim().toLowerCase().endsWith('.webp');
 };
 
+const mayBeVideoAnimatedWebpDerivative = (image: CachedCloudflareImage) => {
+  if (image.isAnimated === true || hasAnimatedTag(image.tags)) return true;
+  if (typeof image.contentType === 'string' && image.contentType.trim().toLowerCase() === 'image/webp') return true;
+  return image.filename.trim().toLowerCase().endsWith('.webp');
+};
+
 const enrichAnimatedState = async (image: CachedCloudflareImage): Promise<CachedCloudflareImage> => {
   if (!shouldProbeAnimatedState(image)) {
     return image;
@@ -165,6 +176,20 @@ const enrichWithVectorMetadata = async (
       ? { width: aspect.width, height: aspect.height }
       : image.dimensions,
   };
+};
+
+const enrichWithVideoAnimatedWebpComfyProvenance = async (
+  image: CachedCloudflareImage
+): Promise<CachedCloudflareImage> => {
+  if (image.generatedBy === 'comfyui' || image.comfyMetadataDetected === true || image.comfyMetadataSource) {
+    return image;
+  }
+  if (!mayBeVideoAnimatedWebpDerivative(image)) {
+    return image;
+  }
+  const videos = await listVideoAssetRecords();
+  const provenance = buildVideoAnimatedWebpComfyProvenanceMap(videos);
+  return applyVideoAnimatedWebpComfyProvenance([image], provenance)[0] ?? image;
 };
 
 const toExifSummary = (value: unknown): Record<string, string | number> | undefined => {
@@ -395,6 +420,10 @@ export async function GET(
     } else {
       diagnostics.vector_enrich_deferred = true;
     }
+
+    const videoProvenanceStartedAt = performance.now();
+    responseImage = await enrichWithVideoAnimatedWebpComfyProvenance(responseImage);
+    timings.video_comfy_provenance = mark(performance.now() - videoProvenanceStartedAt);
 
     diagnostics.had_known_size = typeof readKnownSize(responseImage) === 'number';
     if (shouldPersistResponseImage) {
