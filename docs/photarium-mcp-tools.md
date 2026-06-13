@@ -3,6 +3,7 @@
 ## Discovery & Search
 - `photarium_search`
 - `photarium_search_text`
+- `photarium_search_metadata` (field-aware metadata search: choose fields, match mode, case sensitivity)
 - `photarium_search_color`
 - `photarium_similar`
 - `photarium_antipode`
@@ -23,6 +24,15 @@
 - `photarium_fs_ingest` (recursive local image/video ingest by directory tree)
   - supports `throttleMs` to pace upload requests globally
   - automatically caches successful uploads locally and skips unchanged files on reruns
+
+## Image Tools
+- `photarium_image_tools_list`
+- `photarium_image_tool_run`
+- `photarium_image_tool_preview`
+- `photarium_image_tool_run_get`
+- `photarium_image_tool_preview_get`
+
+The image-tool runtime tools mirror Photarium's `/api/image-tools` manifest, run, preview, and status endpoints. `request` is optional for run and preview calls; when present, it is merged with the selected tool manifest's `defaultRequest`, including open-ended `params` for tool-specific controls.
 
 ### Crop Variants
 

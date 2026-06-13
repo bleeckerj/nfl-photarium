@@ -11,7 +11,7 @@ function normalizeSchema(schema) {
     const record = schema;
     const normalized = { ...record };
     if (record.type === 'object') {
-        normalized.additionalProperties = false;
+        normalized.additionalProperties = record.additionalProperties === true;
         if (record.properties && typeof record.properties === 'object' && !Array.isArray(record.properties)) {
             normalized.properties = Object.fromEntries(Object.entries(record.properties).map(([key, value]) => [key, normalizeSchema(value)]));
         }

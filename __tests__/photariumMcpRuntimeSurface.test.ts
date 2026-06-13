@@ -8,6 +8,8 @@ const HIGH_RISK_SCHEMA_NAMES = [
   'photarium_upload_url',
   'photarium_upload_from_path',
   'photarium_crop_variant',
+  'photarium_image_tool_run',
+  'photarium_image_tool_preview',
   'photarium_generate_image',
   'photarium_semantic_merge',
   'photarium_fs_ingest',

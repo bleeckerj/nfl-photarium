@@ -237,6 +237,202 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
     ],
     "type": "object",
   },
+  "photarium_image_tool_preview": {
+    "properties": {
+      "imageId": {
+        "description": "Photarium image ID to preview against.",
+        "type": "string",
+      },
+      "request": {
+        "description": "Partial image-tool request override. Omitted fields are filled from the selected tool manifest defaultRequest.",
+        "properties": {
+          "effectId": {
+            "description": "Effect identifier to run. Defaults to the selected tool manifest defaultRequest.effectId.",
+            "type": "string",
+          },
+          "output": {
+            "description": "Output overrides merged into the manifest defaultRequest.output.",
+            "properties": {
+              "format": {
+                "description": "Output format such as png, webp, or jpg.",
+                "type": "string",
+              },
+              "mode": {
+                "description": "Output mode for the run or preview.",
+                "enum": [
+                  "still",
+                  "animated",
+                ],
+                "type": "string",
+              },
+              "preset": {
+                "description": "Optional output preset understood by the selected image tool.",
+                "type": "string",
+              },
+            },
+            "type": "object",
+          },
+          "paramPreset": {
+            "description": "Optional preset name understood by the selected image tool.",
+            "type": "string",
+          },
+          "params": {
+            "additionalProperties": true,
+            "description": "Tool-specific parameter overrides merged into the manifest defaultRequest.params.",
+            "type": "object",
+          },
+          "renderContext": {
+            "description": "Optional render context overrides for deterministic previews or animation frames.",
+            "properties": {
+              "fps": {
+                "description": "Frames per second available to the renderer.",
+                "type": "number",
+              },
+              "frameIndex": {
+                "description": "Frame index to render for preview contexts.",
+                "type": "number",
+              },
+              "seed": {
+                "description": "Deterministic render seed.",
+                "type": "number",
+              },
+              "time": {
+                "description": "Timeline time value available to the renderer.",
+                "type": "number",
+              },
+            },
+            "type": "object",
+          },
+          "timeline": {
+            "description": "Optional timeline overrides for animated output.",
+            "properties": {
+              "durationMs": {
+                "description": "Animation duration in milliseconds.",
+                "type": "number",
+              },
+              "fps": {
+                "description": "Frames per second for animated output.",
+                "type": "number",
+              },
+              "loop": {
+                "description": "Whether animated output should loop.",
+                "type": "boolean",
+              },
+            },
+            "type": "object",
+          },
+        },
+        "type": "object",
+      },
+      "toolId": {
+        "description": "Image tool ID, such as grainrad.",
+        "type": "string",
+      },
+    },
+    "required": [
+      "toolId",
+      "imageId",
+    ],
+    "type": "object",
+  },
+  "photarium_image_tool_run": {
+    "properties": {
+      "imageId": {
+        "description": "Photarium image ID to transform.",
+        "type": "string",
+      },
+      "request": {
+        "description": "Partial image-tool request override. Omitted fields are filled from the selected tool manifest defaultRequest.",
+        "properties": {
+          "effectId": {
+            "description": "Effect identifier to run. Defaults to the selected tool manifest defaultRequest.effectId.",
+            "type": "string",
+          },
+          "output": {
+            "description": "Output overrides merged into the manifest defaultRequest.output.",
+            "properties": {
+              "format": {
+                "description": "Output format such as png, webp, or jpg.",
+                "type": "string",
+              },
+              "mode": {
+                "description": "Output mode for the run or preview.",
+                "enum": [
+                  "still",
+                  "animated",
+                ],
+                "type": "string",
+              },
+              "preset": {
+                "description": "Optional output preset understood by the selected image tool.",
+                "type": "string",
+              },
+            },
+            "type": "object",
+          },
+          "paramPreset": {
+            "description": "Optional preset name understood by the selected image tool.",
+            "type": "string",
+          },
+          "params": {
+            "additionalProperties": true,
+            "description": "Tool-specific parameter overrides merged into the manifest defaultRequest.params.",
+            "type": "object",
+          },
+          "renderContext": {
+            "description": "Optional render context overrides for deterministic previews or animation frames.",
+            "properties": {
+              "fps": {
+                "description": "Frames per second available to the renderer.",
+                "type": "number",
+              },
+              "frameIndex": {
+                "description": "Frame index to render for preview contexts.",
+                "type": "number",
+              },
+              "seed": {
+                "description": "Deterministic render seed.",
+                "type": "number",
+              },
+              "time": {
+                "description": "Timeline time value available to the renderer.",
+                "type": "number",
+              },
+            },
+            "type": "object",
+          },
+          "timeline": {
+            "description": "Optional timeline overrides for animated output.",
+            "properties": {
+              "durationMs": {
+                "description": "Animation duration in milliseconds.",
+                "type": "number",
+              },
+              "fps": {
+                "description": "Frames per second for animated output.",
+                "type": "number",
+              },
+              "loop": {
+                "description": "Whether animated output should loop.",
+                "type": "boolean",
+              },
+            },
+            "type": "object",
+          },
+        },
+        "type": "object",
+      },
+      "toolId": {
+        "description": "Image tool ID, such as grainrad.",
+        "type": "string",
+      },
+    },
+    "required": [
+      "toolId",
+      "imageId",
+    ],
+    "type": "object",
+  },
   "photarium_search": {
     "properties": {
       "limit": {

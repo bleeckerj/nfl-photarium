@@ -9,6 +9,7 @@ MCP (Model Context Protocol) server that exposes the full Photarium API surface 
 
 - `photarium_search`
 - `photarium_search_text`
+- `photarium_search_metadata`
 - `photarium_search_color`
 - `photarium_similar`
 - `photarium_antipode`
@@ -20,6 +21,8 @@ MCP (Model Context Protocol) server that exposes the full Photarium API surface 
 - **`photarium_search`** (Semantic): Uses AI to understand the meaning of your query. "vibe coding illustration" finds images that *look like* vibe coding illustrations, even if they're not tagged that way.
 
 - **`photarium_search_text`** (Text): Traditional search matching exact text in metadata. "hero" finds files named "hero.png" or tagged "hero".
+
+- **`photarium_search_metadata`** (Field-aware): Like text search but you choose which fields to scan (filename, folder, tags, description, alt text, namespace, source/original URLs), the match mode (`contains`, `exact`, `prefix`, `regex`), and case sensitivity. Each result reports which fields matched. Use for precise filename or field-scoped lookups, e.g. filename `prefix` "hero-" or an `exact` tag.
 
 - **`photarium_search_color`** (Color): Finds images with matching dominant colors. "#FF5733" finds orange-toned images.
 
@@ -67,6 +70,17 @@ Example:
 ```
 
 
+### Image Tools
+
+- `photarium_image_tools_list`
+- `photarium_image_tool_run`
+- `photarium_image_tool_preview`
+- `photarium_image_tool_run_get`
+- `photarium_image_tool_preview_get`
+
+These tools expose Photarium's server-side image-tool manifests plus asynchronous run, preview, and status records. Run and preview requests accept optional manifest overrides and pass open-ended `params` through to the selected image tool.
+
+
 ### AI Features
 
 - `photarium_generate_alt`
@@ -95,6 +109,7 @@ Example:
 This MCP server also wraps the remaining Photarium endpoints, including:
 
 - Imports, internal uploads, external uploads, animations, and upload downloads
+- Image-tool manifests, runs, previews, and status records
 - Prompt records (get + bulk), extras get/patch, and haiku generation
 - Embedding status + batch generation, vector index creation, colors bulk lookup
 - Family operations (swap parent, delete family, delete-family job status)

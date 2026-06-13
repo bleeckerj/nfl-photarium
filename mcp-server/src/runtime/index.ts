@@ -4,6 +4,8 @@ import { aiHandlers } from './ai/handlers.js';
 import { aiTools } from './ai/tools.js';
 import { discoveryHandlers } from './discovery/handlers.js';
 import { discoveryTools } from './discovery/tools.js';
+import { imageToolHandlers } from './image-tools/handlers.js';
+import { imageToolTools } from './image-tools/tools.js';
 import { organizationHandlers } from './organization/handlers.js';
 import { organizationTools } from './organization/tools.js';
 import { systemHandlers } from './system/handlers.js';
@@ -25,6 +27,7 @@ const runtimeModules: RuntimeToolModule[] = [
   { tools: discoveryTools, handlers: discoveryHandlers },
   { tools: organizationTools, handlers: organizationHandlers },
   { tools: uploadTools, handlers: uploadHandlers },
+  { tools: imageToolTools, handlers: imageToolHandlers },
   { tools: aiTools, handlers: aiHandlers },
   { tools: systemTools, handlers: systemHandlers },
 ];
