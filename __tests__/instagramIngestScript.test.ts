@@ -12,6 +12,7 @@ const noopLogger = {
 
 describe('instagram ingest script helpers', async () => {
   const script = await import('../scripts/instagram-ingest.mjs');
+  const singleUrlExtract = await import('../scripts/instagram-ingest/single-url-extract.mjs');
 
   afterEach(() => {
     vi.restoreAllMocks();
@@ -29,6 +30,28 @@ describe('instagram ingest script helpers', async () => {
     expect(options.command).toBe('ingest');
     expect(options.pushCloudflare).toBe(true);
     expect(options.aiDisplayName).toBe(true);
+  });
+
+  it('fetches Instagram API paths with the browser session headers', async () => {
+    const page = {
+      evaluate: vi.fn(async (_fn, args) => {
+        expect(args.apiPath).toBe('/api/v1/users/web_profile_info/?username=demo');
+        expect(args.appId).toBeTruthy();
+        return { status: 200, text: JSON.stringify({ data: { user: { id: '123' } } }) };
+      }),
+    };
+
+    const result = await singleUrlExtract.igGet(
+      page,
+      '/api/v1/users/web_profile_info/?username=demo',
+    );
+
+    expect(page.evaluate).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      status: 200,
+      json: { data: { user: { id: '123' } } },
+      text: JSON.stringify({ data: { user: { id: '123' } } }),
+    });
   });
 
   it('sends image bytes to the display-name suggest endpoint', async () => {

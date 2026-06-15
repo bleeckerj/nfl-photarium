@@ -49,6 +49,23 @@ export function getCloudflareImageUrl(
 }
 
 /**
+ * URL for an SVG's original (unmodified) bytes. SVG is vector XML — Cloudflare
+ * Images cannot raster-transform it, so we must NOT append `format=webp` (which
+ * the generic builder does for every other URL). Use this only when displaying
+ * an SVG that has no rasterized WebP variant; prefer the WebP variant otherwise.
+ */
+export function getCloudflareSvgOriginalUrl(
+  imageId: string,
+  accountHash?: string
+): string {
+  const hash = accountHash || process.env.NEXT_PUBLIC_CLOUDFLARE_ACCOUNT_HASH;
+  if (!hash) {
+    throw new Error('Cloudflare account hash not found');
+  }
+  return `https://imagedelivery.net/${hash}/${imageId}/public`;
+}
+
+/**
  * Get multiple URLs for an image at different sizes
  * @param imageId - The Cloudflare image ID
  * @param variants - Array of variant names to generate URLs for

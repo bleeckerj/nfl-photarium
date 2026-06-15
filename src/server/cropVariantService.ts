@@ -275,7 +275,16 @@ export async function createCropVariant(options: CropVariantOptions): Promise<Cr
   const credentials = getCloudflareCredentials();
   const sourceImage = await fetchCloudflareImage(options.imageId, credentials);
   const sourceMeta = parseCloudflareMetadata(sourceImage.meta);
-  const { buffer: originalBuffer } = await fetchOriginalImageBlob(options.imageId);
+  // SVG sources have no raster pixels to crop. Crop the linked WebP variant
+  // instead (it was rasterized on upload); fall back to the SVG id only for
+  // legacy uploads without a variant, where sharp rasterizes it on the fly.
+  const sourceIsSvg =
+    (sourceImage.filename?.toLowerCase().endsWith('.svg') ?? false) ||
+    sourceMeta.type === 'image/svg+xml';
+  const cropSourceId = sourceIsSvg && sourceMeta.linkedAssetId
+    ? sourceMeta.linkedAssetId
+    : options.imageId;
+  const { buffer: originalBuffer } = await fetchOriginalImageBlob(cropSourceId);
   const anchor = normalizeCropAnchor(options.anchor);
   const cropped = await cropImageToWebp({
     buffer: originalBuffer,

@@ -1157,9 +1157,12 @@ export default function ImageDetailPage() {
     return Array.from(values).sort((left, right) => left.localeCompare(right));
   }, [allImages, image?.namespace, registryNamespaces]);
 
+  // For SVGs this resolves to the rasterized WebP variant (safe, transformable);
+  // for raster assets getAssetPreviewUrl returns the same original delivery URL
+  // as before, so non-SVG behavior is unchanged.
   const originalDeliveryUrl = useMemo(
-    () => (id ? getCloudflareImageUrl(id, 'original') : ''),
-    [id]
+    () => (image ? getAssetPreviewUrl(image, { imageVariant: 'original' }) : (id ? getCloudflareImageUrl(id, 'original') : '')),
+    [image, id]
   );
   const imageToolSourcePreviewUrl = useMemo(
     () => (image ? getAssetPreviewUrl(image, { imageVariant: 'public' }) : ''),

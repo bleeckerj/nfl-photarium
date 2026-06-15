@@ -11,7 +11,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { Trash2, Copy, ExternalLink, Sparkles, Layers, AlertTriangle, Star } from 'lucide-react';
 import { ColorSwatches } from '@/components/ColorSwatches';
-import { getCloudflareImageUrl, getCloudflareDownloadUrl } from '@/utils/imageUtils';
+import { getCloudflareImageUrl, getCloudflareDownloadUrl, getCloudflareSvgOriginalUrl } from '@/utils/imageUtils';
 import { formatBytes } from '@/utils/formatBytes';
 import { AspectRatioDisplay } from './AspectRatioDisplay';
 import { formatShortAssetId, isSvgImage } from './utils';
@@ -94,12 +94,17 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
 }) => {
   const isVideoAsset = image.assetType === 'video';
   const svgImage = isSvgImage(image);
+  // Prefer the rasterized WebP variant for SVGs (XSS-immune, transformable);
+  // fall back to the raw sanitized SVG only for legacy uploads without a variant.
+  const svgWebpVariantId = svgImage ? image.linkedAssetId : undefined;
+  const renderAsRawSvg = svgImage && !svgWebpVariantId;
+  const displaySourceId = svgWebpVariantId ?? image.id;
   const imageUrl = isVideoAsset
     ? image.videoThumbnailUrl || image.videoPreviewUrl || image.videoPlaybackUrl || image.videoHlsUrl || ''
-    : getCloudflareImageUrl(image.id, selectedVariant === 'public' ? 'original' : selectedVariant);
+    : getCloudflareImageUrl(displaySourceId, selectedVariant === 'public' ? 'original' : selectedVariant);
   const displayUrl = isVideoAsset
     ? imageUrl
-    : (svgImage ? getCloudflareImageUrl(image.id, 'original') : imageUrl);
+    : (renderAsRawSvg ? getCloudflareSvgOriginalUrl(image.id) : imageUrl);
   const fileSizeLabel = formatBytes(image.size);
   const swatchAverageColor = colorMetadata?.averageColor ?? image.averageColor;
   const swatchDominantColors = colorMetadata?.dominantColors ?? image.dominantColors;
@@ -183,7 +188,7 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
               VIDEO
             </div>
           </>
-        ) : svgImage ? (
+        ) : renderAsRawSvg ? (
           <img
             draggable
             onDragStart={handleDragStart}

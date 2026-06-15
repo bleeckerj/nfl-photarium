@@ -11,6 +11,13 @@ const pickVariantUrl = (variants: string[], variant: string) => {
   );
 };
 
+// SVG is active content (can carry scripts/handlers). When served same-origin it
+// must never render inline — force a download and disable MIME sniffing so the
+// browser cannot reinterpret it as an executable document.
+const isSvgContent = (contentType: string | null, filename?: string): boolean =>
+  (contentType?.toLowerCase().includes('image/svg') ?? false) ||
+  (filename?.toLowerCase().endsWith('.svg') ?? false);
+
 const extractVariantFromUrl = (url: string, imageId: string): string | undefined => {
   // Cloudflare Images delivery URLs look like:
   // https://imagedelivery.net/<account_hash>/<image_id>/<variant>
@@ -60,12 +67,15 @@ export async function GET(
         );
       }
 
+      const blobContentType = blobResponse.headers.get('content-type') || 'application/octet-stream';
+      const svg = isSvgContent(blobContentType, image.filename);
       const headers = new Headers();
-      headers.set('Content-Type', blobResponse.headers.get('content-type') || 'application/octet-stream');
+      headers.set('Content-Type', blobContentType);
       headers.set(
         'Content-Disposition',
-        `${disposition}; filename="${image.filename || `${imageId}.bin`}"`
+        `${svg ? 'attachment' : disposition}; filename="${image.filename || `${imageId}.bin`}"`
       );
+      if (svg) headers.set('X-Content-Type-Options', 'nosniff');
       headers.set('X-Photarium-Variant-Requested', variant);
       headers.set('X-Photarium-Variant-Served', 'original');
 
@@ -87,12 +97,15 @@ export async function GET(
       );
     }
 
+    const variantContentType = response.headers.get('content-type') || 'application/octet-stream';
+    const svg = isSvgContent(variantContentType, image.filename);
     const headers = new Headers();
-    headers.set('Content-Type', response.headers.get('content-type') || 'application/octet-stream');
+    headers.set('Content-Type', variantContentType);
     headers.set(
       'Content-Disposition',
-      `${disposition}; filename="${image.filename || `${imageId}.bin`}"`
+      `${svg ? 'attachment' : disposition}; filename="${image.filename || `${imageId}.bin`}"`
     );
+    if (svg) headers.set('X-Content-Type-Options', 'nosniff');
     headers.set('X-Photarium-Variant-Requested', variant);
     headers.set('X-Photarium-Variant-Served', extractVariantFromUrl(url, imageId) || 'unknown');
 

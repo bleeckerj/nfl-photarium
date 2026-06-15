@@ -30,6 +30,7 @@ import {
   extractSingleUrlRecord,
   fetchSingleUrlRecordFromApiByShortcode,
   fetchSingleUrlRecordFromUserFeedByShortcode,
+  igGet,
 } from "./instagram-ingest/single-url-extract.mjs";
 
 export { parseArgs } from "./instagram-ingest/cli.mjs";

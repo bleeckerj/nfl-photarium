@@ -1,5 +1,6 @@
 import { fetchCloudflareImage, getCloudflareCredentials } from '@/server/cloudflareClient';
 import { assertDecodableSourceImage } from '@/server/image-tools/sourceImageValidation';
+import { parseCloudflareMetadata } from '@/utils/cloudflareMetadata';
 
 type CloudflareImageSource = Awaited<ReturnType<typeof fetchCloudflareImage>>;
 
@@ -68,16 +69,34 @@ const tryFetchFallbackVariant = async (source: CloudflareImageSource) => {
 
 export const downloadSourceImage = async (imageId: string): Promise<DownloadedSourceImage> => {
   const { accountId, apiToken } = getCloudflareCredentials();
-  const source = await fetchCloudflareImage(imageId, { accountId, apiToken });
-  const filename = source.filename || `${imageId}.bin`;
+  let source = await fetchCloudflareImage(imageId, { accountId, apiToken });
+
+  // SVG sources have no raster pixels for tools to operate on. Resolve to the
+  // linked WebP variant (rasterized on upload) so every image tool processes a
+  // bitmap. Legacy SVGs without a variant fall through and sharp rasterizes them.
+  let effectiveImageId = imageId;
+  const meta = parseCloudflareMetadata(source.meta);
+  const sourceIsSvg =
+    (source.filename?.toLowerCase().endsWith('.svg') ?? false) ||
+    meta.type === 'image/svg+xml';
+  if (sourceIsSvg && meta.linkedAssetId && meta.linkedAssetId !== imageId) {
+    try {
+      source = await fetchCloudflareImage(meta.linkedAssetId, { accountId, apiToken });
+      effectiveImageId = meta.linkedAssetId;
+    } catch {
+      // Fall back to the original SVG id below.
+    }
+  }
+
+  const filename = source.filename || `${effectiveImageId}.bin`;
 
   let blobResponse: Response;
   try {
-    blobResponse = await fetchOriginalBlob({ accountId, apiToken, imageId });
+    blobResponse = await fetchOriginalBlob({ accountId, apiToken, imageId: effectiveImageId });
   } catch (error) {
     const variantResponse = await tryFetchFallbackVariant(source);
     if (variantResponse?.ok) {
-      return readSourceResponse(variantResponse, { imageId, filename });
+      return readSourceResponse(variantResponse, { imageId: effectiveImageId, filename });
     }
 
     const message = sanitizeFailureDetail(error instanceof Error ? error.message : String(error));
@@ -85,13 +104,13 @@ export const downloadSourceImage = async (imageId: string): Promise<DownloadedSo
   }
 
   if (blobResponse.ok) {
-    return readSourceResponse(blobResponse, { imageId, filename });
+    return readSourceResponse(blobResponse, { imageId: effectiveImageId, filename });
   }
 
   if (blobResponse.status === 403) {
     const variantResponse = await tryFetchFallbackVariant(source);
     if (variantResponse?.ok) {
-      return readSourceResponse(variantResponse, { imageId, filename });
+      return readSourceResponse(variantResponse, { imageId: effectiveImageId, filename });
     }
   }
 

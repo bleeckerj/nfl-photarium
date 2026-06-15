@@ -6,6 +6,27 @@ export declare function textSearch(query: string, options?: {
     limit?: number;
     refresh?: boolean;
 }): Promise<SearchResult>;
+export type MetadataSearchField = 'filename' | 'folder' | 'tags' | 'description' | 'altText' | 'namespace' | 'sourceUrl' | 'originalUrl';
+export type MetadataMatchMode = 'contains' | 'exact' | 'prefix' | 'regex';
+export declare const METADATA_SEARCH_FIELDS: MetadataSearchField[];
+export interface MetadataSearchResult {
+    results: Array<ImageResult & {
+        matchedFields: MetadataSearchField[];
+    }>;
+    query: string;
+    count: number;
+    fields: MetadataSearchField[];
+    match: MetadataMatchMode;
+}
+export declare function metadataSearch(query: string, options?: {
+    fields?: MetadataSearchField[];
+    match?: MetadataMatchMode;
+    caseSensitive?: boolean;
+    folder?: string;
+    namespace?: string;
+    limit?: number;
+    refresh?: boolean;
+}): Promise<MetadataSearchResult>;
 export declare function searchByColor(hexColor: string, limit?: number, namespace?: string | null): Promise<SearchResult>;
 export declare function findSimilar(imageId: string, type?: 'clip' | 'color', limit?: number, options?: {
     includeStrangers?: boolean;

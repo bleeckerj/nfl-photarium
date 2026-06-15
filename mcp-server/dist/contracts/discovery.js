@@ -3,6 +3,7 @@ const DISCOVERY_TOOL_NAMES = [
     'list_tools',
     'photarium_search',
     'photarium_search_text',
+    'photarium_search_metadata',
     'photarium_search_color',
     'photarium_search_image',
     'photarium_similar',

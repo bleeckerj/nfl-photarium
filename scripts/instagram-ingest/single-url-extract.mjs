@@ -2,7 +2,7 @@ import { APP_ID } from "./cli.mjs";
 import { extractShortcodeFromInstagramUrl } from "./cloudflare-upload.mjs";
 import { mapItemToRecord } from "./records.mjs";
 
-async function igGet(page, apiPath) {
+export async function igGet(page, apiPath) {
   const result = await page.evaluate(
     async ({ apiPath, appId }) => {
       const res = await fetch(apiPath, {

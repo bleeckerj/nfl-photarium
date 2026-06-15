@@ -1,7 +1,7 @@
 import { saveBase64ToFile } from '../shared/files.js';
 import { estimateBase64Bytes } from '../upload/filenames.js';
 import { extractComfyMetadata } from './comfy-metadata.js';
-import { downloadImageById, downloadOriginalImageById, findAntipode, findSimilar, getImage, getImageMetadata, listImages, searchByColor, searchByImage, semanticSearch, textSearch, } from './client.js';
+import { downloadImageById, downloadOriginalImageById, findAntipode, findSimilar, getImage, getImageMetadata, listImages, metadataSearch, searchByColor, searchByImage, semanticSearch, textSearch, } from './client.js';
 export const discoveryHandlers = {
     'photarium_search': async (args) => {
         const { query, limit, namespace } = args;
@@ -18,6 +18,18 @@ export const discoveryHandlers = {
     'photarium_search_text': async (args) => {
         const { query, folder, namespace, limit, refresh } = args;
         const result = await textSearch(query, { folder, namespace, limit, refresh });
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: JSON.stringify(result, null, 2),
+                },
+            ],
+        };
+    },
+    'photarium_search_metadata': async (args) => {
+        const { query, fields, match, caseSensitive, folder, namespace, limit, refresh } = args;
+        const result = await metadataSearch(query, { fields, match, caseSensitive, folder, namespace, limit, refresh });
         return {
             content: [
                 {

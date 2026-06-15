@@ -11,7 +11,7 @@ import React from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Trash2, Copy, ExternalLink, Layers, AlertTriangle, Star } from 'lucide-react';
-import { getCloudflareImageUrl, getCloudflareDownloadUrl } from '@/utils/imageUtils';
+import { getCloudflareImageUrl, getCloudflareDownloadUrl, getCloudflareSvgOriginalUrl } from '@/utils/imageUtils';
 import { formatBytes } from '@/utils/formatBytes';
 import { ComfyIndicator, isComfyDetected } from '@/components/asset-detail/ComfyIndicator';
 import { ColorSwatches } from '@/components/ColorSwatches';
@@ -93,13 +93,19 @@ export const ImageCard: React.FC<ImageCardProps> = ({
 }) => {
   const isVideoAsset = image.assetType === 'video';
   const svgImage = isSvgImage(image);
+  // Prefer the rasterized WebP variant for SVGs: it is XSS-immune and supports
+  // Cloudflare resize/format transforms. Fall back to the raw (sanitized) SVG
+  // only for legacy uploads that predate variant generation.
+  const svgWebpVariantId = svgImage ? image.linkedAssetId : undefined;
+  const renderAsRawSvg = svgImage && !svgWebpVariantId;
+  const displaySourceId = svgWebpVariantId ?? image.id;
   const isComfyOutput = isComfyDetected(image);
   const imageUrl = isVideoAsset
     ? image.videoThumbnailUrl || image.videoPreviewUrl || image.videoPlaybackUrl || image.videoHlsUrl || ''
-    : getCloudflareImageUrl(image.id, selectedVariant === 'public' ? 'original' : selectedVariant);
+    : getCloudflareImageUrl(displaySourceId, selectedVariant === 'public' ? 'original' : selectedVariant);
   const displayUrl = isVideoAsset
     ? imageUrl
-    : (svgImage ? getCloudflareImageUrl(image.id, 'original') : imageUrl);
+    : (renderAsRawSvg ? getCloudflareSvgOriginalUrl(image.id) : imageUrl);
   const fileSizeLabel = formatBytes(image.size);
   const swatchAverageColor = colorMetadata?.averageColor ?? image.averageColor;
   const swatchDominantColors = colorMetadata?.dominantColors ?? image.dominantColors;
@@ -188,7 +194,7 @@ export const ImageCard: React.FC<ImageCardProps> = ({
               VIDEO
             </div>
           </>
-        ) : svgImage ? (
+        ) : renderAsRawSvg ? (
           <img
             draggable
             onDragStart={(e) => handleImageDragStart(e, image)}

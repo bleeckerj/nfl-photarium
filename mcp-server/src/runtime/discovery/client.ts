@@ -64,6 +64,139 @@ export async function textSearch(
   };
 }
 
+// Field-aware metadata search - target specific fields with selectable match modes
+export type MetadataSearchField =
+  | 'filename'
+  | 'folder'
+  | 'tags'
+  | 'description'
+  | 'altText'
+  | 'namespace'
+  | 'sourceUrl'
+  | 'originalUrl';
+
+export type MetadataMatchMode = 'contains' | 'exact' | 'prefix' | 'regex';
+
+export const METADATA_SEARCH_FIELDS: MetadataSearchField[] = [
+  'filename',
+  'folder',
+  'tags',
+  'description',
+  'altText',
+  'namespace',
+  'sourceUrl',
+  'originalUrl',
+];
+
+function getFieldValues(img: ImageResult, field: MetadataSearchField): string[] {
+  switch (field) {
+    case 'filename':
+      return img.filename ? [img.filename] : [];
+    case 'folder':
+      return img.folder ? [img.folder] : [];
+    case 'tags':
+      return img.tags ?? [];
+    case 'description':
+      return img.description ? [img.description] : [];
+    case 'altText':
+      return img.altTag ? [img.altTag] : [];
+    case 'namespace':
+      return img.namespace ? [img.namespace] : [];
+    case 'sourceUrl':
+      return img.sourceUrl ? [img.sourceUrl] : [];
+    case 'originalUrl':
+      return img.originalUrl ? [img.originalUrl] : [];
+    default:
+      return [];
+  }
+}
+
+function buildMatcher(
+  query: string,
+  match: MetadataMatchMode,
+  caseSensitive: boolean
+): (value: string) => boolean {
+  if (match === 'regex') {
+    const regex = new RegExp(query, caseSensitive ? undefined : 'i');
+    return (value) => regex.test(value);
+  }
+
+  const normalize = (value: string) => (caseSensitive ? value : value.toLowerCase());
+  const needle = normalize(query);
+  switch (match) {
+    case 'exact':
+      return (value) => normalize(value) === needle;
+    case 'prefix':
+      return (value) => normalize(value).startsWith(needle);
+    case 'contains':
+    default:
+      return (value) => normalize(value).includes(needle);
+  }
+}
+
+export interface MetadataSearchResult {
+  results: Array<ImageResult & { matchedFields: MetadataSearchField[] }>;
+  query: string;
+  count: number;
+  fields: MetadataSearchField[];
+  match: MetadataMatchMode;
+}
+
+export async function metadataSearch(
+  query: string,
+  options: {
+    fields?: MetadataSearchField[];
+    match?: MetadataMatchMode;
+    caseSensitive?: boolean;
+    folder?: string;
+    namespace?: string;
+    limit?: number;
+    refresh?: boolean;
+  } = {}
+): Promise<MetadataSearchResult> {
+  const match = options.match ?? 'contains';
+  const caseSensitive = options.caseSensitive ?? false;
+  const requested = options.fields?.length ? options.fields : METADATA_SEARCH_FIELDS;
+  // Preserve a stable field order and drop anything unrecognized; fall back to all fields.
+  const resolved = METADATA_SEARCH_FIELDS.filter((field) => requested.includes(field));
+  const fields = resolved.length ? resolved : METADATA_SEARCH_FIELDS;
+
+  let matcher: (value: string) => boolean;
+  try {
+    matcher = buildMatcher(query, match, caseSensitive);
+  } catch (error) {
+    throw new Error(`Invalid ${match} pattern: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  const { images } = await listImages({
+    folder: options.folder,
+    namespace: options.namespace,
+    limit: 0,
+    refresh: options.refresh,
+  });
+
+  const matched: Array<ImageResult & { matchedFields: MetadataSearchField[] }> = [];
+  for (const img of images) {
+    const matchedFields = fields.filter((field) =>
+      getFieldValues(img, field).some((value) => matcher(value))
+    );
+    if (matchedFields.length > 0) {
+      matched.push({ ...img, matchedFields });
+    }
+  }
+
+  const limit = options.limit ?? 50;
+  const limited = limit > 0 ? matched.slice(0, limit) : matched;
+
+  return {
+    results: limited,
+    query,
+    count: limited.length,
+    fields,
+    match,
+  };
+}
+
 export async function searchByColor(
   hexColor: string,
   limit: number = 20,

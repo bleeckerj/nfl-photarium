@@ -38,6 +38,9 @@ export async function GET(
     const headers = new Headers();
     headers.set('Content-Type', contentType);
     headers.set('Content-Disposition', `attachment; filename="${filename}"`);
+    // Disable MIME sniffing so an SVG (or any asset) cannot be reinterpreted as
+    // an executable document when served same-origin.
+    headers.set('X-Content-Type-Options', 'nosniff');
     if (size) {
       headers.set('Content-Length', size.toString());
     }

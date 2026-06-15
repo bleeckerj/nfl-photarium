@@ -10,11 +10,13 @@ import {
   getImage,
   getImageMetadata,
   listImages,
+  metadataSearch,
   searchByColor,
   searchByImage,
   semanticSearch,
   textSearch,
 } from './client.js';
+import type { MetadataMatchMode, MetadataSearchField } from './client.js';
 
 export const discoveryHandlers: Record<string, RuntimeToolHandler> = {
   'photarium_search': async (args: Record<string, unknown>) => {
@@ -39,6 +41,28 @@ export const discoveryHandlers: Record<string, RuntimeToolHandler> = {
       refresh?: boolean;
     };
     const result = await textSearch(query, { folder, namespace, limit, refresh });
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
+  },
+
+  'photarium_search_metadata': async (args: Record<string, unknown>) => {
+    const { query, fields, match, caseSensitive, folder, namespace, limit, refresh } = args as {
+      query: string;
+      fields?: MetadataSearchField[];
+      match?: MetadataMatchMode;
+      caseSensitive?: boolean;
+      folder?: string;
+      namespace?: string;
+      limit?: number;
+      refresh?: boolean;
+    };
+    const result = await metadataSearch(query, { fields, match, caseSensitive, folder, namespace, limit, refresh });
     return {
       content: [
         {
