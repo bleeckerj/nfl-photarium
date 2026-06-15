@@ -10,6 +10,7 @@ import puppeteer from "puppeteer";
 import {
   C,
   createLogger,
+  DEFAULT_DATA_DIR,
   parseArgs,
   printUsage,
 } from "./instagram-ingest/cli.mjs";
