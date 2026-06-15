@@ -33,6 +33,16 @@ export interface ColorInfo {
   averageRgb: RGB;
 }
 
+const COLOR_SAMPLE_MAX_DIMENSION = 100;
+const MAX_ANIMATED_COLOR_SAMPLE_FRAMES = 16;
+const MIN_RELATIVE_FRAME_ACTIVITY = 0.28;
+const MIN_ACTIVITY_FILTER_PEAK = 32;
+
+interface FramePixelSample {
+  pixels: RGB[];
+  activity: number;
+}
+
 /**
  * Extract color information from an image URL
  * 
@@ -63,23 +73,7 @@ export async function extractColorsFromUrl(imageUrl: string): Promise<ColorInfo 
  */
 export async function extractColorsFromBuffer(imageBuffer: Buffer): Promise<ColorInfo | null> {
   try {
-    // Resize to small size for faster processing (color doesn't need high res)
-    const { data } = await sharp(imageBuffer)
-      .resize(100, 100, { fit: 'inside' })
-      .removeAlpha()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-
-    const pixels: RGB[] = [];
-
-    // Extract all pixel colors
-    for (let i = 0; i < data.length; i += 3) {
-      pixels.push({
-        r: data[i],
-        g: data[i + 1],
-        b: data[i + 2],
-      });
-    }
+    const pixels = await extractColorPixels(imageBuffer);
 
     // Calculate histogram
     const histogram = calculateHistogram(pixels);
@@ -101,6 +95,109 @@ export async function extractColorsFromBuffer(imageBuffer: Buffer): Promise<Colo
     console.error('[Color] Error extracting colors:', error);
     return null;
   }
+}
+
+async function extractColorPixels(imageBuffer: Buffer): Promise<RGB[]> {
+  const metadata = await sharp(imageBuffer).metadata();
+  const frameCount = metadata.pages ?? 1;
+
+  if (frameCount > 1) {
+    return extractAnimatedColorPixels(imageBuffer, frameCount);
+  }
+
+  return readFrameColorPixels(imageBuffer);
+}
+
+async function extractAnimatedColorPixels(
+  imageBuffer: Buffer,
+  frameCount: number
+): Promise<RGB[]> {
+  const frameIndices = getAnimatedFrameSampleIndices(
+    frameCount,
+    MAX_ANIMATED_COLOR_SAMPLE_FRAMES
+  );
+
+  const samples = await Promise.all(
+    frameIndices.map(async (page) => {
+      const pixels = await readFrameColorPixels(imageBuffer, { page, pages: 1 });
+      return {
+        pixels,
+        activity: calculateFrameActivity(pixels),
+      };
+    })
+  );
+
+  const representativeSamples = selectRepresentativeFrameSamples(samples);
+  return representativeSamples.flatMap((sample) => sample.pixels);
+}
+
+function getAnimatedFrameSampleIndices(frameCount: number, maxFrames: number): number[] {
+  if (frameCount <= 1) return [0];
+
+  const sampleCount = Math.min(frameCount, maxFrames);
+  if (sampleCount === frameCount) {
+    return Array.from({ length: frameCount }, (_, index) => index);
+  }
+
+  const lastFrameIndex = frameCount - 1;
+  const indices = new Set<number>();
+  for (let i = 0; i < sampleCount; i++) {
+    indices.add(Math.round((i * lastFrameIndex) / (sampleCount - 1)));
+  }
+
+  return Array.from(indices).sort((a, b) => a - b);
+}
+
+async function readFrameColorPixels(
+  imageBuffer: Buffer,
+  frameOptions?: { page: number; pages: number }
+): Promise<RGB[]> {
+  const { data } = await sharp(imageBuffer, frameOptions)
+    .resize(COLOR_SAMPLE_MAX_DIMENSION, COLOR_SAMPLE_MAX_DIMENSION, { fit: 'inside' })
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  const pixels: RGB[] = [];
+  for (let i = 0; i < data.length; i += 3) {
+    pixels.push({
+      r: data[i],
+      g: data[i + 1],
+      b: data[i + 2],
+    });
+  }
+
+  return pixels;
+}
+
+function calculateFrameActivity(pixels: RGB[]): number {
+  if (pixels.length === 0) return 0;
+
+  let totalActivity = 0;
+  for (const pixel of pixels) {
+    const maxChannel = Math.max(pixel.r, pixel.g, pixel.b);
+    const minChannel = Math.min(pixel.r, pixel.g, pixel.b);
+    const saturation = maxChannel - minChannel;
+    totalActivity += maxChannel * 0.7 + saturation * 0.3;
+  }
+
+  return totalActivity / pixels.length;
+}
+
+function selectRepresentativeFrameSamples(samples: FramePixelSample[]): FramePixelSample[] {
+  if (samples.length === 0) return samples;
+
+  const maxActivity = Math.max(...samples.map((sample) => sample.activity));
+  if (maxActivity < MIN_ACTIVITY_FILTER_PEAK) {
+    return samples;
+  }
+
+  const activityFloor = maxActivity * MIN_RELATIVE_FRAME_ACTIVITY;
+  const representativeSamples = samples.filter((sample) => sample.activity >= activityFloor);
+
+  return representativeSamples.length > 0
+    ? representativeSamples
+    : [samples.reduce((best, sample) => (sample.activity > best.activity ? sample : best))];
 }
 
 /**
