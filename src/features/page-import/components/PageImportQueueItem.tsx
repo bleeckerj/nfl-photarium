@@ -10,7 +10,10 @@ import {
   resolveQueueItemDimensions,
   resolveQueueItemFileSize,
 } from '@/features/page-import/utils/formatters';
-import { formatSmallAssetThresholdMb } from '@/features/page-import/utils/smallAssetPolicy';
+import {
+  MIN_SMALL_ASSET_DIMENSION,
+  formatSmallAssetThresholdMb,
+} from '@/features/page-import/utils/smallAssetPolicy';
 
 type PageImportQueueItemProps = {
   item: UploaderQueueItem;
@@ -89,8 +92,10 @@ export function PageImportQueueItem(props: PageImportQueueItemProps) {
   const metadataOverLimit = metadataBytes >= 1024;
   const isSelected = item.selected !== false;
   const isSmallAssetPendingReview = Boolean(item.smallAssetReview) && !isSelected;
-  const smallAssetThresholdLabel = item.smallAssetReview
-    ? formatSmallAssetThresholdMb(item.smallAssetReview.thresholdBytes)
+  const smallAssetReviewLabel = item.smallAssetReview
+    ? item.smallAssetReview.reason === 'file-size'
+      ? `Below ${formatSmallAssetThresholdMb(item.smallAssetReview.thresholdBytes)} MB threshold`
+      : `Below ${MIN_SMALL_ASSET_DIMENSION} px dimension threshold`
     : null;
 
   return (
@@ -166,9 +171,9 @@ export function PageImportQueueItem(props: PageImportQueueItemProps) {
             <span>{formatImportBytes(displaySizeBytes)}</span>
             <span>{formatImportDimensions(displayDimensions)}</span>
             <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] uppercase text-gray-600">{effectiveAssetType}</span>
-            {isSmallAssetPendingReview && smallAssetThresholdLabel && (
+            {isSmallAssetPendingReview && smallAssetReviewLabel && (
               <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">
-                Below {smallAssetThresholdLabel} MB threshold
+                {smallAssetReviewLabel}
               </span>
             )}
           </div>

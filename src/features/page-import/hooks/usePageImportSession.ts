@@ -6,8 +6,9 @@ import type {
   UploaderQueueItem,
 } from '@/features/page-import/types';
 import { setAllQueuedItemsSelected } from '@/features/page-import/utils/queueSelection';
+import { reconcileSmallAssetReview } from '@/features/page-import/utils/smallAssetPolicy';
 
-type MetadataPatch = {
+export type MetadataPatch = {
   id: string;
   url: string;
   metadata: UploaderQueueItem['metadata'];
@@ -35,6 +36,24 @@ const deleteImportAsset = async (sessionId: string, assetKey?: string, url?: str
     body: JSON.stringify({ assetKey, url }),
     keepalive: true,
   }).catch(() => undefined);
+};
+
+export const applyMetadataPatchToQueuedItem = (
+  item: UploaderQueueItem,
+  patch: MetadataPatch
+): UploaderQueueItem => {
+  const smallAssetReview = reconcileSmallAssetReview(item.smallAssetReview, patch.metadata);
+  const smallAssetReviewCleared = Boolean(item.smallAssetReview) && !smallAssetReview;
+
+  return {
+    ...item,
+    metadata: patch.metadata,
+    sizeBytes: patch.metadata?.fileSizeBytes ?? item.sizeBytes,
+    contentType: patch.metadata?.contentType ?? item.contentType,
+    tempAssetKey: patch.tempAssetKey ?? item.tempAssetKey,
+    smallAssetReview,
+    selected: smallAssetReviewCleared && item.selected === false ? true : item.selected,
+  };
 };
 
 export function usePageImportSession() {
@@ -127,13 +146,7 @@ export function usePageImportSession() {
           patchesById.get(item.id) ||
           (item.remoteUrl ? patchesByUrl.get(item.remoteUrl) : undefined);
         if (!patch) return item;
-        return {
-          ...item,
-          metadata: patch.metadata,
-          sizeBytes: patch.metadata?.fileSizeBytes ?? item.sizeBytes,
-          contentType: patch.metadata?.contentType ?? item.contentType,
-          tempAssetKey: patch.tempAssetKey ?? item.tempAssetKey,
-        };
+        return applyMetadataPatchToQueuedItem(item, patch);
       })
     );
   }, []);

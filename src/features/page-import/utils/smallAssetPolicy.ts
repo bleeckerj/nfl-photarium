@@ -16,6 +16,11 @@ type SmallAssetDimensions = {
   height: number;
 };
 
+type SmallAssetMetadata = {
+  fileSizeBytes?: number;
+  dimensions?: SmallAssetDimensions;
+};
+
 export const mbToSmallAssetThresholdBytes = (value: number): number =>
   Math.round(value * SMALL_ASSET_MB_TO_BYTES);
 
@@ -67,4 +72,35 @@ export const buildSmallAssetDimensionReview = (
     dimensions.height < MIN_SMALL_ASSET_DIMENSION
     ? { thresholdBytes, reason: 'dimensions' }
     : undefined;
+};
+
+export const reconcileSmallAssetReview = (
+  currentReview: SmallAssetReview | undefined,
+  metadata: SmallAssetMetadata | undefined
+): SmallAssetReview | undefined => {
+  if (!currentReview || !metadata) {
+    return currentReview;
+  }
+
+  const thresholdBytes = currentReview.thresholdBytes;
+  const fileSizeReview = buildSmallAssetFileSizeReview(metadata.fileSizeBytes, thresholdBytes);
+  if (fileSizeReview) return fileSizeReview;
+
+  const dimensionReview = buildSmallAssetDimensionReview(metadata.dimensions, thresholdBytes);
+  if (dimensionReview) return dimensionReview;
+
+  const hasResolvedFileSize =
+    typeof metadata.fileSizeBytes === 'number' && Number.isFinite(metadata.fileSizeBytes);
+  if (currentReview.reason === 'file-size' && hasResolvedFileSize) {
+    return undefined;
+  }
+
+  const hasResolvedDimensions = Boolean(
+    metadata.dimensions && metadata.dimensions.width > 0 && metadata.dimensions.height > 0
+  );
+  if (currentReview.reason === 'dimensions' && hasResolvedDimensions) {
+    return undefined;
+  }
+
+  return currentReview;
 };
