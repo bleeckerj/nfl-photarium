@@ -5,6 +5,7 @@ import { calculateAspectRatio } from '@/utils/imageUtils';
 import { queueAutoEmbeddingsForVideo } from '@/server/videoEmbeddingService';
 import { extractComfyWorkflowMetadata } from '@/utils/comfyMetadata';
 import { ingestComfyWorkflowForVideo } from '@/server/comfy/videoWorkflowIngestion';
+import { validateParentForNewChild } from '@/server/parentValidation';
 
 export const MAX_VIDEO_BYTES = Math.max(
   5 * 1024 * 1024,
@@ -129,6 +130,30 @@ const cleanVideoContext = (context: VideoUploadContext): VideoUploadContext => (
 
 const isExplicitNamespace = (value?: string) =>
   Boolean(value && value !== '__all__' && value !== '__none__' && value !== 'undefined');
+
+const resolveCanonicalVideoUploadContext = async (
+  context: VideoUploadContext,
+  failureReason: VideoUploadFailureReason
+): Promise<{ ok: true; context: VideoUploadContext } | { ok: false; error: string; status: number; reason: VideoUploadFailureReason }> => {
+  const parentValidation = await validateParentForNewChild(context.parentId);
+  if (!parentValidation.ok) {
+    return {
+      ok: false,
+      error: parentValidation.error,
+      status: parentValidation.status,
+      reason: failureReason,
+    };
+  }
+
+  return {
+    ok: true,
+    context: {
+      ...context,
+      namespace: parentValidation.canonicalParentNamespace ?? context.namespace,
+      parentId: parentValidation.canonicalParentId,
+    },
+  };
+};
 
 const inferMimeTypeFromFilename = (fileName: string) => {
   const extension = fileName.split('.').pop()?.toLowerCase();
@@ -255,6 +280,11 @@ export async function uploadVideoBuffer(
       reason: 'invalid-type',
     };
   }
+  const resolvedContext = await resolveCanonicalVideoUploadContext(cleanedContext, 'upload');
+  if (!resolvedContext.ok) {
+    return resolvedContext;
+  }
+  const effectiveContext = resolvedContext.context;
   const normalizedFileType = cleanString(fileType)?.toLowerCase() || inferMimeTypeFromFilename(fileName);
 
   if (!normalizedFileType || !SUPPORTED_VIDEO_TYPES.has(normalizedFileType)) {
@@ -278,9 +308,9 @@ export async function uploadVideoBuffer(
       contentType: normalizedFileType,
       meta: {
         filename: fileName,
-        namespace: cleanedContext.namespace || '',
+        namespace: effectiveContext.namespace || '',
       },
-      requireSignedUrls: cleanedContext.requireSignedUrls,
+      requireSignedUrls: effectiveContext.requireSignedUrls,
     });
     const dimensions = resolveVideoDimensions(result);
     const deliveryBase = inferVideoDeliveryBase(result);
@@ -291,10 +321,10 @@ export async function uploadVideoBuffer(
       comfyMetadataDetected: comfyExtraction.detected ? true : undefined,
       comfyMetadataSource: comfyExtraction.source,
       filename: fileName,
-      displayName: cleanedContext.displayName || fileName,
+      displayName: effectiveContext.displayName || fileName,
       fileSizeBytes: fileSize,
       uploaded: new Date().toISOString(),
-      parentId: cleanedContext.parentId,
+      parentId: effectiveContext.parentId,
       streamUid: result.uid,
       playbackUrl: buildPlaybackUrl(result.uid, deliveryBase),
       hlsUrl: buildHlsUrl(result.uid, deliveryBase),
@@ -305,12 +335,12 @@ export async function uploadVideoBuffer(
       width: dimensions.width,
       height: dimensions.height,
       aspectRatio: dimensions.aspectRatio,
-      folder: cleanedContext.folder,
-      tags: cleanedContext.tags,
-      description: cleanedContext.description,
-      originalUrl: cleanedContext.originalUrl,
-      sourceUrl: cleanedContext.sourceUrl,
-      namespace: cleanedContext.namespace,
+      folder: effectiveContext.folder,
+      tags: effectiveContext.tags,
+      description: effectiveContext.description,
+      originalUrl: effectiveContext.originalUrl,
+      sourceUrl: effectiveContext.sourceUrl,
+      namespace: effectiveContext.namespace,
     });
     if (comfyExtraction.detected) {
       await ingestComfyWorkflowForVideo({
@@ -351,6 +381,11 @@ export async function uploadVideoFromRemoteUrl(
       reason: 'invalid-url',
     };
   }
+  const resolvedContext = await resolveCanonicalVideoUploadContext(cleanedContext, 'invalid-url');
+  if (!resolvedContext.ok) {
+    return resolvedContext;
+  }
+  const effectiveContext = resolvedContext.context;
   const cleanSourceUrl = cleanString(sourceUrl);
   if (!cleanSourceUrl) {
     return { ok: false, error: 'A valid video URL is required', status: 400, reason: 'invalid-url' };
@@ -370,9 +405,9 @@ export async function uploadVideoFromRemoteUrl(
       sourceUrl: cleanSourceUrl,
       meta: {
         filename: fileName || '',
-        namespace: cleanedContext.namespace || '',
+        namespace: effectiveContext.namespace || '',
       },
-      requireSignedUrls: cleanedContext.requireSignedUrls,
+      requireSignedUrls: effectiveContext.requireSignedUrls,
     });
     const dimensions = resolveVideoDimensions(result);
     const deliveryBase = inferVideoDeliveryBase(result);
@@ -381,9 +416,9 @@ export async function uploadVideoFromRemoteUrl(
     const record = await createVideoAssetRecord({
       assetType: 'video',
       filename: inferredFilename,
-      displayName: cleanedContext.displayName || inferredFilename,
+      displayName: effectiveContext.displayName || inferredFilename,
       uploaded: new Date().toISOString(),
-      parentId: cleanedContext.parentId,
+      parentId: effectiveContext.parentId,
       streamUid: result.uid,
       playbackUrl: buildPlaybackUrl(result.uid, deliveryBase),
       hlsUrl: buildHlsUrl(result.uid, deliveryBase),
@@ -394,12 +429,12 @@ export async function uploadVideoFromRemoteUrl(
       width: dimensions.width,
       height: dimensions.height,
       aspectRatio: dimensions.aspectRatio,
-      folder: cleanedContext.folder,
-      tags: cleanedContext.tags,
-      description: cleanedContext.description,
-      originalUrl: cleanedContext.originalUrl ?? cleanSourceUrl,
-      sourceUrl: cleanedContext.sourceUrl ?? cleanSourceUrl,
-      namespace: cleanedContext.namespace,
+      folder: effectiveContext.folder,
+      tags: effectiveContext.tags,
+      description: effectiveContext.description,
+      originalUrl: effectiveContext.originalUrl ?? cleanSourceUrl,
+      sourceUrl: effectiveContext.sourceUrl ?? cleanSourceUrl,
+      namespace: effectiveContext.namespace,
     });
     void queueAutoEmbeddingsForVideo(record);
 

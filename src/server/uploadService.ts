@@ -4,12 +4,11 @@ import { transformApiImageToCached, upsertCachedImage } from '@/server/cloudflar
 import type { toDuplicateSummary } from '@/server/duplicateDetector';
 import {
   type DuplicateFamilySelection,
+  type DuplicateOverrideSelection,
   type UploadDuplicateAction,
   evaluateUploadDeduplicationPolicy,
   logContentHashDuplicate,
-  logCrossNamespaceContentHashWarning,
-  logDuplicateFamilySelection,
-  logOriginalUrlReuseWarning,
+  logUploadDeduplicationResult,
 } from '@/server/uploadDuplicatePolicy';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { enforceCloudflareMetadataLimit } from '@/utils/cloudflareMetadata';
@@ -25,6 +24,7 @@ import { storeImageAspectMetadata } from '@/server/vectorSearch';
 import { extractComfyWorkflowMetadata } from '@/utils/comfyMetadata';
 import { ingestComfyWorkflowForImage } from '@/server/comfy/workflowIngestion';
 import { patchImageExtrasRecord } from '@/server/imageExtras';
+import { validateParentForNewChild } from '@/server/parentValidation';
 
 // Re-export for backward compatibility
 export { sanitizeFilename, MAX_FILENAME_LENGTH } from '@/utils/filename';
@@ -86,6 +86,7 @@ export type UploadSuccess = {
   autoEmbeddings?: AutoEmbeddingsStatus;
   uploadNormalization?: UploadNormalizationMetadata;
   duplicateHandling?: DuplicateFamilySelection;
+  duplicateOverride?: DuplicateOverrideSelection;
 };
 
 export type UploadFailure = {
@@ -177,6 +178,17 @@ export async function uploadImageBuffer({
       reason: 'upload',
     };
   }
+  const parentValidation = await validateParentForNewChild(parentId);
+  if (!parentValidation.ok) {
+    return {
+      ok: false,
+      error: parentValidation.error,
+      status: parentValidation.status,
+      reason: 'upload',
+    };
+  }
+  const canonicalParentId = parentValidation.canonicalParentId;
+  const effectiveNamespace = parentValidation.canonicalParentNamespace ?? normalizedNamespace;
 
   if (!isSnagx && !SUPPORTED_IMAGE_TYPES.has(fileType)) {
     logIssue('Rejected non-image upload', { filename: fileName, type: fileType });
@@ -248,34 +260,19 @@ export async function uploadImageBuffer({
   const deduplication = await evaluateUploadDeduplicationPolicy({
     contentHash,
     normalizedOriginalUrl,
-    namespace: normalizedNamespace,
+    namespace: effectiveNamespace,
     duplicateAction,
-    requestedParentId: parentId,
+    requestedParentId: canonicalParentId,
   });
-  if (deduplication.originalUrlWarning) {
-    logOriginalUrlReuseWarning({
-      logScope: 'upload',
-      originalUrl,
-      warning: deduplication.originalUrlWarning,
-    });
-  }
-  if (deduplication.crossNamespaceContentHashMatches.length) {
-    logCrossNamespaceContentHashWarning({
-      logScope: 'upload',
-      contentHash,
-      targetNamespace: normalizedNamespace,
-      matches: deduplication.crossNamespaceContentHashMatches,
-    });
-  }
-  if (deduplication.duplicateFamilySelection) {
-    logDuplicateFamilySelection({
-      logScope: 'upload',
-      contentHash,
-      selection: deduplication.duplicateFamilySelection,
-    });
-  }
+  logUploadDeduplicationResult({
+    logScope: 'upload',
+    contentHash,
+    originalUrl,
+    targetNamespace: effectiveNamespace,
+    result: deduplication,
+  });
 
-  const resolvedParentId = deduplication.duplicateFamilySelection?.canonicalParentId ?? parentId;
+  const resolvedParentId = deduplication.duplicateFamilySelection?.canonicalParentId ?? canonicalParentId;
 
   const exifSummary = await extractExifSummary(workingOriginalBuffer);
   const comfyExtraction = await extractComfyWorkflowMetadata(workingOriginalBuffer, { mimeType: workingFileType });
@@ -283,7 +280,11 @@ export async function uploadImageBuffer({
   const effectiveComfyMetadataDetected = comfyExtraction.detected ? true : comfyMetadataDetected;
   const effectiveComfyMetadataSource = comfyExtraction.source ?? comfyMetadataSource;
 
-  if (deduplication.contentHashDuplicates.length && !deduplication.duplicateFamilySelection) {
+  if (
+    deduplication.contentHashDuplicates.length &&
+    !deduplication.duplicateFamilySelection &&
+    !deduplication.duplicateOverrideSelection
+  ) {
     logContentHashDuplicate({
       logScope: 'upload',
       contentHash,
@@ -310,10 +311,11 @@ export async function uploadImageBuffer({
     folder: folder,
     tags: tags,
     sourcePath: sourcePath,
-    namespace: normalizedNamespace,
+    namespace: effectiveNamespace,
     contentHash,
     variationParentId: resolvedParentId,
     duplicateFamilyOverride: deduplication.duplicateFamilySelection ? true : undefined,
+    duplicateDetectionOverride: deduplication.duplicateOverrideSelection ? true : undefined,
     uploadNormalization: prepared.data.uploadNormalization,
     generatedBy: effectiveGeneratedBy,
     comfyMetadataDetected: effectiveComfyMetadataDetected,
@@ -549,13 +551,14 @@ export async function uploadImageBuffer({
       description: description,
       originalUrl: originalUrl,
       sourceUrl: sourceUrl,
-      namespace: normalizedNamespace,
+      namespace: effectiveNamespace,
       parentId: resolvedParentId,
       linkedAssetId: webpVariantId,
       webpVariantId,
       autoEmbeddings,
       uploadNormalization: prepared.data.uploadNormalization,
       duplicateHandling: deduplication.duplicateFamilySelection,
+      duplicateOverride: deduplication.duplicateOverrideSelection,
     }
   };
 }

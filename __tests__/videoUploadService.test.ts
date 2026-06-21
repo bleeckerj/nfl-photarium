@@ -12,6 +12,7 @@ const {
   queueAutoEmbeddingsForVideoMock,
   extractComfyWorkflowMetadataMock,
   ingestComfyWorkflowForVideoMock,
+  validateParentForNewChildMock,
 } = vi.hoisted(() => ({
   createStreamVideoFromFileMock: vi.fn(),
   createStreamVideoFromUrlMock: vi.fn(),
@@ -19,6 +20,7 @@ const {
   queueAutoEmbeddingsForVideoMock: vi.fn(),
   extractComfyWorkflowMetadataMock: vi.fn(),
   ingestComfyWorkflowForVideoMock: vi.fn(),
+  validateParentForNewChildMock: vi.fn(),
 }));
 
 vi.mock('@/server/cloudflareStreamClient', () => ({
@@ -40,6 +42,10 @@ vi.mock('@/utils/comfyMetadata', () => ({
 
 vi.mock('@/server/comfy/videoWorkflowIngestion', () => ({
   ingestComfyWorkflowForVideo: ingestComfyWorkflowForVideoMock,
+}));
+
+vi.mock('@/server/parentValidation', () => ({
+  validateParentForNewChild: validateParentForNewChildMock,
 }));
 
 describe('videoUploadService', () => {
@@ -77,6 +83,11 @@ describe('videoUploadService', () => {
       persisted: false,
       indexed: false,
       reason: 'not-comfy',
+    });
+    validateParentForNewChildMock.mockResolvedValue({
+      ok: true,
+      canonicalParentId: undefined,
+      canonicalParentNamespace: undefined,
     });
   });
 
@@ -165,6 +176,43 @@ describe('videoUploadService', () => {
     );
   });
 
+  it('stores buffer uploads under the canonical parent when the requested parent is a variant', async () => {
+    validateParentForNewChildMock.mockResolvedValueOnce({
+      ok: true,
+      canonicalParentId: 'root-image',
+      canonicalParentNamespace: 'root-ns',
+      redirectedFromParentId: 'variant-image',
+    });
+
+    const result = await uploadVideoBuffer({
+      buffer: Buffer.from('video-bytes'),
+      fileName: 'clip.mp4',
+      fileType: 'video/mp4',
+      fileSize: 1024,
+      context: {
+        parentId: 'variant-image',
+        tags: [],
+        namespace: 'variant-ns',
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(validateParentForNewChildMock).toHaveBeenCalledWith('variant-image');
+    expect(createStreamVideoFromFileMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        meta: expect.objectContaining({
+          namespace: 'root-ns',
+        }),
+      })
+    );
+    expect(createVideoAssetRecordMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parentId: 'root-image',
+        namespace: 'root-ns',
+      })
+    );
+  });
+
   it('imports remote video URL and defaults original/source URLs', async () => {
     const result = await uploadVideoFromRemoteUrl({
       sourceUrl: 'https://cdn.example.com/loop.mp4',
@@ -179,6 +227,40 @@ describe('videoUploadService', () => {
     expect(createStreamVideoFromUrlMock).toHaveBeenCalledTimes(1);
     expect(extractComfyWorkflowMetadataMock).not.toHaveBeenCalled();
     expect(ingestComfyWorkflowForVideoMock).not.toHaveBeenCalled();
+  });
+
+  it('stores remote uploads under the canonical parent when the requested parent is a variant', async () => {
+    validateParentForNewChildMock.mockResolvedValueOnce({
+      ok: true,
+      canonicalParentId: 'root-image',
+      canonicalParentNamespace: 'root-ns',
+      redirectedFromParentId: 'variant-image',
+    });
+
+    const result = await uploadVideoFromRemoteUrl({
+      sourceUrl: 'https://cdn.example.com/loop.mp4',
+      context: {
+        parentId: 'variant-image',
+        tags: [],
+        namespace: 'variant-ns',
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(validateParentForNewChildMock).toHaveBeenCalledWith('variant-image');
+    expect(createStreamVideoFromUrlMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        meta: expect.objectContaining({
+          namespace: 'root-ns',
+        }),
+      })
+    );
+    expect(createVideoAssetRecordMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parentId: 'root-image',
+        namespace: 'root-ns',
+      })
+    );
   });
 
   it('does not ingest workflow extras when video metadata is not detected', async () => {
