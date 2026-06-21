@@ -27,6 +27,28 @@ const LOG_LEVEL = {
   trace: 5,
 };
 
+export function normalizeInstagramUsername(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  let candidate = raw;
+  try {
+    const parsed = new URL(raw);
+    if (/instagram\.com$/i.test(parsed.hostname) || /\.instagram\.com$/i.test(parsed.hostname)) {
+      candidate = parsed.pathname;
+    }
+  } catch {
+    // Plain handles are the common path; URL parsing is only for profile URLs.
+  }
+
+  const withoutAt = candidate.replace(/^@+/, "");
+  const pathSegment = withoutAt
+    .split(/[/?#]/)
+    .map((part) => part.trim())
+    .filter(Boolean)[0] || "";
+  return pathSegment.replace(/^@+/, "");
+}
+
 function nowStamp() {
   return new Date().toISOString();
 }
@@ -92,7 +114,7 @@ Options:
   --ai-display-name         Generate display names for image uploads during ingest
   --skip-video-push         Skip pushing videos during ingest
   --api-base <url>          Base URL for local API (default: http://localhost:3000)
-  --namespace <name>        Upload namespace (default: cf-default)
+  --namespace <name>        Upload namespace (default: ingest)
   --no-resume               Ignore existing checkpoint and start from newest page
   --headful                 Run ingest with visible browser window
   -v, --verbose             Increase verbosity (stackable)
@@ -121,7 +143,7 @@ export function parseArgs(argv) {
     aiDisplayName: false,
     skipVideoPush: false,
     apiBase: "http://localhost:3000",
-    namespace: "cf-default",
+    namespace: "ingest",
     resume: true,
     headful: false,
     verbosity: DEFAULT_VERBOSITY,
@@ -138,7 +160,7 @@ export function parseArgs(argv) {
     const next = rest[i + 1];
     if (arg === "--help" || arg === "-h") out.command = "help";
     else if (arg === "--username" && next) {
-      out.username = next;
+      out.username = normalizeInstagramUsername(next);
       i += 1;
     } else if (arg === "--profile-dir" && next) {
       out.profileDir = path.resolve(next);

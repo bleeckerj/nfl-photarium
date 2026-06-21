@@ -173,5 +173,34 @@ export const removeRegistryNamespace = async (namespace?: string) => {
   return true;
 };
 
+export const renameRegistryNamespace = async (sourceNamespace?: string, targetNamespace?: string) => {
+  const source = normalizeRegistryNamespace(sourceNamespace);
+  const target = normalizeRegistryNamespace(targetNamespace);
+  if (
+    !source ||
+    !target ||
+    source === target ||
+    isProtectedRegistryNamespace(source) ||
+    isProtectedRegistryNamespace(target)
+  ) return false;
+
+  const payload = await readRegistry();
+  const entries = normalizeEntries(payload.namespaces);
+  const sourceEntry = entries.find((entry) => entry.name === source);
+  const targetEntry = entries.find((entry) => entry.name === target);
+  const nextEntries = entries.filter((entry) => entry.name !== source);
+
+  if (!targetEntry) {
+    nextEntries.push({ name: target, description: sourceEntry?.description ?? '' });
+  } else if (!targetEntry.description && sourceEntry?.description) {
+    targetEntry.description = sourceEntry.description;
+  }
+
+  payload.namespaces = nextEntries;
+  payload.updatedAt = new Date().toISOString();
+  await writeRegistry(payload);
+  return true;
+};
+
 // Exposes the registry path for scripts/debugging.
 export const getRegistryPath = () => REGISTRY_PATH;

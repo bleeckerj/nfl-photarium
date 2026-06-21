@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { transformApiImageToCached, upsertCachedImage } from '@/server/cloudflareImageCache';
+import { getOpenAiAltModel, OPENAI_CHAT_COMPLETIONS_URL } from '@/server/openAiGeneratorModels';
 import { pickCloudflareMetadata } from '@/utils/cloudflareMetadata';
-
-const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
 
 type CloudflareMetadata = Record<string, unknown>;
 
@@ -120,9 +119,9 @@ export async function POST(
 
     const prompt = 'You are an accessibility assistant. Provide a concise, objective alt text (max 120 characters) that describes the main subject and context of the image.';
 
-    const altModel = process.env.OPENAI_ALT_MODEL || 'gpt-4o';
+    const altModel = getOpenAiAltModel();
 
-    const openAiResponse = await fetch(OPENAI_API_URL, {
+    const openAiResponse = await fetch(OPENAI_CHAT_COMPLETIONS_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

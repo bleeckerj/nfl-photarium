@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fallbackDisplayNameFromFilename, sanitizeSuggestedDisplayName } from '@/utils/displayName';
 import { sanitizePhraseSuggestedTags } from '@/server/aiTagParsing';
-
-const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
+import { getOpenAiDisplayNameModel, OPENAI_CHAT_COMPLETIONS_URL } from '@/server/openAiGeneratorModels';
 
 const isHttpUrl = (value: string) => {
   try {
@@ -134,8 +133,8 @@ export async function POST(request: NextRequest) {
           .filter(Boolean)
           .join('\n');
 
-    const model = process.env.OPENAI_DISPLAY_NAME_MODEL || 'gpt-4.1-nano';
-    const openAiResponse = await fetch(OPENAI_API_URL, {
+    const model = getOpenAiDisplayNameModel();
+    const openAiResponse = await fetch(OPENAI_CHAT_COMPLETIONS_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

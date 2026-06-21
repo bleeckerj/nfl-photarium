@@ -40,6 +40,11 @@ interface GalleryModalsProps {
   canDeleteSelectedNamespace?: boolean;
   deletingNamespace?: boolean;
   onDeleteNamespace?: () => void;
+  namespaceRenameTarget?: string;
+  canRenameSelectedNamespace?: boolean;
+  renamingNamespace?: boolean;
+  onNamespaceRenameTargetChange?: (value: string) => void;
+  onRenameNamespace?: () => void;
 
   editingImage: string | null;
   editFolderSelect: string;
@@ -112,6 +117,8 @@ interface GalleryModalsProps {
   onBulkAnimateTouchedChange: (value: boolean) => void;
   bulkAnimateLoop: boolean;
   onBulkAnimateLoopChange: (value: boolean) => void;
+  bulkAnimateNamespaceInput: string;
+  onBulkAnimateNamespaceInputChange: (value: string) => void;
   bulkAnimateFilename: string;
   onBulkAnimateFilenameChange: (value: string) => void;
   bulkAnimateLoading: boolean;
@@ -142,6 +149,11 @@ export const GalleryModals: React.FC<GalleryModalsProps> = ({
   canDeleteSelectedNamespace,
   deletingNamespace,
   onDeleteNamespace,
+  namespaceRenameTarget,
+  canRenameSelectedNamespace,
+  renamingNamespace,
+  onNamespaceRenameTargetChange,
+  onRenameNamespace,
   editingImage,
   editFolderSelect,
   editFolderOptions,
@@ -201,6 +213,8 @@ export const GalleryModals: React.FC<GalleryModalsProps> = ({
   onBulkAnimateTouchedChange,
   bulkAnimateLoop,
   onBulkAnimateLoopChange,
+  bulkAnimateNamespaceInput,
+  onBulkAnimateNamespaceInputChange,
   bulkAnimateFilename,
   onBulkAnimateFilenameChange,
   bulkAnimateLoading,
@@ -245,6 +259,11 @@ export const GalleryModals: React.FC<GalleryModalsProps> = ({
         canDeleteSelectedNamespace={canDeleteSelectedNamespace}
         deletingNamespace={deletingNamespace}
         onDeleteNamespace={onDeleteNamespace}
+        namespaceRenameTarget={namespaceRenameTarget}
+        canRenameSelectedNamespace={canRenameSelectedNamespace}
+        renamingNamespace={renamingNamespace}
+        onRenameTargetChange={onNamespaceRenameTargetChange}
+        onRenameNamespace={onRenameNamespace}
       />
 
       <GalleryEditModal
@@ -315,6 +334,8 @@ export const GalleryModals: React.FC<GalleryModalsProps> = ({
           onBulkAnimateTouchedChange={onBulkAnimateTouchedChange}
           bulkAnimateLoop={bulkAnimateLoop}
           onBulkAnimateLoopChange={onBulkAnimateLoopChange}
+          bulkAnimateNamespaceInput={bulkAnimateNamespaceInput}
+          onBulkAnimateNamespaceInputChange={onBulkAnimateNamespaceInputChange}
           bulkAnimateFilename={bulkAnimateFilename}
           onBulkAnimateFilenameChange={onBulkAnimateFilenameChange}
           bulkAnimateLoading={bulkAnimateLoading}

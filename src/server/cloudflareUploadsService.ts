@@ -206,10 +206,12 @@ export async function getUploadDownloadInfo(uploadId: string) {
   const downloadUrl = pickVariantUrl(result.variants);
   const metadata = parseCloudflareMetadata(result.meta);
   const contentType = cleanString(metadata?.type as string) || response.headers.get('content-type') || undefined;
+  const namespace = cleanString(metadata?.namespace as string);
   return {
     url: downloadUrl,
     filename: result.filename || uploadId,
     contentType: contentType ?? 'application/octet-stream',
-    size: typeof result.size === 'number' ? result.size : undefined
+    size: typeof result.size === 'number' ? result.size : undefined,
+    namespace
   };
 }

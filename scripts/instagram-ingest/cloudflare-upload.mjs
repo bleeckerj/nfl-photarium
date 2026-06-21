@@ -236,6 +236,14 @@ function contentTypeToExt(contentType) {
   return ".jpg";
 }
 
+function normalizeUploadNamespace(namespace) {
+  const trimmed = typeof namespace === "string" ? namespace.trim() : "";
+  if (!trimmed || trimmed === "undefined" || trimmed === "__all__" || trimmed === "__none__") {
+    throw new Error("A specific upload namespace is required.");
+  }
+  return trimmed;
+}
+
 export async function pushImageToCloudflare({
   apiBase,
   imageUrl,
@@ -254,6 +262,7 @@ export async function pushImageToCloudflare({
   const safeShortcode = shortcode || `ig_${Date.now()}`;
   const fileName = `${safeShortcode}${ext}`;
   const fileBlob = new Blob([bytes], { type: contentType || "image/jpeg" });
+  const uploadNamespace = normalizeUploadNamespace(namespace);
 
   const form = new FormData();
   form.append("file", fileBlob, fileName);
@@ -261,12 +270,12 @@ export async function pushImageToCloudflare({
   form.append("tags", Array.isArray(uploadTags) && uploadTags.length > 0 ? uploadTags.join(",") : `instagram,${username}`);
   form.append("sourceUrl", sourcePageUrl);
   form.append("originalUrl", imageUrl);
-  form.append("namespace", namespace);
+  form.append("namespace", uploadNamespace);
   if (displayName) form.append("displayName", displayName);
   if (permalink) form.append("description", permalink);
 
   const endpoint = `${apiBase}/api/upload/external`;
-  log.trace(`cloudflare_push_start endpoint=${endpoint} file=${fileName}`);
+  log.trace(`cloudflare_push_start endpoint=${endpoint} file=${fileName} namespace=${uploadNamespace}`);
   const res = await fetch(endpoint, { method: "POST", body: form });
   const bodyText = await res.text();
   let body = null;
@@ -368,8 +377,9 @@ export async function pushVideoToCloudflare({
   const endpoint = `${apiBase}/api/import/page/upload-video`;
   const safeShortcode = shortcode || `ig_video_${Date.now()}`;
   const { bytes, contentType } = await fetchImageBuffer(sanitizedVideoUrl);
+  const uploadNamespace = normalizeUploadNamespace(namespace);
   log.trace(
-    `cloudflare_video_source_fetched shortcode=${safeShortcode} bytes=${bytes.byteLength} content_type=${contentType || "unknown"}`,
+    `cloudflare_video_source_fetched shortcode=${safeShortcode} namespace=${uploadNamespace} bytes=${bytes.byteLength} content_type=${contentType || "unknown"}`,
   );
   const ext = contentTypeToExt(contentType || "video/mp4");
   const fileName = `${safeShortcode}${ext === ".jpg" ? ".mp4" : ext}`;
@@ -381,11 +391,11 @@ export async function pushVideoToCloudflare({
   form.append("tags", Array.isArray(uploadTags) && uploadTags.length > 0 ? uploadTags.join(",") : `instagram,${username}`);
   form.append("originalUrl", sanitizedVideoUrl);
   form.append("sourceUrl", sourcePageUrl);
-  form.append("namespace", namespace);
+  form.append("namespace", uploadNamespace);
   if (permalink) form.append("description", permalink);
 
   log.trace(
-    `cloudflare_video_push_start endpoint=${endpoint} shortcode=${shortcode || "n/a"} mode=file_upload file=${fileName}`,
+    `cloudflare_video_push_start endpoint=${endpoint} shortcode=${shortcode || "n/a"} mode=file_upload file=${fileName} namespace=${uploadNamespace}`,
   );
   const maxAttempts = 3;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {

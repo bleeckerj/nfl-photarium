@@ -1,5 +1,5 @@
 import { buildShareUrl } from '../shared/image-result.js';
-import { createFolder, deleteImage, deleteImageFamily, getDeleteFamilyJob, getExtras, listFolders, listNamespaces, rotateImage, swapImageParent, updateExtras, updateMetadata, } from './client.js';
+import { createFolder, deleteNamespace, deleteImage, deleteImageFamily, getDeleteFamilyJob, getExtras, listFolders, listNamespaces, renameNamespace, rotateImage, swapImageParent, updateExtras, updateMetadata, } from './client.js';
 export const organizationHandlers = {
     'photarium_list_folders': async (args) => {
         const { namespace } = args;
@@ -32,6 +32,38 @@ export const organizationHandlers = {
                 {
                     type: 'text',
                     text: JSON.stringify({ namespaces }, null, 2),
+                },
+            ],
+        };
+    },
+    'photarium_rename_namespace': async (args) => {
+        const { namespace, targetNamespace, dryRun, confirm } = args;
+        const shouldDryRun = dryRun !== false;
+        if (!shouldDryRun && confirm !== 'RENAME_NAMESPACE') {
+            throw new Error('Live namespace rename requires confirm="RENAME_NAMESPACE".');
+        }
+        const result = await renameNamespace({ namespace, targetNamespace, dryRun: shouldDryRun });
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: JSON.stringify(result, null, 2),
+                },
+            ],
+        };
+    },
+    'photarium_delete_namespace': async (args) => {
+        const { namespace, dryRun, confirm } = args;
+        const shouldDryRun = dryRun !== false;
+        if (!shouldDryRun && confirm !== 'DELETE_NAMESPACE') {
+            throw new Error('Live namespace delete requires confirm="DELETE_NAMESPACE".');
+        }
+        const result = await deleteNamespace({ namespace, dryRun: shouldDryRun });
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: JSON.stringify(result, null, 2),
                 },
             ],
         };

@@ -4,6 +4,8 @@ const ORGANIZATION_TOOL_NAMES = [
   'photarium_list_folders',
   'photarium_create_folder',
   'photarium_list_namespaces',
+  'photarium_rename_namespace',
+  'photarium_delete_namespace',
   'photarium_update_metadata',
   'photarium_extras_get',
   'photarium_extras_update',

@@ -3,7 +3,7 @@ import { findDuplicatesByContentHash, findDuplicatesByOriginalUrl } from '@/serv
 
 type DuplicateLocation = Array<string | null>;
 
-export const DUPLICATE_UPLOAD_ACTIONS = ['reject', 'family'] as const;
+export const DUPLICATE_UPLOAD_ACTIONS = ['reject', 'family', 'override'] as const;
 export type UploadDuplicateAction = (typeof DUPLICATE_UPLOAD_ACTIONS)[number];
 
 export type DuplicateFamilySelection = {
@@ -12,6 +12,13 @@ export type DuplicateFamilySelection = {
   canonicalParentId: string;
   storedAsVariant: true;
   provenance: 'duplicate-family-override';
+};
+
+export type DuplicateOverrideSelection = {
+  requestedAction: 'override';
+  matchedDuplicateIds: string[];
+  admittedAsIndependentAsset: true;
+  provenance: 'operator-duplicate-override';
 };
 
 export type OriginalUrlReuseWarning = {
@@ -27,6 +34,7 @@ export type UploadDeduplicationResult = {
   crossNamespaceContentHashMatches: CachedCloudflareImage[];
   duplicateAction: UploadDuplicateAction;
   duplicateFamilySelection?: DuplicateFamilySelection;
+  duplicateOverrideSelection?: DuplicateOverrideSelection;
 };
 
 const summarizeDuplicateMatches = (matches: CachedCloudflareImage[]) => ({
@@ -101,7 +109,9 @@ async function resolveDuplicateFamilySelection(
 }
 
 export function normalizeUploadDuplicateAction(value?: unknown): UploadDuplicateAction {
-  return typeof value === 'string' && value.trim().toLowerCase() === 'family' ? 'family' : 'reject';
+  if (typeof value !== 'string') return 'reject';
+  const normalized = value.trim().toLowerCase();
+  return normalized === 'family' || normalized === 'override' ? normalized : 'reject';
 }
 
 export async function evaluateUploadDeduplicationPolicy(params: {
@@ -142,6 +152,15 @@ export async function evaluateUploadDeduplicationPolicy(params: {
     duplicateAction === 'family' && !requestedParentId && contentHashDuplicates.length > 0
       ? await resolveDuplicateFamilySelection(contentHashDuplicates)
       : undefined;
+  const duplicateOverrideSelection =
+    duplicateAction === 'override' && contentHashDuplicates.length > 0
+      ? {
+          requestedAction: 'override' as const,
+          matchedDuplicateIds: contentHashDuplicates.map((match) => match.id),
+          admittedAsIndependentAsset: true as const,
+          provenance: 'operator-duplicate-override' as const,
+        }
+      : undefined;
 
   return {
     originalUrlWarning: originalUrlMatches.length
@@ -151,6 +170,7 @@ export async function evaluateUploadDeduplicationPolicy(params: {
     crossNamespaceContentHashMatches,
     duplicateAction,
     duplicateFamilySelection,
+    duplicateOverrideSelection,
   };
 }
 
@@ -216,4 +236,46 @@ export function logDuplicateFamilySelection(params: {
     storedAsVariant: selection.storedAsVariant,
     provenance: selection.provenance,
   });
+}
+
+export function logDuplicateOverrideSelection(params: {
+  logScope: string;
+  contentHash: string;
+  selection: DuplicateOverrideSelection;
+}): void {
+  const { logScope, contentHash, selection } = params;
+  console.info(`[${logScope}] Duplicate content admitted by operator override`, {
+    contentHash,
+    requestedAction: selection.requestedAction,
+    matchedDuplicateIds: selection.matchedDuplicateIds,
+    admittedAsIndependentAsset: selection.admittedAsIndependentAsset,
+    provenance: selection.provenance,
+  });
+}
+
+export function logUploadDeduplicationResult(params: {
+  logScope: string;
+  contentHash: string;
+  originalUrl?: string;
+  targetNamespace?: string;
+  result: UploadDeduplicationResult;
+}): void {
+  const { logScope, contentHash, originalUrl, targetNamespace, result } = params;
+  if (result.originalUrlWarning) {
+    logOriginalUrlReuseWarning({ logScope, originalUrl, warning: result.originalUrlWarning });
+  }
+  if (result.crossNamespaceContentHashMatches.length) {
+    logCrossNamespaceContentHashWarning({
+      logScope,
+      contentHash,
+      targetNamespace,
+      matches: result.crossNamespaceContentHashMatches,
+    });
+  }
+  if (result.duplicateFamilySelection) {
+    logDuplicateFamilySelection({ logScope, contentHash, selection: result.duplicateFamilySelection });
+  }
+  if (result.duplicateOverrideSelection) {
+    logDuplicateOverrideSelection({ logScope, contentHash, selection: result.duplicateOverrideSelection });
+  }
 }

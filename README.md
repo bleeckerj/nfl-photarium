@@ -256,9 +256,16 @@ OPENAI_API_KEY=your_openai_api_key_here
 Optional model overrides:
 
 ```env
+OPENAI_IMAGE_METADATA_MODEL=gpt-4.1-nano
+OPENAI_ALT_MODEL=gpt-4.1-nano
+OPENAI_DESCRIPTION_MODEL=gpt-4.1-nano
 OPENAI_DISPLAY_NAME_MODEL=gpt-4.1-nano
+OPENAI_PROMPT_MODEL=gpt-4.1-nano
 OPENAI_TAGS_MODEL=gpt-4.1-nano
+OPENAI_HAIKU_MODEL=gpt-4.1-nano
 ```
+
+All image metadata generators default to `gpt-4.1-nano` unless a shared or per-generator override is set.
 
 AI-assisted routes can generate or refine:
 
@@ -489,6 +496,7 @@ Accepted fields include:
 | `originalUrl` | no | Used for source tracking and duplicate handling. |
 | `sourceUrl` | no | Canonical source page or source asset URL. |
 | `description` | no | Stored as asset metadata/extras when supported. |
+| `duplicateAction` | no | `reject`, `family`, or `override` for operator-confirmed duplicate false positives. |
 
 See [EXTERNAL_UPLOAD_API.md](./EXTERNAL_UPLOAD_API.md) and [docs/HEADLESS_API.md](./docs/HEADLESS_API.md) for more route-level detail.
 

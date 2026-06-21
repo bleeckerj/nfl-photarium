@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cleanString, parseCloudflareMetadata } from '@/utils/cloudflareMetadata';
 import { sanitizeSingleWordSuggestedTags } from '@/server/aiTagParsing';
-
-const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
+import { getOpenAiTagsModel, OPENAI_CHAT_COMPLETIONS_URL } from '@/server/openAiGeneratorModels';
 const DEFAULT_TAG_COUNT = 6;
 const MIN_TAG_COUNT = 1;
 const MAX_TAG_COUNT = 12;
@@ -109,8 +108,8 @@ export async function POST(
       .filter(Boolean)
       .join('\n');
 
-    const model = process.env.OPENAI_TAGS_MODEL || process.env.OPENAI_DISPLAY_NAME_MODEL || 'gpt-4.1-nano';
-    const openAiResponse = await fetch(OPENAI_API_URL, {
+    const model = getOpenAiTagsModel();
+    const openAiResponse = await fetch(OPENAI_CHAT_COMPLETIONS_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

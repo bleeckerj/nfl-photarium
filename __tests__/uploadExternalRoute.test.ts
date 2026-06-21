@@ -412,6 +412,72 @@ describe('POST /api/upload/external', () => {
     expect(mockFetch).toHaveBeenCalled();
   });
 
+  it('uploads as an independent asset when duplicateAction=override is requested', async () => {
+    process.env.CLOUDFLARE_ACCOUNT_ID = 'acct';
+    process.env.CLOUDFLARE_API_TOKEN = 'token';
+
+    vi.spyOn(duplicateDetector, 'findDuplicatesByOriginalUrl').mockResolvedValue([]);
+    vi.spyOn(duplicateDetector, 'findDuplicatesByContentHash').mockResolvedValue([
+      {
+        id: 'existing-hash-1',
+        filename: 'existing-hash.png',
+        uploaded: '2026-01-01T00:00:00.000Z',
+        folder: 'hash-folder',
+        variants: ['https://imagedelivery.net/hash/existing-hash/public'],
+      } as never,
+    ]);
+
+    let uploadedMetadata: Record<string, unknown> | undefined;
+    const mockFetch = vi.spyOn(globalThis, 'fetch').mockImplementation((url, init) => {
+      if (typeof url === 'string' && url.endsWith('/images/v1') && init?.method === 'POST') {
+        const body = init.body as FormData;
+        const metadataRaw = body.get('metadata');
+        uploadedMetadata = metadataRaw ? JSON.parse(String(metadataRaw)) : undefined;
+
+        return Promise.resolve(new Response(
+          JSON.stringify({
+            result: {
+              id: 'override-upload',
+              filename: 'photo.png',
+              uploaded: '2026-02-01T00:00:00.000Z',
+              variants: ['https://imagedelivery.net/hash/override-upload/public'],
+              images: [],
+            },
+          }),
+          { status: 200 }
+        ));
+      }
+
+      return Promise.resolve(new Response(
+        JSON.stringify({ result: { images: [] } }),
+        { status: 200 }
+      ));
+    });
+
+    const file = new File([`duplicate-override-${Date.now()}-${Math.random()}`], 'photo.png', { type: 'image/png' });
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('originalUrl', 'https://example.com/another-endpoint');
+    formData.append('namespace', 'ns-a');
+    formData.append('duplicateAction', 'override');
+
+    const response = await POST(createRequest(formData));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.id).toBe('override-upload');
+    expect(payload.parentId).toBeUndefined();
+    expect(payload.duplicateOverride).toEqual({
+      requestedAction: 'override',
+      matchedDuplicateIds: ['existing-hash-1'],
+      admittedAsIndependentAsset: true,
+      provenance: 'operator-duplicate-override',
+    });
+    expect(uploadedMetadata?.variationParentId).toBeUndefined();
+    expect(uploadedMetadata?.duplicateDetectionOverride).toBe(true);
+    expect(mockFetch).toHaveBeenCalled();
+  });
+
   it('rejects uploads without an explicit namespace', async () => {
     process.env.CLOUDFLARE_ACCOUNT_ID = 'acct';
     process.env.CLOUDFLARE_API_TOKEN = 'token';

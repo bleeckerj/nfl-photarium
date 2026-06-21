@@ -104,13 +104,13 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     bulkApplyFolder, bulkApplyTags, bulkTagsMode, bulkApplyDisplayName, bulkDisplayNameMode,
     bulkDisplayNameInput, bulkApplyDescription, bulkDescriptionAppendInput, bulkApplyNamespace,
     bulkNamespaceInput, bulkUpdating, bulkDeleting, bulkEmbeddingGenerating, bulkAnimateFps,
-    bulkAnimateTouched, bulkAnimateLoop, bulkAnimateOrderMode, bulkAnimateFilename, bulkAnimateLoading,
+    bulkAnimateTouched, bulkAnimateLoop, bulkAnimateOrderMode, bulkAnimateNamespaceInput, bulkAnimateFilename, bulkAnimateLoading,
     bulkAnimateError, dispatchBulk, setBulkSelectionMode, setBulkEditOpen, setBulkFolderInput,
     setBulkFolderMode, setBulkTagsInput, setBulkTagsAiCount, setBulkApplyFolder, setBulkApplyTags,
     setBulkTagsMode, setBulkApplyDisplayName, setBulkDisplayNameMode, setBulkDisplayNameInput,
     setBulkApplyDescription, setBulkDescriptionAppendInput, setBulkApplyNamespace, setBulkNamespaceInput,
     setBulkUpdating, setBulkDeleting, setBulkEmbeddingGenerating, setBulkAnimateFps, setBulkAnimateTouched,
-    setBulkAnimateLoop, setBulkAnimateOrderMode, setBulkAnimateFilename, setBulkAnimateLoading, setBulkAnimateError,
+    setBulkAnimateLoop, setBulkAnimateOrderMode, setBulkAnimateNamespaceInput, setBulkAnimateFilename, setBulkAnimateLoading, setBulkAnimateError,
   } = useGalleryBulkState({
     bulkFolderInput: storedPreferencesRef.current.bulkFolderInput ?? '',
     bulkFolderMode: (storedPreferencesRef.current.bulkFolderMode ?? 'existing') as 'existing' | 'new',
@@ -120,9 +120,11 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const toast = useToast();
   const {
     namespaceSettingsOpen, setNamespaceSettingsOpen, namespaceDeleting, namespaceDraft,
+    namespaceRenaming, namespaceRenameTarget, setNamespaceRenameTarget,
     namespaceSelectValue, registryNamespaces, fetchNamespaces, registerNamespace,
     namespaceOptions, namespaceLabel, handleNamespaceSelectChange, handleNamespaceDraftChange,
-    selectedNamespaceForDelete, canDeleteSelectedNamespace, handleNamespaceSave, handleNamespaceDelete,
+    selectedNamespaceForDelete, canDeleteSelectedNamespace, canRenameSelectedNamespace,
+    handleNamespaceSave, handleNamespaceDelete, handleNamespaceRename,
   } = useGalleryNamespace({
     images,
     namespace,
@@ -730,7 +732,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     bulkApplyDisplayName, bulkDisplayNameInput, bulkDisplayNameMode, bulkApplyDescription,
     bulkDescriptionAppendInput, bulkApplyNamespace, bulkNamespaceInput, bulkFolderMode, setBulkUpdating,
     setBulkDeleting, setBulkEmbeddingGenerating, setBulkAnimateLoading, setBulkAnimateError,
-    bulkAnimateFps, bulkAnimateFilename, bulkAnimateLoop, bulkAnimateOrderMode, namespace, fetchImages,
+    bulkAnimateFps, bulkAnimateFilename, bulkAnimateLoop, bulkAnimateOrderMode,
+    bulkAnimateNamespaceInput, setBulkAnimateNamespaceInput, namespace, fetchImages,
   });
 
   const {
@@ -942,7 +945,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         onNamespaceSelectChange: handleNamespaceSelectChange, onNamespaceDraftChange: handleNamespaceDraftChange,
         onNamespaceCancel: () => setNamespaceSettingsOpen(false), onNamespaceSave: handleNamespaceSave,
         selectedNamespaceForDelete, canDeleteSelectedNamespace, deletingNamespace: namespaceDeleting,
-        onDeleteNamespace: handleNamespaceDelete, editingImage, editFolderSelect, editFolderOptions,
+        onDeleteNamespace: handleNamespaceDelete, namespaceRenameTarget,
+        canRenameSelectedNamespace, renamingNamespace: namespaceRenaming,
+        onNamespaceRenameTargetChange: setNamespaceRenameTarget,
+        onRenameNamespace: handleNamespaceRename, editingImage, editFolderSelect, editFolderOptions,
         newEditFolder, editTags, onEditFolderSelect: setEditFolderSelect, onNewEditFolderChange: setNewEditFolder,
         onEditTagsChange: setEditTags, onEditCancel: cancelEdit,
         onEditSave: () => {
@@ -968,6 +974,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         registryNamespaces, onRegisterNamespace: registerNamespace, bulkAnimateFps, onBulkAnimateFpsChange: setBulkAnimateFps,
         bulkAnimateTouched, onBulkAnimateTouchedChange: setBulkAnimateTouched, bulkAnimateLoop,
         onBulkAnimateLoopChange: setBulkAnimateLoop, bulkAnimateFilename, onBulkAnimateFilenameChange: setBulkAnimateFilename,
+        bulkAnimateNamespaceInput, onBulkAnimateNamespaceInputChange: setBulkAnimateNamespaceInput,
         bulkAnimateLoading, bulkAnimateError, bulkUpdating, onBulkApply: applyBulkUpdates,
         onBulkCreateAnimation: createBulkAnimation, onBulkClose: closeBulkEditModal,
       }}

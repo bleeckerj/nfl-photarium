@@ -97,4 +97,24 @@ describe('POST /api/upload', () => {
     );
     expect(upsertRegistryNamespaceMock).toHaveBeenCalledWith('ns-parent');
   });
+
+  it('passes duplicate override through to the shared upload service context', async () => {
+    const formData = new FormData();
+    formData.append('file', new File(['image-bytes'], 'photo.png', { type: 'image/png' }));
+    formData.append('namespace', 'ns-a');
+    formData.append('duplicateAction', 'override');
+
+    const response = await POST(createRequest(formData));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.id).toBe('img-1');
+    expect(uploadImageBufferMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          duplicateAction: 'override',
+        }),
+      })
+    );
+  });
 });

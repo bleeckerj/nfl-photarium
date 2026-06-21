@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import { DELETE, GET, POST } from '@/app/api/namespaces/route';
+import { DELETE, GET, PATCH, POST } from '@/app/api/namespaces/route';
 
 const {
   listRegistryNamespaceDetailsMock,
   upsertRegistryNamespaceMock,
   removeRegistryNamespaceMock,
+  renameRegistryNamespaceMock,
   getCachedImagesMock,
   listVideoAssetRecordsMock,
   updateVideoAssetRecordMock,
@@ -14,6 +15,7 @@ const {
   listRegistryNamespaceDetailsMock: vi.fn(),
   upsertRegistryNamespaceMock: vi.fn(),
   removeRegistryNamespaceMock: vi.fn(),
+  renameRegistryNamespaceMock: vi.fn(),
   getCachedImagesMock: vi.fn(),
   listVideoAssetRecordsMock: vi.fn(),
   updateVideoAssetRecordMock: vi.fn(),
@@ -25,6 +27,7 @@ vi.mock('@/server/namespaceRegistry', () => ({
   listRegistryNamespaceDetails: listRegistryNamespaceDetailsMock,
   upsertRegistryNamespace: upsertRegistryNamespaceMock,
   removeRegistryNamespace: removeRegistryNamespaceMock,
+  renameRegistryNamespace: renameRegistryNamespaceMock,
   normalizeRegistryNamespace: (value?: string) => {
     const trimmed = typeof value === 'string' ? value.trim() : '';
     return trimmed && trimmed !== '__all__' && trimmed !== '__none__' ? trimmed : '';
@@ -68,6 +71,7 @@ describe('/api/namespaces', () => {
       ...patch,
     }));
     removeRegistryNamespaceMock.mockResolvedValue(true);
+    renameRegistryNamespaceMock.mockResolvedValue(true);
   });
 
   it('returns merged namespaces with no-store headers', async () => {
@@ -225,6 +229,146 @@ describe('/api/namespaces', () => {
     expect(response.status).toBe(400);
     expect(payload.error).toMatch(/cannot be deleted/i);
     expect(getCachedImagesMock).not.toHaveBeenCalled();
+  });
+
+  it('previews namespace rename without moving assets', async () => {
+    getCachedImagesMock.mockResolvedValueOnce([
+      { id: 'img-1', namespace: 'old-space' },
+      { id: 'img-2', namespace: 'cf-default' },
+    ]);
+    listVideoAssetRecordsMock.mockResolvedValueOnce([
+      { id: 'vid-1', namespace: 'old-space' },
+      { id: 'vid-2', namespace: 'other-space' },
+    ]);
+    const request = new NextRequest('http://localhost/api/namespaces', {
+      method: 'PATCH',
+      body: JSON.stringify({ namespace: 'old-space', targetNamespace: 'new-space-name', dryRun: true }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    const response = await PATCH(request);
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual(expect.objectContaining({
+      namespace: 'old-space',
+      targetNamespace: 'new-space-name',
+      dryRun: true,
+      imageCount: 1,
+      videoCount: 1,
+      imageIds: ['img-1'],
+      videoIds: ['vid-1'],
+      movedImageIds: [],
+      movedVideoIds: [],
+      failures: [],
+    }));
+    expect(patchCloudflareImageMetadataMock).not.toHaveBeenCalled();
+    expect(updateVideoAssetRecordMock).not.toHaveBeenCalled();
+    expect(renameRegistryNamespaceMock).not.toHaveBeenCalled();
+  });
+
+  it('renames a namespace by moving images and videos to the target namespace', async () => {
+    getCachedImagesMock
+      .mockResolvedValueOnce([
+        { id: 'img-1', namespace: 'old-space' },
+        { id: 'img-2', namespace: 'cf-default' },
+      ])
+      .mockResolvedValueOnce([
+        { id: 'img-1', namespace: 'new-space-name' },
+        { id: 'img-2', namespace: 'cf-default' },
+      ]);
+    listVideoAssetRecordsMock
+      .mockResolvedValueOnce([
+        { id: 'vid-1', namespace: 'old-space' },
+      ])
+      .mockResolvedValueOnce([
+        { id: 'vid-1', namespace: 'new-space-name' },
+      ]);
+    listRegistryNamespaceDetailsMock
+      .mockResolvedValueOnce([
+        { name: 'old-space', description: 'Old assets' },
+        { name: 'cf-default', description: 'Default namespace' },
+      ])
+      .mockResolvedValueOnce([
+        { name: 'new-space-name', description: 'Old assets' },
+        { name: 'cf-default', description: 'Default namespace' },
+      ]);
+    const request = new NextRequest('http://localhost/api/namespaces', {
+      method: 'PATCH',
+      body: JSON.stringify({ namespace: 'old-space', targetNamespace: 'new-space-name' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    const response = await PATCH(request);
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(upsertRegistryNamespaceMock).toHaveBeenCalledWith('new-space-name', 'Old assets');
+    expect(patchCloudflareImageMetadataMock).toHaveBeenCalledWith(
+      'img-1',
+      expect.any(Function),
+      { requiredKeys: ['namespace'] }
+    );
+    expect(updateVideoAssetRecordMock).toHaveBeenCalledWith('vid-1', { namespace: 'new-space-name' });
+    expect(renameRegistryNamespaceMock).toHaveBeenCalledWith('old-space', 'new-space-name');
+    expect(payload).toEqual(expect.objectContaining({
+      partialFailure: false,
+      movedImageIds: ['img-1'],
+      movedVideoIds: ['vid-1'],
+      namespaces: ['cf-default', 'new-space-name'],
+    }));
+  });
+
+  it('rejects namespace rename when the target already exists', async () => {
+    listRegistryNamespaceDetailsMock.mockResolvedValueOnce([
+      { name: 'old-space', description: '' },
+      { name: 'taken-space', description: '' },
+    ]);
+    const request = new NextRequest('http://localhost/api/namespaces', {
+      method: 'PATCH',
+      body: JSON.stringify({ namespace: 'old-space', targetNamespace: 'taken-space' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    const response = await PATCH(request);
+    const payload = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(payload.error).toMatch(/already exists/i);
+    expect(patchCloudflareImageMetadataMock).not.toHaveBeenCalled();
+    expect(updateVideoAssetRecordMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps both namespace registry entries when any rename move fails', async () => {
+    getCachedImagesMock.mockResolvedValueOnce([
+      { id: 'img-1', namespace: 'old-space' },
+      { id: 'img-2', namespace: 'old-space' },
+    ]);
+    listVideoAssetRecordsMock.mockResolvedValueOnce([]);
+    listRegistryNamespaceDetailsMock.mockResolvedValueOnce([
+      { name: 'old-space', description: 'Old assets' },
+      { name: 'cf-default', description: 'Default namespace' },
+    ]);
+    patchCloudflareImageMetadataMock
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error('Cloudflare failed'));
+    const request = new NextRequest('http://localhost/api/namespaces', {
+      method: 'PATCH',
+      body: JSON.stringify({ namespace: 'old-space', targetNamespace: 'new-space-name' }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    const response = await PATCH(request);
+    const payload = await response.json();
+
+    expect(response.status).toBe(207);
+    expect(payload.partialFailure).toBe(true);
+    expect(payload.movedImageIds).toEqual(['img-1']);
+    expect(payload.failures).toEqual([
+      { id: 'img-2', assetType: 'image', error: 'Cloudflare failed' },
+    ]);
+    expect(upsertRegistryNamespaceMock).toHaveBeenCalledWith('new-space-name', 'Old assets');
+    expect(renameRegistryNamespaceMock).not.toHaveBeenCalled();
   });
 
   it('keeps the namespace registered when any move fails', async () => {

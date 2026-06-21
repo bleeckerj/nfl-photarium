@@ -51,6 +51,7 @@ describe('POST /api/animate/selection', () => {
     getUploadDownloadInfoMock.mockImplementation(async (id: string) => ({
       url: `https://example.test/${id}.png`,
       filename: `${id}.png`,
+      namespace: 'studio',
     }));
     vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
       Promise.resolve(new Response(new Uint8Array([1, 2, 3]), { status: 200 }))
@@ -114,5 +115,42 @@ describe('POST /api/animate/selection', () => {
         }),
       }
     );
+  });
+
+  it('infers the upload namespace from selected images when browsing all namespaces', async () => {
+    const response = await POST(createRequest({
+      ids: ['img-a', 'img-b'],
+      fps: 2,
+      namespace: '__all__',
+    }));
+
+    expect(response.status).toBe(200);
+    expect(uploadImageBufferMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({ namespace: 'studio' }),
+      })
+    );
+  });
+
+  it('rejects all-namespace animation when selected images span multiple namespaces', async () => {
+    getUploadDownloadInfoMock.mockImplementation(async (id: string) => ({
+      url: `https://example.test/${id}.png`,
+      filename: `${id}.png`,
+      namespace: id === 'img-a' ? 'studio' : 'archive',
+    }));
+
+    const response = await POST(createRequest({
+      ids: ['img-a', 'img-b'],
+      fps: 2,
+      namespace: '__all__',
+    }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(400);
+    expect(payload.error).toBe(
+      'Selected images span multiple namespaces. Select images from one namespace or switch to a specific namespace before creating an animation.'
+    );
+    expect(buildAnimatedWebpFromFramesMock).not.toHaveBeenCalled();
+    expect(uploadImageBufferMock).not.toHaveBeenCalled();
   });
 });

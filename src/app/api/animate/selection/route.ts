@@ -3,8 +3,30 @@ import { getUploadDownloadInfo } from '@/server/cloudflareUploadsService';
 import { uploadImageBuffer } from '@/server/uploadService';
 import { buildAnimatedWebpFromFrames } from '@/server/animatedWebpService';
 import { patchImageExtrasRecord } from '@/server/imageExtras';
+import { normalizeSpecificNamespace } from '@/server/uploadNamespace';
 
 const normalizeFilename = (value: string) => value.replace(/[^a-zA-Z0-9-_\.]/g, '_');
+
+const resolveSelectionNamespace = (
+  requestedNamespace: string | undefined,
+  sourceNamespaces: Array<string | undefined>
+) => {
+  const normalizedRequest = normalizeSpecificNamespace(requestedNamespace);
+  if (normalizedRequest) return { ok: true as const, namespace: normalizedRequest };
+
+  const namespaces = Array.from(new Set(sourceNamespaces.map(normalizeSpecificNamespace).filter(Boolean)));
+  if (namespaces.length === 1) return { ok: true as const, namespace: namespaces[0] };
+  if (namespaces.length > 1) {
+    return {
+      ok: false as const,
+      error: 'Selected images span multiple namespaces. Select images from one namespace or switch to a specific namespace before creating an animation.',
+    };
+  }
+  return {
+    ok: false as const,
+    error: 'Selected images are missing namespace metadata and cannot be used to create an animation from All namespaces.',
+  };
+};
 
 export async function POST(request: NextRequest) {
   try {
@@ -35,9 +57,22 @@ export async function POST(request: NextRequest) {
     const namespace = typeof body?.namespace === 'string' ? body.namespace.trim() : undefined;
     const orderMode = body?.orderMode === 'reverse-gallery' ? 'reverse-gallery' : 'gallery';
 
-    const frames: { buffer: Buffer; filename: string }[] = [];
+    const downloadInfos: Array<{ id: string; url: string; filename: string; namespace?: string }> = [];
     for (const id of ids) {
-      const { url, filename } = await getUploadDownloadInfo(id);
+      const { url, filename, namespace: sourceNamespace } = await getUploadDownloadInfo(id);
+      downloadInfos.push({ id, url, filename, namespace: sourceNamespace });
+    }
+
+    const namespaceResolution = resolveSelectionNamespace(
+      namespace,
+      downloadInfos.map((info) => info.namespace)
+    );
+    if (!namespaceResolution.ok) {
+      return NextResponse.json({ error: namespaceResolution.error }, { status: 400 });
+    }
+
+    const frames: { buffer: Buffer; filename: string }[] = [];
+    for (const { id, url, filename } of downloadInfos) {
       const response = await fetch(url, { cache: 'no-store' });
       if (!response.ok) {
         return NextResponse.json({ error: `Failed to download image ${id}` }, { status: 502 });
@@ -62,7 +97,7 @@ export async function POST(request: NextRequest) {
         accountId,
         apiToken,
         tags: ['animated-webp'],
-        namespace: namespace && namespace !== '__all__' ? namespace : undefined
+        namespace: namespaceResolution.namespace
       }
     });
 

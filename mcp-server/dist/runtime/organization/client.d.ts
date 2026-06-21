@@ -5,6 +5,15 @@ export declare function createFolder(name: string): Promise<{
     name: string;
 }>;
 export declare function listNamespaces(): Promise<string[]>;
+export declare function renameNamespace(options: {
+    namespace: string;
+    targetNamespace: string;
+    dryRun?: boolean;
+}): Promise<Record<string, unknown>>;
+export declare function deleteNamespace(options: {
+    namespace: string;
+    dryRun?: boolean;
+}): Promise<Record<string, unknown>>;
 export declare function updateMetadata(imageId: string, updates: {
     folder?: string;
     tags?: string[];

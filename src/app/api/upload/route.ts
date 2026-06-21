@@ -31,7 +31,7 @@ const isKeynoteFile = (file: File) => file.name.toLowerCase().endsWith('.key');
 const isArchiveFile = (file: File) => isZipFile(file) || isKeynoteFile(file);
 
 const normalizeDuplicateAction = (value: unknown): UploadDuplicateAction | undefined =>
-  value === 'reject' || value === 'family' ? value : undefined;
+  value === 'reject' || value === 'family' || value === 'override' ? value : undefined;
 
 const getMimeTypeFromFilename = (filename: string) => {
   const lower = filename.toLowerCase();

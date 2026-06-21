@@ -17,6 +17,25 @@ export async function listNamespaces() {
     const data = await apiRequest('/api/namespaces');
     return data.namespaces;
 }
+export async function renameNamespace(options) {
+    return apiRequest('/api/namespaces', {
+        method: 'PATCH',
+        body: JSON.stringify({
+            namespace: options.namespace,
+            targetNamespace: options.targetNamespace,
+            dryRun: options.dryRun,
+        }),
+    });
+}
+export async function deleteNamespace(options) {
+    return apiRequest('/api/namespaces', {
+        method: 'DELETE',
+        body: JSON.stringify({
+            namespace: options.namespace,
+            dryRun: options.dryRun,
+        }),
+    });
+}
 export async function updateMetadata(imageId, updates) {
     const data = await apiRequest(`/api/images/${imageId}/update`, {
         method: 'PATCH',

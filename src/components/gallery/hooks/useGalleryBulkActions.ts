@@ -79,6 +79,7 @@ interface UseGalleryBulkActionsOptions {
   setBulkAnimateFps: (value: string) => void;
   setBulkAnimateLoop: (value: boolean) => void;
   setBulkAnimateOrderMode: (value: 'gallery' | 'reverse-gallery') => void;
+  setBulkAnimateNamespaceInput: (value: string) => void;
   setBulkAnimateTouched: (value: boolean) => void;
   bulkApplyFolder: boolean;
   bulkApplyTags: boolean;
@@ -103,6 +104,7 @@ interface UseGalleryBulkActionsOptions {
   bulkAnimateFilename: string;
   bulkAnimateLoop: boolean;
   bulkAnimateOrderMode: 'gallery' | 'reverse-gallery';
+  bulkAnimateNamespaceInput: string;
   namespace?: string;
   fetchImages: (options?: { silent?: boolean; forceRefresh?: boolean }) => Promise<void>;
 }
@@ -120,6 +122,7 @@ export const useGalleryBulkActions = ({
   setBulkAnimateFps,
   setBulkAnimateLoop,
   setBulkAnimateOrderMode,
+  setBulkAnimateNamespaceInput,
   setBulkAnimateTouched,
   bulkApplyFolder,
   bulkApplyTags,
@@ -144,6 +147,7 @@ export const useGalleryBulkActions = ({
   bulkAnimateFilename,
   bulkAnimateLoop,
   bulkAnimateOrderMode,
+  bulkAnimateNamespaceInput,
   namespace,
   fetchImages,
 }: UseGalleryBulkActionsOptions) => {
@@ -482,7 +486,7 @@ export const useGalleryBulkActions = ({
           loop: bulkAnimateLoop,
           filename: bulkAnimateFilename.trim() || undefined,
           orderMode: bulkAnimateOrderMode,
-          namespace
+          namespace: bulkAnimateNamespaceInput.trim() || namespace
         })
       });
       const data = await response.json();
@@ -494,6 +498,7 @@ export const useGalleryBulkActions = ({
       setBulkAnimateFps('');
       setBulkAnimateLoop(true);
       setBulkAnimateOrderMode('gallery');
+      setBulkAnimateNamespaceInput('');
       setBulkAnimateTouched(false);
       toastPush(`Animation created (${data.id ?? 'new'})`);
       await fetchImages({ forceRefresh: true });
@@ -507,6 +512,7 @@ export const useGalleryBulkActions = ({
     bulkAnimateFilename,
     bulkAnimateFps,
     bulkAnimateLoop,
+    bulkAnimateNamespaceInput,
     bulkAnimateOrderMode,
     fetchImages,
     images,
@@ -516,6 +522,7 @@ export const useGalleryBulkActions = ({
     setBulkAnimateFilename,
     setBulkAnimateFps,
     setBulkAnimateLoop,
+    setBulkAnimateNamespaceInput,
     setBulkAnimateOrderMode,
     setBulkAnimateTouched,
     setBulkEditOpen,

@@ -23,6 +23,11 @@ interface GalleryNamespaceModalProps {
   canDeleteSelectedNamespace?: boolean;
   deletingNamespace?: boolean;
   onDeleteNamespace?: () => void;
+  namespaceRenameTarget?: string;
+  canRenameSelectedNamespace?: boolean;
+  renamingNamespace?: boolean;
+  onRenameTargetChange?: (value: string) => void;
+  onRenameNamespace?: () => void;
 }
 
 export const GalleryNamespaceModal: React.FC<GalleryNamespaceModalProps> = ({
@@ -38,6 +43,11 @@ export const GalleryNamespaceModal: React.FC<GalleryNamespaceModalProps> = ({
   canDeleteSelectedNamespace = false,
   deletingNamespace = false,
   onDeleteNamespace,
+  namespaceRenameTarget = '',
+  canRenameSelectedNamespace = false,
+  renamingNamespace = false,
+  onRenameTargetChange,
+  onRenameNamespace,
 }) => {
   if (!isOpen) return null;
 
@@ -82,7 +92,38 @@ export const GalleryNamespaceModal: React.FC<GalleryNamespaceModalProps> = ({
           <p className="text-[0.7em] text-gray-500">
             Only images in this namespace are shown and used for duplicate checks (unless you pick &quot;All namespaces&quot;).
           </p>
-          {selectedNamespaceForDelete ? (
+          {selectedNamespaceForDelete && !canDeleteSelectedNamespace ? (
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
+              <div className="text-[0.75em] font-medium text-amber-800">Protected namespace</div>
+              <p className="mt-1 text-[0.7em] text-amber-700">
+                &quot;{selectedNamespaceForDelete}&quot; is a system namespace and cannot be renamed or deleted.
+              </p>
+            </div>
+          ) : null}
+          {selectedNamespaceForDelete && canDeleteSelectedNamespace ? (
+            <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
+              <div className="text-[0.75em] font-medium text-gray-800">Rename namespace</div>
+              <p className="mt-1 text-[0.7em] text-gray-600">
+                Moves every asset in &quot;{selectedNamespaceForDelete}&quot; to the new namespace name.
+              </p>
+              <input
+                value={namespaceRenameTarget}
+                onChange={(e) => onRenameTargetChange?.(e.target.value)}
+                placeholder="New namespace name"
+                className="mt-2 w-full border border-gray-300 rounded-md px-3 py-2 text-[0.85em] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                disabled={!canDeleteSelectedNamespace || renamingNamespace}
+              />
+              <button
+                type="button"
+                onClick={onRenameNamespace}
+                disabled={!canRenameSelectedNamespace || renamingNamespace}
+                className="mt-2 px-3 py-1 border border-gray-300 rounded-md bg-white text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {renamingNamespace ? 'Renaming...' : 'Rename namespace'}
+              </button>
+            </div>
+          ) : null}
+          {selectedNamespaceForDelete && canDeleteSelectedNamespace ? (
             <div className="rounded-md border border-red-200 bg-red-50 p-3">
               <div className="text-[0.75em] font-medium text-red-800">Delete namespace</div>
               <p className="mt-1 text-[0.7em] text-red-700">

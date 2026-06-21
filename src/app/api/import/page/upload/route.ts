@@ -65,7 +65,7 @@ type UploadItem = {
 };
 
 const normalizeDuplicateAction = (value: unknown): UploadDuplicateAction | undefined =>
-  value === 'reject' || value === 'family' ? value : undefined;
+  value === 'reject' || value === 'family' || value === 'override' ? value : undefined;
 
 export async function POST(request: NextRequest) {
   try {

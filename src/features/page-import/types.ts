@@ -70,6 +70,7 @@ export type UploaderQueueItem = {
   tempAssetKey?: string;
   importSessionId?: string;
   smallAssetReview?: SmallAssetReview;
+  duplicateAction?: 'reject' | 'family' | 'override';
 };
 
 export type ImportProgressState = {

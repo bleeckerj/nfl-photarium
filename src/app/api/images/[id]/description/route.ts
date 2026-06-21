@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cleanString, parseCloudflareMetadata } from '@/utils/cloudflareMetadata';
 import { getImageExtrasRecord, patchImageExtrasRecord } from '@/server/imageExtras';
-
-const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
+import { getOpenAiDescriptionModel, OPENAI_CHAT_COMPLETIONS_URL } from '@/server/openAiGeneratorModels';
 
 const appendGeneratedDescription = (current: string | undefined, generated: string) => {
   const base = typeof current === 'string' ? current.trim() : '';
@@ -117,9 +116,9 @@ export async function POST(
       .filter(Boolean)
       .join('\n\n');
 
-    const descriptionModel = process.env.OPENAI_DESCRIPTION_MODEL || 'gpt-4o';
+    const descriptionModel = getOpenAiDescriptionModel();
 
-    const openAiResponse = await fetch(OPENAI_API_URL, {
+    const openAiResponse = await fetch(OPENAI_CHAT_COMPLETIONS_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

@@ -6,9 +6,7 @@ import { toDuplicateSummary } from '@/server/duplicateDetector';
 import {
   evaluateUploadDeduplicationPolicy,
   logContentHashDuplicate,
-  logCrossNamespaceContentHashWarning,
-  logDuplicateFamilySelection,
-  logOriginalUrlReuseWarning,
+  logUploadDeduplicationResult,
 } from '@/server/uploadDuplicatePolicy';
 import { enforceCloudflareMetadataLimit } from '@/utils/cloudflareMetadata';
 import { extractSnagx } from '@/utils/snagx';
@@ -191,32 +189,21 @@ export async function POST(request: NextRequest) {
       duplicateAction,
       requestedParentId: resolvedParentId,
     });
-    if (deduplication.originalUrlWarning) {
-      logOriginalUrlReuseWarning({
-        logScope: 'upload/external',
-        originalUrl: cleanOriginalUrl,
-        warning: deduplication.originalUrlWarning,
-      });
-    }
-    if (deduplication.crossNamespaceContentHashMatches.length) {
-      logCrossNamespaceContentHashWarning({
-        logScope: 'upload/external',
-        contentHash,
-        targetNamespace: effectiveNamespace,
-        matches: deduplication.crossNamespaceContentHashMatches,
-      });
-    }
-    if (deduplication.duplicateFamilySelection) {
-      logDuplicateFamilySelection({
-        logScope: 'upload/external',
-        contentHash,
-        selection: deduplication.duplicateFamilySelection,
-      });
-    }
+    logUploadDeduplicationResult({
+      logScope: 'upload/external',
+      contentHash,
+      originalUrl: cleanOriginalUrl,
+      targetNamespace: effectiveNamespace,
+      result: deduplication,
+    });
 
     const effectiveParentId = deduplication.duplicateFamilySelection?.canonicalParentId ?? resolvedParentId;
 
-    if (deduplication.contentHashDuplicates.length && !deduplication.duplicateFamilySelection) {
+    if (
+      deduplication.contentHashDuplicates.length &&
+      !deduplication.duplicateFamilySelection &&
+      !deduplication.duplicateOverrideSelection
+    ) {
       logContentHashDuplicate({
         logScope: 'upload/external',
         contentHash,
@@ -248,6 +235,7 @@ export async function POST(request: NextRequest) {
       contentHash,
       variationParentId: effectiveParentId,
       duplicateFamilyOverride: deduplication.duplicateFamilySelection ? true : undefined,
+      duplicateDetectionOverride: deduplication.duplicateOverrideSelection ? true : undefined,
       uploadNormalization: prepared.data.uploadNormalization,
       generatedBy: comfyExtraction.detected ? 'comfyui' : undefined,
       comfyMetadataDetected: comfyExtraction.detected ? true : undefined,
@@ -484,6 +472,7 @@ export async function POST(request: NextRequest) {
       autoEmbeddings,
       uploadNormalization: prepared.data.uploadNormalization,
       duplicateHandling: deduplication.duplicateFamilySelection,
+      duplicateOverride: deduplication.duplicateOverrideSelection,
       ...(promptSave ? { promptSave } : {}),
     }));
 

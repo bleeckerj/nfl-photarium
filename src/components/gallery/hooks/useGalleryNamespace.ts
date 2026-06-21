@@ -22,7 +22,9 @@ export const useGalleryNamespace = ({
 }: UseGalleryNamespaceOptions) => {
   const [namespaceSettingsOpen, setNamespaceSettingsOpen] = useState(false);
   const [namespaceDeleting, setNamespaceDeleting] = useState(false);
+  const [namespaceRenaming, setNamespaceRenaming] = useState(false);
   const [namespaceDraft, setNamespaceDraft] = useState(namespace ?? '');
+  const [namespaceRenameTarget, setNamespaceRenameTarget] = useState('');
   const [namespaceSelectValue, setNamespaceSelectValue] = useState('');
   const [registryNamespaces, setRegistryNamespaces] = useState<string[]>([]);
 
@@ -150,6 +152,12 @@ export const useGalleryNamespace = ({
 
   const canDeleteSelectedNamespace =
     Boolean(selectedNamespaceForDelete) && !PROTECTED_NAMESPACE_VALUES.has(selectedNamespaceForDelete);
+  const trimmedNamespaceRenameTarget = namespaceRenameTarget.trim();
+  const canRenameSelectedNamespace =
+    canDeleteSelectedNamespace &&
+    Boolean(trimmedNamespaceRenameTarget) &&
+    trimmedNamespaceRenameTarget !== selectedNamespaceForDelete &&
+    !PROTECTED_NAMESPACE_VALUES.has(trimmedNamespaceRenameTarget);
 
   const handleNamespaceSave = useCallback(() => {
     const next = namespaceSelectValue === '__custom__'
@@ -243,11 +251,106 @@ export const useGalleryNamespace = ({
     toastPush,
   ]);
 
+  const handleNamespaceRename = useCallback(async () => {
+    if (!selectedNamespaceForDelete || !canRenameSelectedNamespace) return;
+
+    const targetNamespace = trimmedNamespaceRenameTarget;
+    setNamespaceRenaming(true);
+    try {
+      const dryRunResponse = await fetch('/api/namespaces', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({
+          namespace: selectedNamespaceForDelete,
+          targetNamespace,
+          dryRun: true,
+        }),
+      });
+      const dryRunPayload = await dryRunResponse.json().catch(() => null);
+      if (!dryRunResponse.ok) {
+        toastPush(
+          typeof dryRunPayload?.error === 'string'
+            ? dryRunPayload.error
+            : 'Could not preview namespace rename'
+        );
+        return;
+      }
+
+      const imageCount = typeof dryRunPayload?.imageCount === 'number' ? dryRunPayload.imageCount : 0;
+      const videoCount = typeof dryRunPayload?.videoCount === 'number' ? dryRunPayload.videoCount : 0;
+      const assetCount = imageCount + videoCount;
+      const confirmed = typeof window === 'undefined'
+        ? true
+        : window.confirm(
+            `Rename namespace "${selectedNamespaceForDelete}" to "${targetNamespace}"?\n\n${assetCount} asset${assetCount === 1 ? '' : 's'} will be moved to the new namespace.`
+          );
+      if (!confirmed) return;
+
+      const response = await fetch('/api/namespaces', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({
+          namespace: selectedNamespaceForDelete,
+          targetNamespace,
+          dryRun: false,
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || payload?.partialFailure) {
+        const failureCount = Array.isArray(payload?.failures) ? payload.failures.length : 0;
+        toastPush(
+          failureCount > 0
+            ? `Namespace rename partially failed for ${failureCount} asset${failureCount === 1 ? '' : 's'}`
+            : typeof payload?.error === 'string'
+              ? payload.error
+              : 'Namespace rename failed'
+        );
+        void fetchNamespaces('no-store');
+        return;
+      }
+
+      const movedImageCount = Array.isArray(payload?.movedImageIds) ? payload.movedImageIds.length : 0;
+      const movedVideoCount = Array.isArray(payload?.movedVideoIds) ? payload.movedVideoIds.length : 0;
+      const movedCount = movedImageCount + movedVideoCount;
+      const namespaces = Array.isArray(payload?.namespaces) ? payload.namespaces : [];
+      if (namespaces.length > 0) {
+        setRegistryNamespaces(namespaces.filter((entry: unknown): entry is string => typeof entry === 'string'));
+      } else {
+        void fetchNamespaces('no-store');
+      }
+      setNamespaceDraft(targetNamespace);
+      setNamespaceSelectValue(targetNamespace);
+      setNamespaceRenameTarget('');
+      onNamespaceChange?.(targetNamespace);
+      setNamespaceSettingsOpen(false);
+      toastPush(
+        `Renamed namespace "${selectedNamespaceForDelete}" to "${targetNamespace}" and moved ${movedCount} asset${movedCount === 1 ? '' : 's'}`
+      );
+    } catch (error) {
+      console.error('Failed to rename namespace', error);
+      toastPush('Namespace rename failed');
+    } finally {
+      setNamespaceRenaming(false);
+    }
+  }, [
+    canRenameSelectedNamespace,
+    fetchNamespaces,
+    onNamespaceChange,
+    selectedNamespaceForDelete,
+    toastPush,
+    trimmedNamespaceRenameTarget,
+  ]);
+
   return {
     namespaceSettingsOpen,
     setNamespaceSettingsOpen,
     namespaceDeleting,
+    namespaceRenaming,
     namespaceDraft,
+    namespaceRenameTarget,
+    setNamespaceRenameTarget,
     namespaceSelectValue,
     registryNamespaces,
     fetchNamespaces,
@@ -258,7 +361,9 @@ export const useGalleryNamespace = ({
     handleNamespaceDraftChange,
     selectedNamespaceForDelete,
     canDeleteSelectedNamespace,
+    canRenameSelectedNamespace,
     handleNamespaceSave,
     handleNamespaceDelete,
+    handleNamespaceRename,
   };
 };

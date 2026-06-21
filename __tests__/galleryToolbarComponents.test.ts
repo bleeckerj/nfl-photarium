@@ -299,6 +299,31 @@ describe('gallery toolbar components', () => {
     );
 
     expect(markup).toContain('Delete namespace');
+    expect(markup).toContain('Rename namespace');
     expect(markup).toContain('Moves all assets in &quot;client-space&quot; to cf-default');
+  });
+
+  it('does not render rename or delete actions for cf-default', () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(GalleryNamespaceModal, {
+        isOpen: true,
+        namespaceSelectValue: 'cf-default',
+        namespaceDraft: 'cf-default',
+        namespaceOptions: [{ value: 'cf-default', label: 'cf-default (default)' }],
+        onSelectChange: vi.fn(),
+        onDraftChange: vi.fn(),
+        onCancel: vi.fn(),
+        onSave: vi.fn(),
+        selectedNamespaceForDelete: 'cf-default',
+        canDeleteSelectedNamespace: false,
+        deletingNamespace: false,
+        onDeleteNamespace: vi.fn(),
+      })
+    );
+
+    expect(markup).toContain('Protected namespace');
+    expect(markup).toContain('&quot;cf-default&quot; is a system namespace');
+    expect(markup).not.toContain('Delete namespace');
+    expect(markup).not.toContain('Rename namespace');
   });
 });

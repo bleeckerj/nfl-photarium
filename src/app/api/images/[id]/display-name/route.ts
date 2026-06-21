@@ -4,8 +4,7 @@ import {
   fallbackDisplayNameFromFilename,
   sanitizeSuggestedDisplayName,
 } from '@/utils/displayName';
-
-const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
+import { getOpenAiDisplayNameModel, OPENAI_CHAT_COMPLETIONS_URL } from '@/server/openAiGeneratorModels';
 
 function extractMessageText(content: unknown): string | undefined {
   if (typeof content === 'string') return content;
@@ -78,8 +77,8 @@ export async function POST(
       .filter(Boolean)
       .join('\n');
 
-    const model = process.env.OPENAI_DISPLAY_NAME_MODEL || 'gpt-4.1-nano';
-    const openAiResponse = await fetch(OPENAI_API_URL, {
+    const model = getOpenAiDisplayNameModel();
+    const openAiResponse = await fetch(OPENAI_CHAT_COMPLETIONS_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

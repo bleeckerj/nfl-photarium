@@ -22,6 +22,7 @@ export type BulkState = {
   bulkAnimateTouched: boolean;
   bulkAnimateLoop: boolean;
   bulkAnimateOrderMode: 'gallery' | 'reverse-gallery';
+  bulkAnimateNamespaceInput: string;
   bulkAnimateFilename: string;
   bulkAnimateLoading: boolean;
   bulkAnimateError: string | null;
@@ -60,6 +61,7 @@ export const bulkReducer = (state: BulkState, action: BulkAction): BulkState => 
         bulkAnimateTouched: false,
         bulkAnimateLoop: true,
         bulkAnimateOrderMode: 'gallery',
+        bulkAnimateNamespaceInput: '',
         bulkAnimateFilename: '',
         bulkAnimateError: null,
       };

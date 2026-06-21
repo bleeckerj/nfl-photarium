@@ -187,6 +187,36 @@ describe('POST /api/import/page/upload', () => {
     );
   });
 
+  it('passes duplicate override through to the shared upload service context', async () => {
+    resolveUploadSourceMock.mockResolvedValue({
+      buffer: Buffer.from(new Uint8Array(4096)),
+      contentType: 'image/png',
+      filename: 'cached-image.png',
+    });
+
+    const response = await POST(createRequest({
+      items: [
+        {
+          clientId: 'c1',
+          url: 'https://example.com/cached-image.png',
+          namespace: 'test-ns',
+          duplicateAction: 'override',
+        },
+      ],
+    }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.failures).toEqual([]);
+    expect(uploadImageBufferMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          duplicateAction: 'override',
+        }),
+      })
+    );
+  });
+
   it('inherits the canonical parent namespace for variation URL uploads', async () => {
     validateParentForNewChildMock.mockResolvedValue({
       ok: true,

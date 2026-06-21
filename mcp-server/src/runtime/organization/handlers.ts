@@ -2,12 +2,14 @@ import type { RuntimeToolHandler } from '../types.js';
 import { buildShareUrl } from '../shared/image-result.js';
 import {
   createFolder,
+  deleteNamespace,
   deleteImage,
   deleteImageFamily,
   getDeleteFamilyJob,
   getExtras,
   listFolders,
   listNamespaces,
+  renameNamespace,
   rotateImage,
   swapImageParent,
   updateExtras,
@@ -48,6 +50,49 @@ export const organizationHandlers: Record<string, RuntimeToolHandler> = {
         {
           type: 'text',
           text: JSON.stringify({ namespaces }, null, 2),
+        },
+      ],
+    };
+  },
+
+  'photarium_rename_namespace': async (args: Record<string, unknown>) => {
+    const { namespace, targetNamespace, dryRun, confirm } = args as {
+      namespace: string;
+      targetNamespace: string;
+      dryRun?: boolean;
+      confirm?: string;
+    };
+    const shouldDryRun = dryRun !== false;
+    if (!shouldDryRun && confirm !== 'RENAME_NAMESPACE') {
+      throw new Error('Live namespace rename requires confirm="RENAME_NAMESPACE".');
+    }
+    const result = await renameNamespace({ namespace, targetNamespace, dryRun: shouldDryRun });
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
+  },
+
+  'photarium_delete_namespace': async (args: Record<string, unknown>) => {
+    const { namespace, dryRun, confirm } = args as {
+      namespace: string;
+      dryRun?: boolean;
+      confirm?: string;
+    };
+    const shouldDryRun = dryRun !== false;
+    if (!shouldDryRun && confirm !== 'DELETE_NAMESPACE') {
+      throw new Error('Live namespace delete requires confirm="DELETE_NAMESPACE".');
+    }
+    const result = await deleteNamespace({ namespace, dryRun: shouldDryRun });
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(result, null, 2),
         },
       ],
     };

@@ -30,6 +30,19 @@ describe('instagram ingest script helpers', async () => {
     expect(options.command).toBe('ingest');
     expect(options.pushCloudflare).toBe(true);
     expect(options.aiDisplayName).toBe(true);
+    expect(options.namespace).toBe('ingest');
+  });
+
+  it('normalizes profile-ish usernames before deriving ingest paths', () => {
+    const options = script.parseArgs([
+      'ingest',
+      '--username',
+      'palisades_collective/',
+    ]);
+
+    expect(options.username).toBe('palisades_collective');
+    expect(options.outputPath).toMatch(/data\/instagram\/palisades_collective\.ndjson$/);
+    expect(options.checkpointPath).toMatch(/data\/instagram\/palisades_collective\.checkpoint\.json$/);
   });
 
   it('fetches Instagram API paths with the browser session headers', async () => {
@@ -87,12 +100,14 @@ describe('instagram ingest script helpers', async () => {
     expect(result).toEqual({ displayName: 'Ocean Cliffs', model: 'gpt-4.1-nano' });
   });
 
-  it('appends displayName to the external upload form only when provided', async () => {
+  it('appends upload metadata to the external upload form', async () => {
     const bodyValues: Array<FormDataEntryValue | null> = [];
+    const namespaceValues: Array<FormDataEntryValue | null> = [];
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
       const body = init?.body as FormData;
       bodyValues.push(body.get('displayName'));
+      namespaceValues.push(body.get('namespace'));
       return new Response(JSON.stringify({ id: 'img-1', ok: true }), { status: 200 });
     });
 
@@ -104,7 +119,7 @@ describe('instagram ingest script helpers', async () => {
       shortcode: 'abc123',
       permalink: 'https://instagram.com/p/abc123/',
       sourcePageUrl: 'https://instagram.com/demo/',
-      namespace: 'cf-default',
+      namespace: 'ingest',
       log: noopLogger,
       displayName: 'Ocean Cliffs',
       fetchedImage: { bytes: Buffer.from('image-bytes'), contentType: 'image/jpeg' },
@@ -118,12 +133,13 @@ describe('instagram ingest script helpers', async () => {
       shortcode: 'abc124',
       permalink: 'https://instagram.com/p/abc124/',
       sourcePageUrl: 'https://instagram.com/demo/',
-      namespace: 'cf-default',
+      namespace: ' ingest ',
       log: noopLogger,
       fetchedImage: { bytes: Buffer.from('image-bytes'), contentType: 'image/jpeg' },
     });
 
     expect(bodyValues).toEqual(['Ocean Cliffs', null]);
+    expect(namespaceValues).toEqual(['ingest', 'ingest']);
   });
 
   it('continues uploading when AI display-name generation fails', async () => {

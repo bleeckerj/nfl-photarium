@@ -37,6 +37,7 @@ export interface CachedCloudflareImage {
   comfyMetadataSource?: string;
   parentId?: string;
   duplicateFamilyOverride?: boolean;
+  duplicateDetectionOverride?: boolean;
   linkedAssetId?: string;
   variationSort?: number;
   hasClipEmbedding?: boolean;
@@ -73,6 +74,7 @@ export const buildMetadataOverride = (
   assign('comfyMetadataSource', image.comfyMetadataSource);
   assign('variationParentId', options?.clearParentId ? '' : image.parentId);
   assign('duplicateFamilyOverride', image.duplicateFamilyOverride);
+  assign('duplicateDetectionOverride', image.duplicateDetectionOverride);
   assign('linkedAssetId', image.linkedAssetId);
   assign('variationSort', image.variationSort);
   assign('size', image.size);
@@ -168,6 +170,7 @@ export const transformImage = (
       ? String(mergedMeta.comfyMetadataSource)
       : undefined;
   const duplicateFamilyOverride = mergedMeta.duplicateFamilyOverride === true;
+  const duplicateDetectionOverride = mergedMeta.duplicateDetectionOverride === true;
   const cleanVariationSort = (() => {
     if (typeof mergedMeta.variationSort === 'number' && Number.isFinite(mergedMeta.variationSort)) {
       return mergedMeta.variationSort;
@@ -260,6 +263,7 @@ export const transformImage = (
     comfyMetadataDetected,
     comfyMetadataSource,
     duplicateFamilyOverride: duplicateFamilyOverride || undefined,
+    duplicateDetectionOverride: duplicateDetectionOverride || undefined,
     variationSort: cleanVariationSort,
     parentId,
     linkedAssetId,

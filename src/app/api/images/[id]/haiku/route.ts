@@ -11,8 +11,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getImageVectors, isVectorSearchAvailable } from '@/server/vectorSearch';
 import { generateClipTextEmbedding, type EmbeddingLogContext } from '@/server/embeddingService';
-
-const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
+import { getOpenAiHaikuModel, OPENAI_CHAT_COMPLETIONS_URL } from '@/server/openAiGeneratorModels';
 
 // Concept pairs for semantic analysis
 const CONCEPT_PAIRS: [string, string][] = [
@@ -224,14 +223,14 @@ export async function POST(
     );
 
     // Generate haiku using OpenAI
-    const openAiResponse = await fetch(OPENAI_API_URL, {
+    const openAiResponse = await fetch(OPENAI_CHAT_COMPLETIONS_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${openAiKey}`,
       },
       body: JSON.stringify({
-        model: 'gpt-4o',
+        model: getOpenAiHaikuModel(),
         temperature: 0.9, // Higher temperature for more creative output
         max_tokens: 100,
         messages: [

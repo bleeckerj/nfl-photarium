@@ -14,8 +14,12 @@
 - `photarium_list_folders`
 - `photarium_create_folder`
 - `photarium_list_namespaces`
+- `photarium_rename_namespace`
+- `photarium_delete_namespace`
 - `photarium_update_metadata`
 - `photarium_delete`
+
+Namespace admin tools wrap `/api/namespaces`. `photarium_rename_namespace` uses `PATCH` and `photarium_delete_namespace` uses `DELETE`. Both default to `dryRun: true`; live runs require `dryRun: false` plus `confirm: "RENAME_NAMESPACE"` or `confirm: "DELETE_NAMESPACE"` respectively.
 
 ## Upload
 - `photarium_upload_url`
@@ -71,6 +75,8 @@ The image generation tools call OpenAI image generation from the Photarium MCP s
 - `photarium_generate_image` creates a new image from a text prompt.
 - `photarium_generate_from_references` creates a new image from a prompt plus Photarium image IDs or direct image URLs.
 - `photarium_semantic_merge` semantically blends multiple source images into a new generated image. It is synthesis, not exact compositing.
+
+The direct Image API default is `gpt-image-2`; set `PHOTARIUM_OPENAI_IMAGE_MODEL` to test or pin a different OpenAI image model.
 
 All three tools support `dryRun: true` for request-shape testing without OpenAI or upload side effects.
 

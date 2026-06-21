@@ -21,6 +21,34 @@ export async function listNamespaces(): Promise<string[]> {
   return data.namespaces;
 }
 
+export async function renameNamespace(options: {
+  namespace: string;
+  targetNamespace: string;
+  dryRun?: boolean;
+}): Promise<Record<string, unknown>> {
+  return apiRequest('/api/namespaces', {
+    method: 'PATCH',
+    body: JSON.stringify({
+      namespace: options.namespace,
+      targetNamespace: options.targetNamespace,
+      dryRun: options.dryRun,
+    }),
+  });
+}
+
+export async function deleteNamespace(options: {
+  namespace: string;
+  dryRun?: boolean;
+}): Promise<Record<string, unknown>> {
+  return apiRequest('/api/namespaces', {
+    method: 'DELETE',
+    body: JSON.stringify({
+      namespace: options.namespace,
+      dryRun: options.dryRun,
+    }),
+  });
+}
+
 export async function updateMetadata(
   imageId: string,
   updates: {

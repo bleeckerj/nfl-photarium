@@ -32,8 +32,12 @@ MCP (Model Context Protocol) server that exposes the full Photarium API surface 
 - `photarium_list_folders`
 - `photarium_create_folder`
 - `photarium_list_namespaces`
+- `photarium_rename_namespace`
+- `photarium_delete_namespace`
 - `photarium_update_metadata`
 - `photarium_delete`
+
+Namespace admin tools default to `dryRun: true`. Live namespace rename/delete calls require `dryRun: false` and the matching confirmation token.
 
 
 ### Upload
@@ -154,7 +158,7 @@ export OPENAI_API_KEY=your_api_key_here
 Optional image generation settings:
 
 ```bash
-export PHOTARIUM_OPENAI_IMAGE_MODEL=gpt-image-1.5
+export PHOTARIUM_OPENAI_IMAGE_MODEL=gpt-image-2
 export OPENAI_API_BASE_URL=https://api.openai.com/v1
 ```
 
@@ -241,6 +245,8 @@ Once connected, you can ask the AI:
 **Organization:**
 - "List all images in the 'blog-posts' folder"
 - "What folders are available in the gallery?"
+- "Preview renaming namespace old-space to new-space"
+- "Preview deleting namespace old-space"
 - "Move this image to the 'featured' folder"
 - "Add tags 'hero', 'landing' to image abc123"
 

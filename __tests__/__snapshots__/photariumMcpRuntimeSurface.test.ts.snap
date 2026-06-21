@@ -83,6 +83,26 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
     ],
     "type": "object",
   },
+  "photarium_delete_namespace": {
+    "properties": {
+      "confirm": {
+        "description": "Required for live runs with dryRun=false. Must be "DELETE_NAMESPACE".",
+        "type": "string",
+      },
+      "dryRun": {
+        "description": "Preview counts and affected asset IDs without mutating. Defaults to true.",
+        "type": "boolean",
+      },
+      "namespace": {
+        "description": "Namespace to delete",
+        "type": "string",
+      },
+    },
+    "required": [
+      "namespace",
+    ],
+    "type": "object",
+  },
   "photarium_fs_ingest": {
     "properties": {
       "aiDisplayName": {
@@ -195,7 +215,7 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "type": "string",
       },
       "model": {
-        "description": "OpenAI image model. Defaults to PHOTARIUM_OPENAI_IMAGE_MODEL or gpt-image-1.5.",
+        "description": "OpenAI image model. Defaults to PHOTARIUM_OPENAI_IMAGE_MODEL or gpt-image-2.",
         "type": "string",
       },
       "namespace": {
@@ -433,6 +453,31 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
     ],
     "type": "object",
   },
+  "photarium_rename_namespace": {
+    "properties": {
+      "confirm": {
+        "description": "Required for live runs with dryRun=false. Must be "RENAME_NAMESPACE".",
+        "type": "string",
+      },
+      "dryRun": {
+        "description": "Preview counts and affected asset IDs without mutating. Defaults to true.",
+        "type": "boolean",
+      },
+      "namespace": {
+        "description": "Source namespace to rename",
+        "type": "string",
+      },
+      "targetNamespace": {
+        "description": "New namespace name",
+        "type": "string",
+      },
+    },
+    "required": [
+      "namespace",
+      "targetNamespace",
+    ],
+    "type": "object",
+  },
   "photarium_search": {
     "properties": {
       "limit": {
@@ -492,7 +537,7 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "type": "string",
       },
       "model": {
-        "description": "OpenAI image model. Defaults to PHOTARIUM_OPENAI_IMAGE_MODEL or gpt-image-1.5.",
+        "description": "OpenAI image model. Defaults to PHOTARIUM_OPENAI_IMAGE_MODEL or gpt-image-2.",
         "type": "string",
       },
       "namespace": {

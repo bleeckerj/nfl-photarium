@@ -246,7 +246,7 @@ Content-Type: multipart/form-data
 | `sourceUrl` | ❌ | Page URL reference |
 | `namespace` | ❌ | Namespace (defaults to `IMAGE_NAMESPACE` env var) |
 | `parentId` | ❌ | Parent image ID for variants |
-| `duplicateAction` | ❌ | `reject` (default) or `family` to admit same-namespace content-hash duplicates as child variants of an existing canonical parent |
+| `duplicateAction` | ❌ | `reject` (default), `family` to admit same-namespace content-hash duplicates as child variants of an existing canonical parent, or `override` to admit the upload as an independent asset after an operator-confirmed duplicate warning |
 
 **Response:**
 
@@ -279,7 +279,7 @@ Content-Type: multipart/form-data
 
 **Form Fields:** Same as internal upload, plus `.snagx` file support.
 
-**Duplicate Detection:** Returns 409 when `contentHash` (SHA-256 of uploaded image bytes) matches an existing image in the same namespace. `originalUrl` is stored as metadata and may log a warning if reused, but it does not block upload. If `duplicateAction=family` is supplied and no explicit `parentId` is supplied, the upload is admitted as a child variant under the oldest matched canonical parent instead of returning 409.
+**Duplicate Detection:** Returns 409 when `contentHash` (SHA-256 of uploaded image bytes) matches an existing image in the same namespace. `originalUrl` is stored as metadata and may log a warning if reused, but it does not block upload. If `duplicateAction=family` is supplied and no explicit `parentId` is supplied, the upload is admitted as a child variant under the oldest matched canonical parent instead of returning 409. If `duplicateAction=override` is supplied, the upload is admitted as an independent asset and metadata includes `duplicateDetectionOverride: true`.
 
 **Error Response (400):**
 
@@ -965,7 +965,7 @@ GET /api/images/{id}/prompt?force=1
 {
   "imageId": "abc123",
   "prompt": "A minimalist product photograph of a ceramic vase, soft natural lighting from the left, neutral beige background, shallow depth of field, clean composition, modern aesthetic...",
-  "model": "gpt-5.5",
+  "model": "gpt-4.1-nano",
   "generatedAt": "2025-12-05T21:59:41.036Z"
 }
 ```

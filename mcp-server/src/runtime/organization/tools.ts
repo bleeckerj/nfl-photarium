@@ -38,6 +38,56 @@ export const organizationTools: Tool[] = [
     },
   },
   {
+    name: 'photarium_rename_namespace',
+    description:
+      'Preview or apply a namespace rename. Live runs move all image/video assets from the source namespace to the target namespace.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        namespace: {
+          type: 'string',
+          description: 'Source namespace to rename',
+        },
+        targetNamespace: {
+          type: 'string',
+          description: 'New namespace name',
+        },
+        dryRun: {
+          type: 'boolean',
+          description: 'Preview counts and affected asset IDs without mutating. Defaults to true.',
+        },
+        confirm: {
+          type: 'string',
+          description: 'Required for live runs with dryRun=false. Must be "RENAME_NAMESPACE".',
+        },
+      },
+      required: ['namespace', 'targetNamespace'],
+    },
+  },
+  {
+    name: 'photarium_delete_namespace',
+    description:
+      'Preview or delete a namespace. Live runs move all image/video assets in the namespace to cf-default, then remove the namespace.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        namespace: {
+          type: 'string',
+          description: 'Namespace to delete',
+        },
+        dryRun: {
+          type: 'boolean',
+          description: 'Preview counts and affected asset IDs without mutating. Defaults to true.',
+        },
+        confirm: {
+          type: 'string',
+          description: 'Required for live runs with dryRun=false. Must be "DELETE_NAMESPACE".',
+        },
+      },
+      required: ['namespace'],
+    },
+  },
+  {
     name: 'photarium_update_metadata',
     description:
       'Update metadata for an image including folder, tags, description, alt text, and namespace. Can also set parent-child relationships for image variants.',

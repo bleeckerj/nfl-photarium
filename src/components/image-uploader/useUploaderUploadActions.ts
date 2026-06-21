@@ -24,6 +24,8 @@ interface UploadResult {
 interface UploadFailure {
   clientId: string;
   error?: string;
+  reason?: string;
+  duplicates?: unknown[];
 }
 
 interface UseUploaderUploadActionsOptions {
@@ -71,6 +73,13 @@ const formatUploadErrorMessage = (response: Response, payload: unknown) => {
     return (payload as { error?: string }).error as string;
   }
   return 'Upload failed';
+};
+
+const isDuplicateUploadFailure = (response: Response, payload: unknown) => {
+  if (response.status === 409) return true;
+  if (!payload || typeof payload !== 'object') return false;
+  const data = payload as { reason?: unknown; duplicates?: unknown };
+  return data.reason === 'duplicate' || (Array.isArray(data.duplicates) && data.duplicates.length > 0);
 };
 
 export const useUploaderUploadActions = ({
@@ -200,6 +209,7 @@ export const useUploaderUploadActions = ({
           folder: queuedFolder,
           tags: queuedTags,
           description: queuedDescription,
+          duplicateAction: queuedDuplicateAction,
           groupId: queuedGroupId,
           id: queuedId,
         } = filesToUpload[i];
@@ -255,6 +265,7 @@ export const useUploaderUploadActions = ({
           if (sourcePathToSend) formData.append('sourcePath', sourcePathToSend);
           formData.append('namespace', uploadNamespace);
           if (parentIdToSend) formData.append('parentId', parentIdToSend);
+          if (queuedDuplicateAction) formData.append('duplicateAction', queuedDuplicateAction);
           if (i > 0) await delay(uploadDelayMs);
 
           const { response, result } =
@@ -353,6 +364,7 @@ export const useUploaderUploadActions = ({
                         originalUrl: originalUrlToSend || undefined,
                         sourceUrl: sourceUrlToSend || undefined,
                         file: undefined,
+                        duplicateUploadBlocked: undefined,
                       }
                     : img
                 )
@@ -364,8 +376,13 @@ export const useUploaderUploadActions = ({
             }
           } else {
             const errorMessage = formatUploadErrorMessage(response, result);
+            const duplicateUploadBlocked = isDuplicateUploadFailure(response, result);
             setUploadedImages((prev) =>
-              prev.map((img) => (img.id === imageId ? { ...img, status: 'error', error: errorMessage } : img))
+              prev.map((img) =>
+                img.id === imageId
+                  ? { ...img, status: 'error', error: errorMessage, duplicateUploadBlocked }
+                  : img
+              )
             );
           }
         } catch (uploadError) {
@@ -446,6 +463,7 @@ export const useUploaderUploadActions = ({
             sourceUrl: sourceUrlToSend || undefined,
             namespace: uploadNamespace,
             parentId: selectedParentId || undefined,
+            duplicateAction: entry.duplicateAction,
             sessionId: entry.importSessionId,
             tempAssetKey: entry.tempAssetKey,
           };
@@ -632,11 +650,18 @@ export const useUploaderUploadActions = ({
                 originalUrl: success.originalUrl,
                 sourceUrl: success.sourceUrl,
                 remoteUrl: undefined,
+                duplicateUploadBlocked: undefined,
               };
             }
             const failure = failureMap.get(img.id);
             if (failure) {
-              return { ...img, status: 'error' as const, error: failure.error || 'Upload failed' };
+              return {
+                ...img,
+                status: 'error' as const,
+                error: failure.error || 'Upload failed',
+                duplicateUploadBlocked:
+                  failure.reason === 'duplicate' || (Array.isArray(failure.duplicates) && failure.duplicates.length > 0),
+              };
             }
             if (validItems.some((item) => item.id === img.id)) {
               return { ...img, status: 'error' as const, error: 'Upload failed' };

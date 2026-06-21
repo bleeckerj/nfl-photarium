@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cleanString, parseCloudflareMetadata } from '@/utils/cloudflareMetadata';
 import { getPromptThisRecord, setPromptThisRecord, type PromptThisRecord } from '@/server/promptThis';
-
-const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
+import { getOpenAiPromptThisModel, OPENAI_CHAT_COMPLETIONS_URL } from '@/server/openAiGeneratorModels';
 
 function parseForce(request: NextRequest): boolean {
   const fromQuery = request.nextUrl.searchParams.get('force');
@@ -93,9 +92,9 @@ async function generatePromptFromOpenAI(imageUrl: string, userText: string) {
     return { ok: false as const, status: 500, payload: { error: 'OpenAI API key not configured' } };
   }
 
-  const promptModel = process.env.OPENAI_PROMPT_MODEL || 'gpt-5.5';
+  const promptModel = getOpenAiPromptThisModel();
 
-  const openAiResponse = await fetch(OPENAI_API_URL, {
+  const openAiResponse = await fetch(OPENAI_CHAT_COMPLETIONS_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

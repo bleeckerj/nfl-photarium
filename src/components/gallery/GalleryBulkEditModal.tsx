@@ -70,6 +70,8 @@ interface GalleryBulkEditModalProps {
   onBulkAnimateTouchedChange: (value: boolean) => void;
   bulkAnimateLoop: boolean;
   onBulkAnimateLoopChange: (value: boolean) => void;
+  bulkAnimateNamespaceInput: string;
+  onBulkAnimateNamespaceInputChange: (value: string) => void;
   bulkAnimateFilename: string;
   onBulkAnimateFilenameChange: (value: string) => void;
   bulkAnimateLoading: boolean;
@@ -124,6 +126,8 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
   onBulkAnimateTouchedChange,
   bulkAnimateLoop,
   onBulkAnimateLoopChange,
+  bulkAnimateNamespaceInput,
+  onBulkAnimateNamespaceInputChange,
   bulkAnimateFilename,
   onBulkAnimateFilenameChange,
   bulkAnimateLoading,
@@ -191,6 +195,13 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
   const namespaceOptions = useMemo(
     () => registryNamespaces.map(ns => ({ value: ns, label: ns })),
     [registryNamespaces]
+  );
+  const animationNamespaceOptions = useMemo(
+    () => [
+      { value: '', label: 'Same as selected images' },
+      ...namespaceOptions,
+    ],
+    [namespaceOptions]
   );
 
   const handleCopySelectionPayload = async () => {
@@ -624,6 +635,16 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
                 checked={bulkAnimateLoop}
                 onChange={(e) => onBulkAnimateLoopChange(e.target.checked)}
                 className="h-3 w-3"
+              />
+            </label>
+            <label className="flex items-center gap-2 text-[0.65rem] text-gray-600">
+              Output namespace
+              <MonoSelect
+                value={bulkAnimateNamespaceInput}
+                onChange={onBulkAnimateNamespaceInputChange}
+                options={animationNamespaceOptions}
+                className="w-48"
+                size="sm"
               />
             </label>
             <label className="flex items-center gap-2 text-[0.65rem] text-gray-600">

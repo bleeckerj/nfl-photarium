@@ -10,6 +10,10 @@ import {
   deleteNamespaceByMovingAssets,
   validateNamespaceDeletionName,
 } from '@/server/namespaceDeletion';
+import {
+  renameNamespace,
+  validateNamespaceRenameNames,
+} from '@/server/namespaceRename';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -91,6 +95,43 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500, headers: NO_STORE_HEADERS }
+    );
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const body = await request.json().catch(() => null);
+    const namespace = typeof body?.namespace === 'string' ? body.namespace.trim() : '';
+    const targetNamespace = typeof body?.targetNamespace === 'string' ? body.targetNamespace.trim() : '';
+    const dryRun = body?.dryRun === true;
+    const validation = validateNamespaceRenameNames(namespace, targetNamespace);
+
+    if (!validation.ok) {
+      return NextResponse.json(
+        { error: validation.error },
+        { status: 400, headers: NO_STORE_HEADERS }
+      );
+    }
+
+    const result = await renameNamespace(validation.sourceNamespace, validation.targetNamespace, { dryRun });
+    const payload = dryRun || result.partialFailure
+      ? { ...result }
+      : { ...result, ...(await loadNamespaces()) };
+
+    return NextResponse.json(payload, {
+      status: result.partialFailure ? 207 : 200,
+      headers: NO_STORE_HEADERS,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Internal server error';
+    const isConflict = message.includes('already exists');
+    if (!isConflict) {
+      console.error('Rename namespace error:', error);
+    }
+    return NextResponse.json(
+      { error: message },
+      { status: isConflict ? 409 : 500, headers: NO_STORE_HEADERS }
     );
   }
 }

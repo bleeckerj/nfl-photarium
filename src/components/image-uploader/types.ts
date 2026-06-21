@@ -21,6 +21,7 @@ export interface UploadedImage {
   originalUrlInput?: string;
   sourceUrlInput?: string;
   parentId?: string;
+  duplicateUploadBlocked?: boolean;
 }
 
 export interface GalleryImageSummary {

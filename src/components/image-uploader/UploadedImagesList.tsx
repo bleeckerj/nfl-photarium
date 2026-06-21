@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle, X } from 'lucide-react';
+import { AlertCircle, CheckCircle, RefreshCw, X } from 'lucide-react';
 import clsx from 'clsx';
 
 import type { UploadedImage } from '@/components/image-uploader/types';
@@ -9,7 +9,7 @@ interface UploadedImagesListProps {
   onClearAll: () => void;
   onCopyUrl: (url: string) => void;
   onRemove: (id: string) => void;
-  onRetryUpload: (image: UploadedImage) => void;
+  onRetryUpload: (image: UploadedImage, options?: { overrideDuplicate?: boolean }) => void;
 }
 
 export default function UploadedImagesList({
@@ -100,17 +100,34 @@ export default function UploadedImagesList({
                 {image.status === 'error' && (
                   <div className="space-y-1">
                     <p className="text-xs text-red-600">{image.error}</p>
-                    <button
-                      type="button"
-                      onClick={() => onRetryUpload(image)}
-                      disabled={!image.file || isUploading}
-                      className={clsx(
-                        'text-[11px] text-blue-600 hover:text-blue-800',
-                        (!image.file || isUploading) && 'opacity-50 cursor-not-allowed'
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onRetryUpload(image)}
+                        disabled={(!image.file && !image.remoteUrl) || isUploading}
+                        className={clsx(
+                          'inline-flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800',
+                          ((!image.file && !image.remoteUrl) || isUploading) && 'opacity-50 cursor-not-allowed'
+                        )}
+                      >
+                        <RefreshCw className="h-3 w-3" />
+                        Retry upload
+                      </button>
+                      {image.duplicateUploadBlocked && (
+                        <button
+                          type="button"
+                          onClick={() => onRetryUpload(image, { overrideDuplicate: true })}
+                          disabled={(!image.file && !image.remoteUrl) || isUploading}
+                          className={clsx(
+                            'inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 hover:text-amber-900',
+                            ((!image.file && !image.remoteUrl) || isUploading) && 'opacity-50 cursor-not-allowed'
+                          )}
+                        >
+                          <RefreshCw className="h-3 w-3" />
+                          Retry and Override
+                        </button>
                       )}
-                    >
-                      Retry upload
-                    </button>
+                    </div>
                   </div>
                 )}
               </div>

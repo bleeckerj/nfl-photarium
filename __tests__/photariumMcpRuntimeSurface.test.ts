@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { allToolContracts } from '../mcp-server/src/contracts/index.js';
 import { handleRuntimeToolCall, RUNTIME_TOOL_HANDLERS, RUNTIME_TOOLS } from '../mcp-server/src/runtime/index.js';
@@ -14,13 +14,22 @@ const HIGH_RISK_SCHEMA_NAMES = [
   'photarium_semantic_merge',
   'photarium_fs_ingest',
   'photarium_backup',
+  'photarium_rename_namespace',
+  'photarium_delete_namespace',
 ] as const;
+
+const realFetch = global.fetch;
 
 function sorted(values: Iterable<string>): string[] {
   return [...values].sort((a, b) => a.localeCompare(b));
 }
 
 describe('Photarium MCP runtime surface', () => {
+  afterEach(() => {
+    global.fetch = realFetch;
+    vi.restoreAllMocks();
+  });
+
   it('keeps runtime tool definitions aligned with registered contracts', () => {
     expect(sorted(allToolContracts.map((contract) => contract.name))).toEqual(
       sorted(RUNTIME_TOOLS.map((tool) => tool.name)),
@@ -54,5 +63,77 @@ describe('Photarium MCP runtime surface', () => {
     expect(sorted((payload.tools || []).map((tool) => tool.name))).toEqual(
       sorted(RUNTIME_TOOLS.map((tool) => tool.name)),
     );
+  });
+
+  it('defaults namespace rename calls to dry-run through the namespace API', async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      expect(url).toBe('http://localhost:3000/api/namespaces');
+      expect(init?.method).toBe('PATCH');
+      expect(JSON.parse(String(init?.body || '{}'))).toEqual({
+        namespace: 'old-space',
+        targetNamespace: 'new-space',
+        dryRun: true,
+      });
+      return new Response(JSON.stringify({ namespace: 'old-space', targetNamespace: 'new-space', dryRun: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof global.fetch;
+
+    const result = await handleRuntimeToolCall('photarium_rename_namespace', {
+      namespace: 'old-space',
+      targetNamespace: 'new-space',
+    });
+    const payload = JSON.parse(result.content[0]?.text || '{}');
+
+    expect(result.isError).not.toBe(true);
+    expect(payload).toEqual({ namespace: 'old-space', targetNamespace: 'new-space', dryRun: true });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('defaults namespace delete calls to dry-run through the namespace API', async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      expect(url).toBe('http://localhost:3000/api/namespaces');
+      expect(init?.method).toBe('DELETE');
+      expect(JSON.parse(String(init?.body || '{}'))).toEqual({
+        namespace: 'old-space',
+        dryRun: true,
+      });
+      return new Response(JSON.stringify({ namespace: 'old-space', targetNamespace: 'cf-default', dryRun: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof global.fetch;
+
+    const result = await handleRuntimeToolCall('photarium_delete_namespace', {
+      namespace: 'old-space',
+    });
+    const payload = JSON.parse(result.content[0]?.text || '{}');
+
+    expect(result.isError).not.toBe(true);
+    expect(payload).toEqual({ namespace: 'old-space', targetNamespace: 'cf-default', dryRun: true });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects live namespace MCP mutations without confirmation', async () => {
+    global.fetch = vi.fn() as typeof global.fetch;
+
+    const renameResult = await handleRuntimeToolCall('photarium_rename_namespace', {
+      namespace: 'old-space',
+      targetNamespace: 'new-space',
+      dryRun: false,
+    });
+    const deleteResult = await handleRuntimeToolCall('photarium_delete_namespace', {
+      namespace: 'old-space',
+      dryRun: false,
+    });
+
+    expect(renameResult.isError).toBe(true);
+    expect(renameResult.content[0]?.text).toContain('RENAME_NAMESPACE');
+    expect(deleteResult.isError).toBe(true);
+    expect(deleteResult.content[0]?.text).toContain('DELETE_NAMESPACE');
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });

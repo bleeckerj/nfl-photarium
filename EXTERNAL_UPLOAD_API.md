@@ -135,11 +135,11 @@ The response also includes `message` advising that a new Cloudflare URL was crea
 
 ### Error details for 400 responses
 
-When `/api/upload/external` returns 400, the body is still JSON and includes an `error` string that explains what validation failed (e.g., `"No file provided"`, `"File must be an image"`, `"File size must be less than 10MB"`). For duplicate filenames you also get a `duplicates` array with summaries of the existing assets so you can surface (“Duplicate filename detected…”) or skip retries. Always parse the JSON body instead of relying on the status text so you see the actionable message.
+When `/api/upload/external` returns 400, the body is still JSON and includes an `error` string that explains what validation failed (e.g., `"No file provided"`, `"File must be an image"`, `"File size must be less than 10MB"`). When duplicate content is blocked with 409, the response includes `duplicates` summaries of the existing assets so you can surface the conflict, skip retries, or retry with `duplicateAction=override` when an operator needs to admit a false positive. Always parse the JSON body instead of relying on the status text so you see the actionable message.
 
 ```json
 {
-  "error": "Duplicate filename \"hero.png\" detected",
+  "error": "Duplicate image content detected",
   "duplicates": [
     { "id": "xyz", "filename": "hero.png", "folder": "website-images" }
   ]

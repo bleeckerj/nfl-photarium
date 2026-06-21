@@ -24,6 +24,7 @@ import {
   logContentHashDuplicate,
   logCrossNamespaceContentHashWarning,
   logDuplicateFamilySelection,
+  logDuplicateOverrideSelection,
   logOriginalUrlReuseWarning,
 } from '@/server/uploadDuplicatePolicy';
 import type { CachedCloudflareImage } from '@/server/cloudflareImageCache';
@@ -149,6 +150,27 @@ describe('uploadDuplicatePolicy', () => {
     expect(result.duplicateFamilySelection).toBeUndefined();
   });
 
+  it('admits same-namespace hash duplicates when override mode is requested', async () => {
+    const hashMatch = makeImage({ id: 'hash-override-1', namespace: 'nfl' });
+    findDuplicatesByContentHashMock.mockResolvedValueOnce([hashMatch]);
+
+    const result = await evaluateUploadDeduplicationPolicy({
+      contentHash: 'i'.repeat(64),
+      namespace: 'nfl',
+      duplicateAction: 'override',
+    });
+
+    expect(result.duplicateAction).toBe('override');
+    expect(result.contentHashDuplicates).toEqual([hashMatch]);
+    expect(result.duplicateFamilySelection).toBeUndefined();
+    expect(result.duplicateOverrideSelection).toEqual({
+      requestedAction: 'override',
+      matchedDuplicateIds: ['hash-override-1'],
+      admittedAsIndependentAsset: true,
+      provenance: 'operator-duplicate-override',
+    });
+  });
+
   it('logs warning and duplicate summaries with scope', () => {
     const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const consoleInfoSpy = vi.spyOn(console, 'info').mockImplementation(() => undefined);
@@ -189,6 +211,17 @@ describe('uploadDuplicatePolicy', () => {
       },
     });
 
+    logDuplicateOverrideSelection({
+      logScope: 'upload',
+      contentHash: 'i'.repeat(64),
+      selection: {
+        requestedAction: 'override',
+        matchedDuplicateIds: ['hash-3'],
+        admittedAsIndependentAsset: true,
+        provenance: 'operator-duplicate-override',
+      },
+    });
+
     expect(consoleWarnSpy).toHaveBeenCalledWith(
       '[upload/external] Original URL already exists (warning only)',
       expect.objectContaining({
@@ -221,6 +254,15 @@ describe('uploadDuplicatePolicy', () => {
         contentHash: 'h'.repeat(64),
         canonicalParentId: 'parent-1',
         matchedDuplicateIds: ['hash-2'],
+      })
+    );
+
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      '[upload] Duplicate content admitted by operator override',
+      expect.objectContaining({
+        contentHash: 'i'.repeat(64),
+        matchedDuplicateIds: ['hash-3'],
+        admittedAsIndependentAsset: true,
       })
     );
   });

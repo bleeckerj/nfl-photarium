@@ -18,7 +18,8 @@ export function useUploadedImageActions({
   }, [setUploadedImages]);
 
   const handleRetryUpload = useCallback(
-    (image: UploadedImage) => {
+    (image: UploadedImage, options?: { overrideDuplicate?: boolean }) => {
+      const duplicateAction = options?.overrideDuplicate ? 'override' : undefined;
       if (image.file) {
         const retryItem: UploaderQueueItem = {
           id: image.id,
@@ -31,6 +32,7 @@ export function useUploadedImageActions({
           tags: image.tagsInput,
           description: image.descriptionInput,
           selected: true,
+          duplicateAction,
         };
         uploadFiles([retryItem]);
         return;
@@ -48,6 +50,7 @@ export function useUploadedImageActions({
           tags: image.tagsInput,
           description: image.descriptionInput,
           selected: true,
+          duplicateAction,
         };
         uploadRemoteFiles([retryItem]);
       }
