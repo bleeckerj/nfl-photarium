@@ -80,11 +80,15 @@ export const ControlGroupConsole = ({
   values,
   busy,
   onChange,
+  advancedOpen,
+  onAdvancedToggle,
 }: {
   group: ControlGroup;
   values: ToolValues;
   busy: boolean;
   onChange: ControlChangeHandler;
+  advancedOpen?: boolean;
+  onAdvancedToggle?: (groupId: string, open: boolean) => void;
 }) => {
   const fields = (
     <div className="grid gap-2">
@@ -101,8 +105,13 @@ export const ControlGroupConsole = ({
   );
 
   if (group.advanced) {
+    const detailsProps = advancedOpen === undefined ? {} : { open: advancedOpen };
     return (
-      <details className="rounded border border-gray-200 bg-white p-2">
+      <details
+        {...detailsProps}
+        onToggle={(event) => onAdvancedToggle?.(group.id, event.currentTarget.open)}
+        className="rounded border border-gray-200 bg-white p-2"
+      >
         <summary className="cursor-pointer font-mono text-[11px] font-semibold text-gray-700">{group.label}</summary>
         <div className="mt-3">{fields}</div>
       </details>

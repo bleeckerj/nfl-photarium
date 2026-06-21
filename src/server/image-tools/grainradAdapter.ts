@@ -4,10 +4,15 @@ import { getImageExtrasRecord, patchImageExtrasRecord } from '@/server/imageExtr
 import { getUserVisibleTags } from '@/utils/systemTags';
 import { uploadImageBuffer } from '@/server/uploadService';
 import { uploadVideoBuffer } from '@/server/videoUploadService';
-import { renderGrainradArtifact, type GrainradArtifact } from '@/server/image-tools/grainradEngine';
+import {
+  renderGrainradArtifact,
+  type GrainradArtifact,
+  type GrainradRenderProgress,
+} from '@/server/image-tools/grainradEngine';
 import { downloadSourceImage } from '@/server/image-tools/sourceDownloader';
 import { createGrainradManifest } from '@/server/image-tools/grainradManifest';
 import type {
+  ImageToolDiagnosticEventInput,
   ImageToolAdapter,
   ImageToolOutputMode,
   ImageToolRequest,
@@ -34,6 +39,21 @@ const buildOutputFilename = (sourceFilename: string, request: ImageToolRequest, 
   const stem = sourceFilename.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9._-]+/g, '_') || 'image';
   return `${stem}-grainrad-${request.effectId}.${extension || request.output.format}`;
 };
+
+const cleanProgressDetails = (progress: GrainradRenderProgress): ImageToolDiagnosticEventInput['details'] => {
+  if (!progress.details) return undefined;
+  return Object.fromEntries(
+    Object.entries(progress.details).filter((entry): entry is [string, string | number | boolean | null] => (
+      entry[1] !== undefined
+    ))
+  );
+};
+
+const buildProgressEvent = (progress: GrainradRenderProgress): ImageToolDiagnosticEventInput => ({
+  phase: `grainrad.${progress.phase}`,
+  message: progress.message,
+  details: cleanProgressDetails(progress),
+});
 
 const uploadArtifactToPhotarium = async (params: {
   sourceImageId: string;
@@ -118,7 +138,15 @@ export const grainradAdapter: ImageToolAdapter = {
         : 'Rendering Grainrad preview in-process',
     });
     updatePreview({ message: 'Rendering Grainrad preview', percent: 0.5 });
-    const artifact = await renderGrainradArtifact(source.buffer, request);
+    const artifact = await renderGrainradArtifact(source.buffer, request, {
+      onProgress: (progress) => {
+        addEvent(buildProgressEvent(progress));
+        updatePreview({
+          message: progress.message,
+          percent: progress.percent,
+        });
+      },
+    });
 
     addEvent({
       phase: 'preview.ready',
@@ -147,7 +175,15 @@ export const grainradAdapter: ImageToolAdapter = {
         : 'Rendering Grainrad still in-process',
     });
     updateRun({ message: 'Rendering Grainrad effect', percent: 0.5 });
-    const artifact = await renderGrainradArtifact(source.buffer, request);
+    const artifact = await renderGrainradArtifact(source.buffer, request, {
+      onProgress: (progress) => {
+        addEvent(buildProgressEvent(progress));
+        updateRun({
+          message: progress.message,
+          percent: progress.percent,
+        });
+      },
+    });
 
     addEvent({
       phase: 'photarium.upload',

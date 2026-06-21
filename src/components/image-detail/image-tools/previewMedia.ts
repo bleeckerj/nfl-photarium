@@ -59,6 +59,14 @@ export const resolveImageToolPreviewMedia = (params: {
   };
 };
 
+export const resolveGeneratedImageToolPreviewMedia = (params: {
+  tool: PreviewTool;
+  preview?: Pick<ImageToolPreview, 'artifactUrl' | 'contentType'> | null;
+}): ImageToolPreviewMedia | null => {
+  if (!cleanOptionalString(params.preview?.artifactUrl)) return null;
+  return resolveImageToolPreviewMedia(params);
+};
+
 export const hasDiagnosticError = (events: ImageToolDiagnosticEvent[]) =>
   events.some((event) => event.level === 'error');
 

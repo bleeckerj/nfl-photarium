@@ -94,15 +94,30 @@ describe('grainradEngine (in-process bridge)', () => {
       paramPreset: 'diagonal-tear-hold-soft-wave-medium',
       params: { verticalHoldAmount: 1, verticalHoldSpeed: 0.3 },
       output: { mode: 'still', format: 'png', preset: 'balanced' },
-    }))).toBe(384);
+    }))).toBe(1024);
     expect(resolveGrainradMaxDim(stillRequest({
       effectId: 'rgb-subpixel-display',
       output: { mode: 'still', format: 'png', preset: 'high-quality' },
-    }))).toBe(512);
+    }))).toBe(1600);
     expect(resolveGrainradMaxDim(stillRequest({
       effectId: 'threshold',
       output: { mode: 'still', format: 'png', preset: 'high-quality' },
     }))).toBeUndefined();
+  });
+
+  it('uses smaller caps for animated RGB display renders', () => {
+    expect(resolveGrainradMaxDim(stillRequest({
+      effectId: 'rgb-subpixel-display',
+      output: { mode: 'animated', format: 'webp', preset: 'preview' },
+    }))).toBe(256);
+    expect(resolveGrainradMaxDim(stillRequest({
+      effectId: 'rgb-subpixel-display',
+      output: { mode: 'animated', format: 'webp', preset: 'balanced' },
+    }))).toBe(384);
+    expect(resolveGrainradMaxDim(stillRequest({
+      effectId: 'rgb-subpixel-display',
+      output: { mode: 'animated', format: 'webp', preset: 'high-quality' },
+    }))).toBe(512);
   });
 
   it('renders an animated GIF with multiple frames (sharp, no ffmpeg)', async () => {
@@ -118,6 +133,29 @@ describe('grainradEngine (in-process bridge)', () => {
     const meta = await sharp(artifact.buffer, { animated: true }).metadata();
     expect(meta.format).toBe('gif');
     expect(meta.pages ?? 1).toBeGreaterThanOrEqual(2);
+  });
+
+  it('renders RGB display animated previews with multiple frames', async () => {
+    const png = await createTestImageFixture('png');
+    const progress: string[] = [];
+    const artifact = await renderAnimated(png.buffer, stillRequest({
+      effectId: 'rgb-subpixel-display',
+      paramPreset: 'diagonal-tear-hold-soft-wave-medium',
+      params: {},
+      output: { mode: 'animated', format: 'webp', preset: 'preview' },
+      timeline: { durationMs: 400, fps: 4, loop: true },
+    }), {
+      onProgress: (event) => {
+        progress.push(`${event.phase}:${event.message}`);
+      },
+    });
+    expect(artifact.contentType).toBe('image/webp');
+    expect(artifact.filename).toBe('grainrad-rgb-subpixel-display.webp');
+    const meta = await sharp(artifact.buffer, { animated: true }).metadata();
+    expect(meta.format).toBe('webp');
+    expect(meta.pages ?? 1).toBeGreaterThanOrEqual(2);
+    expect(progress.some((event) => event.includes('Rendering Grainrad frame 1 of 2'))).toBe(true);
+    expect(progress.some((event) => event.startsWith('encode:'))).toBe(true);
   });
 
   it('rejects undecodable source bytes with a clear error', async () => {

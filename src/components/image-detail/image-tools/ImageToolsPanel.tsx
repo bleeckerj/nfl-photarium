@@ -21,8 +21,9 @@ import {
 import {
   formatDiagnosticDetails,
   hasDiagnosticError,
-  resolveImageToolPreviewMedia,
+  resolveGeneratedImageToolPreviewMedia,
 } from '@/components/image-detail/image-tools/previewMedia';
+import { SavedConfigurationsPanel } from '@/components/image-detail/image-tools/SavedConfigurationsPanel';
 import {
   buildInitialValues,
   buildRequest,
@@ -30,7 +31,7 @@ import {
   updateToolValues,
   type ToolValues,
 } from '@/components/image-detail/image-tools/controlModel';
-import { ControlGroupConsole } from '@/components/image-detail/image-tools/ControlFields';
+import { ParameterGroupsLayout } from '@/components/image-detail/image-tools/ParameterGroupsLayout';
 
 type ImageToolsPanelProps = {
   imageId: string;
@@ -109,7 +110,7 @@ const PluginCard = ({
   );
 };
 
-export function ImageToolsPanel({ imageId, sourcePreviewUrl, sourceLabel, onRunComplete }: ImageToolsPanelProps) {
+export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps) {
   const [tools, setTools] = useState<ImageToolManifest[]>([]);
   const [selectedToolId, setSelectedToolId] = useState<string | null>(null);
   const [values, setValues] = useState<ToolValues>({});
@@ -223,15 +224,25 @@ export function ImageToolsPanel({ imageId, sourcePreviewUrl, sourceLabel, onRunC
     return () => window.clearInterval(timer);
   }, [preview]);
 
-  const handleSelectTool = (tool: ImageToolManifest) => {
-    setSelectedToolId(tool.id);
-    setValues(buildInitialValues(tool));
+  const resetToolExecutionState = () => {
     setRun(null);
     setRunError(null);
     setRunWarning(null);
     setPreview(null);
     setPreviewError(null);
     setPreviewWarning(null);
+    setPreviewing(false);
+  };
+
+  const handleSelectTool = (tool: ImageToolManifest) => {
+    setSelectedToolId(tool.id);
+    setValues(buildInitialValues(tool));
+    resetToolExecutionState();
+  };
+
+  const handleLoadConfiguration = (nextValues: ToolValues) => {
+    setValues(nextValues);
+    resetToolExecutionState();
   };
 
   const updateControl = (control: ImageToolControl, value: string | boolean) => {
@@ -286,13 +297,19 @@ export function ImageToolsPanel({ imageId, sourcePreviewUrl, sourceLabel, onRunC
     ? `${uploadedAsset.assetType === 'video' ? '/videos' : '/images'}/${uploadedAsset.id}`
     : undefined;
   const previewMedia = selectedTool
-    ? resolveImageToolPreviewMedia({
+    ? resolveGeneratedImageToolPreviewMedia({
         tool: selectedTool,
         preview,
-        sourcePreviewUrl,
-        sourceLabel,
       })
     : null;
+  const previewStatus = preview?.message || (preview ? `Preview ${preview.status}` : null);
+  const showPreviewStatus = Boolean(previewError || previewWarning || preview?.error || previewStatus || preview?.events?.length);
+  const sidebarGridClass = previewMedia
+    ? 'grid gap-2 sm:grid-cols-2 xl:grid-cols-1'
+    : 'grid gap-2 sm:grid-cols-2';
+  const effectOptionGridClass = previewMedia
+    ? 'grid gap-1.5 sm:grid-cols-2 xl:grid-cols-1'
+    : 'grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3';
   const effectControl = selectedTool?.controls.find((control) => control.id === 'effectId' && control.type === 'select') ?? null;
   const activeEffectValue = String(values.effectId ?? effectControl?.defaultValue ?? selectedTool?.defaultRequest.effectId ?? '');
   const consoleGroups = controlGroups
@@ -348,11 +365,7 @@ export function ImageToolsPanel({ imageId, sourcePreviewUrl, sourceLabel, onRunC
               type="button"
               onClick={() => {
                 setSelectedToolId(null);
-                setRun(null);
-                setPreview(null);
-                setRunWarning(null);
-                setPreviewWarning(null);
-                setPreviewing(false);
+                resetToolExecutionState();
               }}
               className="inline-flex items-center gap-1 rounded border border-gray-200 px-2 py-1 font-mono text-[10px] text-gray-600 hover:border-gray-300"
             >
@@ -361,55 +374,49 @@ export function ImageToolsPanel({ imageId, sourcePreviewUrl, sourceLabel, onRunC
             </button>
           </div>
 
-          <div className="grid gap-0 bg-gray-50/70 xl:grid-cols-[minmax(0,1fr)_26rem]">
-            <div className="min-w-0 border-b border-gray-200 xl:border-b-0 xl:border-r">
-              <div className="relative h-[clamp(18rem,58vh,40rem)] overflow-hidden bg-gray-50">
-                {previewMedia?.kind === 'video' ? (
-                  <video
-                    src={previewMedia.src}
-                    aria-label={previewMedia.alt}
-                    className="h-full w-full object-contain"
-                    autoPlay
-                    controls
-                    loop
-                    muted
-                    playsInline
-                  />
-                ) : previewMedia ? (
-                  <Image
-                    src={previewMedia.src}
-                    alt={previewMedia.alt}
-                    fill
-                    sizes="(max-width: 1279px) 100vw, calc(100vw - 26rem)"
-                    className={previewMedia.objectFit === 'cover' ? 'object-contain opacity-80' : 'object-contain'}
-                    unoptimized
-                  />
-                ) : null}
-                {previewMedia && (
+          <div className={`grid gap-0 bg-gray-50/70 ${previewMedia ? 'xl:grid-cols-[minmax(0,1fr)_26rem]' : ''}`}>
+            {previewMedia ? (
+              <div className="min-w-0 border-b border-gray-200 xl:border-b-0 xl:border-r">
+                <div className="relative h-[clamp(14rem,44vh,32rem)] overflow-hidden bg-gray-50">
+                  {previewMedia.kind === 'video' ? (
+                    <video
+                      src={previewMedia.src}
+                      aria-label={previewMedia.alt}
+                      className="h-full w-full object-contain"
+                      autoPlay
+                      controls
+                      loop
+                      muted
+                      playsInline
+                    />
+                  ) : (
+                    <Image
+                      src={previewMedia.src}
+                      alt={previewMedia.alt}
+                      fill
+                      sizes="(max-width: 1279px) 100vw, calc(100vw - 26rem)"
+                      className={previewMedia.objectFit === 'cover' ? 'object-contain opacity-80' : 'object-contain'}
+                      unoptimized
+                    />
+                  )}
                   <span className="absolute bottom-3 left-3 rounded bg-white/90 px-2 py-1 font-mono text-[10px] text-gray-700 shadow-sm">
                     {previewMedia.badge}
                   </span>
-                )}
-              </div>
-
-              {(previewError || previewWarning || preview?.error || preview) && (
-                <div className="space-y-2 border-t border-gray-200 bg-gray-50/60 px-3 py-2">
-                  {(previewError || preview?.error) && (
-                    <p className="font-mono text-[11px] text-red-600">{previewError || preview?.error}</p>
-                  )}
-                  {previewWarning && (
-                    <p className="font-mono text-[11px] text-amber-700">{previewWarning}</p>
-                  )}
-                  {preview?.message && <p className="font-mono text-[10px] text-gray-500">{preview.message}</p>}
-                  {preview && <DiagnosticList events={preview.events ?? []} />}
                 </div>
-              )}
-            </div>
+              </div>
+            ) : null}
 
             <div className="min-w-0 space-y-4 p-3">
+              <SavedConfigurationsPanel
+                tool={selectedTool}
+                values={values}
+                busy={busy}
+                onLoad={handleLoadConfiguration}
+              />
+
               <div>
                 <div className="mb-2 border-b border-gray-200 pb-1 font-mono text-[11px] font-semibold text-gray-800">Actions</div>
-                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                <div className={sidebarGridClass}>
                   <button
                     type="button"
                     onClick={handlePreview}
@@ -429,6 +436,18 @@ export function ImageToolsPanel({ imageId, sourcePreviewUrl, sourceLabel, onRunC
                     {running ? 'Running' : 'Run tool'}
                   </button>
                 </div>
+                {showPreviewStatus && (
+                  <div className="mt-2 space-y-2 rounded border border-gray-200 bg-white/80 px-3 py-2">
+                    {(previewError || preview?.error) && (
+                      <p className="font-mono text-[11px] text-red-600">{previewError || preview?.error}</p>
+                    )}
+                    {previewWarning && (
+                      <p className="font-mono text-[11px] text-amber-700">{previewWarning}</p>
+                    )}
+                    {previewStatus && <p className="font-mono text-[10px] text-gray-500">{previewStatus}</p>}
+                    {preview && <DiagnosticList events={preview.events ?? []} />}
+                  </div>
+                )}
                 {run && (
                   <div className="mt-2">
                     <div className="h-1.5 overflow-hidden rounded bg-gray-100">
@@ -448,7 +467,7 @@ export function ImageToolsPanel({ imageId, sourcePreviewUrl, sourceLabel, onRunC
                   <span className="text-[10px] font-normal text-gray-500">{activeEffectValue}</span>
                 </div>
                 {effectControl ? (
-                  <div className="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-1">
+                  <div className={effectOptionGridClass}>
                     {(effectControl.options ?? []).map((option) => {
                       const optionValue = String(option.value);
                       const active = optionValue === activeEffectValue;
@@ -482,21 +501,12 @@ export function ImageToolsPanel({ imageId, sourcePreviewUrl, sourceLabel, onRunC
               <span>Parameters</span>
               <span className="text-[10px] font-normal text-gray-500">{consoleGroups.length} group{consoleGroups.length === 1 ? '' : 's'}</span>
             </div>
-            <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
-              {consoleGroups.length > 0 ? (
-                consoleGroups.map((group) => (
-                  <ControlGroupConsole
-                    key={group.id}
-                    group={group}
-                    values={values}
-                    busy={busy}
-                    onChange={updateControl}
-                  />
-                ))
-              ) : (
-                <p className="font-mono text-[10px] text-gray-500">No parameter controls for this effect.</p>
-              )}
-            </div>
+            <ParameterGroupsLayout
+              groups={consoleGroups}
+              values={values}
+              busy={busy}
+              onChange={updateControl}
+            />
           </div>
 
           {(runError || runWarning || run?.error || run) && (

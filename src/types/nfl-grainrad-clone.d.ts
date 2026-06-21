@@ -15,6 +15,15 @@ declare module 'nfl-grainrad-clone' {
     seed?: number;
   };
 
+  export type Timeline = {
+    durationMs?: number;
+    fps?: number;
+    loop?: boolean;
+    mode?: 'still' | 'animated';
+    seed?: number;
+    sourceTimeMode?: 'synthetic' | 'source-video' | 'live';
+  };
+
   export type EngineRenderResult = {
     kind: 'image' | 'ascii' | string;
     value: RasterImage | unknown;
@@ -76,4 +85,11 @@ declare module 'nfl-grainrad-clone' {
 
   export function createEffectsApi(options?: unknown): EffectsApi;
   export function createPhotariumImageToolManifest(options?: unknown): unknown;
+  export function normalizeTimeline(timeline?: Timeline, renderContext?: RenderContext): Required<Timeline>;
+  export function getTimelineFrameCount(timeline?: Timeline): number;
+  export function createFrameRenderContext(
+    renderContext?: RenderContext,
+    timeline?: Timeline,
+    frameIndex?: number
+  ): RenderContext;
 }

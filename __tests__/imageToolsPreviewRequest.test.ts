@@ -69,4 +69,23 @@ describe('buildImageToolPreviewRequest', () => {
       loop: false,
     });
   });
+
+  it('keeps RGB display animated selections on the bounded animated preview path', () => {
+    const previewRequest = buildImageToolPreviewRequest({
+      ...baseRequest,
+      effectId: 'rgb-subpixel-display',
+      output: { mode: 'animated', format: 'webp', preset: 'balanced' },
+    });
+
+    expect(previewRequest.output).toEqual({
+      mode: 'animated',
+      format: 'webp',
+      preset: 'preview',
+    });
+    expect(previewRequest.timeline).toEqual({
+      durationMs: 1200,
+      fps: 8,
+      loop: true,
+    });
+  });
 });

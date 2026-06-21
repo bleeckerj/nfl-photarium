@@ -17,7 +17,10 @@ import { join } from 'node:path';
 
 import sharp from 'sharp';
 import {
+  createFrameRenderContext,
   createEffectsApi,
+  getTimelineFrameCount,
+  normalizeTimeline,
   type EffectsApi,
   type RasterImage,
 } from 'nfl-grainrad-clone';
@@ -37,6 +40,17 @@ export type GrainradArtifact = {
   filename: string;
 };
 
+export type GrainradRenderProgress = {
+  phase: 'decode' | 'render' | 'frame' | 'encode';
+  message: string;
+  percent?: number;
+  details?: Record<string, string | number | boolean | null | undefined>;
+};
+
+type GrainradRenderOptions = {
+  onProgress?: (progress: GrainradRenderProgress) => void | Promise<void>;
+};
+
 // Preset -> longest-edge cap, to bound CPU/memory on large sources. Stills and
 // previews downscale; high-quality keeps native resolution for lightweight effects.
 const PRESET_MAX_DIM: Record<string, number | undefined> = {
@@ -48,9 +62,17 @@ const PRESET_MAX_DIM: Record<string, number | undefined> = {
 // RGB-display rendering performs multiple glow/resampling passes per pixel.
 // Running it at full export size in the Next process can starve status routes,
 // which makes queued/running jobs look hung in the UI.
-const CPU_HEAVY_EFFECT_MAX_DIM: Record<string, Record<string, number | undefined>> = {
+const CPU_HEAVY_STILL_EFFECT_MAX_DIM: Record<string, Record<string, number | undefined>> = {
   'rgb-subpixel-display': {
-    preview: 320,
+    preview: 512,
+    balanced: 1024,
+    'high-quality': 1600,
+  },
+};
+
+const CPU_HEAVY_ANIMATED_EFFECT_MAX_DIM: Record<string, Record<string, number | undefined>> = {
+  'rgb-subpixel-display': {
+    preview: 256,
     balanced: 384,
     'high-quality': 512,
   },
@@ -81,8 +103,20 @@ const resolvePreset = (preset?: string) => (preset && preset in PRESET_MAX_DIM ?
 
 export const resolveGrainradMaxDim = (request: ImageToolRequest) => {
   const preset = resolvePreset(request.output.preset);
-  return CPU_HEAVY_EFFECT_MAX_DIM[request.effectId]?.[preset] ?? PRESET_MAX_DIM[preset];
+  const effectCaps = request.output.mode === 'animated'
+    ? CPU_HEAVY_ANIMATED_EFFECT_MAX_DIM
+    : CPU_HEAVY_STILL_EFFECT_MAX_DIM;
+  return effectCaps[request.effectId]?.[preset] ?? PRESET_MAX_DIM[preset];
 };
+
+const reportProgress = async (
+  options: GrainradRenderOptions | undefined,
+  progress: GrainradRenderProgress
+) => {
+  await options?.onProgress?.(progress);
+};
+
+const yieldToEventLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 // ---- sharp <-> grainrad raster bridging ------------------------------------
 
@@ -237,15 +271,30 @@ const buildFilename = (effectId: string, ext: string) => `grainrad-${effectId}.$
  */
 export const renderStill = async (
   sourceBuffer: Buffer,
-  request: ImageToolRequest
+  request: ImageToolRequest,
+  options: GrainradRenderOptions = {}
 ): Promise<GrainradArtifact> => {
   const format = normalizeFormat(request.output.format);
   const contentType = STILL_CONTENT_TYPE[format];
   if (!contentType) throw new Error(`Unsupported still format "${request.output.format}".`);
 
   const preset = resolvePreset(request.output.preset);
-  const raster = await decodeToRaster(sourceBuffer, { maxDim: resolveGrainradMaxDim(request) });
+  const maxDim = resolveGrainradMaxDim(request);
+  await reportProgress(options, {
+    phase: 'decode',
+    message: 'Decoding source raster',
+    percent: 0.15,
+    details: { maxDim: maxDim ?? null },
+  });
+  const raster = await decodeToRaster(sourceBuffer, { maxDim });
 
+  await reportProgress(options, {
+    phase: 'render',
+    message: 'Rendering Grainrad still frame',
+    percent: 0.5,
+    details: { width: raster.width, height: raster.height },
+  });
+  await yieldToEventLoop();
   const result = getApi().renderRaster({
     source: raster,
     effect: request.effectId,
@@ -255,6 +304,11 @@ export const renderStill = async (
   });
   assertImageOutput(result, request.effectId);
 
+  await reportProgress(options, {
+    phase: 'encode',
+    message: `Encoding ${format.toUpperCase()} artifact`,
+    percent: 0.85,
+  });
   const buffer = await encodeStill(result.value, format, PRESET_QUALITY[preset]);
   const ext = format === 'jpeg' ? 'jpg' : format;
   return { buffer, contentType, filename: buildFilename(request.effectId, ext) };
@@ -265,33 +319,88 @@ export const renderStill = async (
  */
 export const renderAnimated = async (
   sourceBuffer: Buffer,
-  request: ImageToolRequest
+  request: ImageToolRequest,
+  options: GrainradRenderOptions = {}
 ): Promise<GrainradArtifact> => {
   const format = normalizeFormat(request.output.format);
   const contentType = ANIMATED_CONTENT_TYPE[format];
   if (!contentType) throw new Error(`Unsupported animated format "${request.output.format}".`);
 
   const preset = resolvePreset(request.output.preset);
-  const raster = await decodeToRaster(sourceBuffer, { maxDim: resolveGrainradMaxDim(request) });
-
-  const { frames, fps, loop } = await getApi().renderRasterSequence({
-    source: raster,
-    effect: request.effectId,
-    paramPreset: request.paramPreset,
-    params: request.params,
-    timeline: request.timeline ?? {},
-    renderContext: request.renderContext ?? {},
+  const maxDim = resolveGrainradMaxDim(request);
+  await reportProgress(options, {
+    phase: 'decode',
+    message: 'Decoding source raster',
+    percent: 0.15,
+    details: { maxDim: maxDim ?? null },
   });
+  const raster = await decodeToRaster(sourceBuffer, { maxDim });
+
+  const animatedTimeline = { ...(request.timeline ?? {}), mode: 'animated' as const };
+  const normalizedTimeline = normalizeTimeline(animatedTimeline, request.renderContext ?? {});
+  const frameCount = getTimelineFrameCount(normalizedTimeline);
+  const frames: RasterImage[] = [];
+
+  for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
+    const displayFrame = frameIndex + 1;
+    await reportProgress(options, {
+      phase: 'frame',
+      message: `Rendering Grainrad frame ${displayFrame} of ${frameCount}`,
+      percent: 0.2 + (frameIndex / frameCount) * 0.62,
+      details: {
+        frameIndex: displayFrame,
+        frameCount,
+        width: raster.width,
+        height: raster.height,
+      },
+    });
+    await yieldToEventLoop();
+
+    const renderContext = createFrameRenderContext(request.renderContext ?? {}, normalizedTimeline, frameIndex);
+    const result = getApi().renderRaster({
+      source: raster,
+      effect: request.effectId,
+      paramPreset: request.paramPreset,
+      params: request.params,
+      renderContext,
+    });
+    assertImageOutput(result, request.effectId);
+    frames.push(result.value);
+
+    await reportProgress(options, {
+      phase: 'frame',
+      message: `Rendered Grainrad frame ${displayFrame} of ${frameCount}`,
+      percent: 0.2 + (displayFrame / frameCount) * 0.62,
+      details: {
+        frameIndex: displayFrame,
+        frameCount,
+        time: renderContext.time ?? 0,
+      },
+    });
+    await yieldToEventLoop();
+  }
   if (frames.length === 0) throw new Error('Grainrad produced no frames for the animated export.');
 
+  await reportProgress(options, {
+    phase: 'encode',
+    message: `Encoding animated ${format.toUpperCase()} artifact`,
+    percent: 0.88,
+    details: { frameCount: frames.length },
+  });
   let buffer: Buffer;
   if (format === 'mp4') {
-    buffer = await encodeMp4(frames, fps);
+    buffer = await encodeMp4(frames, normalizedTimeline.fps);
   } else if (frames.length < 2) {
     // A single-frame animation degrades to a still in the same container.
     buffer = await encodeStill(frames[0], format === 'gif' ? 'png' : format, PRESET_QUALITY[preset]);
   } else {
-    buffer = await encodeAnimatedSharp(frames, format as 'gif' | 'webp', fps, loop, PRESET_QUALITY[preset]);
+    buffer = await encodeAnimatedSharp(
+      frames,
+      format as 'gif' | 'webp',
+      normalizedTimeline.fps,
+      normalizedTimeline.loop,
+      PRESET_QUALITY[preset]
+    );
   }
 
   return { buffer, contentType, filename: buildFilename(request.effectId, format) };
@@ -302,10 +411,11 @@ export const renderAnimated = async (
  */
 export const renderGrainradArtifact = async (
   sourceBuffer: Buffer,
-  request: ImageToolRequest
+  request: ImageToolRequest,
+  options: GrainradRenderOptions = {}
 ): Promise<GrainradArtifact> =>
   request.output.mode === 'animated'
-    ? renderAnimated(sourceBuffer, request)
-    : renderStill(sourceBuffer, request);
+    ? renderAnimated(sourceBuffer, request, options)
+    : renderStill(sourceBuffer, request, options);
 
 export const listGrainradEffects = () => getApi().listEffects();

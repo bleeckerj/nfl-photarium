@@ -7,13 +7,22 @@ import {
   groupVisibleControls,
   updateToolValues,
 } from '@/components/image-detail/image-tools/controlModel';
-import { resolveImageToolPreviewMedia } from '@/components/image-detail/image-tools/previewMedia';
+import {
+  resolveGeneratedImageToolPreviewMedia,
+  resolveImageToolPreviewMedia,
+} from '@/components/image-detail/image-tools/previewMedia';
 import {
   IMAGE_TOOL_STATUS_TIMEOUT_MESSAGE,
   isImageToolTransientStatusError,
   type ImageToolControl,
   type ImageToolManifest,
 } from '@/services/imageToolsService';
+import {
+  getSavedImageToolConfigurations,
+  IMAGE_TOOL_CONFIGURATIONS_STORAGE_KEY,
+  normalizeSavedToolValues,
+  upsertSavedImageToolConfiguration,
+} from '@/components/image-detail/image-tools/savedConfigurations';
 
 const tool = {
   label: 'Grainrad Effects',
@@ -84,6 +93,28 @@ const richTool = {
       ],
     },
     {
+      id: 'timeline.durationMs',
+      label: 'Duration',
+      type: 'number',
+      defaultValue: 2400,
+      min: 100,
+      group: 'animation',
+    },
+    {
+      id: 'timeline.loop',
+      label: 'Loop',
+      type: 'switch',
+      defaultValue: true,
+      group: 'animation',
+    },
+    {
+      id: 'renderContext.seed',
+      label: 'Seed',
+      type: 'number',
+      defaultValue: 1337,
+      group: 'animation',
+    },
+    {
       id: 'params.jitterAmount',
       label: 'Jitter Amount',
       type: 'slider',
@@ -118,6 +149,16 @@ const richTool = {
 } satisfies ImageToolManifest;
 
 const controlById = (id: string) => richTool.controls.find((control) => control.id === id) as ImageToolControl;
+
+const createMemoryStorage = () => {
+  const store = new Map<string, string>();
+  return {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      store.set(key, value);
+    },
+  };
+};
 
 describe('ImageToolsPanel', () => {
   it('exports the image tools catalog component', () => {
@@ -183,6 +224,10 @@ describe('ImageToolsPanel', () => {
       badge: 'Source image',
       kind: 'image',
     });
+  });
+
+  it('does not reserve selected tool preview media before a generated artifact exists', () => {
+    expect(resolveGeneratedImageToolPreviewMedia({ tool })).toBeNull();
   });
 
   it('falls back to the tool sample only when no source image is available', () => {
@@ -263,6 +308,56 @@ describe('ImageToolsPanel', () => {
 
     expect(values['output.mode']).toBe('still');
     expect(values['output.format']).toBe('png');
+  });
+
+  it('saves and restores a complete Grainrad configuration value map', () => {
+    const storage = createMemoryStorage();
+    const values = {
+      ...updateToolValues(richTool, buildInitialValues(richTool), controlById('effectId'), 'rgb-subpixel-display'),
+      paramPreset: 'diagonal-tear-hold-soft-wave-medium',
+      'output.mode': 'animated',
+      'output.format': 'mp4',
+      'timeline.durationMs': 3600,
+      'timeline.loop': false,
+      'renderContext.seed': 4242,
+      'params.verticalHoldAmount': 0.5,
+    };
+
+    const result = upsertSavedImageToolConfiguration({
+      tool: richTool,
+      name: 'RGB drift export',
+      values,
+      storage,
+      now: new Date('2026-06-21T12:00:00.000Z'),
+      idFactory: () => 'config-1',
+    });
+    const savedConfigurations = getSavedImageToolConfigurations(richTool.id, storage);
+    const restoredValues = normalizeSavedToolValues(richTool, savedConfigurations[0].values);
+    const restoredRequest = buildRequest(richTool, restoredValues);
+
+    expect(result.configuration.id).toBe('config-1');
+    expect(JSON.parse(storage.getItem(IMAGE_TOOL_CONFIGURATIONS_STORAGE_KEY) || '{}')).toMatchObject({
+      version: 1,
+    });
+    expect(savedConfigurations).toHaveLength(1);
+    expect(restoredValues).toMatchObject({
+      effectId: 'rgb-subpixel-display',
+      paramPreset: 'diagonal-tear-hold-soft-wave-medium',
+      'output.mode': 'animated',
+      'output.format': 'mp4',
+      'timeline.durationMs': 3600,
+      'timeline.loop': false,
+      'renderContext.seed': 4242,
+      'params.verticalHoldAmount': 0.5,
+    });
+    expect(restoredRequest).toMatchObject({
+      effectId: 'rgb-subpixel-display',
+      paramPreset: 'diagonal-tear-hold-soft-wave-medium',
+      output: { mode: 'animated', format: 'mp4' },
+      timeline: { durationMs: 3600, loop: false },
+      renderContext: { seed: 4242 },
+      params: { verticalHoldAmount: 0.5 },
+    });
   });
 
   it('treats image tool status timeouts as transient polling errors', () => {
