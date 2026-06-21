@@ -1,6 +1,12 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 type PromptThisMeta = { saved?: boolean; updatedAt?: string; model?: string } | null;
+type SavePromptThisOptions = {
+  prompt?: string;
+  suppressSuccessToast?: boolean;
+};
+
+const PROMPT_THIS_AUTOSAVE_DELAY_MS = 900;
 
 export const usePromptThisEditor = ({
   imageId,
@@ -15,6 +21,12 @@ export const usePromptThisEditor = ({
   const [promptThisSaving, setPromptThisSaving] = useState(false);
   const [lastSavedPromptThis, setLastSavedPromptThis] = useState<string>('');
   const [promptThisMeta, setPromptThisMeta] = useState<PromptThisMeta>(null);
+  const promptThisInputRef = useRef('');
+  const saveSequenceRef = useRef(0);
+
+  useEffect(() => {
+    promptThisInputRef.current = promptThisInput;
+  }, [promptThisInput]);
 
   const refreshPromptThis = useCallback(async () => {
     if (!imageId) {
@@ -44,16 +56,19 @@ export const usePromptThisEditor = ({
     }
   }, [imageId]);
 
-  const savePromptThisEdits = useCallback(async () => {
+  const savePromptThisEdits = useCallback(async (options?: SavePromptThisOptions) => {
     if (!imageId) return;
 
-    const trimmed = (promptThisInput || '').trim();
+    const promptToSave = options?.prompt ?? promptThisInput;
+    const trimmed = (promptToSave || '').trim();
     const lastSavedTrimmed = (lastSavedPromptThis || '').trim();
 
     if (!trimmed || trimmed === lastSavedTrimmed) {
       return;
     }
 
+    const saveSequence = saveSequenceRef.current + 1;
+    saveSequenceRef.current = saveSequence;
     setPromptThisSaving(true);
     try {
       const response = await fetch(`/api/images/${imageId}/prompt`, {
@@ -67,19 +82,27 @@ export const usePromptThisEditor = ({
         return;
       }
 
-      setPromptThisInput(data.record.prompt);
-      setLastSavedPromptThis(data.record.prompt);
-      setPromptThisMeta({
-        saved: Boolean(data?.saved),
-        updatedAt: data?.record?.updatedAt,
-        model: data?.record?.model,
-      });
-      toastPush('Prompt saved');
+      if (saveSequence === saveSequenceRef.current) {
+        if ((promptThisInputRef.current || '').trim() === trimmed) {
+          setPromptThisInput(data.record.prompt);
+        }
+        setLastSavedPromptThis(data.record.prompt);
+        setPromptThisMeta({
+          saved: Boolean(data?.saved),
+          updatedAt: data?.record?.updatedAt,
+          model: data?.record?.model,
+        });
+        if (!options?.suppressSuccessToast) {
+          toastPush('Prompt saved');
+        }
+      }
     } catch (error) {
       console.error('Failed to save prompt:', error);
       toastPush('Failed to save prompt');
     } finally {
-      setPromptThisSaving(false);
+      if (saveSequence === saveSequenceRef.current) {
+        setPromptThisSaving(false);
+      }
     }
   }, [imageId, lastSavedPromptThis, promptThisInput, toastPush]);
 
@@ -109,6 +132,9 @@ export const usePromptThisEditor = ({
         updatedAt: data?.record?.updatedAt,
         model: data?.record?.model,
       });
+      if (data?.saved) {
+        setLastSavedPromptThis(promptText);
+      }
       toastPush(data?.generated ? 'Prompt generated' : 'Prompt loaded');
     } catch (error) {
       console.error('Failed to generate prompt:', error);
@@ -122,6 +148,24 @@ export const usePromptThisEditor = ({
     refreshPromptThis();
   }, [refreshPromptThis]);
 
+  useEffect(() => {
+    if (!imageId) {
+      return;
+    }
+
+    const trimmed = (promptThisInput || '').trim();
+    const lastSavedTrimmed = (lastSavedPromptThis || '').trim();
+    if (!trimmed || trimmed === lastSavedTrimmed) {
+      return;
+    }
+
+    const timeoutId = globalThis.setTimeout(() => {
+      void savePromptThisEdits({ prompt: promptThisInput, suppressSuccessToast: true });
+    }, PROMPT_THIS_AUTOSAVE_DELAY_MS);
+
+    return () => globalThis.clearTimeout(timeoutId);
+  }, [imageId, lastSavedPromptThis, promptThisInput, savePromptThisEdits]);
+
   return {
     promptThisInput,
     setPromptThisInput,
@@ -129,7 +173,6 @@ export const usePromptThisEditor = ({
     promptThisGenerating,
     promptThisSaving,
     promptThisMeta,
-    savePromptThisEdits,
     generatePromptThis,
   };
 };

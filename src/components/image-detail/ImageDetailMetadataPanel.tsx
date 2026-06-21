@@ -71,7 +71,6 @@ export const ImageDetailMetadataPanel = ({
   onApplyAltToVariations,
   onPromptThisInputChange,
   onGeneratePromptThis,
-  onSavePromptThis,
   onCopyText,
   onOriginalUrlInputChange,
   onSourceUrlInputChange,
@@ -137,7 +136,6 @@ export const ImageDetailMetadataPanel = ({
   onApplyAltToVariations: () => void;
   onPromptThisInputChange: (value: string) => void;
   onGeneratePromptThis: (force?: boolean) => void;
-  onSavePromptThis: () => void;
   onCopyText: (text: string, message?: string) => Promise<void>;
   onOriginalUrlInputChange: (value: string) => void;
   onSourceUrlInputChange: (value: string) => void;
@@ -215,6 +213,7 @@ export const ImageDetailMetadataPanel = ({
       setAltTextInput={onAltTextInputChange}
       altLoading={altLoading}
       onGenerateAlt={onGenerateAlt}
+      onCopy={() => onCopyText(altTextInput || '', 'ALT text copied')}
       hasVariations={hasVariations}
       bulkAltApplying={bulkAltApplying}
       onApplyToVariations={onApplyAltToVariations}
@@ -227,7 +226,6 @@ export const ImageDetailMetadataPanel = ({
       promptThisSaving={promptThisSaving}
       promptThisMeta={promptThisMeta}
       onGenerate={onGeneratePromptThis}
-      onSave={onSavePromptThis}
       onCopy={() => onCopyText(promptThisInput || '', 'Prompt copied')}
     />
     <ComfyWorkflowPanel

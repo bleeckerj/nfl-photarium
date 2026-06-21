@@ -217,7 +217,6 @@ export default function ImageDetailPage() {
     promptThisGenerating,
     promptThisSaving,
     promptThisMeta,
-    savePromptThisEdits,
     generatePromptThis,
   } = usePromptThisEditor({ imageId: image?.id, toastPush: toast.push });
   const [tagGenerationCount, setTagGenerationCount] = useState(6);
@@ -2344,7 +2343,7 @@ export default function ImageDetailPage() {
               onApplyDescriptionToVariations={applyDescriptionToVariations} onAltTextInputChange={setAltTextInput}
               onGenerateAlt={generateAltTag} onApplyAltToVariations={applyAltToVariations}
               onPromptThisInputChange={setPromptThisInput} onGeneratePromptThis={generatePromptThis}
-              onSavePromptThis={savePromptThisEdits} onCopyText={handleCopyText}
+              onCopyText={handleCopyText}
               onOriginalUrlInputChange={setOriginalUrlInput} onSourceUrlInputChange={setSourceUrlInput}
               onShareBaseUrlChange={setShareBaseUrl} onShareVariantChange={setShareVariant}
               getVariantWidthLabel={getVariantWidthLabel} onCopyVariantUrl={handleCopyUrl}

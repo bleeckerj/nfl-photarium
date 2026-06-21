@@ -8,6 +8,7 @@ export function AltTextEditor(props: {
   setAltTextInput: (value: string) => void;
   altLoading: boolean;
   onGenerateAlt: (imageId: string) => void;
+  onCopy: () => void;
   hasVariations: boolean;
   bulkAltApplying: boolean;
   onApplyToVariations: () => void;
@@ -19,6 +20,7 @@ export function AltTextEditor(props: {
     setAltTextInput,
     altLoading,
     onGenerateAlt,
+    onCopy,
     hasVariations,
     bulkAltApplying,
     onApplyToVariations
@@ -39,6 +41,13 @@ export function AltTextEditor(props: {
           >
             <Sparkles className="h-4 w-4" />
             {altLoading ? 'Generating…' : imageHasAlt ? 'Refresh ALT text' : 'Generate ALT text'}
+          </button>
+          <button
+            onClick={onCopy}
+            disabled={!altTextInput.trim()}
+            className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border border-gray-200 text-gray-700 hover:border-gray-300 disabled:opacity-50"
+          >
+            Copy
           </button>
           {hasVariations && (
             <button

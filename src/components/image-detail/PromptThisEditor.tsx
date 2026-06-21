@@ -1,5 +1,5 @@
 import React from 'react';
-import { RotateCcw, Sparkles } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 
 export function PromptThisEditor(props: {
   promptThisInput: string;
@@ -9,7 +9,6 @@ export function PromptThisEditor(props: {
   promptThisSaving?: boolean;
   promptThisMeta: { saved?: boolean; updatedAt?: string; model?: string } | null;
   onGenerate: (force?: boolean) => void;
-  onSave?: () => void;
   onCopy: () => void;
 }) {
   const {
@@ -20,7 +19,6 @@ export function PromptThisEditor(props: {
     promptThisSaving,
     promptThisMeta,
     onGenerate,
-    onSave,
     onCopy
   } = props;
 
@@ -33,21 +31,12 @@ export function PromptThisEditor(props: {
         </div>
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => onGenerate(false)}
+            onClick={() => onGenerate(Boolean(promptThisInput.trim()))}
             disabled={promptThisGenerating}
             className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border border-gray-200 text-gray-700 hover:border-gray-300 disabled:opacity-50"
           >
             <Sparkles className="h-4 w-4" />
-            {promptThisGenerating ? 'Generating…' : promptThisInput ? 'Refresh prompt' : 'Generate prompt'}
-          </button>
-          <button
-            onClick={() => onGenerate(true)}
-            disabled={promptThisGenerating}
-            className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border border-gray-200 text-gray-700 hover:border-gray-300 disabled:opacity-50"
-            title="Force regenerate"
-          >
-            <RotateCcw className="h-4 w-4" />
-            Regenerate
+            {promptThisGenerating ? 'Generating…' : promptThisInput ? 'Refresh Prompt' : 'Generate Prompt'}
           </button>
           <button
             onClick={onCopy}
@@ -56,15 +45,10 @@ export function PromptThisEditor(props: {
           >
             Copy
           </button>
-          {onSave && (
-            <button
-              onClick={onSave}
-              disabled={!promptThisInput || Boolean(promptThisSaving)}
-              className="inline-flex items-center gap-2 px-3 py-1.5 text-xs rounded-md border border-gray-200 text-gray-700 hover:border-gray-300 disabled:opacity-50"
-              title="Save your edits"
-            >
-              {promptThisSaving ? 'Saving…' : 'Save'}
-            </button>
+          {promptThisSaving && (
+            <span className="inline-flex items-center px-2 py-1.5 text-[10px] font-mono text-gray-500">
+              Saving…
+            </span>
           )}
         </div>
       </div>
@@ -72,7 +56,6 @@ export function PromptThisEditor(props: {
       <textarea
         value={promptThisInput}
         onChange={(e) => setPromptThisInput(e.target.value)}
-        onBlur={() => onSave?.()}
         placeholder={promptThisLoading ? 'Loading…' : 'No prompt yet'}
         className="w-full font-mono text-xs border border-gray-300 rounded-md px-3 py-2 mt-2 bg-white text-gray-800 min-h-[96px]"
         rows={4}
