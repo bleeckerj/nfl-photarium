@@ -2,7 +2,6 @@
 
 import { useState, useEffect, forwardRef, useMemo, useRef, useCallback, useLayoutEffect } from 'react';
 import { type CloudflareImage, type GalleryFamilySummary, type GridSize, type ImageGalleryProps, type ImageGalleryRef } from './gallery/types';
-import { getMultipleImageUrls, IMAGE_VARIANTS } from '@/utils/imageUtils';
 import { setDragPayloadForImage } from '@/utils/imageDrag';
 import { copyToClipboard, formatCopyPayload } from '@/utils/clipboard';
 import { useToast } from './Toast';
@@ -32,7 +31,7 @@ import { useGalleryVideoExpansion } from './gallery/hooks/useGalleryVideoExpansi
 import { GalleryShell } from './gallery/GalleryShell';
 import { GalleryLoadingState } from './gallery/GalleryLoadingState';
 import { normalizeColorSearchHex, resolveColorSearchAssets, type ColorSearchResultRow } from './gallery/colorSearch';
-import { DEFAULT_GRID_SIZE } from './gallery/constants';
+import { DEFAULT_GRID_SIZE, VARIANT_OPTIONS } from './gallery/constants';
 import { normalizeGridSize } from './gallery/gridSizing';
 import { toDateKey } from './gallery/dateFilter';
 import { collectFacetFolders, collectImageFolders, mergeFolderNames } from './gallery/folderOptions';
@@ -40,7 +39,7 @@ import { clearGalleryReturnState, GALLERY_RETURN_SNAPSHOT_KEY } from './gallery/
 import { useSearchParams } from 'next/navigation';
 import { isLikelySourceSearchTerm } from '@/utils/galleryFilter';
 import { getUserVisibleTags } from '@/utils/systemTags';
-import { buildGalleryImagesUrl, type GalleryServerQueryState } from './gallery/galleryImagesUrl';
+import { buildGalleryImagesUrl, resolveGalleryRefreshServerQuery, type GalleryServerQueryState } from './gallery/galleryImagesUrl';
 import {
   dedupeGalleryImages, formatVideoResultsNotice, parseGalleryServerFamilySummaryMap,
   parseGalleryServerFocus, parseGalleryServerPagination, parseGalleryVideoMeta,
@@ -56,8 +55,6 @@ export {
   neutralizeStoredPreferenceFilters,
 } from './gallery/storedPreferences';
 export type { ImageGalleryRef } from './gallery/types';
-
-const VARIANT_DIMENSIONS = new Map(IMAGE_VARIANTS.map(variant => [variant.name, variant.width]));
 
 const getBrowserDateTimeZone = () => {
   if (typeof window === 'undefined' || typeof Intl === 'undefined') return undefined;
@@ -253,7 +250,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     silent = false,
     forceRefresh = false,
     syncNamespaces = false,
-  }: { silent?: boolean; forceRefresh?: boolean; syncNamespaces?: boolean } = {}) => {
+    firstPage = false,
+  }: { silent?: boolean; forceRefresh?: boolean; syncNamespaces?: boolean; firstPage?: boolean } = {}) => {
     const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -269,17 +267,15 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     }
     try {
       const focusTarget = initialFocusTargetRef.current;
-      const focusAssetId =
-        focusTarget && !focusAppliedRef.current
-          ? focusTarget.assetId
-          : undefined;
+      const focusAssetId = focusTarget && !focusAppliedRef.current ? focusTarget.assetId : undefined;
+      const effectiveServerQuery = resolveGalleryRefreshServerQuery(galleryServerQueryRef.current, { firstPage });
       const url = buildGalleryImagesUrl({
         forceRefresh,
         namespace,
         videoLimitOverride,
         includeExtrasForGallery,
         showMotionAssetsOnly: showMotionAssetsOnlyRef.current,
-        serverQuery: galleryServerQueryRef.current,
+        serverQuery: effectiveServerQuery,
         focusAssetId,
       });
       const response = await fetch(url, { signal: controller.signal, cache: 'no-store' });
@@ -333,17 +329,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const handleFoldersChanged = async () => {
     await fetchImages({ silent: true });
   };
-
-  useGalleryRefreshLifecycle({
-    fetchImages,
-    imageCount: images.length,
-    loading,
-    perfLoggingEnabled: PERF_LOGGING_ENABLED,
-    ref,
-    refreshTrigger,
-    returningFromDetailRef,
-    serverPagination,
-  });
 
   const clearColorSearch = useCallback(() => {
     setColorSearchHex(null);
@@ -441,19 +426,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     setShowPreview(false);
   };
 
-  const VARIANT_PRESETS = ['small', 'medium', 'large', 'xlarge', 'full', 'thumbnail'];
-
-  const getVariantUrls = (image: CloudflareImage) => {
-    return getMultipleImageUrls(image.id, VARIANT_PRESETS);
-  };
-  const getVariantWidthLabel = (variant: string) => {
-    const width = VARIANT_DIMENSIONS.get(variant);
-    if (!width) {
-      return null;
-    }
-    return `${width}px`;
-  };
-
   const imagesWithPrompts = useMemo(() => {
     if (Object.keys(promptThisMap).length === 0) {
       return images;
@@ -516,6 +488,18 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     brokenImageIds,
     isLoading: loading,
     returningFromDetailRef,
+  });
+
+  useGalleryRefreshLifecycle({
+    fetchImages,
+    imageCount: images.length,
+    loading,
+    perfLoggingEnabled: PERF_LOGGING_ENABLED,
+    ref,
+    refreshTrigger,
+    resetToFirstPage: setCurrentPage,
+    returningFromDetailRef,
+    serverPagination,
   });
 
   const {
@@ -776,18 +760,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     return { dateKey: newestDateKey, count };
   }, [setDateFilter, sortedImages]);
 
-  const variantOptions = useMemo(
-    () => [
-      { value: 'full', label: 'Full (No Resize)' },
-      { value: 'w=300', label: 'Small (300px)' },
-      { value: 'w=600', label: 'Medium (600px)' },
-      { value: 'w=900', label: 'Large (900px)' },
-      { value: 'w=1200', label: 'X-Large (1200px)' },
-      { value: 'w=150', label: 'Thumbnail-ish (150px)' }
-    ],
-    []
-  );
-
   const editFolderOptions = useMemo(
     () => [
       { value: '', label: '[none]' },
@@ -929,7 +901,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       }}
       resultsRegionProps={{
         hasResults, galleryTotalCount, colorSearchHex, hasActiveFilters, viewMode, gridSize,
-        viewFilters, selectedVariant, variantOptions, namespace, auditLoading, auditProgress, brokenAudit,
+        viewFilters, selectedVariant, variantOptions: VARIANT_OPTIONS, namespace, auditLoading, auditProgress, brokenAudit,
         onClearFilters: handleClearFilters, onToggleSelection: toggleSelection, onBeforeNavigate: saveGalleryReturnState,
         onCopyNamespace: (ns) => { void copyToClipboard(ns, 'Namespace', toast.push); },
         onSelectColor: handleSelectColor, onToggleCopyMenu: handleOpenCopyMenu, onStartEdit: startEdit,
@@ -939,8 +911,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         onVariantChange: setSelectedVariant, onFoldersChanged: handleFoldersChanged, onRunBrokenAudit: runBrokenAudit,
       }}
       modalsProps={{
-        images, openCopyMenu, onCloseCopyMenu: () => setOpenCopyMenu(null), getVariantUrls,
-        getVariantWidthLabel, onCopyUrl: handleCopyUrl, onDownload: downloadVariantToFile,
+        images, openCopyMenu, onCloseCopyMenu: () => setOpenCopyMenu(null), onCopyUrl: handleCopyUrl, onDownload: downloadVariantToFile,
         namespaceModalOpen: namespaceSettingsOpen, namespaceSelectValue, namespaceDraft, namespaceOptions,
         onNamespaceSelectChange: handleNamespaceSelectChange, onNamespaceDraftChange: handleNamespaceDraftChange,
         onNamespaceCancel: () => setNamespaceSettingsOpen(false), onNamespaceSave: handleNamespaceSave,

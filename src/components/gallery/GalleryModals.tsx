@@ -7,19 +7,20 @@
 'use client';
 
 import React from 'react';
+import { getMultipleImageUrls } from '@/utils/imageUtils';
 import { GalleryCopyModal } from './GalleryCopyModal';
 import { GalleryBulkEditModal } from './GalleryBulkEditModal';
 import { GalleryEditModal } from './GalleryEditModal';
 import { GalleryNamespaceModal } from './GalleryNamespaceModal';
 import { DeleteConfirmModal } from './modals';
+import { VARIANT_DIMENSIONS, VARIANT_PRESETS } from './constants';
 import type { CloudflareImage, SelectOption } from './types';
+import { getVariantWidthLabel } from './utils';
 
 interface GalleryModalsProps {
   images: CloudflareImage[];
   openCopyMenu: string | null;
   onCloseCopyMenu: () => void;
-  getVariantUrls: (image: CloudflareImage) => Record<string, string>;
-  getVariantWidthLabel: (variant: string) => string | null;
   onCopyUrl: (
     event: React.MouseEvent<HTMLButtonElement>,
     url: string,
@@ -133,8 +134,6 @@ export const GalleryModals: React.FC<GalleryModalsProps> = ({
   images,
   openCopyMenu,
   onCloseCopyMenu,
-  getVariantUrls,
-  getVariantWidthLabel,
   onCopyUrl,
   onDownload,
   namespaceModalOpen,
@@ -226,10 +225,10 @@ export const GalleryModals: React.FC<GalleryModalsProps> = ({
 }) => {
   const copyModalImage = openCopyMenu ? images.find((image) => image.id === openCopyMenu) : null;
   const copyItems = copyModalImage
-    ? Object.entries(getVariantUrls(copyModalImage)).map(([variant, url]) => ({
+    ? Object.entries(getMultipleImageUrls(copyModalImage.id, VARIANT_PRESETS)).map(([variant, url]) => ({
         variant,
         url: String(url),
-        widthLabel: getVariantWidthLabel(variant) ?? undefined,
+        widthLabel: getVariantWidthLabel(variant, VARIANT_DIMENSIONS) ?? undefined,
       }))
     : [];
 

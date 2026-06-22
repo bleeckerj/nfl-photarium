@@ -20,6 +20,13 @@ export type GalleryServerQueryState = {
   showMotionAssetsOnly: boolean;
 };
 
+export const resolveGalleryRefreshServerQuery = (
+  serverQuery: GalleryServerQueryState | undefined,
+  options: { firstPage?: boolean } = {}
+) => (
+  options.firstPage && serverQuery ? { ...serverQuery, page: 1 } : serverQuery
+);
+
 export const buildGalleryImagesUrl = ({
   forceRefresh = false,
   namespace,

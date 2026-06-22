@@ -53,6 +53,12 @@ interface UseUploaderUploadActionsOptions {
 
 const VIDEO_REMOTE_UPLOAD_CONCURRENCY = 2;
 
+// While a multi-file batch is uploading, refresh the gallery progressively so
+// assets appear as they finish instead of only after the whole batch completes.
+// Debounced inside notifyGalleryUploaded so a burst of quick uploads coalesces
+// into a single refresh.
+const GALLERY_PROGRESSIVE_REFRESH_DELAY_MS = 600;
+
 const formatUploadErrorMessage = (response: Response, payload: unknown) => {
   if (response.status === 409 && payload && typeof payload === 'object' && 'duplicates' in payload) {
     const data = payload as { error?: string; duplicates?: Array<{ id?: string; filename?: string; folder?: string }> };
@@ -328,7 +334,10 @@ export const useUploaderUploadActions = ({
               if (shouldEmbedAnything) {
                 successEntries.forEach((entry) => enqueueEmbedding(entry.id, shouldEmbedClip, shouldEmbedColor));
               }
-              if (successEntries.length > 0) uploadedAny = true;
+              if (successEntries.length > 0) {
+                uploadedAny = true;
+                notifyGalleryUploaded(GALLERY_PROGRESSIVE_REFRESH_DELAY_MS);
+              }
             } else {
               const typedResult = result as {
                 id?: string;
@@ -373,6 +382,7 @@ export const useUploaderUploadActions = ({
                 enqueueEmbedding(serverId, shouldEmbedClip, shouldEmbedColor);
               }
               uploadedAny = true;
+              notifyGalleryUploaded(GALLERY_PROGRESSIVE_REFRESH_DELAY_MS);
             }
           } else {
             const errorMessage = formatUploadErrorMessage(response, result);

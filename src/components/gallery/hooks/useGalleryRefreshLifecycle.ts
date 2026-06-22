@@ -2,7 +2,7 @@ import { useEffect, useImperativeHandle, useRef, type ForwardedRef, type Mutable
 import type { ImageGalleryRef } from '../types';
 import type { GalleryServerPagination } from '../serverState';
 
-type FetchImages = (options?: { silent?: boolean; forceRefresh?: boolean; syncNamespaces?: boolean }) => Promise<void>;
+type FetchImages = (options?: { silent?: boolean; forceRefresh?: boolean; syncNamespaces?: boolean; firstPage?: boolean }) => Promise<void>;
 
 type UseGalleryRefreshLifecycleOptions = {
   fetchImages: FetchImages;
@@ -11,6 +11,7 @@ type UseGalleryRefreshLifecycleOptions = {
   perfLoggingEnabled: boolean;
   ref: ForwardedRef<ImageGalleryRef>;
   refreshTrigger?: number;
+  resetToFirstPage: (page: number) => void;
   returningFromDetailRef: MutableRefObject<boolean>;
   serverPagination: GalleryServerPagination | null;
 };
@@ -22,6 +23,7 @@ export function useGalleryRefreshLifecycle({
   perfLoggingEnabled,
   ref,
   refreshTrigger,
+  resetToFirstPage,
   returningFromDetailRef,
   serverPagination,
 }: UseGalleryRefreshLifecycleOptions) {
@@ -39,12 +41,18 @@ export function useGalleryRefreshLifecycle({
   }, [imageCount, loading, perfLoggingEnabled, returningFromDetailRef, serverPagination]);
 
   useImperativeHandle(ref, () => ({
-    refreshImages: () => fetchImages({ silent: true, syncNamespaces: true }),
+    refreshImages: () => {
+      // Newly uploaded assets sort onto the first page; jump there so they are
+      // visible even when the user was browsing a later page.
+      resetToFirstPage(1);
+      return fetchImages({ silent: true, syncNamespaces: true, firstPage: true });
+    },
   }));
 
   useEffect(() => {
     if (refreshTrigger && refreshTrigger > 0) {
-      fetchImages({ silent: true, syncNamespaces: true });
+      resetToFirstPage(1);
+      fetchImages({ silent: true, syncNamespaces: true, firstPage: true });
     }
-  }, [refreshTrigger, fetchImages]);
+  }, [refreshTrigger, fetchImages, resetToFirstPage]);
 }
