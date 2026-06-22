@@ -1,44 +1,19 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 
 import type { ImageToolControl } from '@/services/imageToolsService';
-import { ControlGroupConsole } from '@/components/image-detail/image-tools/ControlFields';
+import { ControlField } from '@/components/image-detail/image-tools/ControlFields';
 import type { ControlGroup, ToolValues } from '@/components/image-detail/image-tools/controlModel';
 
 type ControlChangeHandler = (control: ImageToolControl, value: string | boolean) => void;
 
-const splitGroupsIntoColumns = (groups: ControlGroup[], columnCount: number) => {
-  const columns = Array.from({ length: columnCount }, () => [] as ControlGroup[]);
-  groups.forEach((group, index) => {
-    columns[index % columnCount].push(group);
-  });
-  return columns;
-};
-
-const ParameterGroupCard = ({
-  group,
-  values,
-  busy,
-  onChange,
-  advancedOpen,
-  onAdvancedToggle,
-}: {
-  group: ControlGroup;
-  values: ToolValues;
-  busy: boolean;
-  onChange: ControlChangeHandler;
-  advancedOpen?: boolean;
-  onAdvancedToggle: (groupId: string, open: boolean) => void;
-}) => (
-  <ControlGroupConsole
-    group={group}
-    values={values}
-    busy={busy}
-    onChange={onChange}
-    advancedOpen={advancedOpen}
-    onAdvancedToggle={onAdvancedToggle}
-  />
+const railButtonClass = (active: boolean) => (
+  `flex w-full items-center justify-between gap-2 rounded border px-2 py-1.5 text-left font-mono text-[11px] transition ${
+    active
+      ? 'border-gray-900 bg-white text-gray-950 ring-1 ring-gray-900'
+      : 'border-transparent text-gray-600 hover:border-gray-300 hover:bg-white'
+  }`
 );
 
 export const ParameterGroupsLayout = ({
@@ -52,93 +27,58 @@ export const ParameterGroupsLayout = ({
   busy: boolean;
   onChange: ControlChangeHandler;
 }) => {
-  const [openAdvancedGroupIds, setOpenAdvancedGroupIds] = useState(() => new Set<string>());
-  const handleAdvancedToggle = (groupId: string, open: boolean) => {
-    setOpenAdvancedGroupIds((current) => {
-      const next = new Set(current);
-      if (open) {
-        next.add(groupId);
-      } else {
-        next.delete(groupId);
-      }
-      return next;
-    });
-  };
-
-  const visibleGroups = useMemo(() => {
-    const regularGroups = groups.filter((group) => !group.advanced);
-    const advancedGroups = groups.filter((group) => group.advanced);
-    return {
-      mobile: groups,
-      advanced: advancedGroups,
-      twoColumns: splitGroupsIntoColumns(regularGroups, 2),
-      threeColumns: splitGroupsIntoColumns(regularGroups, 3),
-    };
-  }, [groups]);
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
 
   if (groups.length === 0) {
     return <p className="font-mono text-[10px] text-gray-500">No parameter controls for this effect.</p>;
   }
 
-  const renderGroup = (group: ControlGroup) => (
-    <ParameterGroupCard
-      key={group.id}
-      group={group}
-      values={values}
-      busy={busy}
-      onChange={onChange}
-      advancedOpen={group.advanced ? openAdvancedGroupIds.has(group.id) : undefined}
-      onAdvancedToggle={handleAdvancedToggle}
-    />
-  );
+  const activeGroup = groups.find((group) => group.id === activeGroupId) ?? groups[0];
 
   return (
-    <>
-      <div className="grid gap-3 md:hidden">
-        {visibleGroups.mobile.map(renderGroup)}
-      </div>
-
-      <div className="hidden gap-3 md:grid md:grid-cols-2 2xl:hidden">
-        {visibleGroups.twoColumns.map((column, index) => (
-          <div key={index} className="space-y-3">
-            {column.map(renderGroup)}
-          </div>
-        ))}
-      </div>
-
-      {visibleGroups.advanced.length > 0 && (
-        <div className="mt-3 hidden items-start gap-3 md:grid md:grid-cols-2 2xl:hidden">
-          {visibleGroups.advanced.map((group) => (
-            <div
+    <div className="grid gap-3 md:grid-cols-[11rem_minmax(0,1fr)] md:items-start">
+      <nav
+        aria-label="Parameter groups"
+        className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1 md:mx-0 md:flex-col md:overflow-visible md:px-0 md:pb-0"
+      >
+        {groups.map((group) => {
+          const active = group.id === activeGroup.id;
+          return (
+            <button
               key={group.id}
-              className={openAdvancedGroupIds.has(group.id) ? 'md:col-span-2' : undefined}
+              type="button"
+              aria-pressed={active}
+              onClick={() => setActiveGroupId(group.id)}
+              className={`${railButtonClass(active)} shrink-0 md:shrink`}
             >
-              {renderGroup(group)}
-            </div>
+              <span className="truncate">{group.label}</span>
+              {group.advanced && (
+                <span className="shrink-0 text-[9px] uppercase tracking-wide text-gray-400">adv</span>
+              )}
+            </button>
+          );
+        })}
+      </nav>
+
+      <section className="min-w-0 rounded border border-gray-200 bg-white p-3">
+        <div className="mb-3 flex items-center justify-between gap-2 font-mono text-[11px] font-semibold text-gray-800">
+          <span>{activeGroup.label}</span>
+          <span className="text-[10px] font-normal text-gray-500">
+            {activeGroup.controls.length} control{activeGroup.controls.length === 1 ? '' : 's'}
+          </span>
+        </div>
+        <div className="grid items-start gap-x-4 gap-y-3 [grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))]">
+          {activeGroup.controls.map((control) => (
+            <ControlField
+              key={control.id}
+              control={control}
+              currentValue={values[control.id] ?? control.defaultValue ?? ''}
+              busy={busy}
+              onChange={onChange}
+            />
           ))}
         </div>
-      )}
-
-      <div className="hidden gap-3 2xl:grid 2xl:grid-cols-3">
-        {visibleGroups.threeColumns.map((column, index) => (
-          <div key={index} className="space-y-3">
-            {column.map(renderGroup)}
-          </div>
-        ))}
-      </div>
-
-      {visibleGroups.advanced.length > 0 && (
-        <div className="mt-3 hidden items-start gap-3 2xl:grid 2xl:grid-cols-3">
-          {visibleGroups.advanced.map((group) => (
-            <div
-              key={group.id}
-              className={openAdvancedGroupIds.has(group.id) ? '2xl:col-span-3' : undefined}
-            >
-              {renderGroup(group)}
-            </div>
-          ))}
-        </div>
-      )}
-    </>
+      </section>
+    </div>
   );
 };
