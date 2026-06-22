@@ -84,6 +84,37 @@ const PRESET_QUALITY: Record<string, number> = {
   'high-quality': 92,
 };
 
+const VERTICAL_HOLD_EFFECT_DEFAULTS: Record<string, {
+  verticalHoldAmount: number;
+  verticalHoldSpeed: number;
+  verticalHoldPhase: number;
+  verticalHoldRollAmount: number;
+  verticalHoldBandHeight: number;
+}> = {
+  vhs: {
+    verticalHoldAmount: 0,
+    verticalHoldSpeed: 0.15,
+    verticalHoldPhase: 0,
+    verticalHoldRollAmount: 1,
+    verticalHoldBandHeight: 0.08,
+  },
+  'rgb-subpixel-display': {
+    verticalHoldAmount: 0,
+    verticalHoldSpeed: 0.15,
+    verticalHoldPhase: 0,
+    verticalHoldRollAmount: 1,
+    verticalHoldBandHeight: 0.08,
+  },
+};
+
+const VERTICAL_HOLD_ROLL_PARAM_KEYS = [
+  'verticalHoldSpeed',
+  'verticalHoldPhase',
+  'verticalHoldRollAmount',
+] as const;
+
+const INVISIBLE_VERTICAL_HOLD_VALUE = Number.EPSILON;
+
 const STILL_CONTENT_TYPE: Record<string, string> = {
   png: 'image/png',
   webp: 'image/webp',
@@ -100,6 +131,59 @@ const ANIMATED_CONTENT_TYPE: Record<string, string> = {
 const normalizeFormat = (format: string) => format.trim().toLowerCase();
 
 const resolvePreset = (preset?: string) => (preset && preset in PRESET_MAX_DIM ? preset : 'balanced');
+
+const hasOwnParam = (params: Record<string, unknown>, key: string) =>
+  Object.prototype.hasOwnProperty.call(params, key);
+
+const finiteNumberParam = (value: unknown) => (
+  typeof value === 'number' && Number.isFinite(value) ? value : undefined
+);
+
+const verticalHoldParamValue = (
+  params: Record<string, unknown>,
+  key: keyof typeof VERTICAL_HOLD_EFFECT_DEFAULTS['vhs'],
+  fallback: number
+) => finiteNumberParam(params[key]) ?? fallback;
+
+const usesIndependentVerticalHoldRoll = (request: ImageToolRequest) => {
+  const defaults = VERTICAL_HOLD_EFFECT_DEFAULTS[request.effectId];
+  if (!defaults) return false;
+
+  const params = request.params ?? {};
+  const rollAmount = verticalHoldParamValue(params, 'verticalHoldRollAmount', defaults.verticalHoldRollAmount);
+  if (rollAmount <= 0) return false;
+
+  const rollOverrideChanged = VERTICAL_HOLD_ROLL_PARAM_KEYS.some((key) => (
+    hasOwnParam(params, key) && verticalHoldParamValue(params, key, defaults[key]) !== defaults[key]
+  ));
+  const explicitBandDisabled = (
+    (hasOwnParam(params, 'verticalHoldAmount')
+      && verticalHoldParamValue(params, 'verticalHoldAmount', defaults.verticalHoldAmount) <= 0)
+    || (hasOwnParam(params, 'verticalHoldBandHeight')
+      && verticalHoldParamValue(params, 'verticalHoldBandHeight', defaults.verticalHoldBandHeight) <= 0)
+  );
+
+  return rollOverrideChanged || (Boolean(request.paramPreset) && explicitBandDisabled);
+};
+
+const buildRenderParams = (request: ImageToolRequest) => {
+  const defaults = VERTICAL_HOLD_EFFECT_DEFAULTS[request.effectId];
+  if (!defaults || !usesIndependentVerticalHoldRoll(request)) return request.params;
+
+  const params = request.params ?? {};
+  const amount = verticalHoldParamValue(params, 'verticalHoldAmount', defaults.verticalHoldAmount);
+  const bandHeight = verticalHoldParamValue(params, 'verticalHoldBandHeight', defaults.verticalHoldBandHeight);
+  if (amount > 0 && bandHeight > 0) return params;
+
+  const nextParams = { ...params };
+  if (amount <= 0 || bandHeight <= 0) {
+    nextParams.verticalHoldAmount = INVISIBLE_VERTICAL_HOLD_VALUE;
+  }
+  if (bandHeight <= 0) {
+    nextParams.verticalHoldBandHeight = INVISIBLE_VERTICAL_HOLD_VALUE;
+  }
+  return nextParams;
+};
 
 export const resolveGrainradMaxDim = (request: ImageToolRequest) => {
   const preset = resolvePreset(request.output.preset);
@@ -299,7 +383,7 @@ export const renderStill = async (
     source: raster,
     effect: request.effectId,
     paramPreset: request.paramPreset,
-    params: request.params,
+    params: buildRenderParams(request),
     renderContext: request.renderContext ?? {},
   });
   assertImageOutput(result, request.effectId);
@@ -361,7 +445,7 @@ export const renderAnimated = async (
       source: raster,
       effect: request.effectId,
       paramPreset: request.paramPreset,
-      params: request.params,
+      params: buildRenderParams(request),
       renderContext,
     });
     assertImageOutput(result, request.effectId);

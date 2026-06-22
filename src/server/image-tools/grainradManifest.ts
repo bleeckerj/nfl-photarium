@@ -38,6 +38,11 @@ const ADVANCED_GROUPS = new Set([
   'timing',
 ]);
 
+const CONTROL_OVERRIDES: Record<string, Partial<ImageToolControl>> = {
+  // Upstream currently describes this as a fractional control but exports a binary step.
+  'params.verticalHoldRollAmount': { step: 0.01 },
+};
+
 type GrainradParameter = {
   group?: string;
 };
@@ -108,8 +113,10 @@ const annotateControl = (
   const metadata = parameterIndex.get(paramName);
   const groups = Array.from(metadata?.groups ?? []);
   const group = groups[0] ?? 'general';
+  const overrides = CONTROL_OVERRIDES[control.id] ?? {};
   return {
     ...control,
+    ...overrides,
     group,
     effectIds: Array.from(metadata?.effectIds ?? []),
     advanced: ADVANCED_GROUPS.has(group),
@@ -141,4 +148,3 @@ export const createGrainradManifest = (): ImageToolManifest => {
     },
   };
 };
-

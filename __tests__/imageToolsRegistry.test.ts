@@ -114,6 +114,11 @@ describe('GET /api/image-tools', () => {
     expect(findControl(grainrad!, 'params.contrast')).toBeTruthy();
     expect(findControl(grainrad!, 'params.brightness')).toBeTruthy();
     expect(findControl(grainrad!, 'params.scanlineIntensity')).toBeTruthy();
+    expect(findControl(grainrad!, 'params.verticalHoldRollAmount')).toEqual(expect.objectContaining({
+      min: 0,
+      max: 1,
+      step: 0.01,
+    }));
   });
 });
 

@@ -19,6 +19,22 @@ const stillRequest = (overrides: Partial<ImageToolRequest> = {}): ImageToolReque
   ...overrides,
 });
 
+const createVerticalGradientPng = async (width: number, height: number) => {
+  const data = Buffer.alloc(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * 4;
+      const value = y * 24;
+      data[offset] = value;
+      data[offset + 1] = value;
+      data[offset + 2] = value;
+      data[offset + 3] = 255;
+    }
+  }
+
+  return sharp(data, { raw: { width, height, channels: 4 } }).png().toBuffer();
+};
+
 describe('grainradEngine (in-process bridge)', () => {
   it('decodes a WebP source via sharp (the previously-failing ffmpeg case)', async () => {
     const webp = await createTestImageFixture('webp');
@@ -75,6 +91,45 @@ describe('grainradEngine (in-process bridge)', () => {
       paramPreset: 'missing-preset',
       params: {},
     }))).rejects.toThrow(/Unknown paramPreset/i);
+  });
+
+  it('lets vertical hold roll independently when the visible band is disabled', async () => {
+    const width = 4;
+    const height = 8;
+    const png = await createVerticalGradientPng(width, height);
+    const artifact = await renderStill(png, stillRequest({
+      effectId: 'rgb-subpixel-display',
+      params: {
+        brightness: 0,
+        contrast: 0,
+        gamma: 1,
+        signalResolution: 1,
+        resampleMode: 'nearest',
+        pixelGlow: 0,
+        subpixelGlow: 0,
+        phosphorBloom: 0,
+        glassBloom: 0,
+        maskStrength: 0,
+        maskOpacity: 0,
+        scanlineIntensity: 0,
+        waveAmount: 0,
+        verticalHoldAmount: 0,
+        verticalHoldSpeed: 0,
+        verticalHoldPhase: 0.5,
+        verticalHoldRollAmount: 1,
+        verticalHoldBandHeight: 0,
+        verticalHoldDataDensity: 0,
+        verticalHoldDataBrightness: 0,
+        horizontalSkewAmount: 0,
+        diagonalTearAmount: 0,
+      },
+      output: { mode: 'still', format: 'png', preset: 'preview' },
+    }));
+    const decoded = await sharp(artifact.buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+
+    expect(decoded.info.width).toBe(width);
+    expect(decoded.info.height).toBe(height);
+    expect(decoded.data[0]).toBe(96);
   });
 
   it('downscales large sources for the preview preset', async () => {
