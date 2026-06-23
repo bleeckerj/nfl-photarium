@@ -22,6 +22,7 @@ import { useUploaderImportUrl } from "@/components/image-uploader/useUploaderImp
 import { useUploadGuard } from "@/components/image-uploader/useUploadGuard";
 import { useUploadNamespaceControls } from "@/components/image-uploader/useUploadNamespaceControls";
 import { useUploaderActivityStats } from "@/components/image-uploader/useUploaderActivityStats";
+import { useQueuedImageReduction } from "@/components/image-uploader/useQueuedImageReduction";
 import { copyUrlToClipboard } from "@/components/image-uploader/clipboard";
 import { useUploadedImageActions } from "@/components/image-uploader/useUploadedImageActions";
 import UploadedImagesList from "@/components/image-uploader/UploadedImagesList";
@@ -33,7 +34,6 @@ import EmbeddingSettingsPanel from "@/components/image-uploader/EmbeddingSetting
 import ImportUrlPanel from "@/components/image-uploader/ImportUrlPanel";
 import AnimationControlsBar from "@/components/image-uploader/AnimationControlsBar";
 import {
-  MAX_UPLOAD_IMAGE_BYTES,
   base64ToFile,
   buildUploaderGallerySummaryUrl,
   extractKeynoteImages,
@@ -45,7 +45,6 @@ import {
   isKeynoteFile,
   isZipFile,
   mergeTagInputs,
-  reduceImageFileToLimit,
   resolveTagInput,
 } from "@/components/image-uploader/fileHelpers";
 
@@ -97,7 +96,6 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
   } = usePageImportSession();
   const [selectedParentId, setSelectedParentId] = useState<string>('');
   const previewFallbackAttemptedRef = useRef<Set<string>>(new Set());
-  const [reducingQueueItems, setReducingQueueItems] = useState<Record<string, boolean>>({});
   const [previewFailures, setPreviewFailures] = useState<Record<string, boolean>>({});
   const [expandedQueueMetadata, setExpandedQueueMetadata] = useState<Record<string, boolean>>({});
   const [showAllQueuedItems, setShowAllQueuedItems] = useState(false);
@@ -254,48 +252,16 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     }
   }, [setQueuedFiles]);
 
-  const reduceQueuedFileSize = useCallback(async (id: string) => {
-    const target = queuedFiles.find((item) => item.id === id);
-    if (!target?.file) return;
-    if (!isImageFile(target.file)) return;
-    if (target.file.size <= MAX_UPLOAD_IMAGE_BYTES) return;
-
-    setReducingQueueItems((prev) => ({ ...prev, [id]: true }));
-    try {
-      const reduced = await reduceImageFileToLimit(target.file, MAX_UPLOAD_IMAGE_BYTES);
-      if (!reduced) {
-        updateQueuedFile(id, {
-          processingNote: 'Unable to reduce below 10MB'
-        });
-        return;
-      }
-      const ext = reduced.type === 'image/webp' ? '.webp' : '.jpg';
-      const baseName = target.filename.replace(/\.[^.]+$/, '');
-      const nextFilename = `${baseName}${ext}`;
-      const nextFile = new File([reduced.blob], nextFilename, { type: reduced.type });
-      if (target.previewUrl && target.previewUrl.startsWith('blob:')) {
-        URL.revokeObjectURL(target.previewUrl);
-      }
-      updateQueuedFile(id, {
-        file: nextFile,
-        filename: nextFilename,
-        previewUrl: URL.createObjectURL(nextFile),
-        processingNote: reduced.note
-      });
-      setPreviewFailures((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
-    } catch (error) {
-      console.error('Failed to reduce file size', error);
-      updateQueuedFile(id, {
-        processingNote: 'Size reduction failed'
-      });
-    } finally {
-      setReducingQueueItems((prev) => ({ ...prev, [id]: false }));
-    }
-  }, [queuedFiles, updateQueuedFile]);
+  const {
+    reducingQueueItems,
+    reduceQueuedFileSize,
+    clearReducingQueueItem,
+    clearReducingQueueItems,
+  } = useQueuedImageReduction({
+    queuedFiles,
+    updateQueuedFile,
+    setPreviewFailures,
+  });
 
   const estimateMetadataBytes = useCallback((payload: Record<string, unknown>) => {
     const filtered = Object.fromEntries(
@@ -755,10 +721,10 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
   const handleClearQueuedItems = useCallback(() => {
     clearQueue();
     setPreviewFailures({});
-    setReducingQueueItems({});
+    clearReducingQueueItems();
     setExpandedQueueMetadata({});
     setShowAllQueuedItems(false);
-  }, [clearQueue]);
+  }, [clearQueue, clearReducingQueueItems]);
 
   const handleUnselectAllQueuedItems = useCallback(() => {
     unselectAllQueuedFiles();
@@ -771,17 +737,13 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
       delete next[id];
       return next;
     });
-    setReducingQueueItems((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
+    clearReducingQueueItem(id);
     setExpandedQueueMetadata((prev) => {
       const next = { ...prev };
       delete next[id];
       return next;
     });
-  }, [removeQueuedFile]);
+  }, [clearReducingQueueItem, removeQueuedFile]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,

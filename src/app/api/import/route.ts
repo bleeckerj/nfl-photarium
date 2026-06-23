@@ -232,6 +232,8 @@ export async function POST(request: NextRequest) {
       size: finalBuffer.length,
       data: base64,
       originalUrl: sourceUrl,
+      note: prepared.data.note,
+      uploadNormalization: prepared.data.uploadNormalization,
       captureDate,
       snagxMetadata,
       snagxDescription
