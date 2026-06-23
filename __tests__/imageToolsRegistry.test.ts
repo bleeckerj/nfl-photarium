@@ -119,6 +119,14 @@ describe('GET /api/image-tools', () => {
       max: 1,
       step: 0.01,
     }));
+    expect(findControl(grainrad!, 'params.verticalHoldFullLoop')).toEqual(expect.objectContaining({
+      label: 'Vertical Hold Full Loop',
+      type: 'switch',
+      defaultValue: false,
+      group: 'vertical-hold',
+      effectIds: expect.arrayContaining(['vhs', 'rgb-subpixel-display']),
+      advanced: true,
+    }));
   });
 });
 

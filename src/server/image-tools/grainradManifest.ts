@@ -43,6 +43,17 @@ const CONTROL_OVERRIDES: Record<string, Partial<ImageToolControl>> = {
   'params.verticalHoldRollAmount': { step: 0.01 },
 };
 
+const VERTICAL_HOLD_FULL_LOOP_CONTROL: ImageToolControl = {
+  id: 'params.verticalHoldFullLoop',
+  label: 'Vertical Hold Full Loop',
+  type: 'switch',
+  defaultValue: false,
+  helpText: 'Match animated duration to one complete vertical-hold cycle. This is seamless when roll amount is 1.',
+  group: 'vertical-hold',
+  effectIds: ['vhs', 'rgb-subpixel-display'],
+  advanced: true,
+};
+
 type GrainradParameter = {
   group?: string;
 };
@@ -123,6 +134,20 @@ const annotateControl = (
   };
 };
 
+const addPhotariumControls = (controls: ImageToolControl[]) => {
+  if (controls.some((control) => control.id === VERTICAL_HOLD_FULL_LOOP_CONTROL.id)) {
+    return controls;
+  }
+
+  const rollControlIndex = controls.findIndex((control) => control.id === 'params.verticalHoldRollAmount');
+  const insertIndex = rollControlIndex >= 0 ? rollControlIndex + 1 : controls.length;
+  return [
+    ...controls.slice(0, insertIndex),
+    VERTICAL_HOLD_FULL_LOOP_CONTROL,
+    ...controls.slice(insertIndex),
+  ];
+};
+
 export const createGrainradManifest = (): ImageToolManifest => {
   const api = createEffectsApi();
   const manifest = normalizePhotariumManifest(createPhotariumImageToolManifest({
@@ -140,7 +165,9 @@ export const createGrainradManifest = (): ImageToolManifest => {
 
   return {
     ...manifest,
-    controls: manifest.controls.map((control) => annotateControl(control, parameterIndex)),
+    controls: addPhotariumControls(
+      manifest.controls.map((control) => annotateControl(control, parameterIndex))
+    ),
     defaultRequest: {
       ...manifest.defaultRequest,
       effectId: 'vhs',

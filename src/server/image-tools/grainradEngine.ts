@@ -113,7 +113,18 @@ const VERTICAL_HOLD_ROLL_PARAM_KEYS = [
   'verticalHoldRollAmount',
 ] as const;
 
+const VERTICAL_HOLD_FULL_LOOP_PARAM = 'verticalHoldFullLoop';
 const INVISIBLE_VERTICAL_HOLD_VALUE = Number.EPSILON;
+
+const RGB_SUBPIXEL_PARAM_PRESET_OVERRIDES: Record<
+  string,
+  Partial<typeof VERTICAL_HOLD_EFFECT_DEFAULTS['rgb-subpixel-display']>
+> = {
+  'diagonal-tear-hold-soft-wave-medium': {
+    verticalHoldSpeed: 0.25,
+    verticalHoldRollAmount: 1,
+  },
+};
 
 const STILL_CONTENT_TYPE: Record<string, string> = {
   png: 'image/png',
@@ -145,6 +156,57 @@ const verticalHoldParamValue = (
   fallback: number
 ) => finiteNumberParam(params[key]) ?? fallback;
 
+const booleanParam = (value: unknown) => value === true || value === 'true';
+
+const stripPhotariumOnlyParams = (params: Record<string, unknown>) => {
+  if (!hasOwnParam(params, VERTICAL_HOLD_FULL_LOOP_PARAM)) return params;
+  const nextParams = { ...params };
+  delete nextParams[VERTICAL_HOLD_FULL_LOOP_PARAM];
+  return nextParams;
+};
+
+const verticalHoldPresetParamValue = (
+  request: ImageToolRequest,
+  key: keyof typeof VERTICAL_HOLD_EFFECT_DEFAULTS['vhs']
+) => {
+  if (request.effectId !== 'rgb-subpixel-display' || !request.paramPreset) return undefined;
+  return finiteNumberParam(RGB_SUBPIXEL_PARAM_PRESET_OVERRIDES[request.paramPreset]?.[key]);
+};
+
+const resolvedVerticalHoldParamValue = (
+  request: ImageToolRequest,
+  key: keyof typeof VERTICAL_HOLD_EFFECT_DEFAULTS['vhs']
+) => {
+  const defaults = VERTICAL_HOLD_EFFECT_DEFAULTS[request.effectId];
+  if (!defaults) return undefined;
+
+  const params = request.params ?? {};
+  return finiteNumberParam(params[key])
+    ?? verticalHoldPresetParamValue(request, key)
+    ?? defaults[key];
+};
+
+const resolveVerticalHoldFullLoopTimeline = (
+  request: ImageToolRequest,
+  timeline: ImageToolRequest['timeline']
+): ImageToolRequest['timeline'] => {
+  const params = request.params ?? {};
+  if (!booleanParam(params[VERTICAL_HOLD_FULL_LOOP_PARAM])) return timeline;
+
+  const speed = resolvedVerticalHoldParamValue(request, 'verticalHoldSpeed');
+  if (!speed) return timeline;
+
+  const fps = normalizeTimeline({ ...(timeline ?? {}), mode: 'animated' }, request.renderContext ?? {}).fps;
+  const framesPerCycle = Math.max(2, Math.round(fps / Math.abs(speed)));
+  const durationMs = Math.round((framesPerCycle / fps) * 1000);
+
+  return {
+    ...(timeline ?? {}),
+    durationMs,
+    loop: true,
+  };
+};
+
 const usesIndependentVerticalHoldRoll = (request: ImageToolRequest) => {
   const defaults = VERTICAL_HOLD_EFFECT_DEFAULTS[request.effectId];
   if (!defaults) return false;
@@ -168,12 +230,14 @@ const usesIndependentVerticalHoldRoll = (request: ImageToolRequest) => {
 
 const buildRenderParams = (request: ImageToolRequest) => {
   const defaults = VERTICAL_HOLD_EFFECT_DEFAULTS[request.effectId];
-  if (!defaults || !usesIndependentVerticalHoldRoll(request)) return request.params;
+  if (!defaults || !usesIndependentVerticalHoldRoll(request)) {
+    return stripPhotariumOnlyParams(request.params);
+  }
 
   const params = request.params ?? {};
   const amount = verticalHoldParamValue(params, 'verticalHoldAmount', defaults.verticalHoldAmount);
   const bandHeight = verticalHoldParamValue(params, 'verticalHoldBandHeight', defaults.verticalHoldBandHeight);
-  if (amount > 0 && bandHeight > 0) return params;
+  if (amount > 0 && bandHeight > 0) return stripPhotariumOnlyParams(params);
 
   const nextParams = { ...params };
   if (amount <= 0 || bandHeight <= 0) {
@@ -182,7 +246,7 @@ const buildRenderParams = (request: ImageToolRequest) => {
   if (bandHeight <= 0) {
     nextParams.verticalHoldBandHeight = INVISIBLE_VERTICAL_HOLD_VALUE;
   }
-  return nextParams;
+  return stripPhotariumOnlyParams(nextParams);
 };
 
 export const resolveGrainradMaxDim = (request: ImageToolRequest) => {
@@ -420,7 +484,9 @@ export const renderAnimated = async (
   });
   const raster = await decodeToRaster(sourceBuffer, { maxDim });
 
-  const animatedTimeline = { ...(request.timeline ?? {}), mode: 'animated' as const };
+  const timeline = resolveVerticalHoldFullLoopTimeline(request, request.timeline);
+  const renderParams = buildRenderParams(request);
+  const animatedTimeline = { ...(timeline ?? {}), mode: 'animated' as const };
   const normalizedTimeline = normalizeTimeline(animatedTimeline, request.renderContext ?? {});
   const frameCount = getTimelineFrameCount(normalizedTimeline);
   const frames: RasterImage[] = [];
@@ -445,7 +511,7 @@ export const renderAnimated = async (
       source: raster,
       effect: request.effectId,
       paramPreset: request.paramPreset,
-      params: buildRenderParams(request),
+      params: renderParams,
       renderContext,
     });
     assertImageOutput(result, request.effectId);

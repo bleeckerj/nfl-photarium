@@ -213,6 +213,47 @@ describe('grainradEngine (in-process bridge)', () => {
     expect(progress.some((event) => event.startsWith('encode:'))).toBe(true);
   });
 
+  it('expands vertical hold full-loop animations to one complete roll cycle', async () => {
+    const png = await createTestImageFixture('png');
+    const progress: string[] = [];
+    await renderAnimated(png.buffer, stillRequest({
+      effectId: 'rgb-subpixel-display',
+      params: {
+        brightness: 0,
+        contrast: 0,
+        gamma: 1,
+        signalResolution: 1,
+        resampleMode: 'nearest',
+        pixelGlow: 0,
+        subpixelGlow: 0,
+        phosphorBloom: 0,
+        glassBloom: 0,
+        maskStrength: 0,
+        maskOpacity: 0,
+        scanlineIntensity: 0,
+        waveAmount: 0,
+        verticalHoldAmount: 1,
+        verticalHoldSpeed: 0.5,
+        verticalHoldRollAmount: 1,
+        verticalHoldBandHeight: 0.08,
+        verticalHoldDataDensity: 0,
+        verticalHoldDataBrightness: 0,
+        verticalHoldFullLoop: true,
+        horizontalSkewAmount: 0,
+        diagonalTearAmount: 0,
+      },
+      output: { mode: 'animated', format: 'webp', preset: 'preview' },
+      timeline: { durationMs: 500, fps: 4, loop: true },
+    }), {
+      onProgress: (event) => {
+        progress.push(event.message);
+      },
+    });
+
+    expect(progress.some((event) => event.includes('Rendering Grainrad frame 1 of 8'))).toBe(true);
+    expect(progress.some((event) => event.includes('Rendered Grainrad frame 8 of 8'))).toBe(true);
+  });
+
   it('rejects undecodable source bytes with a clear error', async () => {
     await expect(decodeToRaster(Buffer.from('not-an-image'))).rejects.toThrow(/could not decode/i);
   });

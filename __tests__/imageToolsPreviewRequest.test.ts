@@ -33,7 +33,7 @@ describe('buildImageToolPreviewRequest', () => {
     expect(previewRequest.paramPreset).toBe('diagonal-tear-hold-soft-wave-medium');
   });
 
-  it('renders animated output selections as bounded animated WebP previews when MP4 is selected', () => {
+  it('renders animated output selections as animated WebP previews when MP4 is selected', () => {
     const previewRequest = buildImageToolPreviewRequest({
       ...baseRequest,
       output: { mode: 'animated', format: 'mp4', preset: 'balanced' },
@@ -45,8 +45,8 @@ describe('buildImageToolPreviewRequest', () => {
       preset: 'preview',
     });
     expect(previewRequest.timeline).toEqual({
-      durationMs: 1200,
-      fps: 8,
+      durationMs: 2400,
+      fps: 12,
       loop: true,
     });
   });
@@ -70,7 +70,7 @@ describe('buildImageToolPreviewRequest', () => {
     });
   });
 
-  it('keeps RGB display animated selections on the bounded animated preview path', () => {
+  it('keeps RGB display animated selections on the animated preview path', () => {
     const previewRequest = buildImageToolPreviewRequest({
       ...baseRequest,
       effectId: 'rgb-subpixel-display',
@@ -82,6 +82,20 @@ describe('buildImageToolPreviewRequest', () => {
       format: 'webp',
       preset: 'preview',
     });
+    expect(previewRequest.timeline).toEqual({
+      durationMs: 2400,
+      fps: 12,
+      loop: true,
+    });
+  });
+
+  it('uses preview timeline defaults only when the request has no animated timeline', () => {
+    const previewRequest = buildImageToolPreviewRequest({
+      effectId: 'vhs',
+      params: {},
+      output: { mode: 'animated', format: 'webp', preset: 'balanced' },
+    });
+
     expect(previewRequest.timeline).toEqual({
       durationMs: 1200,
       fps: 8,

@@ -34,8 +34,8 @@ export const buildImageToolPreviewRequest = (request: ImageToolRequest): ImageTo
     timeline: animated
       ? {
           ...request.timeline,
-          durationMs: Math.min(request.timeline?.durationMs ?? ANIMATED_PREVIEW_DURATION_MS, ANIMATED_PREVIEW_DURATION_MS),
-          fps: Math.min(request.timeline?.fps ?? ANIMATED_PREVIEW_FPS, ANIMATED_PREVIEW_FPS),
+          durationMs: request.timeline?.durationMs ?? ANIMATED_PREVIEW_DURATION_MS,
+          fps: request.timeline?.fps ?? ANIMATED_PREVIEW_FPS,
           loop: request.timeline?.loop ?? true,
         }
       : request.timeline ? { ...request.timeline } : undefined,
