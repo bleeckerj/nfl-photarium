@@ -6,6 +6,8 @@ import type { CloudflareImage } from '@/components/image-detail/types';
 import {
   createCropVariant,
   type CropVariantAnchor,
+  type CropVariantMode,
+  type CropVariantPlacement,
   type CropVariantResponse,
 } from '@/services/cropVariantService';
 
@@ -37,6 +39,18 @@ const ANCHORS: Array<{ label: string; value: CropVariantAnchor }> = [
   { label: 'Bottom', value: 'bottom' },
 ];
 
+const HORIZONTAL_PLACEMENTS: Array<{ label: string; value: CropVariantPlacement }> = [
+  { label: 'Left', value: 'left' },
+  { label: 'Center', value: 'center' },
+  { label: 'Right', value: 'right' },
+];
+
+const VERTICAL_PLACEMENTS: Array<{ label: string; value: CropVariantPlacement }> = [
+  { label: 'Top', value: 'top' },
+  { label: 'Center', value: 'center' },
+  { label: 'Bottom', value: 'bottom' },
+];
+
 function parseRatio(value: string) {
   const match = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(value.trim());
   if (!match) {
@@ -55,6 +69,10 @@ function buildDefaultFilename(image: CloudflareImage) {
   return `${base}-crop`;
 }
 
+function alignUp(value: number, multiple: number) {
+  return Math.ceil(value / multiple) * multiple;
+}
+
 function splitTags(value: string) {
   const tags = value
     .split(',')
@@ -69,9 +87,11 @@ export function CropVariantModal({
   onClose,
   onCreated,
 }: CropVariantModalProps) {
+  const [mode, setMode] = useState<CropVariantMode>('crop');
   const [ratioPreset, setRatioPreset] = useState('1:1');
   const [customRatio, setCustomRatio] = useState('4:5');
   const [anchor, setAnchor] = useState<CropVariantAnchor>('center');
+  const [placement, setPlacement] = useState<CropVariantPlacement>('center');
   const [quality, setQuality] = useState(90);
   const [filename, setFilename] = useState(buildDefaultFilename(image));
   const [description, setDescription] = useState(image.description || '');
@@ -109,10 +129,51 @@ export function CropVariantModal({
     };
   }, [anchor, ratio, sourceHeight, sourceWidth]);
 
-  const canSubmit = Boolean(ratio && (!previewGeometry || previewGeometry.fits));
-  const outputLabel = sourceWidth && previewGeometry?.targetHeight
+  const expandGeometry = useMemo(() => {
+    if (!ratio || !sourceWidth || !sourceHeight) {
+      return null;
+    }
+    const targetRatio = ratio.width / ratio.height;
+    const sourceRatio = sourceWidth / sourceHeight;
+    let targetWidth = sourceWidth;
+    let targetHeight = sourceHeight;
+    if (sourceRatio < targetRatio) {
+      targetWidth = Math.ceil(sourceHeight * targetRatio);
+    } else if (sourceRatio > targetRatio) {
+      targetHeight = Math.ceil(sourceWidth / targetRatio);
+    }
+    targetWidth = alignUp(targetWidth, 16);
+    targetHeight = alignUp(targetHeight, 16);
+    const extraX = Math.max(0, targetWidth - sourceWidth);
+    const extraY = Math.max(0, targetHeight - sourceHeight);
+    const x = placement === 'left' ? 0 : placement === 'right' ? extraX : Math.round(extraX / 2);
+    const y = placement === 'top' ? 0 : placement === 'bottom' ? extraY : Math.round(extraY / 2);
+    return {
+      targetWidth,
+      targetHeight,
+      sourceLeftPercent: (x / targetWidth) * 100,
+      sourceTopPercent: (y / targetHeight) * 100,
+      sourceWidthPercent: (sourceWidth / targetWidth) * 100,
+      sourceHeightPercent: (sourceHeight / targetHeight) * 100,
+      expandsHorizontal: extraX > 0,
+      expandsVertical: extraY > 0,
+    };
+  }, [placement, ratio, sourceHeight, sourceWidth]);
+
+  const canSubmit = Boolean(ratio && (mode === 'outpaint' || !previewGeometry || previewGeometry.fits));
+  const outputLabel = mode === 'outpaint' && expandGeometry
+    ? `${expandGeometry.targetWidth} x ${expandGeometry.targetHeight}`
+    : sourceWidth && previewGeometry?.targetHeight
     ? `${sourceWidth} x ${previewGeometry.targetHeight}`
     : 'resolved on upload';
+  const placementOptions = expandGeometry?.expandsHorizontal && !expandGeometry.expandsVertical
+    ? HORIZONTAL_PLACEMENTS
+    : VERTICAL_PLACEMENTS;
+  const previewAspectRatio = mode === 'outpaint' && expandGeometry
+    ? `${expandGeometry.targetWidth} / ${expandGeometry.targetHeight}`
+    : sourceWidth && sourceHeight
+      ? `${sourceWidth} / ${sourceHeight}`
+      : '4 / 3';
 
   const handleSubmit = async () => {
     if (!ratio || !canSubmit || submitting) {
@@ -124,6 +185,8 @@ export function CropVariantModal({
       const result = await createCropVariant(image.id, {
         aspectRatio: ratio.label,
         anchor,
+        mode,
+        placement,
         quality,
         filename: filename.trim() ? filename.trim() : undefined,
         description: description.trim() ? description.trim() : undefined,
@@ -139,13 +202,13 @@ export function CropVariantModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-5xl overflow-hidden rounded-lg bg-white shadow-xl">
-        <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4">
+      <div className="flex max-h-[calc(100dvh-1rem)] w-full max-w-5xl flex-col overflow-hidden rounded-lg bg-white shadow-xl sm:max-h-[calc(100dvh-2rem)]">
+        <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-4 py-3">
           <div className="flex items-center gap-2">
             <Crop className="h-4 w-4 text-gray-700" aria-hidden="true" />
             <div>
-              <h2 className="text-sm font-semibold text-gray-900">Crop variant</h2>
+              <h2 className="text-sm font-semibold text-gray-900">{mode === 'outpaint' ? 'Expand variant' : 'Crop variant'}</h2>
               <p className="text-[11px] text-gray-500">{image.displayName || image.filename}</p>
             </div>
           </div>
@@ -159,15 +222,38 @@ export function CropVariantModal({
           </button>
         </div>
 
-        <div className="grid gap-0 md:grid-cols-[minmax(0,1fr)_340px]">
-          <div className="min-h-[420px] bg-neutral-950 p-4">
+        <div className="grid min-h-0 flex-1 gap-0 overflow-hidden md:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="min-h-[260px] bg-neutral-950 p-3 md:min-h-0 md:p-4">
             <div
-              className="relative mx-auto max-h-[68vh] max-w-full overflow-hidden bg-neutral-900"
+              className="relative mx-auto h-full max-h-full max-w-full overflow-hidden bg-neutral-900"
               style={{
-                aspectRatio: sourceWidth && sourceHeight ? `${sourceWidth} / ${sourceHeight}` : '4 / 3',
+                aspectRatio: previewAspectRatio,
               }}
             >
-              {previewUrl ? (
+              {mode === 'outpaint' && expandGeometry ? (
+                <div
+                  className="absolute border-2 border-dashed border-white/80 bg-black"
+                  style={{
+                    left: `${expandGeometry.sourceLeftPercent}%`,
+                    top: `${expandGeometry.sourceTopPercent}%`,
+                    width: `${expandGeometry.sourceWidthPercent}%`,
+                    height: `${expandGeometry.sourceHeightPercent}%`,
+                  }}
+                >
+                  {previewUrl ? (
+                    <img
+                      src={previewUrl}
+                      alt=""
+                      className="h-full w-full object-contain"
+                      draggable={false}
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-xs text-gray-400">
+                      Preview unavailable
+                    </div>
+                  )}
+                </div>
+              ) : previewUrl ? (
                 <img
                   src={previewUrl}
                   alt=""
@@ -179,7 +265,7 @@ export function CropVariantModal({
                   Preview unavailable
                 </div>
               )}
-              {previewGeometry?.fits && (
+              {mode === 'crop' && previewGeometry?.fits && (
                 <div
                   className="pointer-events-none absolute left-0 w-full border-2 border-white"
                   style={{
@@ -192,8 +278,33 @@ export function CropVariantModal({
             </div>
           </div>
 
-          <div className="flex flex-col border-l border-gray-200">
+          <div className="flex min-h-0 flex-col border-l border-gray-200">
             <div className="flex-1 space-y-5 overflow-y-auto p-4">
+              <section className="space-y-2">
+                <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                  Mode
+                </label>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {([
+                    { label: 'Crop', value: 'crop' },
+                    { label: 'Expand', value: 'outpaint' },
+                  ] as Array<{ label: string; value: CropVariantMode }>).map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setMode(option.value)}
+                      className={`rounded-md border px-2 py-1.5 text-[11px] ${
+                        mode === option.value
+                          ? 'border-gray-900 bg-gray-900 text-white'
+                          : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
               <section className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
@@ -229,16 +340,22 @@ export function CropVariantModal({
 
               <section className="space-y-2">
                 <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
-                  Anchor
+                  {mode === 'outpaint' ? 'Placement' : 'Anchor'}
                 </label>
                 <div className="grid grid-cols-3 gap-1.5">
-                  {ANCHORS.map((option) => (
+                  {(mode === 'outpaint' ? placementOptions : ANCHORS).map((option) => (
                     <button
                       key={option.value}
                       type="button"
-                      onClick={() => setAnchor(option.value)}
+                      onClick={() => {
+                        if (mode === 'outpaint') {
+                          setPlacement(option.value as CropVariantPlacement);
+                        } else {
+                          setAnchor(option.value as CropVariantAnchor);
+                        }
+                      }}
                       className={`rounded-md border px-2 py-1.5 text-[11px] ${
-                        anchor === option.value
+                        (mode === 'outpaint' ? placement : anchor) === option.value
                           ? 'border-blue-600 bg-blue-600 text-white'
                           : 'border-gray-300 text-gray-700 hover:bg-gray-50'
                       }`}
@@ -305,9 +422,14 @@ export function CropVariantModal({
                   Use width:height format.
                 </p>
               )}
-              {previewGeometry && !previewGeometry.fits && (
+              {mode === 'crop' && previewGeometry && !previewGeometry.fits && (
                 <p className="rounded-md border border-red-200 bg-red-50 px-2 py-1.5 text-xs text-red-700">
                   This crop needs {previewGeometry.targetHeight}px height, but the source is {sourceHeight}px tall.
+                </p>
+              )}
+              {mode === 'outpaint' && (
+                <p className="rounded-md border border-blue-200 bg-blue-50 px-2 py-1.5 text-xs text-blue-700">
+                  Expand keeps the full source image and asks AI to fill only the added canvas area.
                 </p>
               )}
               {error && (
@@ -336,7 +458,7 @@ export function CropVariantModal({
                 ) : (
                   <Crop className="h-3.5 w-3.5" aria-hidden="true" />
                 )}
-                Create variant
+                {mode === 'outpaint' ? 'Create expanded variant' : 'Create variant'}
               </button>
             </div>
           </div>

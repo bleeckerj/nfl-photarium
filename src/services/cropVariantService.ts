@@ -1,8 +1,12 @@
 export type CropVariantAnchor = 'top' | 'center' | 'bottom';
+export type CropVariantMode = 'crop' | 'outpaint';
+export type CropVariantPlacement = 'top' | 'center' | 'bottom' | 'left' | 'right';
 
 export type CropVariantRequest = {
   aspectRatio: string;
   anchor: CropVariantAnchor;
+  mode?: CropVariantMode;
+  placement?: CropVariantPlacement;
   quality?: number;
   filename?: string;
   description?: string;
@@ -20,13 +24,30 @@ export type CropVariantResponse = {
   sourceImageId: string;
   sourceWidth: number;
   sourceHeight: number;
-  crop: {
+  mode: CropVariantMode;
+  crop?: {
     width: number;
     height: number;
     aspectRatio: string;
     anchor: CropVariantAnchor;
     x: number;
     y: number;
+  };
+  canvas?: {
+    sourceWidth: number;
+    sourceHeight: number;
+    targetWidth: number;
+    targetHeight: number;
+    aspectRatio: string;
+    placement: CropVariantPlacement;
+    x: number;
+    y: number;
+    padding: {
+      top: number;
+      right: number;
+      bottom: number;
+      left: number;
+    };
   };
   animated?: {
     frameCount: number;

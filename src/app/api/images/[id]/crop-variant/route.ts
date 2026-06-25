@@ -3,6 +3,8 @@ import {
   createCropVariant,
   normalizeCropAnchor,
   normalizeCropQuality,
+  normalizeCropVariantMode,
+  normalizeOutpaintPlacement,
   type CropVariantAnchor,
 } from '@/server/cropVariantService';
 
@@ -29,6 +31,8 @@ function statusForCropError(error: unknown) {
     message.includes('aspect ratio') ||
     message.includes('source image dimensions') ||
     message.includes('requested') ||
+    message.includes('expanded canvas') ||
+    message.includes('too small') ||
     message.includes('image id is required')
   ) {
     return 400;
@@ -54,6 +58,8 @@ export async function POST(
       imageId,
       aspectRatio: typeof body?.aspectRatio === 'string' ? body.aspectRatio : undefined,
       anchor,
+      mode: normalizeCropVariantMode(typeof body?.mode === 'string' ? body.mode : undefined),
+      placement: normalizeOutpaintPlacement(typeof body?.placement === 'string' ? body.placement : undefined),
       quality: normalizeCropQuality(Number(body?.quality)),
       filename: typeof body?.filename === 'string' ? body.filename : undefined,
       description: typeof body?.description === 'string' ? body.description : undefined,

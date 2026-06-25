@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 import sharp from 'sharp';
 
 import {
+  computeOutpaintCanvas,
   computeWidthPreservingCrop,
   cropImageToWebp,
+  outpaintImageToWebp,
+  prepareOutpaintEditImage,
 } from '../src/server/cropVariantService';
 
 async function createStillFixture() {
@@ -114,5 +117,101 @@ describe('cropVariantService', () => {
     expect(metadata.pages).toBe(3);
     expect(metadata.delay).toEqual([90, 120, 150]);
     expect(result.animated).toEqual({ frameCount: 3, delaysPreserved: true });
+  });
+
+  it('computes a wider outpaint canvas for 4:5 sources expanded to 1:1', () => {
+    expect(computeOutpaintCanvas({
+      sourceWidth: 1024,
+      sourceHeight: 1280,
+      aspectRatio: '1:1',
+      placement: 'center',
+    })).toMatchObject({
+      sourceWidth: 1024,
+      sourceHeight: 1280,
+      targetWidth: 1280,
+      targetHeight: 1280,
+      x: 128,
+      y: 0,
+      padding: {
+        left: 128,
+        right: 128,
+        top: 0,
+        bottom: 0,
+      },
+    });
+  });
+
+  it('computes a taller outpaint canvas for 1:1 sources expanded to 4:5', () => {
+    expect(computeOutpaintCanvas({
+      sourceWidth: 1024,
+      sourceHeight: 1024,
+      aspectRatio: '4:5',
+      placement: 'bottom',
+    })).toMatchObject({
+      sourceWidth: 1024,
+      sourceHeight: 1024,
+      targetWidth: 1024,
+      targetHeight: 1280,
+      x: 0,
+      y: 256,
+      padding: {
+        left: 0,
+        right: 0,
+        top: 256,
+        bottom: 0,
+      },
+    });
+  });
+
+  it('creates an outpaint mask that protects the source and exposes only added canvas', async () => {
+    const buffer = await sharp({
+      create: {
+        width: 1024,
+        height: 1280,
+        channels: 4,
+        background: '#0ea5e9',
+      },
+    })
+      .png()
+      .toBuffer();
+
+    const prepared = await prepareOutpaintEditImage({
+      buffer,
+      aspectRatio: '1:1',
+      placement: 'center',
+    });
+    const maskPixel = await sharp(prepared.maskPng).ensureAlpha().raw().toBuffer();
+    const canvasWidth = prepared.canvas.targetWidth;
+    const leftCanvasAlpha = maskPixel[(10 * canvasWidth + 10) * 4 + 3];
+    const sourceAlpha = maskPixel[(10 * canvasWidth + prepared.canvas.x + 10) * 4 + 3];
+
+    expect(prepared.canvas).toMatchObject({ targetWidth: 1280, targetHeight: 1280, x: 128, y: 0 });
+    expect(leftCanvasAlpha).toBe(255);
+    expect(sourceAlpha).toBe(0);
+  });
+
+  it('requires an OpenAI API key for outpaint generation', async () => {
+    const previousKey = process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    const buffer = await sharp({
+      create: {
+        width: 1024,
+        height: 1280,
+        channels: 4,
+        background: '#f97316',
+      },
+    })
+      .png()
+      .toBuffer();
+
+    await expect(outpaintImageToWebp({
+      buffer,
+      aspectRatio: '1:1',
+      placement: 'center',
+    })).rejects.toThrow(/OPENAI_API_KEY is required/i);
+
+    if (previousKey) {
+      process.env.OPENAI_API_KEY = previousKey;
+    }
   });
 });

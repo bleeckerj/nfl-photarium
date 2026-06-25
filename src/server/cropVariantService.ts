@@ -2,15 +2,20 @@ import sharp from 'sharp';
 import { fetchCloudflareImage, getCloudflareCredentials } from '@/server/cloudflareClient';
 import { fetchOriginalImageBlob } from '@/server/animatedWebpService';
 import { uploadImageBuffer } from '@/server/uploadService';
+import { patchImageExtrasRecord } from '@/server/imageExtras';
 import { parseCloudflareMetadata } from '@/utils/cloudflareMetadata';
 import { sanitizeFilename } from '@/utils/filename';
 
 export type CropVariantAnchor = 'top' | 'center' | 'bottom';
+export type CropVariantMode = 'crop' | 'outpaint';
+export type CropVariantPlacement = 'top' | 'center' | 'bottom' | 'left' | 'right';
 
 export type CropVariantOptions = {
   imageId: string;
   aspectRatio?: string;
   anchor?: CropVariantAnchor;
+  mode?: CropVariantMode;
+  placement?: CropVariantPlacement;
   quality?: number;
   filename?: string;
   description?: string;
@@ -29,6 +34,23 @@ export type CropGeometry = {
   y: number;
 };
 
+export type OutpaintCanvasGeometry = {
+  sourceWidth: number;
+  sourceHeight: number;
+  targetWidth: number;
+  targetHeight: number;
+  aspectRatio: string;
+  placement: CropVariantPlacement;
+  x: number;
+  y: number;
+  padding: {
+    top: number;
+    right: number;
+    bottom: number;
+    left: number;
+  };
+};
+
 export type CropVariantResult = {
   id: string;
   url?: string;
@@ -39,7 +61,9 @@ export type CropVariantResult = {
   sourceImageId: string;
   sourceWidth: number;
   sourceHeight: number;
-  crop: CropGeometry;
+  mode: CropVariantMode;
+  crop?: CropGeometry;
+  canvas?: OutpaintCanvasGeometry;
   animated?: {
     frameCount: number;
     delaysPreserved: boolean;
@@ -55,9 +79,28 @@ type AspectRatio = {
   height: number;
 };
 
+type OutpaintPreparedImage = {
+  sourcePng: Buffer;
+  maskPng: Buffer;
+  canvas: OutpaintCanvasGeometry;
+};
+
+type OpenAiImageResult = {
+  buffer: Buffer;
+  mimeType: 'image/png' | 'image/jpeg' | 'image/webp';
+  model: string;
+  revisedPrompt?: string;
+};
+
 const DEFAULT_ASPECT_RATIO = '4:5';
 const DEFAULT_QUALITY = 90;
 const DEFAULT_DELAY_MS = 1000;
+const DEFAULT_OPENAI_IMAGE_MODEL = process.env.PHOTARIUM_OPENAI_IMAGE_MODEL || 'gpt-image-2';
+const OPENAI_API_BASE_URL = process.env.OPENAI_API_BASE_URL || 'https://api.openai.com/v1';
+const OPENAI_MIN_IMAGE_PIXELS = 655_360;
+const OPENAI_MAX_IMAGE_PIXELS = 8_294_400;
+const OPENAI_MAX_IMAGE_EDGE = 3840;
+const OPENAI_IMAGE_EDGE_MULTIPLE = 16;
 
 export function parseCropAspectRatio(value = DEFAULT_ASPECT_RATIO): AspectRatio {
   const trimmed = value.trim();
@@ -87,6 +130,17 @@ export function normalizeCropQuality(value?: number): number {
     return DEFAULT_QUALITY;
   }
   return Math.max(1, Math.min(100, Math.round(value || DEFAULT_QUALITY)));
+}
+
+export function normalizeCropVariantMode(value?: string): CropVariantMode {
+  return value === 'outpaint' ? 'outpaint' : 'crop';
+}
+
+export function normalizeOutpaintPlacement(value?: string): CropVariantPlacement {
+  if (value === 'top' || value === 'center' || value === 'bottom' || value === 'left' || value === 'right') {
+    return value;
+  }
+  return 'center';
 }
 
 export function computeWidthPreservingCrop(input: {
@@ -127,11 +181,16 @@ export function computeWidthPreservingCrop(input: {
   };
 }
 
-function buildCropFilename(sourceFilename?: string, requestedFilename?: string, crop?: CropGeometry) {
+function buildCropFilename(
+  sourceFilename?: string,
+  requestedFilename?: string,
+  details?: { aspectRatio: string; placement: string },
+  mode: CropVariantMode = 'crop'
+) {
   const baseSource = requestedFilename || sourceFilename || 'image';
   const base = sanitizeFilename(baseSource).replace(/\.[^.]+$/, '') || 'image';
-  const suffix = crop ? `${crop.aspectRatio.replace(':', 'x')}-${crop.anchor}` : 'crop';
-  return sanitizeFilename(`${base}-crop-${suffix}.webp`);
+  const suffix = details ? `${details.aspectRatio.replace(':', 'x')}-${details.placement}` : mode;
+  return sanitizeFilename(`${base}-${mode}-${suffix}.webp`);
 }
 
 function normalizeOptionalText(value: unknown) {
@@ -146,6 +205,208 @@ function normalizeTags(tags: unknown) {
     .map((tag) => (typeof tag === 'string' ? tag.trim() : ''))
     .filter(Boolean);
   return cleaned.length ? Array.from(new Set(cleaned)) : undefined;
+}
+
+function alignUp(value: number, multiple: number) {
+  return Math.ceil(value / multiple) * multiple;
+}
+
+function clampOpenAiCanvasSize(canvas: { width: number; height: number }) {
+  if (canvas.width > OPENAI_MAX_IMAGE_EDGE || canvas.height > OPENAI_MAX_IMAGE_EDGE) {
+    throw new Error(`Expanded canvas must fit within ${OPENAI_MAX_IMAGE_EDGE}px per edge for OpenAI image edits`);
+  }
+  const pixels = canvas.width * canvas.height;
+  if (pixels > OPENAI_MAX_IMAGE_PIXELS) {
+    throw new Error(`Expanded canvas is ${pixels.toLocaleString()} pixels, above the OpenAI image edit limit`);
+  }
+  if (pixels < OPENAI_MIN_IMAGE_PIXELS) {
+    throw new Error('Expanded canvas is too small for OpenAI image edits');
+  }
+}
+
+export function computeOutpaintCanvas(input: {
+  sourceWidth: number;
+  sourceHeight: number;
+  aspectRatio?: string;
+  placement?: CropVariantPlacement;
+}): OutpaintCanvasGeometry {
+  const ratio = parseCropAspectRatio(input.aspectRatio);
+  const sourceWidth = Math.round(input.sourceWidth);
+  const sourceHeight = Math.round(input.sourceHeight);
+  if (sourceWidth <= 0 || sourceHeight <= 0) {
+    throw new Error('Source image dimensions could not be resolved');
+  }
+
+  const targetRatio = ratio.width / ratio.height;
+  const sourceRatio = sourceWidth / sourceHeight;
+  let targetWidth = sourceWidth;
+  let targetHeight = sourceHeight;
+  if (sourceRatio < targetRatio) {
+    targetWidth = Math.ceil(sourceHeight * targetRatio);
+  } else if (sourceRatio > targetRatio) {
+    targetHeight = Math.ceil(sourceWidth / targetRatio);
+  }
+
+  targetWidth = alignUp(targetWidth, OPENAI_IMAGE_EDGE_MULTIPLE);
+  targetHeight = alignUp(targetHeight, OPENAI_IMAGE_EDGE_MULTIPLE);
+  clampOpenAiCanvasSize({ width: targetWidth, height: targetHeight });
+
+  const placement = input.placement ?? 'center';
+  const extraX = targetWidth - sourceWidth;
+  const extraY = targetHeight - sourceHeight;
+  const x = placement === 'left' ? 0 : placement === 'right' ? extraX : Math.round(extraX / 2);
+  const y = placement === 'top' ? 0 : placement === 'bottom' ? extraY : Math.round(extraY / 2);
+
+  return {
+    sourceWidth,
+    sourceHeight,
+    targetWidth,
+    targetHeight,
+    aspectRatio: ratio.label,
+    placement,
+    x,
+    y,
+    padding: {
+      top: y,
+      right: targetWidth - sourceWidth - x,
+      bottom: targetHeight - sourceHeight - y,
+      left: x,
+    },
+  };
+}
+
+function buildOutpaintPrompt(canvas: OutpaintCanvasGeometry) {
+  return [
+    'Expand this image to fill the transparent canvas while preserving the original image exactly.',
+    'Only generate visual content in the transparent outer area.',
+    'Continue the scene naturally with matching lighting, perspective, texture, color, depth of field, and photographic style.',
+    `Target aspect ratio: ${canvas.aspectRatio}. Original image placement: ${canvas.placement}.`,
+  ].join(' ');
+}
+
+function readOpenAiApiKey() {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) {
+    throw new Error('OPENAI_API_KEY is required for AI expand crop variants');
+  }
+  return apiKey;
+}
+
+export async function prepareOutpaintEditImage(input: {
+  buffer: Buffer;
+  aspectRatio?: string;
+  placement?: CropVariantPlacement;
+}): Promise<OutpaintPreparedImage> {
+  const sourcePng = await sharp(input.buffer, { animated: false, failOn: 'none' })
+    .ensureAlpha()
+    .png()
+    .toBuffer();
+  const metadata = await sharp(sourcePng, { failOn: 'none' }).metadata();
+  if (!metadata.width || !metadata.height) {
+    throw new Error('Source image dimensions could not be resolved');
+  }
+  const canvas = computeOutpaintCanvas({
+    sourceWidth: metadata.width,
+    sourceHeight: metadata.height,
+    aspectRatio: input.aspectRatio,
+    placement: input.placement,
+  });
+
+  const base = await sharp({
+    create: {
+      width: canvas.targetWidth,
+      height: canvas.targetHeight,
+      channels: 4,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    },
+  })
+    .composite([{ input: sourcePng, left: canvas.x, top: canvas.y }])
+    .png()
+    .toBuffer();
+
+  const maskRaw = Buffer.alloc(canvas.targetWidth * canvas.targetHeight * 4, 255);
+  for (let row = canvas.y; row < canvas.y + canvas.sourceHeight; row += 1) {
+    for (let column = canvas.x; column < canvas.x + canvas.sourceWidth; column += 1) {
+      maskRaw[(row * canvas.targetWidth + column) * 4 + 3] = 0;
+    }
+  }
+  const maskPng = await sharp(maskRaw, {
+    raw: {
+      width: canvas.targetWidth,
+      height: canvas.targetHeight,
+      channels: 4,
+    },
+  })
+    .png()
+    .toBuffer();
+
+  return {
+    sourcePng: base,
+    maskPng,
+    canvas,
+  };
+}
+
+async function callOpenAiOutpaintEdit(prepared: OutpaintPreparedImage): Promise<OpenAiImageResult> {
+  const formData = new FormData();
+  const model = DEFAULT_OPENAI_IMAGE_MODEL;
+  formData.append('model', model);
+  formData.append('prompt', buildOutpaintPrompt(prepared.canvas));
+  formData.append('size', `${prepared.canvas.targetWidth}x${prepared.canvas.targetHeight}`);
+  formData.append('quality', 'high');
+  formData.append('output_format', 'webp');
+  formData.append('image[]', new Blob([new Uint8Array(prepared.sourcePng)], { type: 'image/png' }), 'source-canvas.png');
+  formData.append('mask', new Blob([new Uint8Array(prepared.maskPng)], { type: 'image/png' }), 'mask.png');
+
+  const endpoint = new URL('/v1/images/edits', `${OPENAI_API_BASE_URL.replace(/\/$/, '')}/`);
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${readOpenAiApiKey()}`,
+    },
+    body: formData,
+  });
+  const rawText = await response.text();
+  let parsed: unknown = rawText;
+  try {
+    parsed = rawText ? JSON.parse(rawText) : {};
+  } catch {
+    parsed = rawText;
+  }
+  if (!response.ok) {
+    throw new Error(`OpenAI image edit failed (${response.status}): ${typeof parsed === 'string' ? parsed : JSON.stringify(parsed)}`);
+  }
+  const record = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  const data = Array.isArray(record.data) ? record.data : [];
+  const first = data.find((item): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item));
+  const b64Json = typeof first?.b64_json === 'string' ? first.b64_json : undefined;
+  const revisedPrompt = typeof first?.revised_prompt === 'string' ? first.revised_prompt : undefined;
+  if (!b64Json) {
+    throw new Error('OpenAI image edit returned no image data');
+  }
+  return {
+    buffer: Buffer.from(b64Json, 'base64'),
+    mimeType: 'image/webp',
+    model,
+    revisedPrompt,
+  };
+}
+
+export async function outpaintImageToWebp(input: {
+  buffer: Buffer;
+  aspectRatio?: string;
+  placement?: CropVariantPlacement;
+}) {
+  const prepared = await prepareOutpaintEditImage(input);
+  const generated = await callOpenAiOutpaintEdit(prepared);
+  return {
+    buffer: generated.buffer,
+    sourceWidth: prepared.canvas.sourceWidth,
+    sourceHeight: prepared.canvas.sourceHeight,
+    canvas: prepared.canvas,
+    model: generated.model,
+    revisedPrompt: generated.revisedPrompt,
+  };
 }
 
 async function cropAnimatedWebp(input: {
@@ -286,23 +547,33 @@ export async function createCropVariant(options: CropVariantOptions): Promise<Cr
     : options.imageId;
   const { buffer: originalBuffer } = await fetchOriginalImageBlob(cropSourceId);
   const anchor = normalizeCropAnchor(options.anchor);
-  const cropped = await cropImageToWebp({
-    buffer: originalBuffer,
-    aspectRatio: options.aspectRatio,
-    anchor,
-    quality: options.quality,
-  });
+  const mode = normalizeCropVariantMode(options.mode);
+  const result = mode === 'outpaint'
+    ? await outpaintImageToWebp({
+      buffer: originalBuffer,
+      aspectRatio: options.aspectRatio,
+      placement: normalizeOutpaintPlacement(options.placement),
+    })
+    : await cropImageToWebp({
+      buffer: originalBuffer,
+      aspectRatio: options.aspectRatio,
+      anchor,
+      quality: options.quality,
+    });
 
-  const filename = buildCropFilename(sourceImage.filename, options.filename, cropped.crop);
+  const details = 'crop' in result
+    ? { aspectRatio: result.crop.aspectRatio, placement: result.crop.anchor }
+    : { aspectRatio: result.canvas.aspectRatio, placement: result.canvas.placement };
+  const filename = buildCropFilename(sourceImage.filename, options.filename, details, mode);
   const inheritedTags = Array.isArray(sourceMeta.tags) ? sourceMeta.tags : [];
   const requestedTags = normalizeTags(options.tags);
   const tags = requestedTags ?? inheritedTags;
   const upload = await uploadImageBuffer({
-    buffer: cropped.buffer,
-    originalBuffer: cropped.buffer,
+    buffer: result.buffer,
+    originalBuffer: result.buffer,
     fileName: filename,
     fileType: 'image/webp',
-    fileSize: cropped.buffer.byteLength,
+    fileSize: result.buffer.byteLength,
     context: {
       accountId: credentials.accountId,
       apiToken: credentials.apiToken,
@@ -314,6 +585,7 @@ export async function createCropVariant(options: CropVariantOptions): Promise<Cr
       sourcePath: sourceMeta.sourcePath,
       namespace: normalizeOptionalText(options.namespace) ?? sourceMeta.namespace,
       parentId: normalizeOptionalText(options.parentId) ?? options.imageId,
+      generatedBy: mode === 'outpaint' ? 'openai' : undefined,
     },
   });
 
@@ -321,6 +593,28 @@ export async function createCropVariant(options: CropVariantOptions): Promise<Cr
     const error = new Error(upload.error);
     Object.assign(error, { status: upload.status });
     throw error;
+  }
+
+  if (mode === 'outpaint' && 'canvas' in result) {
+    await patchImageExtrasRecord(upload.data.id, {
+      imageToolRun: {
+        toolId: 'crop-outpaint',
+        adapterKind: 'openai-image-edit',
+        sourceImageId: options.imageId,
+        params: {
+          aspectRatio: result.canvas.aspectRatio,
+          placement: result.canvas.placement,
+          model: result.model,
+          revisedPrompt: result.revisedPrompt,
+        },
+        output: {
+          width: result.canvas.targetWidth,
+          height: result.canvas.targetHeight,
+          mimeType: 'image/webp',
+        },
+        createdAt: new Date().toISOString(),
+      },
+    });
   }
 
   return {
@@ -331,11 +625,11 @@ export async function createCropVariant(options: CropVariantOptions): Promise<Cr
     displayName: upload.data.filename,
     parentId: upload.data.parentId,
     sourceImageId: options.imageId,
-    sourceWidth: cropped.sourceWidth,
-    sourceHeight: cropped.sourceHeight,
-    crop: cropped.crop,
-    animated: cropped.animated,
-    bytes: cropped.buffer.byteLength,
+    sourceWidth: result.sourceWidth,
+    sourceHeight: result.sourceHeight,
+    mode,
+    ...('crop' in result ? { crop: result.crop, animated: result.animated } : { canvas: result.canvas }),
+    bytes: result.buffer.byteLength,
     mimeType: 'image/webp',
     image: upload.data,
   };
