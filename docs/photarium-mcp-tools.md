@@ -29,6 +29,15 @@ Namespace admin tools wrap `/api/namespaces`. `photarium_rename_namespace` uses 
   - supports `throttleMs` to pace upload requests globally
   - automatically caches successful uploads locally and skips unchanged files on reruns
 
+## Instagram
+- `photarium_instagram_auth` (interactive login/session validation through the existing Chromium profile flow)
+- `photarium_instagram_ingest_profile` (feed/profile ingest through `scripts/instagram-ingest.mjs ingest`)
+- `photarium_instagram_ingest_single_url` (single post/reel ingest; preserves the existing default namespace and fallback username)
+- `photarium_instagram_replay_videos` (replay video uploads from Instagram NDJSON)
+- `photarium_instagram_recover_videos` (resolve missing video URLs, then optionally replay uploads)
+
+These tools wrap the current repository scripts and return captured command, stdout, stderr, and exit code. Instagram stories are not currently implemented in the repository scripts, so story ingest is outside this MCP surface for now.
+
 ## Image Tools
 - `photarium_image_tools_list`
 - `photarium_image_tool_run`

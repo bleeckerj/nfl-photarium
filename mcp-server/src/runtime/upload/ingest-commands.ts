@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import { BASE_URL, REPO_ROOT } from '../shared/config.js';
+import { REPO_ROOT } from '../shared/config.js';
 import { runCommandCapture } from '../shared/command-runner.js';
 
 export async function runFilesystemIngest(options: {
@@ -45,48 +45,6 @@ export async function runFilesystemIngest(options: {
   if (typeof options.throttleMs === 'number') args.push('--throttle-ms', String(options.throttleMs));
   if (typeof options.limit === 'number') args.push('--limit', String(options.limit));
   if (options.dryRun) args.push('--dry-run');
-  if (options.verbose) args.push('--verbose');
-
-  const result = await runCommandCapture(process.execPath, args, { cwd: REPO_ROOT });
-  return {
-    ok: result.exitCode === 0,
-    exitCode: result.exitCode,
-    command: [process.execPath, ...args],
-    stdout: result.stdout,
-    stderr: result.stderr,
-  };
-}
-
-export async function runInstagramSingleUrlIngest(options: {
-  url: string;
-  username?: string;
-  namespace?: string;
-  apiBase?: string;
-  profileDir?: string;
-  output?: string;
-  requestDelayMs?: number;
-  headful?: boolean;
-  verbose?: boolean;
-}): Promise<{
-  ok: boolean;
-  exitCode: number;
-  command: string[];
-  stdout: string;
-  stderr: string;
-}> {
-  const scriptPath = path.join(REPO_ROOT, 'scripts', 'instagram-ingest.mjs');
-  const args = [scriptPath, 'single-url', '--url', options.url, '--push-cloudflare'];
-
-  args.push('--username', options.username || 'darthjulian');
-  args.push('--namespace', options.namespace || 'ig-videos');
-  args.push('--api-base', options.apiBase || BASE_URL);
-
-  if (options.profileDir) args.push('--profile-dir', options.profileDir);
-  if (options.output) args.push('--output', options.output);
-  if (typeof options.requestDelayMs === 'number') {
-    args.push('--request-delay-ms', String(options.requestDelayMs));
-  }
-  if (options.headful) args.push('--headful');
   if (options.verbose) args.push('--verbose');
 
   const result = await runCommandCapture(process.execPath, args, { cwd: REPO_ROOT });

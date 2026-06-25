@@ -13,7 +13,6 @@ const UPLOAD_TOOL_NAMES = [
   'photarium_upload_download',
   'photarium_fs_ingest',
   'photarium_discord_refresh_and_ingest',
-  'photarium_instagram_ingest_single_url',
 ] as const;
 
 export const uploadContracts = UPLOAD_TOOL_NAMES.map(createRuntimeToolContract);

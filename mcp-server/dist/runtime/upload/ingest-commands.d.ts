@@ -23,23 +23,6 @@ export declare function runFilesystemIngest(options: {
     stdout: string;
     stderr: string;
 }>;
-export declare function runInstagramSingleUrlIngest(options: {
-    url: string;
-    username?: string;
-    namespace?: string;
-    apiBase?: string;
-    profileDir?: string;
-    output?: string;
-    requestDelayMs?: number;
-    headful?: boolean;
-    verbose?: boolean;
-}): Promise<{
-    ok: boolean;
-    exitCode: number;
-    command: string[];
-    stdout: string;
-    stderr: string;
-}>;
 export declare function runDiscordRefreshAndIngest(options: {
     discordRepo?: string;
     imagesRoot?: string;

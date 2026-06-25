@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 export const BASE_URL = process.env.PHOTARIUM_BASE_URL || 'http://localhost:3000';
 const THIS_FILE_DIR = path.dirname(fileURLToPath(import.meta.url));
-export const REPO_ROOT = path.resolve(THIS_FILE_DIR, '..', '..', '..');
+export const REPO_ROOT = path.resolve(THIS_FILE_DIR, '..', '..', '..', '..');
 
 export const JSON_REQUEST_HEADERS = {
   'Content-Type': 'application/json',

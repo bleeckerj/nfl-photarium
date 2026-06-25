@@ -3,7 +3,7 @@ import { normalizeManualPrompt } from '../shared/prompts.js';
 import { cleanUploadFilename, camelizeUploadStem, detectImageMimeFromBuffer, extensionFromFilename, extensionFromMimeType, estimateBase64Bytes, withExtension, } from './filenames.js';
 import { createAnimation, downloadUpload, importFromUrl, listUploads, uploadFileBase64, uploadFromUrl, } from './client.js';
 import { cropPhotariumVariant } from './crop-variant.js';
-import { runDiscordRefreshAndIngest, runFilesystemIngest, runInstagramSingleUrlIngest, } from './ingest-commands.js';
+import { runDiscordRefreshAndIngest, runFilesystemIngest, } from './ingest-commands.js';
 export const uploadHandlers = {
     'photarium_upload_url': async (args) => {
         const { url, folder, tags, namespace, description, prompt, displayName, originalUrl, sourceUrl, parentId } = args;
@@ -349,36 +349,6 @@ export const uploadHandlers = {
             metadata: {
                 purpose: 'Refreshes/downloads latest Discord content into local files when configured, then ingests those local files into Photarium catalog with the same semantics as fs:ingest.',
             },
-        };
-        return {
-            content: [
-                {
-                    type: 'text',
-                    text: JSON.stringify(response, null, 2),
-                },
-            ],
-            ...(result.ok ? {} : { isError: true }),
-        };
-    },
-    'photarium_instagram_ingest_single_url': async (args) => {
-        const { url, username, namespace, apiBase, profileDir, output, requestDelayMs, headful, verbose, } = args;
-        const result = await runInstagramSingleUrlIngest({
-            url,
-            username,
-            namespace,
-            apiBase,
-            profileDir,
-            output,
-            requestDelayMs,
-            headful,
-            verbose,
-        });
-        const response = {
-            ok: result.ok,
-            exitCode: result.exitCode,
-            command: result.command,
-            stdout: result.stdout,
-            stderr: result.stderr,
         };
         return {
             content: [

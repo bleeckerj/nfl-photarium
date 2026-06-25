@@ -22,7 +22,6 @@ import { cropPhotariumVariant, type CropVariantAnchor } from './crop-variant.js'
 import {
   runDiscordRefreshAndIngest,
   runFilesystemIngest,
-  runInstagramSingleUrlIngest,
 } from './ingest-commands.js';
 
 export const uploadHandlers: Record<string, RuntimeToolHandler> = {
@@ -563,60 +562,6 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
         purpose:
           'Refreshes/downloads latest Discord content into local files when configured, then ingests those local files into Photarium catalog with the same semantics as fs:ingest.',
       },
-    };
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(response, null, 2),
-        },
-      ],
-      ...(result.ok ? {} : { isError: true }),
-    };
-  },
-
-  'photarium_instagram_ingest_single_url': async (args: Record<string, unknown>) => {
-    const {
-      url,
-      username,
-      namespace,
-      apiBase,
-      profileDir,
-      output,
-      requestDelayMs,
-      headful,
-      verbose,
-    } = args as {
-      url: string;
-      username?: string;
-      namespace?: string;
-      apiBase?: string;
-      profileDir?: string;
-      output?: string;
-      requestDelayMs?: number;
-      headful?: boolean;
-      verbose?: boolean;
-    };
-
-    const result = await runInstagramSingleUrlIngest({
-      url,
-      username,
-      namespace,
-      apiBase,
-      profileDir,
-      output,
-      requestDelayMs,
-      headful,
-      verbose,
-    });
-
-    const response = {
-      ok: result.ok,
-      exitCode: result.exitCode,
-      command: result.command,
-      stdout: result.stdout,
-      stderr: result.stderr,
     };
 
     return {

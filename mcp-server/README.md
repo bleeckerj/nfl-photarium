@@ -47,7 +47,18 @@ Namespace admin tools default to `dryRun: true`. Live namespace rename/delete ca
 - `photarium_crop_variant` (width-preserving still/animated WebP crop uploaded as a source image variant)
 - `photarium_fs_ingest` (recursive local image/video ingest from a directory tree)
   - includes local checkpointing to skip unchanged files on reruns (avoids repeat AI/API work)
-- `photarium_instagram_ingest_single_url` (single Instagram post/reel ingest through the existing authenticated CLI/profile flow)
+
+### Instagram
+
+These tools wrap the existing repository Instagram scripts and reuse their authenticated Chromium profile, NDJSON, checkpoint, and Photarium upload behavior.
+
+- `photarium_instagram_auth`
+- `photarium_instagram_ingest_profile`
+- `photarium_instagram_ingest_single_url`
+- `photarium_instagram_replay_videos`
+- `photarium_instagram_recover_videos`
+
+Instagram stories are not currently exposed by the repository scripts, so story ingest is not implemented in this MCP surface yet.
 
 #### Crop Variants
 

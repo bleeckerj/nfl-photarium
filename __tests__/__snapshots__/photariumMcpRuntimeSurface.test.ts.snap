@@ -453,6 +453,200 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
     ],
     "type": "object",
   },
+  "photarium_instagram_ingest_profile": {
+    "properties": {
+      "aiDisplayName": {
+        "description": "Generate display names for image uploads during ingest.",
+        "type": "boolean",
+      },
+      "apiBase": {
+        "description": "Photarium base URL override. Defaults to PHOTARIUM_BASE_URL / runtime BASE_URL.",
+        "type": "string",
+      },
+      "checkpoint": {
+        "description": "Optional checkpoint path override.",
+        "type": "string",
+      },
+      "count": {
+        "description": "Items per Instagram API page.",
+        "type": "number",
+      },
+      "delayMs": {
+        "description": "Delay between feed page fetches in milliseconds.",
+        "type": "number",
+      },
+      "downloadDir": {
+        "description": "Optional local directory to download discovered image assets.",
+        "type": "string",
+      },
+      "headful": {
+        "description": "Run with a visible browser window instead of headless mode.",
+        "type": "boolean",
+      },
+      "maxPages": {
+        "description": "Stop after N feed pages. The CLI default is unbounded.",
+        "type": "number",
+      },
+      "namespace": {
+        "description": "Specific Photarium namespace for uploaded media.",
+        "type": "string",
+      },
+      "noColor": {
+        "description": "Disable ANSI colors in captured CLI output.",
+        "type": "boolean",
+      },
+      "noResume": {
+        "description": "Ignore existing checkpoint and start from the newest page.",
+        "type": "boolean",
+      },
+      "output": {
+        "description": "Optional NDJSON output path override.",
+        "type": "string",
+      },
+      "profileDir": {
+        "description": "Persistent Chromium profile directory to reuse for the Instagram session. Defaults to the CLI default when omitted.",
+        "type": "string",
+      },
+      "pushCloudflare": {
+        "description": "Push discovered media to Photarium/Cloudflare.",
+        "type": "boolean",
+      },
+      "requestDelayMs": {
+        "description": "Delay between per-asset Photarium push requests in milliseconds.",
+        "type": "number",
+      },
+      "skipVideoPush": {
+        "description": "Skip pushing videos during profile ingest.",
+        "type": "boolean",
+      },
+      "username": {
+        "description": "Instagram username or fallback owner username, without requiring an @ prefix.",
+        "type": "string",
+      },
+      "verbose": {
+        "description": "Increase CLI logging verbosity.",
+        "type": "boolean",
+      },
+    },
+    "required": [
+      "username",
+      "namespace",
+    ],
+    "type": "object",
+  },
+  "photarium_instagram_ingest_single_url": {
+    "properties": {
+      "apiBase": {
+        "description": "Photarium base URL override. Defaults to PHOTARIUM_BASE_URL / runtime BASE_URL.",
+        "type": "string",
+      },
+      "headful": {
+        "description": "Run with a visible browser window instead of headless mode.",
+        "type": "boolean",
+      },
+      "namespace": {
+        "description": "Target namespace for uploaded media. Defaults to "ig-videos".",
+        "type": "string",
+      },
+      "noColor": {
+        "description": "Disable ANSI colors in captured CLI output.",
+        "type": "boolean",
+      },
+      "noPushCloudflare": {
+        "description": "Disable Photarium/Cloudflare pushes and only write the NDJSON record.",
+        "type": "boolean",
+      },
+      "output": {
+        "description": "Optional NDJSON output path override.",
+        "type": "string",
+      },
+      "profileDir": {
+        "description": "Persistent Chromium profile directory to reuse for the Instagram session. Defaults to the CLI default when omitted.",
+        "type": "string",
+      },
+      "pushCloudflare": {
+        "description": "Push media into Photarium. Defaults to true unless noPushCloudflare is set.",
+        "type": "boolean",
+      },
+      "requestDelayMs": {
+        "description": "Delay between per-asset push requests in milliseconds.",
+        "type": "number",
+      },
+      "url": {
+        "description": "Instagram post or reel URL to ingest.",
+        "type": "string",
+      },
+      "username": {
+        "description": "Fallback owner username for the Instagram post. Defaults to "darthjulian".",
+        "type": "string",
+      },
+      "verbose": {
+        "description": "Increase CLI logging verbosity.",
+        "type": "boolean",
+      },
+    },
+    "required": [
+      "url",
+    ],
+    "type": "object",
+  },
+  "photarium_instagram_recover_videos": {
+    "properties": {
+      "apiBase": {
+        "description": "Photarium base URL override. Defaults to PHOTARIUM_BASE_URL / runtime BASE_URL.",
+        "type": "string",
+      },
+      "dryRun": {
+        "description": "Print planned commands without executing them.",
+        "type": "boolean",
+      },
+      "headful": {
+        "description": "Run with a visible browser window instead of headless mode.",
+        "type": "boolean",
+      },
+      "input": {
+        "description": "Input Instagram NDJSON path to repair and replay.",
+        "type": "string",
+      },
+      "limit": {
+        "description": "Resolve at most N missing shortcodes.",
+        "type": "number",
+      },
+      "namespace": {
+        "description": "Specific Photarium namespace for uploaded media.",
+        "type": "string",
+      },
+      "profileDir": {
+        "description": "Persistent Chromium profile directory to reuse for the Instagram session. Defaults to the CLI default when omitted.",
+        "type": "string",
+      },
+      "requestDelayMs": {
+        "description": "Delay between replay pushes in milliseconds.",
+        "type": "number",
+      },
+      "skipReplay": {
+        "description": "Skip replay and run URL resolution only.",
+        "type": "boolean",
+      },
+      "skipResolve": {
+        "description": "Skip URL resolution and run replay only.",
+        "type": "boolean",
+      },
+      "username": {
+        "description": "Instagram username or fallback owner username, without requiring an @ prefix.",
+        "type": "string",
+      },
+      "verbose": {
+        "description": "Increase CLI logging verbosity.",
+        "type": "boolean",
+      },
+    },
+    "required": [
+      "input",
+      "namespace",
+    ],
+    "type": "object",
+  },
   "photarium_rename_namespace": {
     "properties": {
       "confirm": {
