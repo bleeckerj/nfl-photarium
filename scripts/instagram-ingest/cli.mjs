@@ -114,7 +114,7 @@ Options:
   --ai-display-name         Generate display names for image uploads during ingest
   --skip-video-push         Skip pushing videos during ingest
   --api-base <url>          Base URL for local API (default: http://localhost:3000)
-  --namespace <name>        Upload namespace (default: ingest)
+  --namespace <name>        Upload namespace (default: ingest; single-url default: cf-instagram)
   --no-resume               Ignore existing checkpoint and start from newest page
   --headful                 Run ingest with visible browser window
   -v, --verbose             Increase verbosity (stackable)
@@ -144,6 +144,7 @@ export function parseArgs(argv) {
     skipVideoPush: false,
     apiBase: "http://localhost:3000",
     namespace: "ingest",
+    namespaceProvided: false,
     resume: true,
     headful: false,
     verbosity: DEFAULT_VERBOSITY,
@@ -199,6 +200,7 @@ export function parseArgs(argv) {
       i += 1;
     } else if (arg === "--namespace" && next) {
       out.namespace = next.trim();
+      out.namespaceProvided = true;
       i += 1;
     } else if (arg === "--push-cloudflare") out.pushCloudflare = true;
     else if (arg === "--no-push-cloudflare") out.pushCloudflare = false;
@@ -218,6 +220,9 @@ export function parseArgs(argv) {
   }
   if (!out.inputPath) out.inputPath = path.join(DEFAULT_DATA_DIR, `${defaultUsernameBase}.ndjson`);
   if (!out.checkpointPath) out.checkpointPath = path.join(DEFAULT_DATA_DIR, `${defaultUsernameBase}.checkpoint.json`);
+  if (out.command === "single-url" && !out.namespaceProvided) {
+    out.namespace = "cf-instagram";
+  }
 
   return out;
 }

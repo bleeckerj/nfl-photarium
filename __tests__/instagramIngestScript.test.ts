@@ -45,6 +45,16 @@ describe('instagram ingest script helpers', async () => {
     expect(options.checkpointPath).toMatch(/data\/instagram\/palisades_collective\.checkpoint\.json$/);
   });
 
+  it('uses cf-instagram as the single-url upload namespace by default', () => {
+    const options = script.parseArgs([
+      'single-url',
+      '--url',
+      'https://www.instagram.com/p/abc123/',
+    ]);
+
+    expect(options.namespace).toBe('cf-instagram');
+  });
+
   it('fetches Instagram API paths with the browser session headers', async () => {
     const page = {
       evaluate: vi.fn(async (_fn, args) => {
@@ -191,5 +201,21 @@ describe('instagram ingest script helpers', async () => {
     expect(singleUrlExtract.rankInstagramImageUrls([cropped, full])[0]).toBe(full);
     expect(singleUrlExtract.selectInstagramImageUrls([cropped, full, unrelated], { mediaType: 1 })).toEqual([full]);
     expect(singleUrlExtract.selectInstagramImageUrls([cropped, full, unrelated], { mediaType: 8 })).toHaveLength(3);
+  });
+
+  it('infers single-url post owners from Instagram metadata without using the auth account', () => {
+    const fromProfileUrl = singleUrlExtract.inferInstagramOwnerUsername({
+      profileUrl: 'https://www.instagram.com/shopatmatter/p/DZ-DMb6nPjf/',
+    });
+    const fromHandle = singleUrlExtract.inferInstagramOwnerUsername({
+      twitterTitle: 'The Shop At MATTER (@shopatmatter) • Instagram photo',
+    });
+    const fromByline = singleUrlExtract.inferInstagramOwnerUsername({
+      description: '17 likes, 0 comments - shopatmatter on June 24, 2026: "Caption."',
+    });
+
+    expect(fromProfileUrl).toEqual({ username: 'shopatmatter', source: 'profile_url' });
+    expect(fromHandle).toEqual({ username: 'shopatmatter', source: 'meta_handle' });
+    expect(fromByline).toEqual({ username: 'shopatmatter', source: 'meta_byline' });
   });
 });

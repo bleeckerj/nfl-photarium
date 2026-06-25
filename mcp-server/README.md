@@ -275,7 +275,7 @@ Once connected, you can ask the AI:
 - "Upload this base64 image into the comfyui folder"
 - "Recursively ingest ~/Code/chester-downloads-discord-images into the midjourney namespace and use AI for display names and tags"
 - "Recursively ingest ~/Code/chester-downloads-discord-images into the midjourney namespace and throttle uploads to 500ms between requests"
-- "Ingest this Instagram reel URL into the default ig-videos namespace using the saved browser profile"
+- "Ingest this Instagram reel URL into the default cf-instagram namespace using the saved browser profile"
 - "Delete image abc123"
 
 ## Integration with Editorial Workflow

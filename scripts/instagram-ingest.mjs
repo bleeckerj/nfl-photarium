@@ -32,6 +32,7 @@ import {
   fetchSingleUrlRecordFromApiByShortcode,
   fetchSingleUrlRecordFromUserFeedByShortcode,
   igGet,
+  selectInstagramImageUrls,
 } from "./instagram-ingest/single-url-extract.mjs";
 
 export { parseArgs } from "./instagram-ingest/cli.mjs";
@@ -560,7 +561,7 @@ async function runSingleUrl(opts, log) {
   log.info(`output=${opts.outputPath || "(auto; will route after owner resolution)"}`);
   log.info(`push_cloudflare=${opts.pushCloudflare}`);
 
-  const profileUsername = parsedInputUrl?.profileUsername || extractProfileUsernameFromInstagramUrl(opts.instagramUrl) || opts.username;
+  const inputProfileUsername = parsedInputUrl?.profileUsername || extractProfileUsernameFromInstagramUrl(opts.instagramUrl) || "";
 
   if (opts.pushCloudflare) {
     if (opts.namespace === "__all__" || opts.namespace === "__none__") {
@@ -568,9 +569,7 @@ async function runSingleUrl(opts, log) {
     }
     log.info(`api_base=${opts.apiBase}`);
     log.info(`push_namespace=${opts.namespace}`);
-    log.info(
-      `push_tags=${buildInstagramUploadTags(opts.username, profileUsername).join(",")} push_folder=instagram`,
-    );
+    log.info("push_tags=(resolved after post owner extraction) push_folder=instagram");
   }
 
   const browser = await launchBrowser(opts.profileDir, opts.headful ? false : true);
@@ -579,14 +578,22 @@ async function runSingleUrl(opts, log) {
 
     const record = await extractSingleUrlRecord(page, normalizedInstagramUrl, opts.username, log);
     record.cloudflare = [];
-    record.profileUsername = profileUsername;
-    record.uploadTags = buildInstagramUploadTags(record.username || opts.username, profileUsername);
+    const resolveSourceUsername = () => {
+      const resolvedOwnerUsername =
+        record.username_source && record.username_source !== "fallback_arg" && record.username_source !== "unresolved"
+          ? record.username
+          : "";
+      return resolvedOwnerUsername || inputProfileUsername || "";
+    };
+    let sourceUsername = resolveSourceUsername();
+    record.profileUsername = sourceUsername || null;
+    record.uploadTags = buildInstagramUploadTags(sourceUsername, "");
 
     if (record.videoUrls.length === 0 && record.shortcode) {
       const apiFallback = await fetchSingleUrlRecordFromApiByShortcode(
         page,
         record.shortcode,
-        record.username || opts.username,
+        sourceUsername || opts.username,
         record.userId || null,
         log,
       );
@@ -608,7 +615,10 @@ async function runSingleUrl(opts, log) {
         const mergedImages = [...record.imageUrls, ...apiFallback.imageUrls];
         const mergedVideos = [...record.videoUrls, ...apiFallback.videoUrls];
         const hadVideoBefore = record.videoUrls.length > 0;
-        record.imageUrls = [...new Set(mergedImages.filter(Boolean))];
+        record.imageUrls = selectInstagramImageUrls(mergedImages, {
+          mediaType: record.mediaType,
+          productType: record.productType,
+        });
         record.videoUrls = [...new Set(mergedVideos.filter(Boolean))];
         if (record.videoUrls.length > 0 && apiFallback.videoUrls.length > 0) {
           record.video_source = appendSourceLabel(
@@ -619,13 +629,17 @@ async function runSingleUrl(opts, log) {
         log.info(
           `single_url_api_fallback_merged shortcode=${record.shortcode} images=${record.imageUrls.length} videos=${record.videoUrls.length}`,
         );
+        sourceUsername = resolveSourceUsername();
+        record.profileUsername = sourceUsername || null;
+        record.uploadTags = buildInstagramUploadTags(sourceUsername, "");
       }
     }
 
-    if (record.videoUrls.length === 0 && record.shortcode && profileUsername) {
+    const feedLookupUsername = sourceUsername || "";
+    if (record.videoUrls.length === 0 && record.shortcode && feedLookupUsername) {
       const feedFallback = await fetchSingleUrlRecordFromUserFeedByShortcode(
         page,
-        profileUsername,
+        feedLookupUsername,
         record.shortcode,
         log,
       );
@@ -647,7 +661,10 @@ async function runSingleUrl(opts, log) {
         const mergedImages = [...record.imageUrls, ...feedFallback.imageUrls];
         const mergedVideos = [...record.videoUrls, ...feedFallback.videoUrls];
         const hadVideoBefore = record.videoUrls.length > 0;
-        record.imageUrls = [...new Set(mergedImages.filter(Boolean))];
+        record.imageUrls = selectInstagramImageUrls(mergedImages, {
+          mediaType: record.mediaType,
+          productType: record.productType,
+        });
         record.videoUrls = [...new Set(mergedVideos.filter(Boolean))];
         if (record.videoUrls.length > 0 && feedFallback.videoUrls.length > 0) {
           record.video_source = appendSourceLabel(
@@ -658,6 +675,9 @@ async function runSingleUrl(opts, log) {
         log.info(
           `single_url_feed_fallback_merged shortcode=${record.shortcode} images=${record.imageUrls.length} videos=${record.videoUrls.length}`,
         );
+        sourceUsername = resolveSourceUsername();
+        record.profileUsername = sourceUsername || null;
+        record.uploadTags = buildInstagramUploadTags(sourceUsername, "");
       }
     }
 
@@ -679,12 +699,9 @@ async function runSingleUrl(opts, log) {
     }
 
     if (!opts.outputPathProvided) {
-      const routedUsername = typeof record.username === "string" ? record.username.trim() : "";
-      if (!routedUsername) {
-        throw new Error(
-          "Could not resolve post owner username for single-url. Re-run auth/headful or pass --username <owner> or --output <path>.",
-        );
-      }
+      const routedUsername =
+        sourceUsername ||
+        (record.shortcode ? `single-url-${record.shortcode}` : "single-url-unresolved");
       opts.outputPath = path.join(DEFAULT_DATA_DIR, `${routedUsername}.ndjson`);
       log.info(`single_url_output_auto_routed username=${routedUsername} output=${opts.outputPath}`);
     }
@@ -704,7 +721,8 @@ async function runSingleUrl(opts, log) {
 
     if (opts.pushCloudflare) {
       const sourcePageUrl = record.permalink || opts.instagramUrl;
-      const uploadTags = buildInstagramUploadTags(record.username || opts.username, profileUsername);
+      const uploadTags = buildInstagramUploadTags(sourceUsername, "");
+      record.uploadTags = uploadTags;
 
       const shouldTreatAsVideoPost =
         record.mediaType === 2 ||
@@ -724,7 +742,7 @@ async function runSingleUrl(opts, log) {
             const pushed = await pushImageToCloudflare({
               apiBase: opts.apiBase,
               imageUrl,
-              username: record.username || opts.username,
+              username: sourceUsername || "instagram",
               uploadTags,
               shortcode: record.shortcode,
               permalink: record.permalink,
@@ -772,7 +790,7 @@ async function runSingleUrl(opts, log) {
             const pushed = await pushVideoToCloudflare({
               apiBase: opts.apiBase,
               videoUrl,
-              username: record.username || opts.username,
+              username: sourceUsername || "instagram",
               uploadTags,
               shortcode: record.shortcode,
               permalink: record.permalink,

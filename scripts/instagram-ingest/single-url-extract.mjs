@@ -72,6 +72,49 @@ export function selectInstagramImageUrls(imageUrls, mediaInfo = {}) {
   return isCarousel ? rankedImageUrls : rankedImageUrls.slice(0, 1);
 }
 
+function cleanInstagramUsername(value) {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw) return null;
+  const withoutAt = raw.replace(/^@+/, "").trim();
+  return /^[a-zA-Z0-9._]{1,30}$/.test(withoutAt) ? withoutAt : null;
+}
+
+export function inferInstagramOwnerUsername(candidates = {}) {
+  const values = {
+    profileUrl: typeof candidates.profileUrl === "string" ? candidates.profileUrl : "",
+    twitterTitle: typeof candidates.twitterTitle === "string" ? candidates.twitterTitle : "",
+    description: typeof candidates.description === "string" ? candidates.description : "",
+    ogDescription: typeof candidates.ogDescription === "string" ? candidates.ogDescription : "",
+    canonicalUrl: typeof candidates.canonicalUrl === "string" ? candidates.canonicalUrl : "",
+  };
+
+  for (const urlValue of [values.profileUrl, values.canonicalUrl]) {
+    try {
+      const parsed = new URL(urlValue, "https://www.instagram.com");
+      const parts = parsed.pathname.split("/").filter(Boolean);
+      const postIndex = parts.findIndex((part) => ["p", "reel", "reels", "tv"].includes(part.toLowerCase()));
+      const username = postIndex > 0 ? cleanInstagramUsername(parts[postIndex - 1]) : null;
+      if (username) return { username, source: "profile_url" };
+    } catch {
+      // Non-URL strings are handled by the textual patterns below.
+    }
+  }
+
+  for (const text of [values.twitterTitle, values.description, values.ogDescription]) {
+    const atHandle = text.match(/@([a-zA-Z0-9._]{1,30})\b/);
+    const username = cleanInstagramUsername(atHandle?.[1]);
+    if (username) return { username, source: "meta_handle" };
+  }
+
+  for (const text of [values.description, values.ogDescription]) {
+    const byline = text.match(/^\s*(?:[\d,.]+\s+likes?,\s+[\d,.]+\s+comments?\s+-\s+)?([a-zA-Z0-9._]{1,30})\s+on\s+/i);
+    const username = cleanInstagramUsername(byline?.[1]);
+    if (username) return { username, source: "meta_byline" };
+  }
+
+  return { username: null, source: "unresolved" };
+}
+
 export async function igGet(page, apiPath) {
   const result = await page.evaluate(
     async ({ apiPath, appId }) => {
@@ -146,15 +189,44 @@ export async function extractSingleUrlRecord(page, instagramUrl, fallbackUsernam
       return urls;
     };
     const toList = (items) => [...new Set(items.filter((item) => typeof item === "string" && item.length > 0))];
-    const inferUsernameFromMetaText = (...candidates) => {
-      for (const value of candidates) {
-        if (typeof value !== "string") continue;
-        const text = value.trim();
-        if (!text) continue;
-        const match = text.match(/([a-zA-Z0-9._]{1,30})\s+on\s+Instagram/i);
-        if (match?.[1]) return match[1];
+    const cleanInstagramUsername = (value) => {
+      const raw = typeof value === "string" ? value.trim() : "";
+      if (!raw) return null;
+      const withoutAt = raw.replace(/^@+/, "").trim();
+      return /^[a-zA-Z0-9._]{1,30}$/.test(withoutAt) ? withoutAt : null;
+    };
+    const inferInstagramOwnerUsername = (candidates = {}) => {
+      const profileUrl = typeof candidates.profileUrl === "string" ? candidates.profileUrl : "";
+      const canonicalUrl = typeof candidates.canonicalUrl === "string" ? candidates.canonicalUrl : "";
+      const twitterTitle = typeof candidates.twitterTitle === "string" ? candidates.twitterTitle : "";
+      const description = typeof candidates.description === "string" ? candidates.description : "";
+      const ogDescription = typeof candidates.ogDescription === "string" ? candidates.ogDescription : "";
+
+      for (const urlValue of [profileUrl, canonicalUrl]) {
+        try {
+          const parsed = new URL(urlValue, "https://www.instagram.com");
+          const parts = parsed.pathname.split("/").filter(Boolean);
+          const postIndex = parts.findIndex((part) => ["p", "reel", "reels", "tv"].includes(part.toLowerCase()));
+          const username = postIndex > 0 ? cleanInstagramUsername(parts[postIndex - 1]) : null;
+          if (username) return { username, source: "profile_url" };
+        } catch {
+          // Textual meta fields are handled below.
+        }
       }
-      return null;
+
+      for (const text of [twitterTitle, description, ogDescription]) {
+        const atHandle = text.match(/@([a-zA-Z0-9._]{1,30})\b/);
+        const username = cleanInstagramUsername(atHandle?.[1]);
+        if (username) return { username, source: "meta_handle" };
+      }
+
+      for (const text of [description, ogDescription]) {
+        const byline = text.match(/^\s*(?:[\d,.]+\s+likes?,\s+[\d,.]+\s+comments?\s+-\s+)?([a-zA-Z0-9._]{1,30})\s+on\s+/i);
+        const username = cleanInstagramUsername(byline?.[1]);
+        if (username) return { username, source: "meta_byline" };
+      }
+
+      return { username: null, source: "unresolved" };
     };
     const imageUrls = [];
     const videoUrls = [];
@@ -343,22 +415,33 @@ export async function extractSingleUrlRecord(page, instagramUrl, fallbackUsernam
       }
     }
     const permalink = window.location.href;
-    const ogTitle = document.querySelector('meta[property="og:title"]')?.getAttribute("content") || "";
     const ogDescription = document.querySelector('meta[property="og:description"]')?.getAttribute("content") || "";
+    const description = document.querySelector('meta[name="description"]')?.getAttribute("content") || "";
     const twitterTitle = document.querySelector('meta[name="twitter:title"]')?.getAttribute("content") || "";
-    const inferredMetaUsername = inferUsernameFromMetaText(ogTitle, ogDescription, twitterTitle);
+    const ogUrl = document.querySelector('meta[property="og:url"]')?.getAttribute("content") || "";
+    const canonicalUrl = document.querySelector('link[rel="canonical"]')?.getAttribute("href") || "";
+    const inferredOwner = inferInstagramOwnerUsername({
+      profileUrl: ogUrl,
+      canonicalUrl,
+      twitterTitle,
+      description,
+      ogDescription,
+    });
     const usernameFromOwner = mediaNode?.owner?.username || null;
     const usernameFromJsonLd = jsonLdUsername || null;
     const usernameFromFallback =
       typeof fallbackUsername === "string" && fallbackUsername ? fallbackUsername : null;
-    const username = usernameFromOwner || usernameFromJsonLd || usernameFromFallback;
+    const usernameFromMeta = inferredOwner.username || null;
+    const username = usernameFromOwner || usernameFromJsonLd || usernameFromMeta || usernameFromFallback;
     const usernameSource = usernameFromOwner
       ? "owner"
       : usernameFromJsonLd
         ? "jsonld"
-        : usernameFromFallback
-          ? "fallback_arg"
-          : "unresolved";
+        : usernameFromMeta
+          ? inferredOwner.source
+          : usernameFromFallback
+            ? "fallback_arg"
+            : "unresolved";
     const userId = mediaNode?.owner?.id || null;
     const mediaId = mediaNode?.id || null;
     const pk = mediaNode?.pk || null;
@@ -423,7 +506,7 @@ export async function extractSingleUrlRecord(page, instagramUrl, fallbackUsernam
       imageUrls: toList(imageUrls),
       videoUrls: toList(videoUrls),
       notes,
-      inferredMetaUsername,
+      inferredMetaUsername: usernameFromMeta || null,
       likelyVideo,
       usernameSource,
       videoSignals: {

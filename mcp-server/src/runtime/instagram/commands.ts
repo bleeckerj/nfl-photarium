@@ -121,8 +121,8 @@ export async function runInstagramSingleUrlIngest(options: {
 }): Promise<InstagramCommandResult> {
   const args = [scriptPath('instagram-ingest.mjs'), 'single-url', '--url', options.url];
 
-  args.push('--username', options.username || 'darthjulian');
-  args.push('--namespace', options.namespace || 'ig-videos');
+  appendStringArg(args, options.username, '--username');
+  args.push('--namespace', options.namespace || 'cf-instagram');
   args.push('--api-base', options.apiBase || BASE_URL);
 
   if (options.noPushCloudflare) {

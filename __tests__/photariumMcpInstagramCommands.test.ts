@@ -37,7 +37,7 @@ describe('Photarium MCP Instagram command wrappers', async () => {
     spawnMock.mockReset();
   });
 
-  it('builds the single URL ingest command with compatibility defaults', async () => {
+  it('builds the single URL ingest command with Instagram defaults', async () => {
     mockSpawnResult(0, 'ok');
 
     const result = await commands.runInstagramSingleUrlIngest({
@@ -55,13 +55,12 @@ describe('Photarium MCP Instagram command wrappers', async () => {
         'single-url',
         '--url',
         'https://www.instagram.com/p/abc123/',
-        '--username',
-        'darthjulian',
         '--namespace',
-        'ig-videos',
+        'cf-instagram',
         '--push-cloudflare',
       ]),
     );
+    expect(args).not.toContain('--username');
     expect(options.cwd).toMatch(/cloud-flare-image-handler$/);
   });
 

@@ -520,7 +520,7 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "type": "boolean",
       },
       "username": {
-        "description": "Instagram username or fallback owner username, without requiring an @ prefix.",
+        "description": "Instagram source username, without requiring an @ prefix. For single-url ingest, omit this unless it is the post owner.",
         "type": "string",
       },
       "verbose": {
@@ -545,7 +545,7 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "type": "boolean",
       },
       "namespace": {
-        "description": "Target namespace for uploaded media. Defaults to "ig-videos".",
+        "description": "Target namespace for uploaded media. Defaults to "cf-instagram".",
         "type": "string",
       },
       "noColor": {
@@ -577,7 +577,7 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "type": "string",
       },
       "username": {
-        "description": "Fallback owner username for the Instagram post. Defaults to "darthjulian".",
+        "description": "Known owner username for the Instagram post. Omit unless the source account is known.",
         "type": "string",
       },
       "verbose": {
@@ -633,7 +633,7 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "type": "boolean",
       },
       "username": {
-        "description": "Instagram username or fallback owner username, without requiring an @ prefix.",
+        "description": "Instagram source username, without requiring an @ prefix. For single-url ingest, omit this unless it is the post owner.",
         "type": "string",
       },
       "verbose": {

@@ -1,7 +1,7 @@
 const sharedInstagramProperties = {
     username: {
         type: 'string',
-        description: 'Instagram username or fallback owner username, without requiring an @ prefix.',
+        description: 'Instagram source username, without requiring an @ prefix. For single-url ingest, omit this unless it is the post owner.',
     },
     profileDir: {
         type: 'string',
@@ -74,7 +74,7 @@ export const instagramTools = [
     },
     {
         name: 'photarium_instagram_ingest_single_url',
-        description: 'Ingest a single Instagram post or reel URL through the existing Instagram CLI/browser profile flow. Defaults to namespace "ig-videos", fallback owner username "darthjulian", and Cloudflare push enabled for backward compatibility.',
+        description: 'Ingest a single Instagram post or reel URL through the existing Instagram CLI/browser profile flow. Defaults to namespace "cf-instagram" and Cloudflare push enabled.',
         inputSchema: {
             type: 'object',
             properties: {
@@ -84,11 +84,11 @@ export const instagramTools = [
                 },
                 username: {
                     type: 'string',
-                    description: 'Fallback owner username for the Instagram post. Defaults to "darthjulian".',
+                    description: 'Known owner username for the Instagram post. Omit unless the source account is known.',
                 },
                 namespace: {
                     type: 'string',
-                    description: 'Target namespace for uploaded media. Defaults to "ig-videos".',
+                    description: 'Target namespace for uploaded media. Defaults to "cf-instagram".',
                 },
                 apiBase: sharedInstagramProperties.apiBase,
                 profileDir: sharedInstagramProperties.profileDir,
