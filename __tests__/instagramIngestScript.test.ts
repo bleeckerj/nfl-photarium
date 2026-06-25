@@ -179,4 +179,17 @@ describe('instagram ingest script helpers', async () => {
     expect(uploadDisplayName).toBeNull();
     expect(warn).toHaveBeenCalledTimes(1);
   });
+
+  it('prefers full Instagram photo URLs over cropped og:image candidates', () => {
+    const cropped =
+      'https://scontent-lax3-2.cdninstagram.com/v/t51.82787-15/730226633_18413347660194929_2999636219339230040_n.jpg?stp=c287.0.864.863a_dst-jpg_e35_s640x640_tt6&_nc_cat=103&efg=eyJlZmdfdGFnIjoiRkVFRC5iZXN0X2ltYWdlX3VybGdlbi5DMyJ9';
+    const full =
+      'https://scontent-lax3-2.cdninstagram.com/v/t51.82787-15/730226633_18413347660194929_2999636219339230040_n.jpg?stp=dst-jpg_e35_tt6&_nc_cat=103&ig_cache_key=MzkyNjU4OTk3Mzg2MTMwMDQ0Nw%3D%3D.3-ccb7-5&efg=eyJ2ZW5jb2RlX3RhZyI6IkZFRUQueHBpZHMuMTQzOS5zZHIucmVndWxhcl9waG90by5DMyJ9';
+    const unrelated =
+      'https://scontent-lax3-2.cdninstagram.com/v/t51.82787-15/602832905_18384595480194929_6650267950416299315_n.jpg?stp=dst-jpg_e35_tt6&_nc_cat=107&ig_cache_key=Mzc5MTExOTY3OTE4OTMwMzMxMQ%3D%3D.3-ccb7-5&efg=eyJ2ZW5jb2RlX3RhZyI6IkNBUk9VU0VMX0lURU0ueHBpZHMuMTQ0MC5zZHIucmVndWxhcl9waG90by5DMyJ9';
+
+    expect(singleUrlExtract.rankInstagramImageUrls([cropped, full])[0]).toBe(full);
+    expect(singleUrlExtract.selectInstagramImageUrls([cropped, full, unrelated], { mediaType: 1 })).toEqual([full]);
+    expect(singleUrlExtract.selectInstagramImageUrls([cropped, full, unrelated], { mediaType: 8 })).toHaveLength(3);
+  });
 });

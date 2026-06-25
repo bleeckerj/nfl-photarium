@@ -2,6 +2,76 @@ import { APP_ID } from "./cli.mjs";
 import { extractShortcodeFromInstagramUrl } from "./cloudflare-upload.mjs";
 import { mapItemToRecord } from "./records.mjs";
 
+function decodePossiblyEscapedUrl(rawUrl) {
+  if (typeof rawUrl !== "string") return "";
+  return rawUrl
+    .replace(/\\\//g, "/")
+    .replace(/\\u0026/gi, "&")
+    .replace(/&amp;/gi, "&")
+    .trim();
+}
+
+function isLikelyImageUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const pathname = parsed.pathname.toLowerCase();
+    return /\.(jpg|jpeg|png|webp|gif|avif)(?:$|[?#])/.test(pathname) || /cdninstagram/i.test(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function scoreInstagramImageUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLowerCase();
+    const pathname = parsed.pathname.toLowerCase();
+    const stp = (parsed.searchParams.get("stp") || "").toLowerCase();
+    const efg = decodePossiblyEscapedUrl(parsed.searchParams.get("efg") || "").toLowerCase();
+    let score = 0;
+
+    if (hostname.includes("cdninstagram") || hostname.startsWith("scontent-")) score += 30;
+    if (/\.(jpg|jpeg|png|webp|avif)$/.test(pathname)) score += 15;
+    if (stp) score += 5;
+    if (stp.includes("dst-jpg") && !/c\d+\./i.test(stp)) score += 40;
+    if (/regular_photo|xpids|photo/.test(efg)) score += 15;
+    if (/best_image_urlgen/.test(efg)) score -= 15;
+    if (/c\d+\.\d+\.\d+[a-z]?/i.test(stp)) score -= 70;
+    if (/(^|_)s\d+x\d+($|_)/i.test(stp)) score -= 35;
+    if (/(^|_)e35_s\d+x\d+/i.test(stp)) score -= 35;
+    if (parsed.searchParams.has("ig_cache_key")) score += 8;
+
+    return score;
+  } catch {
+    return -100;
+  }
+}
+
+export function rankInstagramImageUrls(imageUrls) {
+  const firstIndexByUrl = new Map();
+  const unique = [];
+  for (const imageUrl of Array.isArray(imageUrls) ? imageUrls : []) {
+    const normalized = decodePossiblyEscapedUrl(imageUrl);
+    if (!normalized || !normalized.startsWith("http") || !isLikelyImageUrl(normalized)) continue;
+    if (!firstIndexByUrl.has(normalized)) {
+      firstIndexByUrl.set(normalized, unique.length);
+      unique.push(normalized);
+    }
+  }
+
+  return unique.sort((a, b) => {
+    const scoreDelta = scoreInstagramImageUrl(b) - scoreInstagramImageUrl(a);
+    if (scoreDelta !== 0) return scoreDelta;
+    return (firstIndexByUrl.get(a) ?? 0) - (firstIndexByUrl.get(b) ?? 0);
+  });
+}
+
+export function selectInstagramImageUrls(imageUrls, mediaInfo = {}) {
+  const rankedImageUrls = rankInstagramImageUrls(imageUrls);
+  const isCarousel = mediaInfo.mediaType === 8 || mediaInfo.productType === "carousel_container";
+  return isCarousel ? rankedImageUrls : rankedImageUrls.slice(0, 1);
+}
+
 export async function igGet(page, apiPath) {
   const result = await page.evaluate(
     async ({ apiPath, appId }) => {
@@ -51,6 +121,30 @@ export async function extractSingleUrlRecord(page, instagramUrl, fallbackUsernam
     await page.waitForNetworkIdle({ idleTime: 750, timeout: 3000 }).catch(() => {});
 
     const extracted = await page.evaluate(({ fallbackUsername }) => {
+    const decodePossiblyEscapedUrl = (rawUrl) =>
+      typeof rawUrl === "string"
+        ? rawUrl.replace(/\\\//g, "/").replace(/\\u0026/gi, "&").replace(/&amp;/gi, "&").trim()
+        : "";
+    const isLikelyImageUrl = (url) => {
+      try {
+        const parsed = new URL(url);
+        const pathname = parsed.pathname.toLowerCase();
+        return /\.(jpg|jpeg|png|webp|gif|avif)(?:$|[?#])/.test(pathname) || /cdninstagram/i.test(parsed.hostname);
+      } catch {
+        return false;
+      }
+    };
+    const extractImageUrlsFromText = (text) => {
+      if (typeof text !== "string" || !text.includes("http")) return [];
+      const urls = [];
+      const pattern = /https:(?:\\\/\\\/|\/\/)[^"' <>)]+/gi;
+      let match = null;
+      while ((match = pattern.exec(text)) !== null) {
+        const url = decodePossiblyEscapedUrl(match[0]).replace(/[),.;]+$/g, "");
+        if (isLikelyImageUrl(url)) urls.push(url);
+      }
+      return urls;
+    };
     const toList = (items) => [...new Set(items.filter((item) => typeof item === "string" && item.length > 0))];
     const inferUsernameFromMetaText = (...candidates) => {
       for (const value of candidates) {
@@ -70,10 +164,12 @@ export async function extractSingleUrlRecord(page, instagramUrl, fallbackUsernam
     let sawVideoScriptField = false;
 
     const pushImage = (url) => {
-      if (typeof url === "string" && url.startsWith("http")) imageUrls.push(url);
+      const normalized = decodePossiblyEscapedUrl(url);
+      if (normalized.startsWith("http") && isLikelyImageUrl(normalized)) imageUrls.push(normalized);
     };
     const pushVideo = (url) => {
-      if (typeof url === "string" && url.startsWith("http")) videoUrls.push(url);
+      const normalized = decodePossiblyEscapedUrl(url);
+      if (normalized.startsWith("http")) videoUrls.push(normalized);
     };
 
     const metaImageSelectors = [
@@ -113,6 +209,24 @@ export async function extractSingleUrlRecord(page, instagramUrl, fallbackUsernam
       }
     }
 
+    for (const imageEl of document.querySelectorAll("img")) {
+      pushImage(imageEl.currentSrc || "");
+      pushImage(imageEl.src || "");
+      pushImage(imageEl.getAttribute("src") || "");
+      const srcset = imageEl.getAttribute("srcset") || "";
+      for (const entry of srcset.split(",")) {
+        const candidate = entry.trim().split(/\s+/)[0] || "";
+        pushImage(candidate);
+      }
+    }
+
+    for (const linkEl of document.querySelectorAll("link[rel]")) {
+      const rel = (linkEl.getAttribute("rel") || "").toLowerCase();
+      if (rel.includes("image") || rel.includes("preload") || rel.includes("preconnect")) {
+        pushImage(linkEl.getAttribute("href") || "");
+      }
+    }
+
     for (const sourceEl of document.querySelectorAll("source")) {
       const type = (sourceEl.getAttribute("type") || "").toLowerCase();
       const src = sourceEl.getAttribute("src") || "";
@@ -124,6 +238,10 @@ export async function extractSingleUrlRecord(page, instagramUrl, fallbackUsernam
     const weakSeen = new WeakSet();
     const scanNode = (value, depth = 0) => {
       if (!value || depth > 10) return;
+      if (typeof value === "string") {
+        if (isLikelyImageUrl(value)) pushImage(value);
+        return;
+      }
       if (Array.isArray(value)) {
         for (const item of value) scanNode(item, depth + 1);
         return;
@@ -157,6 +275,9 @@ export async function extractSingleUrlRecord(page, instagramUrl, fallbackUsernam
     for (const script of scriptNodes) {
       const text = script.textContent || "";
       if (!text.trim()) continue;
+      for (const imageUrl of extractImageUrlsFromText(text)) {
+        pushImage(imageUrl);
+      }
       try {
         const parsed = JSON.parse(text);
         scanNode(parsed);
@@ -320,6 +441,11 @@ export async function extractSingleUrlRecord(page, instagramUrl, fallbackUsernam
       ...networkVideoUrls,
     ];
 
+    const imageUrls = selectInstagramImageUrls(extracted.imageUrls, {
+      mediaType: extracted.mediaType,
+      productType: extracted.productType,
+    });
+
     const record = {
       source: "instagram",
       fetchedAt: new Date().toISOString(),
@@ -336,7 +462,7 @@ export async function extractSingleUrlRecord(page, instagramUrl, fallbackUsernam
       likeCount: null,
       commentCount: null,
       caption: extracted.caption || "",
-      imageUrls: Array.isArray(extracted.imageUrls) ? extracted.imageUrls : [],
+      imageUrls,
       videoUrls: [...new Set(mergedVideoUrls.filter(Boolean))],
       likelyVideo: extracted.likelyVideo === true,
       username_source: extracted.usernameSource || "unresolved",
