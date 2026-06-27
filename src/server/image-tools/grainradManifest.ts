@@ -48,7 +48,7 @@ const VERTICAL_HOLD_FULL_LOOP_CONTROL: ImageToolControl = {
   label: 'Vertical Hold Full Loop',
   type: 'switch',
   defaultValue: false,
-  helpText: 'Match animated duration to one complete vertical-hold cycle. This is seamless when roll amount is 1.',
+  helpText: 'Match animated duration to one seamless full-frame vertical-hold roll.',
   group: 'vertical-hold',
   effectIds: ['vhs', 'rgb-subpixel-display'],
   advanced: true,
@@ -135,8 +135,11 @@ const annotateControl = (
 };
 
 const addPhotariumControls = (controls: ImageToolControl[]) => {
-  if (controls.some((control) => control.id === VERTICAL_HOLD_FULL_LOOP_CONTROL.id)) {
-    return controls;
+  const existingControlIndex = controls.findIndex((control) => control.id === VERTICAL_HOLD_FULL_LOOP_CONTROL.id);
+  if (existingControlIndex >= 0) {
+    return controls.map((control, index) =>
+      index === existingControlIndex ? VERTICAL_HOLD_FULL_LOOP_CONTROL : control
+    );
   }
 
   const rollControlIndex = controls.findIndex((control) => control.id === 'params.verticalHoldRollAmount');

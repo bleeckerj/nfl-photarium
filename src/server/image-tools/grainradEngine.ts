@@ -165,6 +165,9 @@ const stripPhotariumOnlyParams = (params: Record<string, unknown>) => {
   return nextParams;
 };
 
+const usesVerticalHoldFullLoop = (request: ImageToolRequest) =>
+  booleanParam((request.params ?? {})[VERTICAL_HOLD_FULL_LOOP_PARAM]);
+
 const verticalHoldPresetParamValue = (
   request: ImageToolRequest,
   key: keyof typeof VERTICAL_HOLD_EFFECT_DEFAULTS['vhs']
@@ -190,8 +193,7 @@ const resolveVerticalHoldFullLoopTimeline = (
   request: ImageToolRequest,
   timeline: ImageToolRequest['timeline']
 ): ImageToolRequest['timeline'] => {
-  const params = request.params ?? {};
-  if (!booleanParam(params[VERTICAL_HOLD_FULL_LOOP_PARAM])) return timeline;
+  if (!usesVerticalHoldFullLoop(request)) return timeline;
 
   const speed = resolvedVerticalHoldParamValue(request, 'verticalHoldSpeed');
   if (!speed) return timeline;
@@ -212,6 +214,8 @@ const usesIndependentVerticalHoldRoll = (request: ImageToolRequest) => {
   if (!defaults) return false;
 
   const params = request.params ?? {};
+  if (usesVerticalHoldFullLoop(request)) return true;
+
   const rollAmount = verticalHoldParamValue(params, 'verticalHoldRollAmount', defaults.verticalHoldRollAmount);
   if (rollAmount <= 0) return false;
 
@@ -235,11 +239,17 @@ const buildRenderParams = (request: ImageToolRequest) => {
   }
 
   const params = request.params ?? {};
+  const fullLoop = usesVerticalHoldFullLoop(request);
   const amount = verticalHoldParamValue(params, 'verticalHoldAmount', defaults.verticalHoldAmount);
   const bandHeight = verticalHoldParamValue(params, 'verticalHoldBandHeight', defaults.verticalHoldBandHeight);
-  if (amount > 0 && bandHeight > 0) return stripPhotariumOnlyParams(params);
+  if (amount > 0 && bandHeight > 0) {
+    return stripPhotariumOnlyParams(fullLoop ? { ...params, verticalHoldRollAmount: 1 } : params);
+  }
 
   const nextParams = { ...params };
+  if (fullLoop) {
+    nextParams.verticalHoldRollAmount = 1;
+  }
   if (amount <= 0 || bandHeight <= 0) {
     nextParams.verticalHoldAmount = INVISIBLE_VERTICAL_HOLD_VALUE;
   }

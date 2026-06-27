@@ -217,25 +217,24 @@ describe('grainradEngine (in-process bridge)', () => {
     const png = await createTestImageFixture('png');
     const progress: string[] = [];
     await renderAnimated(png.buffer, stillRequest({
-      effectId: 'rgb-subpixel-display',
+      effectId: 'vhs',
       params: {
+        jitterAmount: 0,
+        jitterFrequency: 0,
+        jitterSpeed: 0,
+        rgbSplit: 0,
+        bleed: 0,
+        blur: 0,
+        scanlineIntensity: 0,
+        noiseAmount: 0,
+        desaturation: 0,
         brightness: 0,
         contrast: 0,
-        gamma: 1,
-        signalResolution: 1,
-        resampleMode: 'nearest',
-        pixelGlow: 0,
-        subpixelGlow: 0,
-        phosphorBloom: 0,
-        glassBloom: 0,
-        maskStrength: 0,
-        maskOpacity: 0,
-        scanlineIntensity: 0,
-        waveAmount: 0,
         verticalHoldAmount: 1,
-        verticalHoldSpeed: 0.5,
-        verticalHoldRollAmount: 1,
+        verticalHoldSpeed: 1,
+        verticalHoldRollAmount: 0.25,
         verticalHoldBandHeight: 0.08,
+        verticalHoldSoftness: 0.18,
         verticalHoldDataDensity: 0,
         verticalHoldDataBrightness: 0,
         verticalHoldFullLoop: true,
@@ -250,8 +249,8 @@ describe('grainradEngine (in-process bridge)', () => {
       },
     });
 
-    expect(progress.some((event) => event.includes('Rendering Grainrad frame 1 of 8'))).toBe(true);
-    expect(progress.some((event) => event.includes('Rendered Grainrad frame 8 of 8'))).toBe(true);
+    expect(progress.some((event) => event.includes('Rendering Grainrad frame 1 of 4'))).toBe(true);
+    expect(progress.some((event) => event.includes('Rendered Grainrad frame 4 of 4'))).toBe(true);
   });
 
   it('rejects undecodable source bytes with a clear error', async () => {
