@@ -8,6 +8,7 @@
 
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { filterImagesForGallery } from '@/utils/galleryFilter';
+import { matchesAspectRatioClass } from '@/utils/aspectRatioClass';
 import { loadHiddenFolders, loadHiddenTags, persistHiddenFolders, persistHiddenTags } from '../storage';
 import { computeDuplicateGroups, buildChildrenMap, buildFamilySummaryMap, formatDateRangeLabel } from '../utils';
 import { DEFAULT_PAGE_SIZE } from '../constants';
@@ -346,17 +347,7 @@ export function useGalleryFilters({
   const aspectRatioFilteredImages = useMemo(() => {
     if (!aspectRatioFilters.length) return embeddingFilteredImages;
     return embeddingFilteredImages.filter(image => {
-      if (image.assetType === 'video') return true;
-      if (!image.dimensions?.width || !image.dimensions?.height) return false;
-      const ratio = image.dimensions.width / image.dimensions.height;
-      const isSquare = Math.abs(ratio - 1) <= 0.05;
-      const isHorizontal = ratio > 1.05;
-      const isVertical = ratio < 0.95;
-      return (
-        (aspectRatioFilters.includes('square') && isSquare) ||
-        (aspectRatioFilters.includes('horizontal') && isHorizontal) ||
-        (aspectRatioFilters.includes('vertical') && isVertical)
-      );
+      return matchesAspectRatioClass(image, aspectRatioFilters);
     });
   }, [embeddingFilteredImages, aspectRatioFilters]);
 

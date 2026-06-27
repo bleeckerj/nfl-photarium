@@ -1,5 +1,9 @@
 import { getUserVisibleTags, hasFavoriteTag } from '@/utils/systemTags';
 import { computeDuplicateGroups, buildFamilySummaryMap } from '@/components/gallery/utils';
+import {
+  matchesAspectRatioClass,
+  type AspectRatioClass,
+} from '@/utils/aspectRatioClass';
 
 export type GalleryQueryAsset = {
   id: string;
@@ -27,6 +31,7 @@ export type GalleryQueryAsset = {
   hasClipEmbedding?: boolean;
   hasColorEmbedding?: boolean;
   aspectRatio?: string;
+  aspectRatioClass?: AspectRatioClass;
   dimensions?: { width: number; height: number };
 };
 
@@ -40,7 +45,7 @@ export type GalleryQueryFilters = {
   duplicates?: boolean;
   comfy?: boolean;
   embedding?: 'none' | 'missing-clip' | 'missing-color' | 'missing-any' | 'missing-both';
-  aspectRatioClasses?: Array<'horizontal' | 'vertical' | 'square'>;
+  aspectRatioClasses?: AspectRatioClass[];
   dateStart?: string;
   dateEnd?: string;
   dateTimeZone?: string;
@@ -161,17 +166,7 @@ const matchesEmbedding = (asset: GalleryQueryAsset, embedding: GalleryQueryFilte
 
 const matchesAspect = (asset: GalleryQueryAsset, classes?: GalleryQueryFilters['aspectRatioClasses']) => {
   if (!classes?.length) return true;
-  if (asset.assetType === 'video') return true;
-  if (!asset.dimensions?.width || !asset.dimensions?.height) return false;
-  const ratio = asset.dimensions.width / asset.dimensions.height;
-  const isSquare = Math.abs(ratio - 1) <= 0.05;
-  const isHorizontal = ratio > 1.05;
-  const isVertical = ratio < 0.95;
-  return (
-    (classes.includes('square') && isSquare) ||
-    (classes.includes('horizontal') && isHorizontal) ||
-    (classes.includes('vertical') && isVertical)
-  );
+  return matchesAspectRatioClass(asset, classes);
 };
 
 const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;

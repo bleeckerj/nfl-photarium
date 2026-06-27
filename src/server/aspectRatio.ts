@@ -1,15 +1,11 @@
 import sharp from 'sharp';
 import { getCloudflareImageUrl, calculateAspectRatio } from '@/utils/imageUtils';
+import {
+  classifyAspectRatio,
+  type AspectRatioClass,
+} from '@/utils/aspectRatioClass';
 
-export type AspectRatioClass = 'horizontal' | 'vertical' | 'square';
-
-const SQUARE_TOLERANCE = 0.05;
-
-export const classifyAspectRatio = (width: number, height: number): AspectRatioClass => {
-  const ratio = width / height;
-  if (Math.abs(ratio - 1) <= SQUARE_TOLERANCE) return 'square';
-  return ratio > 1 ? 'horizontal' : 'vertical';
-};
+export { classifyAspectRatio, type AspectRatioClass };
 
 export const fetchImageDimensions = async (imageUrl: string): Promise<{ width: number; height: number }> => {
   const resp = await fetch(imageUrl);

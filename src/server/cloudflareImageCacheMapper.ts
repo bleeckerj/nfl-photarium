@@ -1,4 +1,5 @@
 import { cleanString, parseCloudflareMetadata, type CloudflareMetadata } from '@/utils/cloudflareMetadata';
+import { normalizeAspectRatioClass, type AspectRatioClass } from '@/utils/aspectRatioClass';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import type { AnimatedWebpProvenanceRecord } from '@/server/imageExtras';
 
@@ -45,6 +46,7 @@ export interface CachedCloudflareImage {
   dominantColors?: string[];
   averageColor?: string;
   aspectRatio?: string;
+  aspectRatioClass?: AspectRatioClass;
   dimensions?: { width: number; height: number };
 }
 
@@ -79,6 +81,7 @@ export const buildMetadataOverride = (
   assign('variationSort', image.variationSort);
   assign('size', image.size);
   assign('aspectRatio', image.aspectRatio);
+  assign('aspectRatioClass', image.aspectRatioClass);
   assign('dimensions', image.dimensions);
   assign('type', image.contentType);
   assign('isAnimated', image.isAnimated);
@@ -238,6 +241,9 @@ export const transformImage = (
     const trimmed = mergedMeta.aspectRatio.trim();
     return trimmed ? trimmed : undefined;
   })();
+  const parsedAspectRatioClass = normalizeAspectRatioClass(
+    typeof mergedMeta.aspectRatioClass === 'string' ? mergedMeta.aspectRatioClass : undefined
+  );
 
   return {
     id: image.id,
@@ -268,6 +274,7 @@ export const transformImage = (
     parentId,
     linkedAssetId,
     aspectRatio: parsedAspectRatio,
+    aspectRatioClass: parsedAspectRatioClass ?? undefined,
     dimensions: parsedDimensions,
   };
 };

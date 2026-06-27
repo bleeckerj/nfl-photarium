@@ -1,4 +1,5 @@
 import type { GalleryQueryAsset, GalleryQueryFilters } from '@/server/galleryQuery';
+import type { AspectRatioClass } from '@/utils/aspectRatioClass';
 
 export type ListableImage = {
   id: string;
@@ -13,6 +14,7 @@ export type ListableImage = {
   tags?: string[];
   description?: string;
   aspectRatio?: string;
+  aspectRatioClass?: AspectRatioClass;
   dimensions?: { width: number; height: number };
   altTag?: string;
   altText?: string;
@@ -125,9 +127,9 @@ export const parseCsvParam = (value: string | null): string[] =>
         .filter(Boolean)
     : [];
 
-export const parseAspectClasses = (value: string | null): Array<'horizontal' | 'vertical' | 'square'> =>
+export const parseAspectClasses = (value: string | null): AspectRatioClass[] =>
   parseCsvParam(value).filter(
-    (entry): entry is 'horizontal' | 'vertical' | 'square' =>
+    (entry): entry is AspectRatioClass =>
       entry === 'horizontal' || entry === 'vertical' || entry === 'square'
   );
 
@@ -178,6 +180,12 @@ export function toListableImage(image: Record<string, unknown>): ListableImage {
     tags: Array.isArray(image.tags) ? (image.tags as string[]) : undefined,
     description: typeof image.description === 'string' ? image.description : undefined,
     aspectRatio: typeof image.aspectRatio === 'string' ? image.aspectRatio : undefined,
+    aspectRatioClass:
+      image.aspectRatioClass === 'horizontal' ||
+      image.aspectRatioClass === 'vertical' ||
+      image.aspectRatioClass === 'square'
+        ? image.aspectRatioClass
+        : undefined,
     dimensions,
     altTag: typeof image.altTag === 'string' ? image.altTag : undefined,
     altText: typeof image.altText === 'string' ? image.altText : undefined,

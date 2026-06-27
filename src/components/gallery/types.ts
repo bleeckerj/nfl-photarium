@@ -6,6 +6,7 @@
  */
 
 import type { EmbeddingPendingEntry } from '@/utils/embeddingPending';
+import type { AspectRatioClass } from '@/utils/aspectRatioClass';
 
 export interface CloudflareImage {
   id: string;
@@ -20,6 +21,7 @@ export interface CloudflareImage {
   tags?: string[];
   description?: string;
   aspectRatio?: string;
+  aspectRatioClass?: AspectRatioClass;
   dimensions?: { width: number; height: number };
   altTag?: string;
   altText?: string;
@@ -63,7 +65,7 @@ export type BulkFolderMode = 'existing' | 'new';
 export type BulkTagsMode = 'replace' | 'append' | 'ai';
 export type BulkDisplayNameMode = 'custom' | 'auto' | 'clear' | 'ai';
 export type EmbeddingFilter = 'none' | 'missing-clip' | 'missing-color' | 'missing-any' | 'missing-both';
-export type AspectRatioClass = 'horizontal' | 'vertical' | 'square';
+export type { AspectRatioClass };
 
 export interface DateFilter {
   startDate: string; // YYYY-MM-DD

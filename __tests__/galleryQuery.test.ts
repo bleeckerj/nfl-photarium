@@ -165,6 +165,40 @@ describe('queryGalleryAssets', () => {
     expect(result.scopeTotal).toBe(2);
   });
 
+  it('filters aspect ratios from persisted metadata when dimensions are unavailable', () => {
+    const result = queryGalleryAssets(
+      [
+        asset({ id: 'square-ratio', aspectRatio: '1:1' }),
+        asset({ id: 'square-class', aspectRatioClass: 'square' }),
+        asset({ id: 'landscape-ratio', aspectRatio: '16:9' }),
+        asset({ id: 'portrait-ratio', aspectRatio: '4:5' }),
+        asset({ id: 'unknown' }),
+      ],
+      { aspectRatioClasses: ['square'] },
+      1,
+      60
+    );
+
+    expect(result.images.map((image) => image.id)).toEqual(['square-class', 'square-ratio']);
+    expect(result.total).toBe(2);
+  });
+
+  it('applies aspect ratio filters to video assets', () => {
+    const result = queryGalleryAssets(
+      [
+        asset({ id: 'horizontal-video', assetType: 'video', aspectRatio: '16:9' }),
+        asset({ id: 'vertical-image', aspectRatio: '4:5' }),
+        asset({ id: 'vertical-video', assetType: 'video', dimensions: { width: 720, height: 1280 } }),
+      ],
+      { aspectRatioClasses: ['vertical'] },
+      1,
+      60
+    );
+
+    expect(result.images.map((image) => image.id)).toEqual(['vertical-image', 'vertical-video']);
+    expect(result.total).toBe(2);
+  });
+
   it('formats page upload spans oldest to newest regardless of sort order', () => {
     expect(
       formatDateRangeLabel([

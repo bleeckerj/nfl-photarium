@@ -4,6 +4,7 @@ export type CloudflareMetadata = {
   description?: string;
   size?: number | string;
   aspectRatio?: string;
+  aspectRatioClass?: string;
   dimensions?: {
     width?: number;
     height?: number;
@@ -74,6 +75,10 @@ export const CLOUDFLARE_METADATA_FIELDS = [
   'comfyMetadataSource',
   'uploadNormalization',
   'variationSort',
+  'size',
+  'aspectRatio',
+  'aspectRatioClass',
+  'dimensions',
   'updatedAt'
 ] as const;
 

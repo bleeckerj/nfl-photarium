@@ -25,6 +25,7 @@ import {
   applyVideoAnimatedWebpComfyProvenance,
   buildVideoAnimatedWebpComfyProvenanceMap,
 } from '@/server/videoAnimatedWebpComfyProvenance';
+import { matchesAspectRatioClass, normalizeAspectRatioClass } from '@/utils/aspectRatioClass';
 
 export async function GET(request: NextRequest) {
   const startedAt = performance.now();
@@ -206,6 +207,7 @@ export async function GET(request: NextRequest) {
           imagesWithEmbeddings = imagesWithEmbeddings.map(img => {
             const meta = colorMetadata.get(img.id);
             const aspect = aspectMetadata.get(img.id);
+            const aspectRatioClass = normalizeAspectRatioClass(aspect?.aspectRatioClass);
             if (meta) {
               return {
                 ...img,
@@ -214,6 +216,7 @@ export async function GET(request: NextRequest) {
                 dominantColors: meta.dominantColors ?? img.dominantColors,
                 averageColor: meta.averageColor ?? img.averageColor,
                 aspectRatio: aspect?.aspectRatio ?? img.aspectRatio,
+                aspectRatioClass: aspectRatioClass ?? img.aspectRatioClass,
                 dimensions: aspect?.width && aspect?.height
                   ? { width: aspect.width, height: aspect.height }
                   : img.dimensions,
@@ -223,6 +226,7 @@ export async function GET(request: NextRequest) {
               return {
                 ...img,
                 aspectRatio: aspect.aspectRatio ?? img.aspectRatio,
+                aspectRatioClass: aspectRatioClass ?? img.aspectRatioClass,
                 dimensions: aspect.width && aspect.height
                   ? { width: aspect.width, height: aspect.height }
                   : img.dimensions,
@@ -288,24 +292,13 @@ export async function GET(request: NextRequest) {
       );
     }
     if ((aspectRatioClass || aspectRatio) && aspectRatioClasses.length === 0) {
+      const normalizedAspectRatioClass = normalizeAspectRatioClass(aspectRatioClass);
       finalImages = finalImages.filter((image) => {
-        const entry = image as Record<string, unknown>;
-        if (entry.assetType === 'video') {
-          if (aspectRatio && typeof entry.aspectRatio === 'string') {
-            return entry.aspectRatio === aspectRatio;
-          }
-          return true;
-        }
+        const entry = image as GalleryQueryAsset;
         if (aspectRatioClass) {
-          const dimensions = entry.dimensions as { width?: number; height?: number } | undefined;
-          const ratio = dimensions?.width && dimensions?.height
-            ? dimensions.width / dimensions.height
-            : null;
-          const isSquare = ratio !== null && Math.abs(ratio - 1) <= 0.05;
-          if (aspectRatioClass === 'square') return Boolean(isSquare);
-          if (aspectRatioClass === 'horizontal') return ratio !== null && ratio > 1.05;
-          if (aspectRatioClass === 'vertical') return ratio !== null && ratio < 0.95;
-          return false;
+          return normalizedAspectRatioClass
+            ? matchesAspectRatioClass(entry, [normalizedAspectRatioClass])
+            : false;
         }
         if (aspectRatio) {
           return entry.aspectRatio === aspectRatio;
