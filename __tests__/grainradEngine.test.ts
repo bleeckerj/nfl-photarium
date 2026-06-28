@@ -84,6 +84,24 @@ describe('grainradEngine (in-process bridge)', () => {
     }
   });
 
+  it('renders the source-collage effect on a still', async () => {
+    const png = await createTestImageFixture('png');
+    const artifact = await renderStill(png.buffer, stillRequest({
+      effectId: 'source-collage',
+      paramPreset: 'instagram-cascade',
+      params: {
+        tileCount: 18,
+        recursionDepth: 4,
+        motionAmount: 0,
+      },
+    }));
+    expect(artifact.contentType).toBe('image/png');
+    expect(artifact.filename).toBe('grainrad-source-collage.png');
+    const meta = await sharp(artifact.buffer).metadata();
+    expect(meta.width).toBe(96);
+    expect(meta.height).toBe(72);
+  });
+
   it('passes paramPreset through to the Grainrad engine', async () => {
     const png = await createTestImageFixture('png');
     await expect(renderStill(png.buffer, stillRequest({
@@ -211,6 +229,26 @@ describe('grainradEngine (in-process bridge)', () => {
     expect(meta.pages ?? 1).toBeGreaterThanOrEqual(2);
     expect(progress.some((event) => event.includes('Rendering Grainrad frame 1 of 2'))).toBe(true);
     expect(progress.some((event) => event.startsWith('encode:'))).toBe(true);
+  });
+
+  it('renders source-collage animated previews with multiple frames', async () => {
+    const png = await createTestImageFixture('png');
+    const artifact = await renderAnimated(png.buffer, stillRequest({
+      effectId: 'source-collage',
+      paramPreset: 'instagram-cascade',
+      params: {
+        tileCount: 16,
+        recursionDepth: 4,
+        stateRate: 4,
+      },
+      output: { mode: 'animated', format: 'webp', preset: 'preview' },
+      timeline: { durationMs: 500, fps: 4, loop: true },
+    }));
+    expect(artifact.contentType).toBe('image/webp');
+    expect(artifact.filename).toBe('grainrad-source-collage.webp');
+    const meta = await sharp(artifact.buffer, { animated: true }).metadata();
+    expect(meta.format).toBe('webp');
+    expect(meta.pages ?? 1).toBeGreaterThanOrEqual(2);
   });
 
   it('expands vertical hold full-loop animations to one complete roll cycle', async () => {

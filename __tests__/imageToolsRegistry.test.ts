@@ -102,8 +102,21 @@ describe('GET /api/image-tools', () => {
       'halftone',
       'bit-glitch',
       'rgb-subpixel-display',
+      'source-collage',
     ]));
     expect(effectIds).not.toContain('ascii');
+    expect(findControl(grainrad!, 'params.tileCount')).toEqual(expect.objectContaining({
+      effectIds: expect.arrayContaining(['source-collage']),
+      group: 'layout',
+    }));
+    expect(findControl(grainrad!, 'params.cropMode')).toEqual(expect.objectContaining({
+      type: 'select',
+      group: 'source-crop',
+    }));
+    expect(findControl(grainrad!, 'params.paletteMode')).toEqual(expect.objectContaining({
+      type: 'select',
+      group: 'appearance',
+    }));
     expect(findControl(grainrad!, 'params.jitterAmount')).toEqual(expect.objectContaining({
       effectIds: expect.arrayContaining(['vhs']),
     }));

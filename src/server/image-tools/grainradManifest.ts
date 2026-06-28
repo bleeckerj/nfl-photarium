@@ -13,6 +13,7 @@ const PHOTARIUM_GRAINRAD_EFFECT_IDS = [
   'halftone',
   'bit-glitch',
   'rgb-subpixel-display',
+  'source-collage',
 ];
 
 const BASE_CONTROL_IDS = new Set([
