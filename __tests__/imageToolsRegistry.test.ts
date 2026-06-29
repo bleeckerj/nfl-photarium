@@ -101,6 +101,7 @@ describe('GET /api/image-tools', () => {
       'dithering',
       'halftone',
       'bit-glitch',
+      'eight-bit',
       'rgb-subpixel-display',
       'source-collage',
     ]));

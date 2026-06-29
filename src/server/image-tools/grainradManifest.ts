@@ -12,6 +12,7 @@ const PHOTARIUM_GRAINRAD_EFFECT_IDS = [
   'dithering',
   'halftone',
   'bit-glitch',
+  'eight-bit',
   'rgb-subpixel-display',
   'source-collage',
 ];
@@ -162,7 +163,7 @@ export const createGrainradManifest = (): ImageToolManifest => {
       thumbnailUrl: '/image-tools/grainrad-preview.svg',
       previewUrl: '/image-tools/grainrad-preview.svg',
       previewMimeType: 'image/svg+xml',
-      shortDescription: 'Analog VHS, threshold, dithering, halftone, bit-glitch, and RGB display passes.',
+      shortDescription: 'Analog VHS, threshold, dithering, halftone, bit-glitch, 8-bit, and RGB display passes.',
     },
   }));
   const parameterIndex = buildParameterIndex(api);
