@@ -298,6 +298,17 @@ describe('ImageToolsPanel', () => {
     expect(values['output.format']).toBe('webp');
   });
 
+  it('uses WebP as the initial animated format even when another animated format was selected before', () => {
+    const animatedValues = {
+      ...buildInitialValues(richTool),
+      'output.format': 'mp4',
+    };
+    const values = updateToolValues(richTool, animatedValues, controlById('output.mode'), 'animated');
+
+    expect(values['output.mode']).toBe('animated');
+    expect(values['output.format']).toBe('webp');
+  });
+
   it('switches animated-only formats to PNG when still output is selected', () => {
     const animatedValues = {
       ...buildInitialValues(richTool),

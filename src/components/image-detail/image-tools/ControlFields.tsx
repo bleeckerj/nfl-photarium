@@ -1,7 +1,17 @@
+import { Shuffle } from 'lucide-react';
+
 import type { ImageToolControl } from '@/services/imageToolsService';
 import type { ControlGroup, ToolValues } from '@/components/image-detail/image-tools/controlModel';
 
 type ControlChangeHandler = (control: ImageToolControl, value: string | boolean) => void;
+
+const MAX_SEED = 999_999_999;
+
+const createRandomSeed = () => String(Math.floor(Math.random() * MAX_SEED) + 1);
+
+const isSeedControl = (control: ImageToolControl) => (
+  control.id === 'renderContext.seed' || control.id === 'params.seed'
+);
 
 export const ControlField = ({
   control,
@@ -46,6 +56,36 @@ export const ControlField = ({
             <option key={String(option.value)} value={String(option.value)}>{option.label}</option>
           ))}
         </select>
+        {control.helpText && <span className="mt-1 block text-[10px] font-normal text-gray-500">{control.helpText}</span>}
+      </label>
+    );
+  }
+
+  if (isSeedControl(control)) {
+    return (
+      <label className="block font-mono text-[11px] text-gray-600">
+        {control.label}
+        <span className="mt-1 flex min-w-0 items-center gap-1.5">
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            value={String(currentValue)}
+            onChange={(event) => onChange(control, event.target.value)}
+            disabled={busy}
+            className="min-w-0 flex-1 rounded border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-800"
+          />
+          <button
+            type="button"
+            onClick={() => onChange(control, createRandomSeed())}
+            disabled={busy}
+            title="Randomize seed"
+            aria-label="Randomize seed"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded border border-gray-300 bg-white text-gray-700 transition hover:border-gray-500 hover:text-gray-950 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Shuffle aria-hidden="true" className="h-3.5 w-3.5" />
+          </button>
+        </span>
         {control.helpText && <span className="mt-1 block text-[10px] font-normal text-gray-500">{control.helpText}</span>}
       </label>
     );

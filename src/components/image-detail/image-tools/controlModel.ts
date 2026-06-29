@@ -58,7 +58,7 @@ const GROUP_ORDER = [
 ];
 
 const STILL_OUTPUT_FORMATS = new Set(['png', 'webp', 'jpg', 'jpeg']);
-const ANIMATED_OUTPUT_FORMATS = new Set(['gif', 'webp', 'mp4']);
+const WEBP_OUTPUT_FORMAT = 'webp';
 
 const pathGroupFallback = (path: string) => {
   if (path === 'effectId') return 'output';
@@ -170,8 +170,8 @@ export const updateToolValues = (
 
   if (control.id === 'output.mode') {
     const currentFormat = String(next['output.format'] ?? tool.defaultRequest.output.format);
-    if (next['output.mode'] === 'animated' && !ANIMATED_OUTPUT_FORMATS.has(currentFormat)) {
-      next['output.format'] = 'webp';
+    if (next['output.mode'] === 'animated') {
+      next['output.format'] = WEBP_OUTPUT_FORMAT;
     }
     if (next['output.mode'] === 'still' && !STILL_OUTPUT_FORMATS.has(currentFormat)) {
       next['output.format'] = 'png';
