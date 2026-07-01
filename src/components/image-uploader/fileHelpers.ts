@@ -1,14 +1,15 @@
 import JSZip from "jszip";
 
 export const MAX_UPLOAD_IMAGE_BYTES = 10 * 1024 * 1024;
-const KEYNOTE_IMAGE_EXTENSIONS = ['.jpeg', '.jpg', '.png', '.gif', '.webp', '.svg'];
+const KEYNOTE_IMAGE_EXTENSIONS = ['.jpeg', '.jpg', '.png', '.gif', '.webp', '.svg', '.avif'];
 const MIME_BY_EXTENSION: Record<string, string> = {
   '.jpeg': 'image/jpeg',
   '.jpg': 'image/jpeg',
   '.png': 'image/png',
   '.gif': 'image/gif',
   '.webp': 'image/webp',
-  '.svg': 'image/svg+xml'
+  '.svg': 'image/svg+xml',
+  '.avif': 'image/avif'
 };
 
 export const base64ToFile = (base64: string, filename: string, mimeType: string) => {

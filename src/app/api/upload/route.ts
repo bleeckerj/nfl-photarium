@@ -20,7 +20,8 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   '.png': 'image/png',
   '.gif': 'image/gif',
   '.webp': 'image/webp',
-  '.svg': 'image/svg+xml'
+  '.svg': 'image/svg+xml',
+  '.avif': 'image/avif'
 };
 
 const isZipFile = (file: File) =>

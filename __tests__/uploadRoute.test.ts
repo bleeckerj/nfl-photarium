@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import AdmZip from 'adm-zip';
 import { POST } from '@/app/api/upload/route';
 
 const ORIGINAL_ENV = { ...process.env };
@@ -114,6 +115,27 @@ describe('POST /api/upload', () => {
         context: expect.objectContaining({
           duplicateAction: 'override',
         }),
+      })
+    );
+  });
+
+  it('uploads AVIF files found inside archives', async () => {
+    const zip = new AdmZip();
+    zip.addFile('slides/cover.avif', Buffer.from('avif-bytes'));
+    const zipBuffer = zip.toBuffer();
+    const formData = new FormData();
+    formData.append('file', new File([zipBuffer], 'deck.zip', { type: 'application/zip' }));
+    formData.append('namespace', 'ns-a');
+
+    const response = await POST(createRequest(formData));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.successCount).toBe(1);
+    expect(uploadImageBufferMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fileName: 'cover.avif',
+        fileType: 'image/avif',
       })
     );
   });

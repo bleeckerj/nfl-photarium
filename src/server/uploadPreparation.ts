@@ -49,6 +49,20 @@ const IMAGE_EXTENSION_BY_TYPE: Record<string, string> = {
   'image/png': '.png',
   'image/gif': '.gif',
   'image/svg+xml': '.svg',
+  'image/avif': '.avif',
+};
+
+const CLOUDFLARE_NATIVE_UPLOAD_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'image/svg+xml',
+]);
+
+const normalizeUploadMimeType = (fileType: string) => {
+  const normalized = fileType.trim().toLowerCase();
+  return normalized === 'image/jpg' ? 'image/jpeg' : normalized;
 };
 
 const withExtensionForType = (fileName: string, fileType: string) => {
@@ -205,14 +219,15 @@ export async function prepareImageForUpload({
   maxBytes?: number;
 }): Promise<{ ok: true; data: PreparedUploadPayload } | { ok: false; error: string }> {
   const bytesBefore = buffer.byteLength;
+  const normalizedFileType = normalizeUploadMimeType(fileType);
 
-  if (!fileType.startsWith('image/')) {
+  if (!normalizedFileType.startsWith('image/')) {
     return { ok: false, error: 'File must be an image' };
   }
 
   // SVG is vector XML, not raster pixels. Sanitize it and store the cleaned
   // original as-is; never run it through the raster transcode pipeline below.
-  if (fileType === 'image/svg+xml') {
+  if (normalizedFileType === 'image/svg+xml') {
     const sanitized = sanitizeSvgBuffer(buffer);
     if (!sanitized.ok) {
       return { ok: false, error: sanitized.error };
@@ -227,7 +242,7 @@ export async function prepareImageForUpload({
       ok: true,
       data: {
         buffer: sanitized.buffer,
-        fileType,
+        fileType: normalizedFileType,
         fileName,
         transformed: sanitized.modified,
         bytesBefore,
@@ -289,13 +304,14 @@ export async function prepareImageForUpload({
     maxAnimationFrameArea: CLOUDFLARE_MAX_ANIMATION_FRAME_AREA,
     frameCount: sourceFrameCount,
   });
+  const requiresCompatibilityTranscode = !CLOUDFLARE_NATIVE_UPLOAD_TYPES.has(normalizedFileType);
 
-  if (sourceReasons.length === 0) {
+  if (sourceReasons.length === 0 && !requiresCompatibilityTranscode) {
     return {
       ok: true,
       data: {
         buffer,
-        fileType,
+        fileType: normalizedFileType,
         fileName,
         transformed: false,
         bytesBefore,
@@ -468,7 +484,7 @@ export async function prepareImageForUpload({
         const chosen = passing.sort((a, b) => b.buffer.byteLength - a.buffer.byteLength)[0];
         const notePrefix = sourceReasons.length
           ? `Adjusted for ${describeReasons(sourceReasons)}`
-          : 'Adjusted for upload limits';
+          : 'Converted for Cloudflare upload compatibility';
         const note = canResize && chosen.width && chosen.height && needsResize
           ? `${notePrefix}: converted to ${chosen.type === 'image/webp' ? 'WebP' : 'JPEG'} and resized to ${chosen.width}x${chosen.height} (q${quality})`
           : `${notePrefix}: converted to ${chosen.type === 'image/webp' ? 'WebP' : 'JPEG'} (q${quality})`;

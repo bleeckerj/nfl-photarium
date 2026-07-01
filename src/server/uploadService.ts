@@ -47,7 +47,8 @@ export const SUPPORTED_IMAGE_TYPES = new Set([
   'image/png',
   'image/gif',
   'image/webp',
-  'image/svg+xml'
+  'image/svg+xml',
+  'image/avif'
 ]);
 
 export type UploadContext = {

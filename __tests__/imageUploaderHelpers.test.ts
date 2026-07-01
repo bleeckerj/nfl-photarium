@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import JSZip from 'jszip';
 import {
   buildUploaderGallerySummaryUrl,
+  extractZipImages,
   inferAssetTypeFromFile,
   isArchiveFile,
   isImageFile,
@@ -36,6 +38,21 @@ describe('image uploader helpers', () => {
   it('builds the uploader gallery summary URL for namespace states', () => {
     expect(buildUploaderGallerySummaryUrl('__all__')).toBe('/api/images?page=1&pageSize=500&namespace=__all__');
     expect(buildUploaderGallerySummaryUrl('studio')).toBe('/api/images?page=1&pageSize=500&namespace=studio');
+  });
+
+  it('extracts AVIF images from archives with the correct MIME type', async () => {
+    const zip = new JSZip();
+    zip.file('assets/source.avif', 'avif-bytes');
+    zip.file('assets/source.jpg', 'jpeg-bytes');
+    zip.file('notes.txt', 'ignore');
+    const blob = await zip.generateAsync({ type: 'blob' });
+
+    const extracted = await extractZipImages(new File([blob], 'images.zip', { type: 'application/zip' }));
+
+    expect(extracted.map((entry) => [entry.filename, entry.file.type])).toEqual([
+      ['source.avif', 'image/avif'],
+      ['source.jpg', 'image/jpeg'],
+    ]);
   });
 });
 
