@@ -196,7 +196,7 @@ export function AdoptVariationSection(props: AdoptVariationSectionProps) {
         />
       </div>
 
-      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
         <label htmlFor="adopt-folder" className="text-xs font-medium text-gray-700">
           Filter by folder
         </label>

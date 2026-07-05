@@ -231,12 +231,12 @@ export function VariationsSection(props: VariationsSectionProps) {
 
   return (
     <div id="variations-section" className="space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-mono font-medum text-gray-700">
           {/* There's no reason to say 'Vars' as that term is referred to with the count of vars, so just say 'Other vars from this parent' if it's a child image, otherwise no header is needed */}
           {isChildImage ? 'Other vars from this parent' : ''}
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
             <p className="text-[10px] whitespace-nowrap text-gray-500">
               {variationCount} {isChildImage ? 'other var' : 'var'}
               {variationCount !== 1 ? 's' : ''}
