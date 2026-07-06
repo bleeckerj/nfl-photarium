@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MCP_DIR="$ROOT_DIR/mcp-server"
 ACTION="${1:-start}"
+ORIGINAL_ENV_KEYS="$(env | sed -n 's/^\([^=]*\)=.*/\1/p')"
 
 if [[ ! -d "$MCP_DIR" ]]; then
   echo "Missing mcp-server directory at $MCP_DIR" >&2
@@ -29,6 +30,60 @@ resolve_bin() {
 }
 
 NODE_BIN="$(resolve_bin node /usr/local/bin/node /opt/homebrew/bin/node /opt/local/bin/node)"
+
+env_key_was_exported() {
+  local key="$1"
+  case $'\n'"$ORIGINAL_ENV_KEYS"$'\n' in
+    *$'\n'"$key"$'\n'*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+trim_env_value() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+strip_env_quotes() {
+  local value="$1"
+  if [[ "$value" == \"*\" && "$value" == *\" && "${#value}" -ge 2 ]]; then
+    value="${value:1:${#value}-2}"
+  elif [[ "$value" == \'*\' && "$value" == *\' && "${#value}" -ge 2 ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s' "$value"
+}
+
+load_env_file() {
+  local env_file="$1"
+  local line key value
+  [[ -f "$env_file" ]] || return 0
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    line="$(trim_env_value "$line")"
+    [[ -z "$line" || "${line:0:1}" == "#" ]] && continue
+
+    if [[ "$line" == export[[:space:]]* ]]; then
+      line="${line#export}"
+      line="$(trim_env_value "$line")"
+    fi
+    [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || continue
+
+    key="${line%%=*}"
+    value="${line#*=}"
+    if env_key_was_exported "$key" && [[ -n "${!key:-}" ]]; then
+      continue
+    fi
+    value="$(strip_env_quotes "$(trim_env_value "$value")")"
+    export "$key=$value"
+  done < "$env_file"
+}
+
+load_env_file "$ROOT_DIR/.env"
+load_env_file "$ROOT_DIR/.env.local"
 
 if [[ ! -f "$MCP_DIR/dist/index.js" ]]; then
   echo "Build output missing. Running npm run build..." >&2
