@@ -4,6 +4,8 @@ const SQUARE_TOLERANCE = 0.05;
 
 export type AspectRatioClassInput = {
   dimensions?: { width?: number; height?: number };
+  width?: number;
+  height?: number;
   aspectRatio?: string;
   aspectRatioClass?: string;
 };
@@ -42,11 +44,13 @@ export const classifyAspectRatio = (width: number, height: number): AspectRatioC
 
 export const resolveAspectRatioClass = ({
   dimensions,
+  width: topLevelWidth,
+  height: topLevelHeight,
   aspectRatio,
   aspectRatioClass,
 }: AspectRatioClassInput): AspectRatioClass | null => {
-  const width = dimensions?.width;
-  const height = dimensions?.height;
+  const width = dimensions?.width ?? topLevelWidth;
+  const height = dimensions?.height ?? topLevelHeight;
   if (
     typeof width === 'number' &&
     typeof height === 'number' &&

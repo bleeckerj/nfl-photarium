@@ -9,6 +9,9 @@ const {
   getImageExtrasRecordsMock,
   getImageFolderOverridesMock,
   getImageFolderOverridesVersionMock,
+  batchGetAspectMetadataMock,
+  batchGetColorMetadataMock,
+  isVectorSearchAvailableMock,
 } = vi.hoisted(() => ({
   getCachedImagesMock: vi.fn(),
   getCacheStatsMock: vi.fn(),
@@ -16,6 +19,9 @@ const {
   getImageExtrasRecordsMock: vi.fn(),
   getImageFolderOverridesMock: vi.fn<[], Promise<Map<string, string | undefined>>>(),
   getImageFolderOverridesVersionMock: vi.fn<[], number>(),
+  batchGetAspectMetadataMock: vi.fn(),
+  batchGetColorMetadataMock: vi.fn(),
+  isVectorSearchAvailableMock: vi.fn(),
 }));
 
 vi.mock('@/server/cloudflareImageCache', () => ({
@@ -24,9 +30,9 @@ vi.mock('@/server/cloudflareImageCache', () => ({
 }));
 
 vi.mock('@/server/vectorSearch', () => ({
-  batchGetAspectMetadata: vi.fn(),
-  batchGetColorMetadata: vi.fn(),
-  isVectorSearchAvailable: vi.fn(),
+  batchGetAspectMetadata: batchGetAspectMetadataMock,
+  batchGetColorMetadata: batchGetColorMetadataMock,
+  isVectorSearchAvailable: isVectorSearchAvailableMock,
 }));
 
 vi.mock('@/server/videoCatalogStorage', () => ({
@@ -75,6 +81,9 @@ describe('GET /api/images video integration', () => {
     getImageExtrasRecordsMock.mockResolvedValue({});
     getImageFolderOverridesMock.mockResolvedValue(new Map<string, string | undefined>());
     getImageFolderOverridesVersionMock.mockReturnValue(0);
+    batchGetAspectMetadataMock.mockResolvedValue(new Map());
+    batchGetColorMetadataMock.mockResolvedValue(new Map());
+    isVectorSearchAvailableMock.mockResolvedValue(false);
   });
 
   it('returns merged image and video assets', async () => {
@@ -679,6 +688,75 @@ describe('GET /api/images video integration', () => {
         isVariant: false,
         variantCount: 1,
         childIds: ['img-child'],
+      })
+    );
+  });
+
+  it('hydrates Redis aspect metadata before server-side aspect filtering', async () => {
+    getCachedImagesMock.mockResolvedValue([
+      {
+        id: 'wide-from-redis',
+        filename: 'wide.jpg',
+        uploaded: '2026-02-20T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/wide-from-redis/public'],
+        tags: [],
+      },
+      {
+        id: 'tall-from-redis',
+        filename: 'tall.jpg',
+        uploaded: '2026-02-19T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/tall-from-redis/public'],
+        tags: [],
+      },
+    ]);
+    listVideoAssetRecordsWithSyncMock.mockResolvedValue([]);
+    isVectorSearchAvailableMock.mockResolvedValueOnce(true);
+    batchGetAspectMetadataMock.mockResolvedValueOnce(
+      new Map([
+        [
+          'wide-from-redis',
+          {
+            imageId: 'wide-from-redis',
+            aspectRatio: '16:9',
+            aspectRatioClass: 'horizontal',
+            width: 1600,
+            height: 900,
+          },
+        ],
+        [
+          'tall-from-redis',
+          {
+            imageId: 'tall-from-redis',
+            aspectRatio: '9:16',
+            aspectRatioClass: 'vertical',
+            width: 900,
+            height: 1600,
+          },
+        ],
+      ])
+    );
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/images?namespace=__all__&page=1&pageSize=60&aspectRatioClasses=horizontal')
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(batchGetAspectMetadataMock).toHaveBeenCalledWith(['wide-from-redis', 'tall-from-redis']);
+    expect(batchGetColorMetadataMock).not.toHaveBeenCalled();
+    expect(payload.images.map((image: { id: string }) => image.id)).toEqual(['wide-from-redis']);
+    expect(payload.images[0]).toEqual(
+      expect.objectContaining({
+        aspectRatio: '16:9',
+        aspectRatioClass: 'horizontal',
+        dimensions: { width: 1600, height: 900 },
+      })
+    );
+    expect(payload.pagination).toEqual(
+      expect.objectContaining({
+        total: 1,
+        scopeTotal: 2,
+        totalPages: 1,
       })
     );
   });

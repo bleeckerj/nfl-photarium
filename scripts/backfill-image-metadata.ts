@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 
 import { parseArgs } from 'node:util';
+import { loadEnvConfig } from '@next/env';
 import { getCachedImages } from '@/server/cloudflareImageCache';
 import { enrichImageAssetMetadata } from '@/server/assetMetadataEnrichment';
 import { FileClientPageProjectStore } from '@/features/client-pages/storage/fileStore';
+
+loadEnvConfig(process.cwd());
 
 const logger = (message: string) => {
   const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
@@ -78,7 +81,11 @@ const main = async () => {
   logger(`Complete. Updated ${updated} images.`);
 };
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
-  process.exit(1);
-});
+main()
+  .then(() => {
+    process.exit(0);
+  })
+  .catch((error) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  });

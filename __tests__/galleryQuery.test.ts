@@ -183,6 +183,22 @@ describe('queryGalleryAssets', () => {
     expect(result.total).toBe(2);
   });
 
+  it('filters aspect ratios from legacy top-level dimensions', () => {
+    const result = queryGalleryAssets(
+      [
+        asset({ id: 'wide', width: 1600, height: 900 }),
+        asset({ id: 'tall', width: 900, height: 1600 }),
+        asset({ id: 'squareish', width: 1000, height: 1004 }),
+      ],
+      { aspectRatioClasses: ['horizontal'] },
+      1,
+      60
+    );
+
+    expect(result.images.map((image) => image.id)).toEqual(['wide']);
+    expect(result.total).toBe(1);
+  });
+
   it('applies aspect ratio filters to video assets', () => {
     const result = queryGalleryAssets(
       [

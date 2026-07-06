@@ -15,6 +15,8 @@ export type ListableImage = {
   description?: string;
   aspectRatio?: string;
   aspectRatioClass?: AspectRatioClass;
+  width?: number;
+  height?: number;
   dimensions?: { width: number; height: number };
   altTag?: string;
   altText?: string;
@@ -162,8 +164,18 @@ export const applyFolderOverridesToAssets = <T extends GalleryQueryAsset>(
 
 export function toListableImage(image: Record<string, unknown>): ListableImage {
   const rawDimensions = image.dimensions as { width?: unknown; height?: unknown } | undefined;
-  const width = typeof rawDimensions?.width === 'number' ? rawDimensions.width : undefined;
-  const height = typeof rawDimensions?.height === 'number' ? rawDimensions.height : undefined;
+  const width =
+    typeof rawDimensions?.width === 'number'
+      ? rawDimensions.width
+      : typeof image.width === 'number'
+        ? image.width
+        : undefined;
+  const height =
+    typeof rawDimensions?.height === 'number'
+      ? rawDimensions.height
+      : typeof image.height === 'number'
+        ? image.height
+        : undefined;
   const dimensions = width && height ? { width, height } : undefined;
 
   // Intentionally omit heavy fields like EXIF from the gallery list payload.
@@ -186,6 +198,8 @@ export function toListableImage(image: Record<string, unknown>): ListableImage {
       image.aspectRatioClass === 'square'
         ? image.aspectRatioClass
         : undefined,
+    width,
+    height,
     dimensions,
     altTag: typeof image.altTag === 'string' ? image.altTag : undefined,
     altText: typeof image.altText === 'string' ? image.altText : undefined,

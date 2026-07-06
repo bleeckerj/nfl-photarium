@@ -68,6 +68,7 @@ export async function GET(request: NextRequest) {
     const comfy = parseBooleanParam(request.nextUrl.searchParams.get('comfy'));
     const embedding = parseEmbeddingFilter(request.nextUrl.searchParams.get('embedding'));
     const aspectRatioClasses = parseAspectClasses(request.nextUrl.searchParams.get('aspectRatioClasses'));
+    const normalizedAspectRatioClass = normalizeAspectRatioClass(aspectRatioClass);
     const dateStart = request.nextUrl.searchParams.get('dateStart')?.trim() || '';
     const dateEnd = request.nextUrl.searchParams.get('dateEnd')?.trim() || '';
     const dateTimeZone = request.nextUrl.searchParams.get('dateTimeZone')?.trim() || '';
@@ -188,7 +189,12 @@ export async function GET(request: NextRequest) {
     // Optional: merge embedding status from Redis.
     // Keep this off by default so gallery can render immediately and enrich asynchronously.
     let imagesWithEmbeddings = imagesWithVideoProvenance.filter((image) => scopedImageIds.has(image.id));
-    if (includeVectorMeta) {
+    const needsColorMetadata = includeVectorMeta || embedding !== 'none';
+    const needsAspectMetadata =
+      includeVectorMeta ||
+      aspectRatioClasses.length > 0 ||
+      Boolean(normalizedAspectRatioClass || aspectRatio);
+    if (needsColorMetadata || needsAspectMetadata) {
       try {
         const redisCheckStart = performance.now();
         const redisAvailable = await isVectorSearchAvailable();
@@ -198,11 +204,17 @@ export async function GET(request: NextRequest) {
           const redisBatchStart = performance.now();
           const imageIds = imagesWithEmbeddings.map(img => img.id);
           const [colorMetadata, aspectMetadata] = await Promise.all([
-            batchGetColorMetadata(imageIds),
-            batchGetAspectMetadata(imageIds),
+            needsColorMetadata
+              ? batchGetColorMetadata(imageIds)
+              : Promise.resolve(new Map()),
+            needsAspectMetadata
+              ? batchGetAspectMetadata(imageIds)
+              : Promise.resolve(new Map()),
           ]);
           timings.redis_batch = mark(performance.now() - redisBatchStart);
           diagnostics.redis_image_count = imageIds.length;
+          diagnostics.redis_color_lookup = needsColorMetadata;
+          diagnostics.redis_aspect_lookup = needsAspectMetadata;
           
           imagesWithEmbeddings = imagesWithEmbeddings.map(img => {
             const meta = colorMetadata.get(img.id);
@@ -292,7 +304,6 @@ export async function GET(request: NextRequest) {
       );
     }
     if ((aspectRatioClass || aspectRatio) && aspectRatioClasses.length === 0) {
-      const normalizedAspectRatioClass = normalizeAspectRatioClass(aspectRatioClass);
       finalImages = finalImages.filter((image) => {
         const entry = image as GalleryQueryAsset;
         if (aspectRatioClass) {

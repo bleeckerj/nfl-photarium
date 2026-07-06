@@ -32,6 +32,8 @@ export type GalleryQueryAsset = {
   hasColorEmbedding?: boolean;
   aspectRatio?: string;
   aspectRatioClass?: AspectRatioClass;
+  width?: number;
+  height?: number;
   dimensions?: { width: number; height: number };
 };
 
