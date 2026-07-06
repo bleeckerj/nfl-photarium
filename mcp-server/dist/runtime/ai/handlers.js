@@ -1,8 +1,8 @@
 import { normalizeManualPrompt } from '../shared/prompts.js';
-import { downloadOriginalImageById } from '../discovery/client.js';
+import { downloadOriginalImageById, getImage } from '../discovery/client.js';
 import { uploadFileBase64 } from '../upload/client.js';
 import { generateAlt, generateDescription, generatePrompt, getConcepts, getHaiku, getPromptRecord, getPromptsBulk, } from './client.js';
-import { generatePhotariumImage, generatePhotariumImageFromReferences, } from './image-generation.js';
+import { generatePhotariumImage, generatePhotariumAspectRatioVariant, generatePhotariumImageFromReferences, } from './image-generation.js';
 export const aiHandlers = {
     'photarium_generate_alt': async (args) => {
         const { imageId } = args;
@@ -54,6 +54,17 @@ export const aiHandlers = {
     'photarium_generate_from_references': async (args) => {
         const { references, ...settings } = args;
         const result = await generatePhotariumImageFromReferences({ downloadOriginalImageById, uploadFileBase64 }, settings, references, 'reference_generate');
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: JSON.stringify(result, null, 2),
+                },
+            ],
+        };
+    },
+    'photarium_aspect_ratio_variant': async (args) => {
+        const result = await generatePhotariumAspectRatioVariant({ downloadOriginalImageById, getImage, uploadFileBase64 }, args);
         return {
             content: [
                 {

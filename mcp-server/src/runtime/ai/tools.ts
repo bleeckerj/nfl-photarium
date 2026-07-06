@@ -125,6 +125,50 @@ export const aiTools: Tool[] = [
     },
   },
   {
+    name: 'photarium_aspect_ratio_variant',
+    description:
+      'Use OpenAI image editing to change a Photarium image ID or direct image URL to a target aspect ratio without cropping, stretching, or padding, then upload the result as a variant when a source image ID is provided.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        imageId: {
+          type: 'string',
+          description: 'Photarium image ID to use as the edit target. Exactly one of imageId or imageUrl is required.',
+        },
+        imageUrl: {
+          type: 'string',
+          description: 'Direct image URL to use as the edit target when the source is not already in Photarium. Exactly one of imageId or imageUrl is required.',
+        },
+        aspectRatio: {
+          type: 'string',
+          description: 'Target aspect ratio such as 4:5, 1:1, 9:16, or 16:9. Default: 4:5.',
+        },
+        prompt: {
+          type: 'string',
+          description: 'Optional extra image-editing instructions. The preservation prompt is always included.',
+        },
+        model: { type: 'string', description: 'OpenAI image model. Defaults to PHOTARIUM_OPENAI_IMAGE_MODEL or gpt-image-2.' },
+        size: {
+          type: 'string',
+          description: 'Optional OpenAI output size. Defaults to a pixel size matching aspectRatio, e.g. 1024x1280 for 4:5.',
+        },
+        quality: { type: 'string', description: 'Image quality, e.g. low, medium, high, or auto.' },
+        outputFormat: { type: 'string', enum: ['png', 'jpeg', 'jpg', 'webp'], description: 'Output image format. Defaults to png.' },
+        background: { type: 'string', enum: ['transparent', 'opaque', 'auto'], description: 'Background behavior for GPT image models.' },
+        filename: { type: 'string', description: 'Optional filename for the uploaded generated variant.' },
+        namespace: { type: 'string', description: 'Photarium namespace for the generated variant. Defaults to the source image namespace when imageId is used.' },
+        folder: { type: 'string', description: 'Photarium folder for the generated variant.' },
+        tags: { type: 'array', items: { type: 'string' }, description: 'Tags to apply. Defaults to the source image tags when imageId is used.' },
+        description: { type: 'string', description: 'Description to store on the generated variant.' },
+        displayName: { type: 'string', description: 'Display name hint for the generated variant filename.' },
+        parentId: { type: 'string', description: 'Parent image ID for variant relationship. Defaults to imageId when imageId is used.' },
+        originalUrl: { type: 'string', description: 'Original URL for provenance. Defaults to the source image originalUrl when available.' },
+        sourceUrl: { type: 'string', description: 'Source page URL for provenance. Defaults to the source image sourceUrl when available.' },
+        dryRun: { type: 'boolean', description: 'If true, return the planned OpenAI/upload request without generating or uploading.' },
+      },
+    },
+  },
+  {
     name: 'photarium_semantic_merge',
     description:
       'Generate a new image by semantically merging multiple Photarium images or URLs. This synthesizes visual/conceptual traits and does not preserve exact placement, exact logos, or pixels.',

@@ -74,6 +74,7 @@ The crop preserves source width. If the requested ratio needs more height than t
 - `photarium_generate_prompt`
 - `photarium_generate_image`
 - `photarium_generate_from_references`
+- `photarium_aspect_ratio_variant`
 - `photarium_semantic_merge`
 - `photarium_concepts`
 
@@ -83,11 +84,14 @@ The image generation tools call OpenAI image generation from the Photarium MCP s
 
 - `photarium_generate_image` creates a new image from a text prompt.
 - `photarium_generate_from_references` creates a new image from a prompt plus Photarium image IDs or direct image URLs.
+- `photarium_aspect_ratio_variant` edits a Photarium image ID or direct image URL into a new target aspect ratio while preserving the full source image, then uploads it as a variant when `imageId` is provided.
 - `photarium_semantic_merge` semantically blends multiple source images into a new generated image. It is synthesis, not exact compositing.
 
 The direct Image API default is `gpt-image-2`; set `PHOTARIUM_OPENAI_IMAGE_MODEL` to test or pin a different OpenAI image model.
 
-All three tools support `dryRun: true` for request-shape testing without OpenAI or upload side effects.
+The image-generation tools support `dryRun: true` for request-shape testing without OpenAI or upload side effects.
+
+`photarium_aspect_ratio_variant` is for reframing without source-image loss. It asks the image model to preserve the full visible source and extend or recompose the surrounding canvas as needed. Use `photarium_crop_variant` when an intentional crop is wanted.
 
 Example text-to-image dry run:
 
@@ -119,6 +123,17 @@ Example reference generation:
   ],
   "namespace": "generated-images",
   "folder": "reference-generations"
+}
+```
+
+Example aspect-ratio variant:
+
+```json
+{
+  "imageId": "d3eab243-1067-47d3-980d-06418b1f7400",
+  "aspectRatio": "4:5",
+  "outputFormat": "png",
+  "dryRun": true
 }
 ```
 

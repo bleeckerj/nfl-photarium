@@ -1,6 +1,6 @@
 import type { RuntimeToolHandler } from '../types.js';
 import { normalizeManualPrompt } from '../shared/prompts.js';
-import { downloadOriginalImageById } from '../discovery/client.js';
+import { downloadOriginalImageById, getImage } from '../discovery/client.js';
 import { uploadFileBase64 } from '../upload/client.js';
 import {
   generateAlt,
@@ -13,7 +13,9 @@ import {
 } from './client.js';
 import {
   generatePhotariumImage,
+  generatePhotariumAspectRatioVariant,
   generatePhotariumImageFromReferences,
+  type AspectRatioVariantSettings,
   type ImageGenerationSettings,
   type ImageReferenceInput,
 } from './image-generation.js';
@@ -80,6 +82,21 @@ export const aiHandlers: Record<string, RuntimeToolHandler> = {
       settings,
       references,
       'reference_generate'
+    );
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
+  },
+
+  'photarium_aspect_ratio_variant': async (args: Record<string, unknown>) => {
+    const result = await generatePhotariumAspectRatioVariant(
+      { downloadOriginalImageById, getImage, uploadFileBase64 },
+      args as unknown as AspectRatioVariantSettings
     );
     return {
       content: [

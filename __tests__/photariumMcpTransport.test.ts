@@ -115,6 +115,7 @@ describe('Photarium MCP transports', () => {
     expect(result.tools.some((tool: { name: string }) => tool.name === 'photarium_create_folder')).toBe(true);
     expect(result.tools.some((tool: { name: string }) => tool.name === 'photarium_generate_image')).toBe(true);
     expect(result.tools.some((tool: { name: string }) => tool.name === 'photarium_generate_from_references')).toBe(true);
+    expect(result.tools.some((tool: { name: string }) => tool.name === 'photarium_aspect_ratio_variant')).toBe(true);
     expect(result.tools.some((tool: { name: string }) => tool.name === 'photarium_semantic_merge')).toBe(true);
   });
 
@@ -175,6 +176,22 @@ describe('Photarium MCP transports', () => {
     expect(mergePayload.sources).toHaveLength(2);
     expect(mergePayload.sources[0]).toMatchObject({ imageId: 'img-style', role: 'style_reference' });
     expect(mergePayload.sources[1]).toMatchObject({ url: 'https://example.com/source.png', role: 'subject_reference' });
+
+    const aspectRatioResult = await app.executor.invoke(
+      'photarium_aspect_ratio_variant',
+      {
+        imageId: 'img-source',
+        aspectRatio: '4x5',
+        dryRun: true,
+      },
+      { transport: 'stdio' },
+    );
+    expect(aspectRatioResult.isError).not.toBe(true);
+    const aspectRatioPayload = JSON.parse(aspectRatioResult.content[0]?.text || '{}');
+    expect(aspectRatioPayload.mode).toBe('aspect_ratio_variant');
+    expect(aspectRatioPayload.request.endpoint).toBe('/images/edits');
+    expect(aspectRatioPayload.request.body.size).toBe('1024x1280');
+    expect(aspectRatioPayload.upload.parentId).toBe('img-source');
   });
 
   it('stdio call_tool uses the shared executor and validator', async () => {

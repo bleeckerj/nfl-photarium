@@ -5,6 +5,7 @@ const AI_TOOL_NAMES = [
     'photarium_generate_prompt',
     'photarium_generate_image',
     'photarium_generate_from_references',
+    'photarium_aspect_ratio_variant',
     'photarium_semantic_merge',
     'photarium_prompt_get',
     'photarium_prompts_bulk',

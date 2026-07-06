@@ -11,6 +11,7 @@ const HIGH_RISK_SCHEMA_NAMES = [
   'photarium_image_tool_run',
   'photarium_image_tool_preview',
   'photarium_generate_image',
+  'photarium_aspect_ratio_variant',
   'photarium_semantic_merge',
   'photarium_fs_ingest',
   'photarium_instagram_ingest_profile',

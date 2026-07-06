@@ -3,6 +3,14 @@ const DEFAULT_OPENAI_IMAGE_MODEL = process.env.PHOTARIUM_OPENAI_IMAGE_MODEL || '
 function normalizePrompt(value) {
     return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
+function pickString(value) {
+    return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+function pickTags(value) {
+    return Array.isArray(value)
+        ? value.filter((entry) => typeof entry === 'string' && entry.trim().length > 0).map((entry) => entry.trim())
+        : undefined;
+}
 function normalizeImageOutputFormat(value) {
     const normalized = (value || 'png').trim().toLowerCase();
     if (normalized === 'jpg' || normalized === 'jpeg')
@@ -55,6 +63,72 @@ function buildGeneratedFilename(settings, outputFormat) {
         : camelizeUploadStem(settings.displayName || settings.description || settings.prompt.slice(0, 80));
     return `${stem}${extension}`;
 }
+export function parseImageAspectRatio(value = '4:5') {
+    const normalized = value.trim().replace(/\s+/g, '');
+    const match = normalized.match(/^(\d+(?:\.\d+)?)(?::|\/|x)(\d+(?:\.\d+)?)$/i);
+    if (!match) {
+        throw new Error(`Invalid aspectRatio "${value}". Use a ratio like "4:5", "1:1", or "9:16".`);
+    }
+    const width = Number(match[1]);
+    const height = Number(match[2]);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+        throw new Error(`Invalid aspectRatio "${value}". Ratio numbers must be positive.`);
+    }
+    return {
+        label: `${match[1]}:${match[2]}`,
+        width,
+        height,
+    };
+}
+function ratioToken(aspectRatio) {
+    return aspectRatio.replace(/[^A-Za-z0-9]+/g, 'x');
+}
+function defaultAspectRatioSize(aspectRatio) {
+    const base = 1024;
+    if (aspectRatio.width === aspectRatio.height)
+        return `${base}x${base}`;
+    if (aspectRatio.width < aspectRatio.height) {
+        return `${base}x${Math.max(1, Math.round(base * aspectRatio.height / aspectRatio.width))}`;
+    }
+    return `${Math.max(1, Math.round(base * aspectRatio.width / aspectRatio.height))}x${base}`;
+}
+function sourceMetadataFromImage(image) {
+    if (!image)
+        return {};
+    const meta = image.metadata && typeof image.metadata === 'object' && !Array.isArray(image.metadata)
+        ? image.metadata
+        : {};
+    return {
+        filename: pickString(image.filename) || pickString(meta.filename),
+        namespace: pickString(image.namespace) || pickString(meta.namespace),
+        folder: pickString(image.folder) || pickString(meta.folder),
+        tags: pickTags(image.tags) || pickTags(meta.tags),
+        description: pickString(image.description) || pickString(meta.description),
+        originalUrl: pickString(image.originalUrl) || pickString(meta.originalUrl),
+        sourceUrl: pickString(image.sourceUrl) || pickString(meta.sourceUrl),
+    };
+}
+function buildAspectRatioVariantFilename(options) {
+    const source = options.requested || options.sourceFilename || 'AspectRatioVariant';
+    const sourceStem = cleanFilename(source);
+    const baseStem = options.requested ? sourceStem : `${sourceStem}_${ratioToken(options.aspectRatio)}_imagegen_variant`;
+    return `${baseStem}${extensionForOutputFormat(options.outputFormat)}`;
+}
+function buildAspectRatioVariantPrompt(options) {
+    const lines = [
+        'Use case: precise-object-edit',
+        'Asset type: Photarium image-generated aspect-ratio variant',
+        `Primary request: Change the source image to a ${options.aspectRatio} aspect ratio by extending or recomposing the canvas as needed.`,
+        `Input images: Image 1 is the edit target/source image (${options.sourceLabel}).`,
+        `Composition/framing: preserve the complete visible source image inside the new ${options.aspectRatio} frame; do not crop, zoom, stretch, squeeze, or distort any part of the source.`,
+        'Constraints: keep the subject identity, visual style, lighting, texture, embedded text, logos, and important edge details intact. Add plausible surrounding content only where new canvas area is needed.',
+        'Avoid: cropping, stretching, perspective distortion, changed text, changed logos, watermarks, borders, frames, or blank padding.',
+    ];
+    if (options.additionalInstructions) {
+        lines.push(`Additional instructions: ${options.additionalInstructions}`);
+    }
+    return lines.join('\n');
+}
 function readOpenAiApiKey() {
     const apiKey = process.env.OPENAI_API_KEY?.trim();
     if (!apiKey)
@@ -62,7 +136,7 @@ function readOpenAiApiKey() {
     return apiKey;
 }
 async function postOpenAiImageRequest(endpointPath, body) {
-    const endpoint = new URL(endpointPath, `${OPENAI_API_BASE_URL.replace(/\/$/, '')}/`);
+    const endpoint = new URL(endpointPath.replace(/^\//, ''), `${OPENAI_API_BASE_URL.replace(/\/$/, '')}/`);
     const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
@@ -199,10 +273,11 @@ async function uploadGeneratedImage(deps, options) {
         folder: options.settings.folder,
         tags: options.settings.tags,
         description: options.settings.description,
+        originalUrl: options.settings.originalUrl,
         namespace: options.settings.namespace,
         parentId: options.parentId || options.settings.parentId,
         prompt: options.provenancePrompt,
-        sourceUrl: 'https://platform.openai.com/docs/guides/image-generation',
+        sourceUrl: options.settings.sourceUrl || 'https://platform.openai.com/docs/guides/image-generation',
     });
 }
 export async function generatePhotariumImage(deps, settings) {
@@ -266,7 +341,7 @@ export async function generatePhotariumImageFromReferences(deps, settings, refer
             request: { endpoint: '/images/edits', body: requestBody },
             sources,
             warnings,
-            upload: { filename: buildGeneratedFilename(settings, requestSettings.outputFormat), namespace: settings.namespace, folder: settings.folder, tags: settings.tags, parentId: singleParentId || settings.parentId },
+            upload: { filename: buildGeneratedFilename(settings, requestSettings.outputFormat), namespace: settings.namespace, folder: settings.folder, tags: settings.tags, parentId: settings.parentId || singleParentId },
         };
     }
     const openAiResult = await postOpenAiImageRequest('/images/edits', requestBody);
@@ -276,7 +351,67 @@ export async function generatePhotariumImageFromReferences(deps, settings, refer
         contentType: materialized.contentType,
         settings,
         provenancePrompt: buildImagePromptProvenance({ mode, prompt: settings.prompt, revisedPrompt: openAiResult.revisedPrompt, ...requestSettings, sources }),
-        parentId: singleParentId,
+        parentId: settings.parentId || singleParentId,
     });
     return { mode, imageId: upload.id || upload.imageId || null, url: upload.url || upload.cloudflareUrl || null, upload, revisedPrompt: openAiResult.revisedPrompt || null, model: requestSettings.model, settings: requestSettings, sources, warnings };
+}
+export async function generatePhotariumAspectRatioVariant(deps, settings) {
+    const imageId = pickString(settings.imageId);
+    const imageUrl = pickString(settings.imageUrl);
+    if ((imageId ? 1 : 0) + (imageUrl ? 1 : 0) !== 1) {
+        throw new Error('Provide exactly one source: imageId or imageUrl.');
+    }
+    const aspectRatio = parseImageAspectRatio(settings.aspectRatio);
+    const sourceMetadata = imageId && !settings.dryRun
+        ? sourceMetadataFromImage(await deps.getImage(imageId))
+        : {};
+    const outputFormat = normalizeImageOutputFormat(settings.outputFormat || 'png');
+    const prompt = buildAspectRatioVariantPrompt({
+        aspectRatio: aspectRatio.label,
+        sourceLabel: imageId ? `Photarium image ${imageId}` : imageUrl || 'direct image URL',
+        additionalInstructions: normalizePrompt(settings.prompt),
+    });
+    const filename = buildAspectRatioVariantFilename({
+        requested: settings.filename,
+        sourceFilename: sourceMetadata.filename,
+        aspectRatio: aspectRatio.label,
+        outputFormat,
+    });
+    const generationSettings = {
+        prompt,
+        model: settings.model,
+        size: settings.size || defaultAspectRatioSize(aspectRatio),
+        quality: settings.quality,
+        outputFormat,
+        background: settings.background,
+        filename,
+        namespace: settings.namespace || sourceMetadata.namespace,
+        folder: settings.folder || sourceMetadata.folder,
+        tags: settings.tags || sourceMetadata.tags,
+        description: settings.description
+            || `Image-generated ${aspectRatio.label} aspect-ratio variant preserving the full source image without cropping or stretching.`,
+        displayName: settings.displayName,
+        parentId: settings.parentId || imageId,
+        originalUrl: settings.originalUrl || sourceMetadata.originalUrl,
+        sourceUrl: settings.sourceUrl || sourceMetadata.sourceUrl,
+        dryRun: settings.dryRun,
+    };
+    const result = await generatePhotariumImageFromReferences(deps, generationSettings, [
+        imageId
+            ? {
+                imageId,
+                role: 'composition_reference',
+                instructions: `Edit target. Preserve the full source and recompose only the surrounding canvas to ${aspectRatio.label}; no crop or stretch.`,
+            }
+            : {
+                url: imageUrl,
+                role: 'composition_reference',
+                instructions: `Edit target. Preserve the full source and recompose only the surrounding canvas to ${aspectRatio.label}; no crop or stretch.`,
+            },
+    ], 'aspect_ratio_variant');
+    return {
+        ...result,
+        aspectRatio: aspectRatio.label,
+        requestedSource: imageId ? { imageId } : { imageUrl },
+    };
 }

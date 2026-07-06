@@ -2,6 +2,101 @@
 
 exports[`Photarium MCP runtime surface > snapshots representative high-risk tool schemas 1`] = `
 {
+  "photarium_aspect_ratio_variant": {
+    "properties": {
+      "aspectRatio": {
+        "description": "Target aspect ratio such as 4:5, 1:1, 9:16, or 16:9. Default: 4:5.",
+        "type": "string",
+      },
+      "background": {
+        "description": "Background behavior for GPT image models.",
+        "enum": [
+          "transparent",
+          "opaque",
+          "auto",
+        ],
+        "type": "string",
+      },
+      "description": {
+        "description": "Description to store on the generated variant.",
+        "type": "string",
+      },
+      "displayName": {
+        "description": "Display name hint for the generated variant filename.",
+        "type": "string",
+      },
+      "dryRun": {
+        "description": "If true, return the planned OpenAI/upload request without generating or uploading.",
+        "type": "boolean",
+      },
+      "filename": {
+        "description": "Optional filename for the uploaded generated variant.",
+        "type": "string",
+      },
+      "folder": {
+        "description": "Photarium folder for the generated variant.",
+        "type": "string",
+      },
+      "imageId": {
+        "description": "Photarium image ID to use as the edit target. Exactly one of imageId or imageUrl is required.",
+        "type": "string",
+      },
+      "imageUrl": {
+        "description": "Direct image URL to use as the edit target when the source is not already in Photarium. Exactly one of imageId or imageUrl is required.",
+        "type": "string",
+      },
+      "model": {
+        "description": "OpenAI image model. Defaults to PHOTARIUM_OPENAI_IMAGE_MODEL or gpt-image-2.",
+        "type": "string",
+      },
+      "namespace": {
+        "description": "Photarium namespace for the generated variant. Defaults to the source image namespace when imageId is used.",
+        "type": "string",
+      },
+      "originalUrl": {
+        "description": "Original URL for provenance. Defaults to the source image originalUrl when available.",
+        "type": "string",
+      },
+      "outputFormat": {
+        "description": "Output image format. Defaults to png.",
+        "enum": [
+          "png",
+          "jpeg",
+          "jpg",
+          "webp",
+        ],
+        "type": "string",
+      },
+      "parentId": {
+        "description": "Parent image ID for variant relationship. Defaults to imageId when imageId is used.",
+        "type": "string",
+      },
+      "prompt": {
+        "description": "Optional extra image-editing instructions. The preservation prompt is always included.",
+        "type": "string",
+      },
+      "quality": {
+        "description": "Image quality, e.g. low, medium, high, or auto.",
+        "type": "string",
+      },
+      "size": {
+        "description": "Optional OpenAI output size. Defaults to a pixel size matching aspectRatio, e.g. 1024x1280 for 4:5.",
+        "type": "string",
+      },
+      "sourceUrl": {
+        "description": "Source page URL for provenance. Defaults to the source image sourceUrl when available.",
+        "type": "string",
+      },
+      "tags": {
+        "description": "Tags to apply. Defaults to the source image tags when imageId is used.",
+        "items": {
+          "type": "string",
+        },
+        "type": "array",
+      },
+    },
+    "type": "object",
+  },
   "photarium_backup": {
     "properties": {
       "dryRun": {
