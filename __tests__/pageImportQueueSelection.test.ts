@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { UploaderQueueItem } from '@/features/page-import/types';
 import {
   setAllQueuedItemsSelected,
+  setSmallAssetReviewItemsSelected,
   unselectAttemptedQueuedItems,
 } from '@/features/page-import/utils/queueSelection';
 import { toQueueItem } from '@/features/page-import/hooks/usePageImportDiscovery';
@@ -30,6 +31,24 @@ describe('page import queue selection helpers', () => {
     const next = setAllQueuedItemsSelected(items, false);
 
     expect(next.map((item) => item.selected)).toEqual([false, false, false]);
+  });
+
+  it('selects below-threshold review items without changing the rest of the queue', () => {
+    const items: UploaderQueueItem[] = [
+      makeItem('selected-large', true),
+      makeItem('unselected-large', false),
+      {
+        ...makeItem('small', false),
+        smallAssetReview: {
+          thresholdBytes: 50000,
+          reason: 'file-size',
+        },
+      },
+    ];
+
+    const next = setSmallAssetReviewItemsSelected(items, true);
+
+    expect(next.map((item) => item.selected)).toEqual([true, false, true]);
   });
 
   it('unselects only attempted items after upload completion', () => {

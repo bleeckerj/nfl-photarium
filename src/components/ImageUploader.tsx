@@ -4,14 +4,18 @@ import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useDropzone } from "react-dropzone";
 import { normalizeOriginalUrl } from "@/utils/urlNormalization";
 import { inferAssetTypeFromUrl } from "@/utils/mediaAssetType";
-import { appendTextToFilename, removeFilenameExtension } from "@/utils/filename";
+import { appendTextToFilename, removeFilenameExtension, sanitizeFilename } from "@/utils/filename";
 import { usePageImportSession } from "@/features/page-import/hooks/usePageImportSession";
 import { usePageImportDiscovery } from "@/features/page-import/hooks/usePageImportDiscovery";
 import { useCandidateMetadataEnrichment } from "@/features/page-import/hooks/useCandidateMetadataEnrichment";
 import { PageImportControls } from "@/features/page-import/components/PageImportControls";
 import { PageImportQueue } from "@/features/page-import/components/PageImportQueue";
 import type { UploaderQueueItem } from "@/features/page-import/types";
-import { unselectAttemptedQueuedItems } from "@/features/page-import/utils/queueSelection";
+import {
+  setAllQueuedItemsSelected,
+  setSmallAssetReviewItemsSelected,
+  unselectAttemptedQueuedItems,
+} from "@/features/page-import/utils/queueSelection";
 import ActivityIndicator from "@/components/image-uploader/ActivityIndicator";
 import { QUEUE_RENDER_LIMIT } from "@/components/image-uploader/constants";
 import type { GalleryImageSummary } from "@/components/image-uploader/types";
@@ -336,6 +340,18 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     () => queuedFiles.filter((item) => item.selected !== false).length,
     [queuedFiles]
   );
+  const smallAssetReviewQueuedCount = useMemo(
+    () => queuedFiles.filter((item) => item.smallAssetReview).length,
+    [queuedFiles]
+  );
+  const queuedImageCount = useMemo(
+    () =>
+      queuedFiles.filter((item) => {
+        const effectiveAssetType = item.assetType ?? (item.file ? inferAssetTypeFromFile(item.file) : inferAssetTypeFromUrl(item.remoteUrl));
+        return effectiveAssetType === 'image';
+      }).length,
+    [queuedFiles]
+  );
   const {
     animateFps,
     setAnimateFps,
@@ -601,21 +617,19 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     }
   };
 
-  const handleAiRefineSelectedNames = useCallback(async () => {
-    const selectedItems = queuedFiles.filter((item) => item.selected !== false);
-    if (selectedItems.length === 0) return;
+  const handleAiRefineQueuedNames = useCallback(async (scope: 'selected' | 'all-images') => {
+    const targetItems = queuedFiles.filter((item) => {
+      if (scope === 'selected' && item.selected === false) return false;
+      const effectiveAssetType = item.assetType ?? (item.file ? inferAssetTypeFromFile(item.file) : inferAssetTypeFromUrl(item.remoteUrl));
+      return effectiveAssetType === 'image';
+    });
+    if (targetItems.length === 0) return;
 
     setAiRefiningNames(true);
     try {
       const fallbackFolder = resolveFolder();
-      for (const item of selectedItems) {
+      for (const item of targetItems) {
         try {
-          const effectiveAssetType = item.assetType ?? (item.file ? inferAssetTypeFromFile(item.file) : inferAssetTypeFromUrl(item.remoteUrl));
-          if (effectiveAssetType !== 'image') {
-            updateQueuedFile(item.id, { processingNote: 'AI naming currently supports images only' });
-            continue;
-          }
-
           const formData = new FormData();
           if (item.file) {
             formData.append('file', item.file);
@@ -705,6 +719,15 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     );
   }, [setQueuedFiles]);
 
+  const sanitizeQueueNames = useCallback(() => {
+    setQueuedFiles((prev) =>
+      prev.map((item) => ({
+        ...item,
+        filename: sanitizeFilename(item.filename),
+      }))
+    );
+  }, [setQueuedFiles]);
+
   const appendTextToQueueNames = useCallback(() => {
     const text = queueAppendValue.trim();
     if (!text) {
@@ -729,6 +752,14 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
   const handleUnselectAllQueuedItems = useCallback(() => {
     unselectAllQueuedFiles();
   }, [unselectAllQueuedFiles]);
+
+  const handleSelectAllQueuedItems = useCallback(() => {
+    setQueuedFiles((prev) => setAllQueuedItemsSelected(prev, true));
+  }, [setQueuedFiles]);
+
+  const handleSelectSmallAssetQueuedItems = useCallback(() => {
+    setQueuedFiles((prev) => setSmallAssetReviewItemsSelected(prev, true));
+  }, [setQueuedFiles]);
 
   const handleRemoveQueuedItem = useCallback((id: string) => {
     removeQueuedFile(id);
@@ -885,6 +916,8 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
         queuedFiles={queuedFiles}
         visibleQueuedFiles={visibleQueuedFiles}
         selectedQueuedCount={selectedQueuedCount}
+        smallAssetReviewQueuedCount={smallAssetReviewQueuedCount}
+        queuedImageCount={queuedImageCount}
         isUploading={isUploading}
         uploadBlockedByNamespace={uploadBlockedByNamespace}
         aiRefiningNames={aiRefiningNames}
@@ -921,13 +954,19 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
         }
         onClearQueue={handleClearQueuedItems}
         onUnselectAll={handleUnselectAllQueuedItems}
+        onSelectAll={handleSelectAllQueuedItems}
+        onSelectSmallAssets={handleSelectSmallAssetQueuedItems}
         onAiRefineSelectedNames={() => {
-          void handleAiRefineSelectedNames();
+          void handleAiRefineQueuedNames('selected');
+        }}
+        onAiRefineAllImageNames={() => {
+          void handleAiRefineQueuedNames('all-images');
         }}
         onManualUpload={() => {
           void handleManualUpload();
         }}
         onApplyQueueNameToAll={applyQueueNameToAll}
+        onSanitizeQueueNames={sanitizeQueueNames}
         onRemoveQueueExtensions={removeQueueExtensions}
         onAppendTextToQueueNames={appendTextToQueueNames}
       />

@@ -7,6 +7,8 @@ type PageImportQueueProps = {
   queuedFiles: UploaderQueueItem[];
   visibleQueuedFiles: UploaderQueueItem[];
   selectedQueuedCount: number;
+  smallAssetReviewQueuedCount: number;
+  queuedImageCount: number;
   isUploading: boolean;
   uploadBlockedByNamespace: boolean;
   aiRefiningNames: boolean;
@@ -37,9 +39,13 @@ type PageImportQueueProps = {
   onToggleMetadata: (id: string) => void;
   onClearQueue: () => void;
   onUnselectAll: () => void;
+  onSelectAll: () => void;
+  onSelectSmallAssets: () => void;
   onAiRefineSelectedNames: () => void;
+  onAiRefineAllImageNames: () => void;
   onManualUpload: () => void;
   onApplyQueueNameToAll: () => void;
+  onSanitizeQueueNames: () => void;
   onRemoveQueueExtensions: () => void;
   onAppendTextToQueueNames: () => void;
 };
@@ -51,6 +57,8 @@ export function PageImportQueue(props: PageImportQueueProps) {
     queuedFiles,
     visibleQueuedFiles,
     selectedQueuedCount,
+    smallAssetReviewQueuedCount,
+    queuedImageCount,
     isUploading,
     uploadBlockedByNamespace,
     aiRefiningNames,
@@ -78,9 +86,13 @@ export function PageImportQueue(props: PageImportQueueProps) {
     onToggleMetadata,
     onClearQueue,
     onUnselectAll,
+    onSelectAll,
+    onSelectSmallAssets,
     onAiRefineSelectedNames,
+    onAiRefineAllImageNames,
     onManualUpload,
     onApplyQueueNameToAll,
+    onSanitizeQueueNames,
     onRemoveQueueExtensions,
     onAppendTextToQueueNames,
   } = props;
@@ -101,6 +113,14 @@ export function PageImportQueue(props: PageImportQueueProps) {
             className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs text-blue-700 hover:bg-blue-100 disabled:opacity-50"
           >
             {aiRefiningNames ? 'Refining...' : 'AI shortname selected'}
+          </button>
+          <button
+            type="button"
+            onClick={onAiRefineAllImageNames}
+            disabled={isUploading || aiRefiningNames || queuedImageCount === 0}
+            className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+          >
+            AI shortname all images
           </button>
           <button
             type="button"
@@ -170,6 +190,33 @@ export function PageImportQueue(props: PageImportQueueProps) {
           className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-50"
         >
           Strip extensions
+        </button>
+        <button
+          type="button"
+          onClick={onSanitizeQueueNames}
+          disabled={isUploading || queuedFiles.length === 0}
+          className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+        >
+          Sanitize all names
+        </button>
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={onSelectAll}
+          disabled={isUploading || queuedFiles.length === 0 || selectedQueuedCount === queuedFiles.length}
+          className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+        >
+          Include all
+        </button>
+        <button
+          type="button"
+          onClick={onSelectSmallAssets}
+          disabled={isUploading || smallAssetReviewQueuedCount === 0}
+          className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+        >
+          Include below-threshold ({smallAssetReviewQueuedCount})
         </button>
       </div>
 

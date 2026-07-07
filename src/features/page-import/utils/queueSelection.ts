@@ -6,6 +6,16 @@ export const setAllQueuedItemsSelected = (
 ): UploaderQueueItem[] =>
   items.map((item) => (item.selected === selected ? item : { ...item, selected }));
 
+export const setSmallAssetReviewItemsSelected = (
+  items: UploaderQueueItem[],
+  selected: boolean
+): UploaderQueueItem[] =>
+  items.map((item) =>
+    item.smallAssetReview && item.selected !== selected
+      ? { ...item, selected }
+      : item
+  );
+
 export const unselectAttemptedQueuedItems = (
   items: UploaderQueueItem[],
   attemptedIds: Set<string>
