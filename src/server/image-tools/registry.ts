@@ -1,8 +1,9 @@
 import { grainradAdapter } from '@/server/image-tools/grainradAdapter';
+import { eightBitAdapter } from '@/server/image-tools/eightBitAdapter';
 import { ImageToolManifestError, mergeImageToolRequest, validateImageToolManifest } from '@/server/image-tools/manifest';
 import type { ImageToolAdapter, ImageToolManifest, ImageToolRunInput } from '@/server/image-tools/types';
 
-const adapters: ImageToolAdapter[] = [grainradAdapter];
+const adapters: ImageToolAdapter[] = [grainradAdapter, eightBitAdapter];
 
 class ImageToolRegistry {
   private readonly adapterMap = new Map<string, ImageToolAdapter>();

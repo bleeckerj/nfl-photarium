@@ -3,12 +3,23 @@ import type { VideoUploadSuccess } from '@/server/videoUploadService';
 
 // 'grainrad-inproc' is the active in-process adapter. 'grainrad-http' is retained
 // only so historical provenance records (imageExtras.imageToolRun) still type-check.
-export type ImageToolAdapterKind = 'grainrad-inproc' | 'grainrad-http';
+export type ImageToolAdapterKind =
+  | 'grainrad-inproc'
+  | 'grainrad-http'
+  | 'grainrad-eight-bit-reinterpretation';
 export type ImageToolInputAssetType = 'image' | 'video';
 export type ImageToolOutputMode = 'still' | 'animated';
 export type ImageToolControlType = 'text' | 'number' | 'slider' | 'switch' | 'select' | 'color';
 export type ImageToolRunStatus = 'queued' | 'running' | 'completed' | 'failed';
 export type ImageToolDiagnosticLevel = 'info' | 'warn' | 'error';
+
+export type ImageToolWorkflowMode = 'filter' | 'reinterpretation';
+
+export type ImageToolWorkflow = {
+  mode?: ImageToolWorkflowMode;
+  styleStrength?: string;
+  promptHint?: string;
+};
 
 export type ImageToolControlOption = {
   value: string | number | boolean;
@@ -60,6 +71,18 @@ export type ImageToolRequest = {
     frameIndex?: number;
     time?: number;
   };
+  workflow?: ImageToolWorkflow;
+};
+
+export type ImageToolWorkflowManifest = {
+  id: string;
+  label: string;
+  description?: string;
+  effectId: string;
+  defaultMode?: ImageToolWorkflowMode;
+  modes?: ImageToolWorkflowMode[];
+  defaultStyleStrength?: string;
+  styleStrengths?: string[];
 };
 
 export type ImageToolManifest = {
@@ -72,6 +95,7 @@ export type ImageToolManifest = {
   supportsAsync: boolean;
   presentation: ImageToolPresentation;
   controls: ImageToolControl[];
+  workflows?: ImageToolWorkflowManifest[];
   defaultRequest: ImageToolRequest;
 };
 
@@ -98,6 +122,7 @@ export type ImageToolRunInput = {
     paramPreset?: string;
     params?: Record<string, unknown>;
     output?: Partial<ImageToolRequest['output']>;
+    workflow?: ImageToolWorkflow;
   };
 };
 

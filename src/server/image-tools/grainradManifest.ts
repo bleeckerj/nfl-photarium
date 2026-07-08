@@ -12,7 +12,6 @@ const PHOTARIUM_GRAINRAD_EFFECT_IDS = [
   'dithering',
   'halftone',
   'bit-glitch',
-  'eight-bit',
   'rgb-subpixel-display',
   'source-collage',
 ];

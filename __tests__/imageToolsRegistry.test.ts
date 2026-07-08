@@ -87,7 +87,7 @@ describe('GET /api/image-tools', () => {
     );
   });
 
-  it('lists implemented Grainrad effects and restored VHS controls', async () => {
+  it('lists generic Grainrad effects and restored VHS controls', async () => {
     const response = await GET();
     const payload = await response.json();
     const grainrad = (payload.tools as ImageToolManifest[]).find((tool) => tool.id === 'grainrad');
@@ -101,11 +101,11 @@ describe('GET /api/image-tools', () => {
       'dithering',
       'halftone',
       'bit-glitch',
-      'eight-bit',
       'rgb-subpixel-display',
       'source-collage',
     ]));
     expect(effectIds).not.toContain('ascii');
+    expect(effectIds).not.toContain('eight-bit');
     expect(findControl(grainrad!, 'params.tileCount')).toEqual(expect.objectContaining({
       effectIds: expect.arrayContaining(['source-collage']),
       group: 'layout',
@@ -142,6 +142,36 @@ describe('GET /api/image-tools', () => {
       advanced: true,
     }));
   });
+
+  it('lists the dedicated 8-bit reinterpretation tool', async () => {
+    const response = await GET();
+    const payload = await response.json();
+    const eightBit = (payload.tools as ImageToolManifest[]).find((tool) => tool.id === 'grainrad-eight-bit-reinterpretation');
+
+    expect(eightBit).toEqual(expect.objectContaining({
+      id: 'grainrad-eight-bit-reinterpretation',
+      adapterKind: 'grainrad-eight-bit-reinterpretation',
+      outputModes: ['still'],
+      defaultRequest: expect.objectContaining({
+        effectId: 'eight-bit',
+        workflow: expect.objectContaining({
+          mode: 'reinterpretation',
+          styleStrength: 'polished',
+        }),
+      }),
+    }));
+    expect(findControl(eightBit!, 'workflow.mode')).toEqual(expect.objectContaining({
+      type: 'select',
+      defaultValue: 'reinterpretation',
+      group: 'workflow',
+    }));
+    expect(findControl(eightBit!, 'workflow.styleStrength')).toEqual(expect.objectContaining({
+      type: 'select',
+      defaultValue: 'polished',
+      group: 'workflow',
+    }));
+    expect(findControl(eightBit!, 'output.format')?.options?.map((option) => option.value)).toEqual(['png', 'webp', 'jpg']);
+  });
 });
 
 describe('mergeImageToolRequest', () => {
@@ -155,5 +185,24 @@ describe('mergeImageToolRequest', () => {
     expect(request.paramPreset).toBe('diagonal-tear-hold-soft-wave-medium');
     expect(request.effectId).toBe('rgb-subpixel-display');
     expect(request.params).toEqual({ waveAmount: 3 });
+  });
+
+  it('preserves 8-bit workflow controls when normalizing image tool requests', () => {
+    const request = mergeImageToolRequest(
+      {
+        ...validManifest.defaultRequest,
+        effectId: 'eight-bit',
+        workflow: { mode: 'reinterpretation', styleStrength: 'polished', promptHint: '' },
+      },
+      {
+        workflow: { mode: 'filter', styleStrength: 'brutal', promptHint: 'Keep the label readable.' },
+      }
+    );
+
+    expect(request.workflow).toEqual({
+      mode: 'filter',
+      styleStrength: 'brutal',
+      promptHint: 'Keep the label readable.',
+    });
   });
 });

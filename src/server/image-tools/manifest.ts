@@ -101,6 +101,7 @@ export const mergeImageToolRequest = (
     output?: Partial<ImageToolRequest['output']>;
     timeline?: ImageToolRequest['timeline'];
     renderContext?: ImageToolRequest['renderContext'];
+    workflow?: ImageToolRequest['workflow'];
   }
 ): ImageToolRequest => {
   const mode = incoming.output?.mode ?? defaults.output.mode;
@@ -135,5 +136,11 @@ export const mergeImageToolRequest = (
       ...defaults.renderContext,
       ...(isRecord(incoming.renderContext) ? incoming.renderContext : {}),
     },
+    workflow: isRecord(defaults.workflow) || isRecord(incoming.workflow)
+      ? {
+          ...(isRecord(defaults.workflow) ? defaults.workflow : {}),
+          ...(isRecord(incoming.workflow) ? incoming.workflow : {}),
+        }
+      : undefined,
   };
 };

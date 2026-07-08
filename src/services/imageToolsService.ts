@@ -2,6 +2,13 @@ export type ImageToolOutputMode = 'still' | 'animated';
 export type ImageToolControlType = 'text' | 'number' | 'slider' | 'switch' | 'select' | 'color';
 export type ImageToolRunStatus = 'queued' | 'running' | 'completed' | 'failed';
 export type ImageToolDiagnosticLevel = 'info' | 'warn' | 'error';
+export type ImageToolWorkflowMode = 'filter' | 'reinterpretation';
+
+export type ImageToolWorkflow = {
+  mode?: ImageToolWorkflowMode;
+  styleStrength?: string;
+  promptHint?: string;
+};
 
 export type ImageToolControlOption = {
   value: string | number | boolean;
@@ -53,6 +60,18 @@ export type ImageToolRequest = {
     frameIndex?: number;
     time?: number;
   };
+  workflow?: ImageToolWorkflow;
+};
+
+export type ImageToolWorkflowManifest = {
+  id: string;
+  label: string;
+  description?: string;
+  effectId: string;
+  defaultMode?: ImageToolWorkflowMode;
+  modes?: ImageToolWorkflowMode[];
+  defaultStyleStrength?: string;
+  styleStrengths?: string[];
 };
 
 export type ImageToolManifest = {
@@ -65,6 +84,7 @@ export type ImageToolManifest = {
   supportsAsync: boolean;
   presentation: ImageToolPresentation;
   controls: ImageToolControl[];
+  workflows?: ImageToolWorkflowManifest[];
   defaultRequest: ImageToolRequest;
 };
 

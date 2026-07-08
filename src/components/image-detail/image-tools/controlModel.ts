@@ -15,6 +15,7 @@ export type ControlGroup = {
 
 const GROUP_LABELS: Record<string, string> = {
   output: 'Output',
+  workflow: 'Workflow',
   presets: 'Presets',
   animation: 'Animation',
   general: 'General',
@@ -37,6 +38,7 @@ const GROUP_LABELS: Record<string, string> = {
 
 const GROUP_ORDER = [
   'output',
+  'workflow',
   'presets',
   'general',
   'tone',
@@ -63,6 +65,7 @@ const WEBP_OUTPUT_FORMAT = 'webp';
 const pathGroupFallback = (path: string) => {
   if (path === 'effectId') return 'output';
   if (path === 'paramPreset') return 'presets';
+  if (path.startsWith('workflow.')) return 'workflow';
   if (path.startsWith('output.')) return 'output';
   if (path.startsWith('timeline.')) return 'animation';
   if (path.startsWith('renderContext.')) return 'animation';

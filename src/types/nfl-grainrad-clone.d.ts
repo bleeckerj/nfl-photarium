@@ -85,6 +85,21 @@ declare module 'nfl-grainrad-clone' {
 
   export function createEffectsApi(options?: unknown): EffectsApi;
   export function createPhotariumImageToolManifest(options?: unknown): unknown;
+  export function createPhotariumEightBitReinterpretationManifest(options?: unknown): unknown;
+  export function runEightBitPhotariumWorkflow(options?: unknown): Promise<{
+    kind: 'image' | string;
+    mode: string;
+    styleStrength: string;
+    prompt: string | null;
+    generated: unknown;
+    rendered: {
+      kind: 'image' | string;
+      png?: Buffer | Uint8Array;
+      width?: number;
+      height?: number;
+      metadata?: Record<string, unknown>;
+    };
+  }>;
   export function normalizeTimeline(timeline?: Timeline, renderContext?: RenderContext): Required<Timeline>;
   export function getTimelineFrameCount(timeline?: Timeline): number;
   export function createFrameRenderContext(
