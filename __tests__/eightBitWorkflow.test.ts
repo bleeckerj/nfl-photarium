@@ -91,6 +91,8 @@ describe('renderEightBitWorkflowArtifact', () => {
       mode: 'reinterpretation',
       styleStrength: 'polished',
       promptHint: 'Keep the label blocky.',
+      colorDepth: 'minimal',
+      pixelScale: 'chunky',
     }), { sourceImageId: 'image-1' });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -100,6 +102,8 @@ describe('renderEightBitWorkflowArtifact', () => {
     };
     expect(body.prompt).toContain('A red product bottle on ice.');
     expect(body.prompt).toContain('Keep the label blocky.');
+    expect(body.prompt).toContain('8-10 color palette');
+    expect(body.prompt).toContain('larger blocks');
     expect(body.images[0].image_url).toMatch(/^data:image\/png;base64,/);
     expect(artifact.contentType).toBe('image/png');
     const meta = await sharp(artifact.buffer).metadata();

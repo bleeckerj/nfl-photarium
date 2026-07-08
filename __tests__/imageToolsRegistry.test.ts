@@ -170,6 +170,16 @@ describe('GET /api/image-tools', () => {
       defaultValue: 'polished',
       group: 'workflow',
     }));
+    expect(findControl(eightBit!, 'workflow.colorDepth')).toEqual(expect.objectContaining({
+      type: 'select',
+      defaultValue: 'classic',
+      group: 'workflow',
+    }));
+    expect(findControl(eightBit!, 'workflow.pixelScale')).toEqual(expect.objectContaining({
+      type: 'select',
+      defaultValue: 'medium',
+      group: 'workflow',
+    }));
     expect(findControl(eightBit!, 'output.format')?.options?.map((option) => option.value)).toEqual(['png', 'webp', 'jpg']);
   });
 });
@@ -195,7 +205,13 @@ describe('mergeImageToolRequest', () => {
         workflow: { mode: 'reinterpretation', styleStrength: 'polished', promptHint: '' },
       },
       {
-        workflow: { mode: 'filter', styleStrength: 'brutal', promptHint: 'Keep the label readable.' },
+        workflow: {
+          mode: 'filter',
+          styleStrength: 'brutal',
+          promptHint: 'Keep the label readable.',
+          colorDepth: 'minimal',
+          pixelScale: 'chunky',
+        },
       }
     );
 
@@ -203,6 +219,8 @@ describe('mergeImageToolRequest', () => {
       mode: 'filter',
       styleStrength: 'brutal',
       promptHint: 'Keep the label readable.',
+      colorDepth: 'minimal',
+      pixelScale: 'chunky',
     });
   });
 });

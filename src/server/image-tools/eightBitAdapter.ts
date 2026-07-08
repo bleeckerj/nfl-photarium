@@ -16,6 +16,39 @@ import type {
 
 const STILL_OUTPUT_FORMATS = new Set(['png', 'webp', 'jpg', 'jpeg']);
 
+const EIGHT_BIT_VARIATION_CONTROLS: ImageToolControl[] = [
+  {
+    id: 'workflow.colorDepth',
+    label: 'Color Depth',
+    type: 'select',
+    defaultValue: 'classic',
+    group: 'workflow',
+    effectIds: ['eight-bit'],
+    helpText: 'Palette size guidance for the generated pixel-art pass and final Grainrad constraint pass.',
+    options: [
+      { value: 'minimal', label: 'Minimal', helpText: 'About 8-10 colors with sparse ramps.' },
+      { value: 'classic', label: 'Classic', helpText: 'About 12-14 colors with controlled ramps.' },
+      { value: 'rich', label: 'Rich', helpText: 'About 14-16 colors with broader color families.' },
+      { value: 'expanded', label: 'Expanded', helpText: 'About 18-24 colors while keeping a pixel-art palette.' },
+    ],
+  },
+  {
+    id: 'workflow.pixelScale',
+    label: 'Pixel Size',
+    type: 'select',
+    defaultValue: 'medium',
+    group: 'workflow',
+    effectIds: ['eight-bit'],
+    helpText: 'Controls perceived block size by guiding the prompt and Grainrad working bitmap.',
+    options: [
+      { value: 'fine', label: 'Fine', helpText: 'Smaller blocks with more shape detail.' },
+      { value: 'medium', label: 'Medium', helpText: 'Balanced home-console pixel size.' },
+      { value: 'chunky', label: 'Chunky', helpText: 'Larger blocks and more simplified silhouettes.' },
+      { value: 'blocky', label: 'Blocky', helpText: 'Very low working resolution with large visible tiles.' },
+    ],
+  },
+];
+
 const filterStillOutputFormatOptions = (control: ImageToolControl): ImageToolControl => {
   if (control.id !== 'output.format') return control;
   return {
@@ -36,7 +69,13 @@ const createManifest = () => {
 
   return {
     ...manifest,
-    controls: manifest.controls.map(filterStillOutputFormatOptions),
+    controls: manifest.controls
+      .flatMap((control) => (
+        control.id === 'workflow.promptHint'
+          ? [...EIGHT_BIT_VARIATION_CONTROLS, control]
+          : [control]
+      ))
+      .map(filterStillOutputFormatOptions),
   };
 };
 

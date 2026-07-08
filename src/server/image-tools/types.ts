@@ -19,6 +19,8 @@ export type ImageToolWorkflow = {
   mode?: ImageToolWorkflowMode;
   styleStrength?: string;
   promptHint?: string;
+  colorDepth?: string;
+  pixelScale?: string;
 };
 
 export type ImageToolControlOption = {

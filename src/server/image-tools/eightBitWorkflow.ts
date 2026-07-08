@@ -20,6 +20,55 @@ const PRESET_QUALITY: Record<string, number> = {
   'high-quality': 92,
 };
 
+const COLOR_DEPTH_PRESETS: Record<string, {
+  paletteSize: number;
+  prompt: string;
+}> = {
+  minimal: {
+    paletteSize: 10,
+    prompt: 'Color depth: use a very limited 8-10 color palette with sparse ramps and minimal interior color variation.',
+  },
+  classic: {
+    paletteSize: 14,
+    prompt: 'Color depth: use a classic 12-14 color palette with controlled ramps and restrained dithering.',
+  },
+  rich: {
+    paletteSize: 18,
+    prompt: 'Color depth: use a richer 14-16 color pixel-art palette while preserving broad source color families.',
+  },
+  expanded: {
+    paletteSize: 24,
+    prompt: 'Color depth: use an expanded 18-24 color pixel-art palette, keeping colors deliberately quantized.',
+  },
+};
+
+const PIXEL_SCALE_PRESETS: Record<string, {
+  workingWidth: number;
+  upscale: number;
+  prompt: string;
+}> = {
+  fine: {
+    workingWidth: 320,
+    upscale: 2,
+    prompt: 'Pixel size: use smaller visible pixels and preserve more large-shape detail.',
+  },
+  medium: {
+    workingWidth: 256,
+    upscale: 3,
+    prompt: 'Pixel size: use balanced home-console blocks with simplified forms.',
+  },
+  chunky: {
+    workingWidth: 160,
+    upscale: 4,
+    prompt: 'Pixel size: lower the working resolution for larger blocks, chunkier silhouettes, and fewer tiny features.',
+  },
+  blocky: {
+    workingWidth: 96,
+    upscale: 6,
+    prompt: 'Pixel size: use a very low working resolution with large visible tiles and strongly simplified shapes.',
+  },
+};
+
 type OpenAiImageResult = {
   b64Json?: string;
   url?: string;
@@ -40,7 +89,33 @@ const normalizeWorkflow = (workflow?: ImageToolWorkflow): Required<ImageToolWork
   mode: workflow?.mode === 'filter' ? 'filter' : 'reinterpretation',
   styleStrength: workflow?.styleStrength || 'polished',
   promptHint: workflow?.promptHint || '',
+  colorDepth: workflow?.colorDepth || 'classic',
+  pixelScale: workflow?.pixelScale || 'medium',
 });
+
+const buildWorkflowPromptHint = (workflow: Required<ImageToolWorkflow>) => {
+  return [
+    COLOR_DEPTH_PRESETS[workflow.colorDepth]?.prompt,
+    PIXEL_SCALE_PRESETS[workflow.pixelScale]?.prompt,
+    workflow.promptHint,
+  ].filter(Boolean).join('\n');
+};
+
+const buildWorkflowParams = (
+  params: ImageToolRequest['params'],
+  workflow: Required<ImageToolWorkflow>
+) => {
+  const colorDepth = COLOR_DEPTH_PRESETS[workflow.colorDepth];
+  const pixelScale = PIXEL_SCALE_PRESETS[workflow.pixelScale];
+  return {
+    ...params,
+    ...(colorDepth ? { paletteSize: colorDepth.paletteSize } : {}),
+    ...(pixelScale ? {
+      workingWidth: pixelScale.workingWidth,
+      upscale: pixelScale.upscale,
+    } : {}),
+  };
+};
 
 const readOpenAiApiKey = () => {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
@@ -187,6 +262,8 @@ export const renderEightBitWorkflowArtifact = async (
     details: {
       workflowMode: workflow.mode,
       styleStrength: workflow.styleStrength,
+      colorDepth: workflow.colorDepth,
+      pixelScale: workflow.pixelScale,
     },
   });
 
@@ -199,8 +276,8 @@ export const renderEightBitWorkflowArtifact = async (
       ? await sourceDescriptionFromCache(options.sourceImageId)
       : undefined,
     styleStrength: workflow.styleStrength,
-    promptHint: workflow.promptHint,
-    params: request.params,
+    promptHint: buildWorkflowPromptHint(workflow),
+    params: buildWorkflowParams(request.params, workflow),
     renderContext: request.renderContext,
     generateImage: workflow.mode === 'reinterpretation'
       ? async ({ prompt }: { prompt: string }) => {
@@ -226,6 +303,8 @@ export const renderEightBitWorkflowArtifact = async (
     details: {
       workflowMode: result.mode,
       styleStrength: result.styleStrength,
+      colorDepth: workflow.colorDepth,
+      pixelScale: workflow.pixelScale,
     },
   });
   const encoded = await encodeStillOutput(Buffer.from(rendered.png), request);

@@ -8,6 +8,8 @@ export type ImageToolWorkflow = {
   mode?: ImageToolWorkflowMode;
   styleStrength?: string;
   promptHint?: string;
+  colorDepth?: string;
+  pixelScale?: string;
 };
 
 export type ImageToolControlOption = {
@@ -126,6 +128,23 @@ export type ImageToolRun = {
   events: ImageToolDiagnosticEvent[];
 };
 
+export type ImageToolUploadedAsset = {
+  id?: string;
+  assetType?: 'image' | 'video';
+  filename?: string;
+  url?: string;
+  playbackUrl?: string;
+};
+
+export type ImageToolAcceptedPreview = {
+  preview: ImageToolPreview;
+  uploadedAsset: ImageToolUploadedAsset;
+  artifact?: {
+    filename?: string;
+    contentType?: string;
+  };
+};
+
 export type ImageToolPreview = {
   id: string;
   toolId: string;
@@ -225,6 +244,19 @@ export const createImageToolPreview = async (params: {
     throw new Error(typeof payload.error === 'string' ? payload.error : fallback);
   }
   return payload.preview as ImageToolPreview;
+};
+
+export const acceptImageToolPreview = async (previewId: string): Promise<ImageToolAcceptedPreview> => {
+  const response = await fetch(`/api/image-tools/previews/${encodeURIComponent(previewId)}/accept`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to accept image tool preview');
+  }
+  return payload as ImageToolAcceptedPreview;
 };
 
 export const getImageToolPreview = async (previewId: string): Promise<ImageToolPreview> => {

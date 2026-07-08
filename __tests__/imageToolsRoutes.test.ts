@@ -3,13 +3,15 @@ import { NextRequest } from 'next/server';
 
 import { POST } from '@/app/api/image-tools/[toolId]/runs/route';
 import { POST as POST_PREVIEW } from '@/app/api/image-tools/[toolId]/previews/route';
+import { POST as POST_ACCEPT_PREVIEW } from '@/app/api/image-tools/previews/[previewId]/accept/route';
 import { GET as GET_RUN } from '@/app/api/image-tools/runs/[runId]/route';
 import { GET as GET_PREVIEW } from '@/app/api/image-tools/previews/[previewId]/route';
 import { GET as GET_PREVIEW_ARTIFACT } from '@/app/api/image-tools/previews/[previewId]/artifact/route';
 import { createImageToolRun, addImageToolRunEvent } from '@/server/image-tools/runStore';
 import { completeImageToolPreview, createImageToolPreview } from '@/server/image-tools/previewStore';
 
-const { startImageToolRunMock, startImageToolPreviewRunMock } = vi.hoisted(() => ({
+const { acceptImageToolPreviewArtifactMock, startImageToolRunMock, startImageToolPreviewRunMock } = vi.hoisted(() => ({
+  acceptImageToolPreviewArtifactMock: vi.fn(),
   startImageToolRunMock: vi.fn(),
   startImageToolPreviewRunMock: vi.fn(),
 }));
@@ -17,6 +19,10 @@ const { startImageToolRunMock, startImageToolPreviewRunMock } = vi.hoisted(() =>
 vi.mock('@/server/image-tools/executor', () => ({
   startImageToolRun: startImageToolRunMock,
   startImageToolPreviewRun: startImageToolPreviewRunMock,
+}));
+
+vi.mock('@/server/image-tools/previewAcceptance', () => ({
+  acceptImageToolPreviewArtifact: acceptImageToolPreviewArtifactMock,
 }));
 
 const createPostRequest = (body: Record<string, unknown>) =>
@@ -185,5 +191,46 @@ describe('image tool run routes', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toBe('image/png');
     expect(Buffer.from(await response.arrayBuffer()).toString()).toBe('preview-bytes');
+  });
+
+  it('accepts a completed preview through the preview acceptance service', async () => {
+    acceptImageToolPreviewArtifactMock.mockResolvedValueOnce({
+      preview: {
+        id: 'preview-accepted',
+        toolId: 'grainrad-eight-bit-reinterpretation',
+        imageId: 'img-5',
+        status: 'completed',
+        message: 'Preview ready',
+        percent: 1,
+        createdAt: '2026-07-08T00:00:00.000Z',
+        updatedAt: '2026-07-08T00:00:01.000Z',
+        expiresAt: '2026-07-08T00:10:00.000Z',
+        request: {
+          effectId: 'eight-bit',
+          params: {},
+          output: { mode: 'still', format: 'png' },
+        },
+        events: [],
+      },
+      uploadedAsset: {
+        id: 'generated-preview-1',
+        assetType: 'image',
+        filename: 'accepted.png',
+      },
+      artifact: {
+        filename: 'preview.png',
+        contentType: 'image/png',
+      },
+    });
+
+    const response = await POST_ACCEPT_PREVIEW(
+      new Request('http://localhost/api/image-tools/previews/preview-accepted/accept', { method: 'POST' }),
+      { params: Promise.resolve({ previewId: 'preview-accepted' }) }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(payload.uploadedAsset.id).toBe('generated-preview-1');
+    expect(acceptImageToolPreviewArtifactMock).toHaveBeenCalledWith('preview-accepted');
   });
 });

@@ -7,11 +7,13 @@ import { useEffect, useMemo, useState } from 'react';
 
 import {
   createImageToolPreview,
+  acceptImageToolPreview,
   getImageToolPreview,
   getImageToolRun,
   isImageToolTransientStatusError,
   listImageTools,
   startImageToolRun,
+  type ImageToolUploadedAsset,
   type ImageToolControl,
   type ImageToolDiagnosticEvent,
   type ImageToolManifest,
@@ -123,6 +125,9 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewWarning, setPreviewWarning] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
+  const [acceptingPreview, setAcceptingPreview] = useState(false);
+  const [acceptError, setAcceptError] = useState<string | null>(null);
+  const [acceptedAsset, setAcceptedAsset] = useState<ImageToolUploadedAsset | null>(null);
 
   const loadTools = () => {
     setLoadingTools(true);
@@ -232,6 +237,9 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
     setPreviewError(null);
     setPreviewWarning(null);
     setPreviewing(false);
+    setAcceptingPreview(false);
+    setAcceptError(null);
+    setAcceptedAsset(null);
   };
 
   const handleSelectTool = (tool: ImageToolManifest) => {
@@ -255,6 +263,8 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
     setPreviewing(true);
     setPreviewError(null);
     setPreviewWarning(null);
+    setAcceptError(null);
+    setAcceptedAsset(null);
     setPreview(null);
     try {
       const nextPreview = await createImageToolPreview({
@@ -277,6 +287,8 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
     if (!selectedTool) return;
     setRunError(null);
     setRunWarning(null);
+    setAcceptError(null);
+    setAcceptedAsset(null);
     try {
       const nextRun = await startImageToolRun({
         toolId: selectedTool.id,
@@ -289,10 +301,26 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
     }
   };
 
+  const handleAcceptPreview = async () => {
+    if (!preview || preview.status !== 'completed') return;
+    setAcceptingPreview(true);
+    setAcceptError(null);
+    try {
+      const result = await acceptImageToolPreview(preview.id);
+      setAcceptedAsset(result.uploadedAsset);
+      setPreview(result.preview);
+      await onRunComplete?.();
+    } catch (error) {
+      setAcceptError(error instanceof Error ? error.message : 'Failed to accept image tool preview');
+    } finally {
+      setAcceptingPreview(false);
+    }
+  };
+
   const running = Boolean(run && !isTerminalRun(run));
   const previewRunning = Boolean(preview && !isTerminalPreview(preview));
-  const busy = running || previewing || previewRunning;
-  const uploadedAsset = run?.result?.uploadedAsset;
+  const busy = running || previewing || previewRunning || acceptingPreview;
+  const uploadedAsset = run?.result?.uploadedAsset ?? acceptedAsset;
   const detailHref = uploadedAsset?.id
     ? `${uploadedAsset.assetType === 'video' ? '/videos' : '/images'}/${uploadedAsset.id}`
     : undefined;
@@ -303,7 +331,8 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
       })
     : null;
   const previewStatus = preview?.message || (preview ? `Preview ${preview.status}` : null);
-  const showPreviewStatus = Boolean(previewError || previewWarning || preview?.error || previewStatus || preview?.events?.length);
+  const showPreviewStatus = Boolean(previewError || previewWarning || acceptError || preview?.error || previewStatus || preview?.events?.length);
+  const canAcceptPreview = Boolean(preview?.status === 'completed' && preview.artifactUrl && !acceptedAsset);
   const sidebarGridClass = previewMedia
     ? 'grid gap-2 sm:grid-cols-2 xl:grid-cols-1'
     : 'grid gap-2 sm:grid-cols-2';
@@ -435,6 +464,17 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
                     <Play className="h-3.5 w-3.5" />
                     {running ? 'Running' : 'Run tool'}
                   </button>
+                  {canAcceptPreview && (
+                    <button
+                      type="button"
+                      onClick={handleAcceptPreview}
+                      disabled={busy}
+                      className="inline-flex items-center justify-center gap-1 rounded border border-blue-300 bg-blue-50 px-3 py-2 font-mono text-xs text-blue-900 hover:border-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Play className="h-3.5 w-3.5" />
+                      {acceptingPreview ? 'Accepting' : 'Accept preview'}
+                    </button>
+                  )}
                 </div>
                 {showPreviewStatus && (
                   <div className="mt-2 space-y-2 rounded border border-gray-200 bg-white/80 px-3 py-2">
@@ -443,6 +483,9 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
                     )}
                     {previewWarning && (
                       <p className="font-mono text-[11px] text-amber-700">{previewWarning}</p>
+                    )}
+                    {acceptError && (
+                      <p className="font-mono text-[11px] text-red-600">{acceptError}</p>
                     )}
                     {previewStatus && <p className="font-mono text-[10px] text-gray-500">{previewStatus}</p>}
                     {preview && <DiagnosticList events={preview.events ?? []} />}
@@ -521,7 +564,7 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
             </div>
           )}
 
-          {run?.status === 'completed' && uploadedAsset?.id && (
+          {uploadedAsset?.id && (
             <div className="border-t border-blue-200 bg-blue-50 p-3 font-mono text-[11px] text-blue-900">
               <p className="font-semibold">Generated asset created</p>
               <div className="mt-1 flex flex-wrap items-center gap-2">
