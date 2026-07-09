@@ -1,5 +1,6 @@
 import { useCallback, useState, type Dispatch, type SetStateAction } from 'react';
 import { base64ToFile } from '@/components/image-uploader/fileHelpers';
+import { createImageFileFromDataUrl, isDataUrl } from '@/components/image-uploader/dataUrlImport';
 import type { UploaderQueueItem } from '@/features/page-import/types';
 import { inferAssetTypeFromUrl, isImageOnlyImportError } from '@/utils/mediaAssetType';
 
@@ -44,6 +45,24 @@ export function useUploaderImportUrl({
     try {
       setImportLoading(true);
       setImportError(null);
+      if (isDataUrl(sourceUrl)) {
+        const file = createImageFileFromDataUrl(sourceUrl);
+        const objectUrl = URL.createObjectURL(file);
+        setQueuedFiles((prev) => [
+          ...prev,
+          {
+            id: createQueueId(),
+            assetType: 'image',
+            file,
+            filename: file.name,
+            previewUrl: objectUrl,
+            selected: true,
+          },
+        ]);
+        setImportUrl('');
+        return;
+      }
+
       const inferredAssetType = inferAssetTypeFromUrl(sourceUrl);
       if (inferredAssetType === 'video') {
         queueRemoteVideo(sourceUrl);
