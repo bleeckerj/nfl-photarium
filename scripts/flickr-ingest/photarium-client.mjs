@@ -36,6 +36,35 @@ export async function uploadImageToPhotarium({
   };
 }
 
+export async function uploadVideoToPhotarium({
+  apiBase,
+  buffer,
+  fileName,
+  contentType,
+  metadata,
+}) {
+  const form = new FormData();
+  form.append('file', new Blob([buffer], { type: contentType || 'video/mp4' }), fileName);
+  form.append('namespace', metadata.namespace);
+  if (metadata.folder) form.append('folder', metadata.folder);
+  if (metadata.tags?.length) form.append('tags', metadata.tags.join(','));
+  if (metadata.description) form.append('description', metadata.description);
+  if (metadata.displayName) form.append('displayName', metadata.displayName);
+  if (metadata.sourceUrl) form.append('sourceUrl', metadata.sourceUrl);
+  if (metadata.originalUrl) form.append('originalUrl', metadata.originalUrl);
+
+  const response = await fetch(`${apiBase}/api/import/page/upload-video`, {
+    method: 'POST',
+    body: form,
+  });
+  const payload = await jsonOrText(response);
+  return {
+    ok: response.ok,
+    status: response.status,
+    payload,
+  };
+}
+
 export async function updatePhotariumImage({ apiBase, imageId, metadata }) {
   const response = await fetch(`${apiBase}/api/images/${imageId}/update`, {
     method: 'PATCH',

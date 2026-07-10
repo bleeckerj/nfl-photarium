@@ -14,7 +14,7 @@ It supports:
 
 Current implementation notes:
 
-- v1 is photo-only; non-photo media is skipped
+- photos and Flickr-hosted videos are ingested; other media types are skipped
 - "collection name" is implemented as Flickr album/photoset title
 - true Flickr Collection tree traversal is not implemented
 - default target namespace is `cf-flickr`

@@ -18,10 +18,16 @@ import {
   buildFlickrExtras,
   buildPhotariumMetadata,
   chooseBestPhotoSource,
+  chooseBestVideoSource,
   inferDownloadFileName,
   normalizeAlbumTitles,
 } from './mapping.mjs';
-import { patchPhotariumExtras, updatePhotariumImage, uploadImageToPhotarium } from './photarium-client.mjs';
+import {
+  patchPhotariumExtras,
+  updatePhotariumImage,
+  uploadImageToPhotarium,
+  uploadVideoToPhotarium,
+} from './photarium-client.mjs';
 import { selectorFingerprint } from './constants.mjs';
 import {
   contentHash,
@@ -113,8 +119,8 @@ async function fetchPhotoDetails(client, listPhoto, logger, apiLimiter, options)
     }
   );
 
-  let source = chooseBestPhotoSource(listPhoto);
-  if (!source) {
+  let source = info.media === 'video' ? null : chooseBestPhotoSource(listPhoto);
+  if (!source || info.media === 'video') {
     await apiLimiter();
     const sizes = await retryWithBackoff(
       () => client.getPhotoSizes(listPhoto.id),
@@ -127,7 +133,9 @@ async function fetchPhotoDetails(client, listPhoto, logger, apiLimiter, options)
         },
       }
     );
-    source = chooseBestPhotoSource(listPhoto, sizes);
+    source = info.media === 'video'
+      ? chooseBestVideoSource(sizes)
+      : chooseBestPhotoSource(listPhoto, sizes);
   }
 
   return {
@@ -372,7 +380,7 @@ export async function runIngestCommand(options, logger) {
 
     try {
       const { info, contexts, source } = await fetchPhotoDetails(client, listPhoto, logger, apiLimiter, options);
-      if (info.media !== 'photo') {
+      if (info.media !== 'photo' && info.media !== 'video') {
         counts.unsupported += 1;
         logger.warn(`${prefix} unsupported media=${info.media}`);
         checkpoint.entries[listPhoto.id] = buildEntryUpdate({
@@ -437,7 +445,8 @@ export async function runIngestCommand(options, logger) {
 
       const outcome = await retryWithBackoff(
         async () => {
-          const result = await uploadImageToPhotarium({
+          const upload = info.media === 'video' ? uploadVideoToPhotarium : uploadImageToPhotarium;
+          const result = await upload({
             apiBase: options.apiBase,
             buffer: download.buffer,
             fileName,
@@ -470,14 +479,16 @@ export async function runIngestCommand(options, logger) {
 
       if (outcome.ok) {
         const photariumId = outcome.payload?.id || outcome.payload?.result?.id;
-        await patchPhotariumExtras({
-          apiBase: options.apiBase,
-          imageId: photariumId,
-          patch: extrasPatch,
-        });
+        if (info.media === 'photo') {
+          await patchPhotariumExtras({
+            apiBase: options.apiBase,
+            imageId: photariumId,
+            patch: extrasPatch,
+          });
+        }
 
         counts.uploaded += 1;
-        logger.success(`${prefix} uploaded -> ${photariumId}`);
+        logger.success(`${prefix} uploaded ${info.media} -> ${photariumId}`);
         checkpoint.entries[listPhoto.id] = buildEntryUpdate({
           existingEntry,
           status: 'uploaded',

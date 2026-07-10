@@ -19,7 +19,7 @@ export function chooseBestPhotoSource(listPhoto, sizes = []) {
       label: entry.label,
       width: Number(entry.width || 0),
       height: Number(entry.height || 0),
-      isOriginal: String(entry.label || '').toLowerCase() === 'original',
+      isOriginal: String(entry.label || '').toLowerCase().includes('original'),
     }));
 
   const candidates = [...listCandidates, ...sizeCandidates];
@@ -51,6 +51,34 @@ export function chooseBestPhotoSource(listPhoto, sizes = []) {
     originalAvailable: false,
     width: fallback.width,
     height: fallback.height,
+  };
+}
+
+export function chooseBestVideoSource(sizes = []) {
+  const candidates = (sizes || [])
+    .filter((entry) => entry?.source && entry.media === 'video')
+    .map((entry) => ({
+      source: entry.source,
+      label: entry.label,
+      width: Number(entry.width || 0),
+      height: Number(entry.height || 0),
+      isOriginal: String(entry.label || '').toLowerCase().includes('original'),
+    }));
+
+  if (candidates.length === 0) return null;
+  const selected = candidates.find((candidate) => candidate.isOriginal)
+    || [...candidates].sort((left, right) => {
+      const areaA = left.width * left.height;
+      const areaB = right.width * right.height;
+      return areaB - areaA;
+    })[0];
+
+  return {
+    url: selected.source,
+    preferredSize: selected.label || 'Best Available',
+    originalAvailable: selected.isOriginal,
+    width: selected.width,
+    height: selected.height,
   };
 }
 

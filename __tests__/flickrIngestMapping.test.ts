@@ -40,6 +40,19 @@ describe('flickr ingest mapping helpers', async () => {
     );
   });
 
+  it('selects the original Flickr video rendition when available', () => {
+    const selected = mapping.chooseBestVideoSource([
+      { label: 'Site MP4', width: 640, height: 360, source: 'https://example.com/site.mp4', media: 'video' },
+      { label: 'Video Original', width: 1920, height: 1080, source: 'https://example.com/original.mp4', media: 'video' },
+      { label: 'Poster', width: 1920, height: 1080, source: 'https://example.com/poster.jpg', media: 'photo' },
+    ]);
+
+    expect(selected).toEqual(expect.objectContaining({
+      url: 'https://example.com/original.mp4',
+      originalAvailable: true,
+    }));
+  });
+
   it('maps folders predictably from selector and album context', () => {
     expect(
       mapping.determineFolder({
