@@ -3,6 +3,10 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import {
+  extractInstagramMediaUrl,
+  runInstagramIngest,
+} from './telegram-listener/instagram-ingest.mjs';
 
 const DEFAULT_BASE_URL = 'http://localhost:3000';
 const DEFAULT_STATE_FILE = path.join(os.tmpdir(), 'photarium-telegram-listener-state.json');
@@ -315,12 +319,44 @@ function buildProcessedKey(message, media) {
   return `${chatId}:${messageId}:${unique}`;
 }
 
+function buildInstagramProcessedKey(message, instagramUrl) {
+  const chatId = message?.chat?.id ?? 'unknown';
+  const messageId = message?.message_id ?? 'unknown';
+  return `${chatId}:${messageId}:instagram:${instagramUrl}`;
+}
+
 async function processChannelPost(config, state, message) {
   const chat = message?.chat;
   const messageId = message?.message_id;
 
   if (!chat || !messageId) return { skipped: 'missing-chat-or-message-id' };
   if (!shouldProcessChat(config, chat.id)) return { skipped: 'chat-not-allowed' };
+
+  const instagramUrl = extractInstagramMediaUrl(message);
+  if (instagramUrl) {
+    const processedKey = buildInstagramProcessedKey(message, instagramUrl);
+    if (state.processedKeys.includes(processedKey)) return { skipped: 'already-processed' };
+
+    console.log('[telegram-listener] ingesting Instagram URL', {
+      chatId: chat.id,
+      messageId,
+      instagramUrl,
+    });
+    await runInstagramIngest({
+      instagramUrl,
+      apiBase: config.photariumBaseUrl,
+    });
+    state.processedKeys.push(processedKey);
+    state.processedKeys = state.processedKeys.slice(-1000);
+
+    return {
+      uploaded: true,
+      uploadKind: 'instagram-url',
+      chatId: chat.id,
+      messageId,
+      instagramUrl,
+    };
+  }
 
   const media = chooseMedia(message);
   if (!media) return { skipped: 'no-image-media' };

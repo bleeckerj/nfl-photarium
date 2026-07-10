@@ -93,6 +93,9 @@ function testsForFile(file) {
   if (file.includes('instagram-ingest')) {
     tests.push('__tests__/instagramIngestScript.test.ts');
   }
+  if (file.includes('telegram-channel-listener') || file.includes('telegram-listener/')) {
+    tests.push('__tests__/telegramInstagramIngest.test.ts');
+  }
   if (file.includes('audit-file-sizes') || file.includes('hygiene-targeted')) {
     tests.push();
   }
