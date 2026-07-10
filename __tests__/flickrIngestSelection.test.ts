@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
 describe('Flickr ingest selection', async () => {
-  const { collectSelectedPhotos, formatCompletionProgress, formatPhotoProgress } = await import('../scripts/flickr-ingest/run.mjs');
+  const {
+    collectSelectedPhotos,
+    estimateRemainingTime,
+    formatCompletionProgress,
+    formatElapsedTime,
+    formatPhotoProgress,
+  } = await import('../scripts/flickr-ingest/run.mjs');
 
   function photo(id: number, lastUpdate = '123') {
     return { id: String(id), lastUpdate, title: `Photo ${id}` };
@@ -67,10 +73,17 @@ describe('Flickr ingest selection', async () => {
       index: 0,
       trancheSize: 25,
       completionProgress: { completed: 25, total: 3291 },
-    })).toBe('[25/3,266/3,291 complete/left/total] [1/25 tranche]');
+      elapsedMs: 3723000,
+    })).toBe('[25/3,266/3,291 complete/left/total] [1/25 tranche] [elapsed 01:02:03]');
   });
 
   it('formats completed and remaining account totals', () => {
     expect(formatCompletionProgress(51, 3291)).toBe('[51/3,240/3,291 complete/left/total]');
+  });
+
+  it('formats elapsed time and estimates remaining duration from successful throughput', () => {
+    expect(formatElapsedTime(3723000)).toBe('01:02:03');
+    expect(estimateRemainingTime({ elapsedMs: 100000, successful: 25, remaining: 100 })).toBe(400000);
+    expect(estimateRemainingTime({ elapsedMs: 100000, successful: 0, remaining: 100 })).toBeNull();
   });
 });

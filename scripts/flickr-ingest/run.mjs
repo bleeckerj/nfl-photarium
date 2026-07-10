@@ -300,12 +300,26 @@ export function formatCompletionProgress(completed, total) {
   return `[${boundedCompleted.toLocaleString('en-US')}/${remaining.toLocaleString('en-US')}/${total.toLocaleString('en-US')} complete/left/total]`;
 }
 
-export function formatPhotoProgress({ index, trancheSize, completionProgress }) {
+export function formatElapsedTime(elapsedMs) {
+  const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours, minutes, seconds].map((value) => String(value).padStart(2, '0')).join(':');
+}
+
+export function estimateRemainingTime({ elapsedMs, successful, remaining }) {
+  if (successful <= 0 || remaining <= 0) return null;
+  return (elapsedMs / successful) * remaining;
+}
+
+export function formatPhotoProgress({ index, trancheSize, completionProgress, elapsedMs }) {
   const tranche = `[${index + 1}/${trancheSize} tranche]`;
   const completion = completionProgress
     ? formatCompletionProgress(completionProgress.completed, completionProgress.total)
     : '';
-  return [completion, tranche].filter(Boolean).join(' ');
+  const elapsed = Number.isFinite(elapsedMs) ? `[elapsed ${formatElapsedTime(elapsedMs)}]` : '';
+  return [completion, tranche, elapsed].filter(Boolean).join(' ');
 }
 
 export async function runIngestCommand(options, logger) {
@@ -363,6 +377,7 @@ export async function runIngestCommand(options, logger) {
     skipped: 0,
     unsupported: 0,
   };
+  const trancheStartedAt = Date.now();
 
   await runWithConcurrency(selected, options.concurrency, async (listPhoto, index) => {
     const existingEntry = checkpoint.entries[listPhoto.id];
@@ -371,6 +386,7 @@ export async function runIngestCommand(options, logger) {
       index,
       trancheSize: selected.length,
       completionProgress,
+      elapsedMs: Date.now() - trancheStartedAt,
     })} ${listPhoto.id}`;
 
     if (shouldSkipCheckpointEntry(existingEntry, listPhoto.lastUpdate, options.resume)) {
@@ -584,6 +600,18 @@ export async function runIngestCommand(options, logger) {
     }
   });
 
+  const trancheElapsedMs = Date.now() - trancheStartedAt;
+  const successful = counts.uploaded + counts.duplicate;
+  const remaining = Math.max(completionProgress.total - completionProgress.completed, 0);
+  const estimatedRemainingMs = estimateRemainingTime({
+    elapsedMs: trancheElapsedMs,
+    successful,
+    remaining,
+  });
   logger.banner('Run complete');
   logger.info(`uploaded=${counts.uploaded} duplicate=${counts.duplicate} skipped=${counts.skipped} unsupported=${counts.unsupported} failed=${counts.failed}`);
+  logger.info(
+    `tranche elapsed=${formatElapsedTime(trancheElapsedMs)} successful=${successful}/${selected.length}`
+    + ` estimated-account-remaining=${estimatedRemainingMs === null ? 'unavailable' : formatElapsedTime(estimatedRemainingMs)}`
+  );
 }
