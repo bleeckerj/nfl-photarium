@@ -70,4 +70,17 @@ describe('flickr ingest mapping helpers', async () => {
       })
     ).toBe('Archive');
   });
+
+  it('requests independent uploads when Flickr content duplicates existing assets', () => {
+    const metadata = mapping.buildPhotariumMetadata({
+      selector: 'all',
+      namespace: 'cf-flickr',
+      listPhoto: { id: '1', title: 'Duplicate source', tags: '' },
+      info: { title: 'Duplicate source', description: '', tags: [], urls: [] },
+      albumTitles: [],
+      sourceUrl: 'https://example.com/photo.jpg',
+    });
+
+    expect(metadata.duplicateAction).toBe('override');
+  });
 });

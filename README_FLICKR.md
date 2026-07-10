@@ -8,7 +8,7 @@ It supports:
 - album/photoset-title ingest
 - tag-based ingest
 - resumable runs via checkpoint files
-- duplicate-aware sync into existing Photarium assets
+- duplicate content is uploaded as an independent Photarium asset for later refinement
 - colorful verbose logging
 - dry-run mode
 

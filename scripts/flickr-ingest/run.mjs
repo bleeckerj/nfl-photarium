@@ -26,7 +26,6 @@ import {
 } from './mapping.mjs';
 import {
   patchPhotariumExtras,
-  updatePhotariumImage,
   uploadImageToPhotarium,
   uploadVideoToPhotarium,
 } from './photarium-client.mjs';
@@ -145,31 +144,6 @@ async function fetchPhotoDetails(client, listPhoto, logger, apiLimiter, options)
     contexts,
     source,
   };
-}
-
-function buildUpdatePayload(metadata, originalUrl) {
-  return {
-    namespace: metadata.namespace,
-    folder: metadata.folder,
-    tags: metadata.tags,
-    description: metadata.description || '',
-    displayName: metadata.displayName,
-    sourceUrl: metadata.sourceUrl,
-    originalUrl,
-  };
-}
-
-async function syncExistingPhotariumAsset({ options, imageId, metadata, extrasPatch }) {
-  await updatePhotariumImage({
-    apiBase: options.apiBase,
-    imageId,
-    metadata: buildUpdatePayload(metadata, extrasPatch.flickrSource.selectedSourceUrl),
-  });
-  await patchPhotariumExtras({
-    apiBase: options.apiBase,
-    imageId,
-    patch: extrasPatch,
-  });
 }
 
 export async function runAuthCommand(options, logger) {
@@ -540,43 +514,6 @@ export async function runIngestCommand(options, logger) {
         await appendRunEvent(options.runLogFile, {
           photoId: listPhoto.id,
           status: 'uploaded',
-          photariumId,
-          folder: photariumMetadata.folder,
-          sourceUrl: source.url,
-        });
-        return;
-      }
-
-      if (outcome.status === 409 && Array.isArray(outcome.payload?.duplicates) && outcome.payload.duplicates.length > 0) {
-        const photariumId = outcome.payload.duplicates.find((duplicate) => duplicate && typeof duplicate.id === 'string')?.id;
-        if (!photariumId) {
-          throw new Error('Photarium reported a duplicate but did not return an image id.');
-        }
-
-        await syncExistingPhotariumAsset({
-          options,
-          imageId: photariumId,
-          metadata: photariumMetadata,
-          extrasPatch,
-        });
-
-        counts.duplicate += 1;
-        if (!wasComplete) completionProgress.completed += 1;
-        logger.success(`${prefix()} duplicate -> synced ${photariumId}`);
-        checkpoint.entries[listPhoto.id] = buildEntryUpdate({
-          existingEntry,
-          status: 'duplicate',
-          listPhoto,
-          photariumId,
-          sourceUrl: source.url,
-          folder: photariumMetadata.folder,
-          tags: photariumMetadata.tags,
-          displayName: photariumMetadata.displayName,
-        });
-        await checkpointWrite(() => saveCheckpoint(options.checkpointFile, checkpoint));
-        await appendRunEvent(options.runLogFile, {
-          photoId: listPhoto.id,
-          status: 'duplicate',
           photariumId,
           folder: photariumMetadata.folder,
           sourceUrl: source.url,

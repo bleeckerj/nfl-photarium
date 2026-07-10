@@ -127,6 +127,7 @@ export function buildPhotariumMetadata({
     displayName,
     description,
     sourceUrl: permalink,
+    duplicateAction: 'override',
   };
 }
 
