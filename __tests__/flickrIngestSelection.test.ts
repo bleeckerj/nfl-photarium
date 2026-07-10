@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 describe('Flickr ingest selection', async () => {
-  const { collectSelectedPhotos, formatPhotoProgress } = await import('../scripts/flickr-ingest/run.mjs');
+  const { collectSelectedPhotos, formatCompletionProgress, formatPhotoProgress } = await import('../scripts/flickr-ingest/run.mjs');
 
   function photo(id: number, lastUpdate = '123') {
     return { id: String(id), lastUpdate, title: `Photo ${id}` };
@@ -42,6 +42,7 @@ describe('Flickr ingest selection', async () => {
     );
     expect(result.accountProgressByPhotoId.get('26')).toEqual({ position: 26, total: 50 });
     expect(result.accountProgressByPhotoId.get('50')).toEqual({ position: 50, total: 50 });
+    expect(result.accountTotal).toBe(50);
   });
 
   it('keeps changed checkpoint successes eligible', async () => {
@@ -66,6 +67,11 @@ describe('Flickr ingest selection', async () => {
       index: 0,
       trancheSize: 25,
       accountProgress: { position: 26, total: 3291 },
-    })).toBe('[26/3,291] [1/25 tranche]');
+      completionProgress: { completed: 25, total: 3291 },
+    })).toBe('[26/3,291] [1/25 tranche] [25 complete, 3,266 left]');
+  });
+
+  it('formats completed and remaining account totals', () => {
+    expect(formatCompletionProgress(51, 3291)).toBe('[51 complete, 3,240 left]');
   });
 });

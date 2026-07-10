@@ -39,6 +39,14 @@ export function shouldSkipCheckpointEntry(entry, latestLastUpdate, resume) {
   return String(entry.flickrLastUpdate || '') === String(latestLastUpdate);
 }
 
+export function isSuccessfulCheckpointEntry(entry) {
+  return Boolean(entry && SUCCESS_STATUSES.has(entry.status));
+}
+
+export function countSuccessfulCheckpointEntries(checkpoint) {
+  return Object.values(checkpoint.entries || {}).filter(isSuccessfulCheckpointEntry).length;
+}
+
 export function buildEntryUpdate({
   existingEntry,
   status,
@@ -98,4 +106,3 @@ export function checkpointSummary(checkpoint) {
 export function checkpointLogLabel(filePath) {
   return path.relative(process.cwd(), filePath) || filePath;
 }
-

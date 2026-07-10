@@ -39,4 +39,15 @@ describe('flickr ingest checkpoint helpers', async () => {
       )
     ).toBe(false);
   });
+
+  it('counts only durable successful checkpoint entries', () => {
+    expect(checkpoint.countSuccessfulCheckpointEntries({
+      entries: {
+        one: { status: 'uploaded' },
+        two: { status: 'duplicate' },
+        three: { status: 'unsupported' },
+        four: { status: 'failed' },
+      },
+    })).toBe(2);
+  });
 });
