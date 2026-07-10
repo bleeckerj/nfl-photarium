@@ -138,7 +138,12 @@ export function createFlickrClient(auth) {
         });
         const photos = payload.photos || {};
         const items = asArray(photos.photo).map(normalizeListPhoto);
-        yield { page, totalPages: Number(photos.pages || page), items };
+        yield {
+          page,
+          totalPages: Number(photos.pages || page),
+          totalItems: Number(photos.total || 0),
+          items,
+        };
         if (page >= Number(photos.pages || page)) break;
         page += 1;
       }
@@ -207,4 +212,3 @@ export function resolveAlbumsBySelector(albums, requestedTitles, requestedIds) {
     duplicateTitles,
   };
 }
-

@@ -213,6 +213,9 @@ export async function collectSelectedPhotos({ client, authProfile, options, logg
   const seen = new Set();
   const selected = [];
   const selectedAlbumsByPhotoId = new Map();
+  const accountProgressByPhotoId = new Map();
+  let accountPosition = 0;
+  let accountTotal = 0;
 
   const isEligible = (photo) => !shouldSkipCheckpointEntry(
     checkpoint.entries[photo.id],
@@ -246,13 +249,13 @@ export async function collectSelectedPhotos({ client, authProfile, options, logg
           selected.push(photo);
           selectedAlbumsByPhotoId.set(photo.id, [album.title]);
           if (options.limit > 0 && selected.length >= options.limit) {
-            return { selected, selectedAlbumsByPhotoId };
+            return { selected, selectedAlbumsByPhotoId, accountProgressByPhotoId };
           }
         }
       }
     }
 
-    return { selected, selectedAlbumsByPhotoId };
+    return { selected, selectedAlbumsByPhotoId, accountProgressByPhotoId };
   }
 
   const source = options.selector === 'tag'
@@ -261,18 +264,31 @@ export async function collectSelectedPhotos({ client, authProfile, options, logg
 
   for await (const page of source) {
     logger.debug(`selector ${options.selector} page ${page.page}/${page.totalPages} -> ${page.items.length} photo(s)`);
+    if (options.selector === 'all') accountTotal = page.totalItems;
     for (const photo of page.items) {
       if (seen.has(photo.id)) continue;
       seen.add(photo.id);
+      if (options.selector === 'all') {
+        accountPosition += 1;
+        accountProgressByPhotoId.set(photo.id, { position: accountPosition, total: accountTotal });
+      }
       if (!isEligible(photo)) continue;
       selected.push(photo);
       if (options.limit > 0 && selected.length >= options.limit) {
-        return { selected, selectedAlbumsByPhotoId };
+        return { selected, selectedAlbumsByPhotoId, accountProgressByPhotoId };
       }
     }
   }
 
-  return { selected, selectedAlbumsByPhotoId };
+  return { selected, selectedAlbumsByPhotoId, accountProgressByPhotoId };
+}
+
+export function formatPhotoProgress({ index, trancheSize, accountProgress }) {
+  const tranche = `[${index + 1}/${trancheSize} tranche]`;
+  if (!accountProgress?.total) return tranche;
+  const position = accountProgress.position.toLocaleString('en-US');
+  const total = accountProgress.total.toLocaleString('en-US');
+  return `[${position}/${total}] ${tranche}`;
 }
 
 export async function runIngestCommand(options, logger) {
@@ -302,7 +318,7 @@ export async function runIngestCommand(options, logger) {
   logger.info(`namespace=${options.namespace} selector=${options.selector} user=${authProfile.username}`);
   logger.info(`checkpoint=${checkpointLogLabel(options.checkpointFile)} runlog=${checkpointLogLabel(options.runLogFile)}`);
 
-  const { selected, selectedAlbumsByPhotoId } = await collectSelectedPhotos({
+  const { selected, selectedAlbumsByPhotoId, accountProgressByPhotoId } = await collectSelectedPhotos({
     client,
     authProfile,
     options,
@@ -325,7 +341,12 @@ export async function runIngestCommand(options, logger) {
   };
 
   await runWithConcurrency(selected, options.concurrency, async (listPhoto, index) => {
-    const prefix = `[${index + 1}/${selected.length}] ${listPhoto.id}`;
+    const progress = formatPhotoProgress({
+      index,
+      trancheSize: selected.length,
+      accountProgress: accountProgressByPhotoId.get(listPhoto.id),
+    });
+    const prefix = `${progress} ${listPhoto.id}`;
     const existingEntry = checkpoint.entries[listPhoto.id];
 
     if (shouldSkipCheckpointEntry(existingEntry, listPhoto.lastUpdate, options.resume)) {
