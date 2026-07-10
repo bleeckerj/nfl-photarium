@@ -3,6 +3,7 @@ import path from 'node:path';
 
 const INSTAGRAM_HOST_PATTERN = /(^|\.)instagram\.com$/i;
 const SUPPORTED_MEDIA_KINDS = new Set(['p', 'reel', 'reels', 'tv']);
+export const TELEGRAM_INGEST_NAMESPACE = 'cf-instagram';
 
 export function extractInstagramMediaUrl(message) {
   const text = [message?.text, message?.caption]

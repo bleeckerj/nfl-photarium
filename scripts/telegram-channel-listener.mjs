@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   extractInstagramMediaUrl,
   runInstagramIngest,
+  TELEGRAM_INGEST_NAMESPACE,
 } from './telegram-listener/instagram-ingest.mjs';
 
 const DEFAULT_BASE_URL = 'http://localhost:3000';
@@ -107,9 +108,7 @@ async function loadEnvFile(filePath) {
 
 function getConfig() {
   const telegramBotToken = env('TELEGRAM_BOT_TOKEN');
-  const photariumNamespace = env('PHOTARIUM_NAMESPACE');
   if (!telegramBotToken) throw new Error('Missing TELEGRAM_BOT_TOKEN');
-  if (!photariumNamespace) throw new Error('Missing PHOTARIUM_NAMESPACE');
 
   const photariumBaseUrl = env('PHOTARIUM_BASE_URL', DEFAULT_BASE_URL).replace(/\/+$/, '');
   const config = {
@@ -125,7 +124,7 @@ function getConfig() {
     photariumBaseUrl,
     externalUploadUrl: env('PHOTARIUM_EXTERNAL_UPLOAD_URL', `${photariumBaseUrl}/api/upload/external`),
     displayNameSuggestUrl: env('PHOTARIUM_DISPLAY_NAME_SUGGEST_URL', `${photariumBaseUrl}/api/display-name/suggest`),
-    namespace: photariumNamespace,
+    namespace: TELEGRAM_INGEST_NAMESPACE,
     folder: env('PHOTARIUM_FOLDER'),
     baseTags: uniqueStrings(['telegram', ...splitCsv(env('PHOTARIUM_TAGS'))]),
   };

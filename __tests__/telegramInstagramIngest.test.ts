@@ -4,9 +4,14 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   extractInstagramMediaUrl,
   runInstagramIngest,
+  TELEGRAM_INGEST_NAMESPACE,
 } from '../scripts/telegram-listener/instagram-ingest.mjs';
 
 describe('Telegram Instagram ingestion', () => {
+  it('uses the cf-instagram namespace for every Telegram ingestion path', () => {
+    expect(TELEGRAM_INGEST_NAMESPACE).toBe('cf-instagram');
+  });
+
   it('extracts and canonicalizes Instagram post and reel URLs from message text or captions', () => {
     expect(extractInstagramMediaUrl({
       text: 'Please ingest https://www.instagram.com/reel/ABC123/?igsh=tracking.',
