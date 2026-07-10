@@ -209,10 +209,16 @@ export async function runAuthCommand(options, logger) {
   logger.success(`Stored Flickr auth for ${profile.username || profile.userId} at ${options.authFile}`);
 }
 
-async function collectSelectedPhotos({ client, authProfile, options, logger }) {
+export async function collectSelectedPhotos({ client, authProfile, options, logger, checkpoint }) {
   const seen = new Set();
   const selected = [];
   const selectedAlbumsByPhotoId = new Map();
+
+  const isEligible = (photo) => !shouldSkipCheckpointEntry(
+    checkpoint.entries[photo.id],
+    photo.lastUpdate,
+    options.resume,
+  );
 
   if (options.selector === 'album') {
     const albums = await client.listAlbums(authProfile.userId);
@@ -236,6 +242,7 @@ async function collectSelectedPhotos({ client, authProfile, options, logger }) {
             continue;
           }
           seen.add(photo.id);
+          if (!isEligible(photo)) continue;
           selected.push(photo);
           selectedAlbumsByPhotoId.set(photo.id, [album.title]);
           if (options.limit > 0 && selected.length >= options.limit) {
@@ -257,6 +264,7 @@ async function collectSelectedPhotos({ client, authProfile, options, logger }) {
     for (const photo of page.items) {
       if (seen.has(photo.id)) continue;
       seen.add(photo.id);
+      if (!isEligible(photo)) continue;
       selected.push(photo);
       if (options.limit > 0 && selected.length >= options.limit) {
         return { selected, selectedAlbumsByPhotoId };
@@ -299,6 +307,7 @@ export async function runIngestCommand(options, logger) {
     authProfile,
     options,
     logger,
+    checkpoint,
   });
 
   logger.info(`selected ${selected.length} photo(s)`);
