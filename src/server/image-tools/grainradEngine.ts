@@ -8,6 +8,10 @@
 // There is no grainrad webservice and no ffmpeg decode of the source. sharp's
 // libwebp/libaom decoders handle WebP/AVIF/PNG/JPEG/GIF robustly, which is the
 // fix for the "[webp] image data not found" ffmpeg failures.
+//
+// Animated image sources (GIF / animated WebP) are decoded frame-by-frame for
+// animated exports, so the source's own motion is preserved through the effect;
+// still exports use the first frame.
 
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -305,6 +309,100 @@ export const decodeToRaster = async (
   return createRasterImage(info.width, info.height, new Uint8ClampedArray(data));
 };
 
+export type AnimatedSourceRasters = {
+  frames: RasterImage[];
+  frameDelaysMs: number[];
+  totalDurationMs: number;
+  sourceFps: number;
+};
+
+// Browsers treat a 0/undefined GIF frame delay as ~100ms; mirror that.
+const DEFAULT_FRAME_DELAY_MS = 100;
+
+const normalizeFrameDelay = (value: unknown) => (
+  typeof value === 'number' && Number.isFinite(value) && value >= 10 ? value : DEFAULT_FRAME_DELAY_MS
+);
+
+/**
+ * Decode an animated image source (GIF / animated WebP) to one RGBA raster per
+ * frame, preserving per-frame delays. Returns null for single-frame sources so
+ * callers can fall back to the still path.
+ */
+export const decodeAnimatedSourceToRasters = async (
+  buffer: Buffer,
+  options: { maxDim?: number } = {}
+): Promise<AnimatedSourceRasters | null> => {
+  let metadata: sharp.Metadata;
+  try {
+    metadata = await sharp(buffer, { failOn: 'none', animated: true }).metadata();
+  } catch {
+    return null;
+  }
+  const pages = metadata.pages ?? 1;
+  if (pages <= 1) return null;
+
+  let pipeline = sharp(buffer, { failOn: 'none', animated: true }).ensureAlpha();
+  if (options.maxDim) {
+    pipeline = pipeline.resize(options.maxDim, options.maxDim, {
+      fit: 'inside',
+      withoutEnlargement: true,
+    });
+  }
+  let decoded;
+  try {
+    decoded = await pipeline.raw().toBuffer({ resolveWithObject: true });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Grainrad could not decode the animated source: ${detail}`);
+  }
+  const { data, info } = decoded;
+  // Animated rasters come back as a vertical strip of `pages` frames.
+  const frameHeight = info.height / pages;
+  if (!Number.isInteger(frameHeight) || frameHeight <= 0) return null;
+
+  const { createRasterImage } = await import('nfl-grainrad-clone');
+  const frameBytes = info.width * frameHeight * 4;
+  const frames: RasterImage[] = [];
+  for (let page = 0; page < pages; page += 1) {
+    const slice = data.subarray(page * frameBytes, (page + 1) * frameBytes);
+    frames.push(createRasterImage(info.width, frameHeight, new Uint8ClampedArray(slice)));
+  }
+
+  const rawDelays = Array.isArray(metadata.delay) ? metadata.delay : [];
+  const frameDelaysMs = frames.map((_, index) => normalizeFrameDelay(rawDelays[index]));
+  const totalDurationMs = frameDelaysMs.reduce((sum, delay) => sum + delay, 0);
+  return {
+    frames,
+    frameDelaysMs,
+    totalDurationMs,
+    sourceFps: 1000 / (totalDurationMs / frames.length),
+  };
+};
+
+/**
+ * Pick the source frame visible at `timeSeconds`, honoring per-frame delays.
+ * Looping wraps time over the source duration; otherwise the last frame holds.
+ */
+export const sourceFrameIndexAtTime = (
+  source: AnimatedSourceRasters,
+  timeSeconds: number,
+  loop: boolean
+) => {
+  const total = source.totalDurationMs;
+  let t = Math.max(0, timeSeconds * 1000);
+  if (loop) {
+    t %= total;
+  } else if (t >= total) {
+    return source.frames.length - 1;
+  }
+  let elapsed = 0;
+  for (let index = 0; index < source.frames.length; index += 1) {
+    elapsed += source.frameDelaysMs[index];
+    if (t < elapsed) return index;
+  }
+  return source.frames.length - 1;
+};
+
 const rasterToSharp = (raster: RasterImage) =>
   sharp(Buffer.from(raster.data), {
     raw: { width: raster.width, height: raster.height, channels: 4 },
@@ -492,9 +590,25 @@ export const renderAnimated = async (
     percent: 0.15,
     details: { maxDim: maxDim ?? null },
   });
-  const raster = await decodeToRaster(sourceBuffer, { maxDim });
+  // Animated image sources (GIF / animated WebP) keep their motion: every
+  // source frame is decoded and the effect samples the frame visible at each
+  // output timestamp. Single-frame sources fall back to the still raster and
+  // animate purely through the effect's time-driven params.
+  const animatedSource = await decodeAnimatedSourceToRasters(sourceBuffer, { maxDim });
+  const raster = animatedSource
+    ? animatedSource.frames[0]
+    : await decodeToRaster(sourceBuffer, { maxDim });
 
-  const timeline = resolveVerticalHoldFullLoopTimeline(request, request.timeline);
+  let timeline = resolveVerticalHoldFullLoopTimeline(request, request.timeline);
+  if (animatedSource) {
+    // Default the export timeline to the source's own cadence and length when
+    // the request leaves them unset, so a GIF round-trips at its native motion.
+    timeline = {
+      ...(timeline ?? {}),
+      fps: timeline?.fps ?? Math.round(animatedSource.sourceFps),
+      durationMs: timeline?.durationMs ?? animatedSource.totalDurationMs,
+    };
+  }
   const renderParams = buildRenderParams(request);
   const animatedTimeline = { ...(timeline ?? {}), mode: 'animated' as const };
   const normalizedTimeline = normalizeTimeline(animatedTimeline, request.renderContext ?? {});
@@ -512,13 +626,19 @@ export const renderAnimated = async (
         frameCount,
         width: raster.width,
         height: raster.height,
+        sourceFrameCount: animatedSource?.frames.length ?? 1,
       },
     });
     await yieldToEventLoop();
 
     const renderContext = createFrameRenderContext(request.renderContext ?? {}, normalizedTimeline, frameIndex);
+    const sourceRaster = animatedSource
+      ? animatedSource.frames[
+          sourceFrameIndexAtTime(animatedSource, renderContext.time ?? 0, normalizedTimeline.loop)
+        ]
+      : raster;
     const result = getApi().renderRaster({
-      source: raster,
+      source: sourceRaster,
       effect: request.effectId,
       paramPreset: request.paramPreset,
       params: renderParams,

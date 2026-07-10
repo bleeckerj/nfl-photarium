@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import sharp from 'sharp';
 
 import {
+  decodeAnimatedSourceToRasters,
   decodeToRaster,
   renderStill,
   renderAnimated,
   resolveGrainradMaxDim,
+  sourceFrameIndexAtTime,
 } from '@/server/image-tools/grainradEngine';
 import type { ImageToolRequest } from '@/server/image-tools/types';
 import { createTestImageFixture } from './helpers/imageFixtures';
@@ -206,6 +208,95 @@ describe('grainradEngine (in-process bridge)', () => {
     const meta = await sharp(artifact.buffer, { animated: true }).metadata();
     expect(meta.format).toBe('gif');
     expect(meta.pages ?? 1).toBeGreaterThanOrEqual(2);
+  });
+
+  // Animated source support: a black-then-white 2-frame GIF makes it trivially
+  // observable which source frame fed each output frame.
+  const createBlackWhiteGif = async (width = 32, height = 24, delayMs = 250) => {
+    const black = Buffer.alloc(width * height * 4);
+    const white = Buffer.alloc(width * height * 4, 255);
+    for (let i = 3; i < black.length; i += 4) black[i] = 255;
+    return sharp(Buffer.concat([black, white]), {
+      raw: { width, height: height * 2, channels: 4, pageHeight: height },
+    }).gif({ delay: [delayMs, delayMs], loop: 0 }).toBuffer();
+  };
+
+  const pageLuminances = async (buffer: Buffer) => {
+    const meta = await sharp(buffer, { animated: true }).metadata();
+    const pages = meta.pages ?? 1;
+    const { data, info } = await sharp(buffer, { animated: true })
+      .ensureAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const frameHeight = info.height / pages;
+    const frameBytes = info.width * frameHeight * 4;
+    return Array.from({ length: pages }, (_, page) => {
+      let sum = 0;
+      let count = 0;
+      for (let i = page * frameBytes; i < (page + 1) * frameBytes; i += 4) {
+        sum += (data[i] + data[i + 1] + data[i + 2]) / 3;
+        count += 1;
+      }
+      return sum / count;
+    });
+  };
+
+  it('decodes an animated GIF source into per-frame rasters with delays', async () => {
+    const gif = await createBlackWhiteGif(32, 24, 250);
+    const source = await decodeAnimatedSourceToRasters(gif);
+    expect(source).not.toBeNull();
+    expect(source!.frames).toHaveLength(2);
+    expect(source!.frames[0].width).toBe(32);
+    expect(source!.frames[0].height).toBe(24);
+    expect(source!.frameDelaysMs).toEqual([250, 250]);
+    expect(source!.totalDurationMs).toBe(500);
+    expect(sourceFrameIndexAtTime(source!, 0, true)).toBe(0);
+    expect(sourceFrameIndexAtTime(source!, 0.25, true)).toBe(1);
+    expect(sourceFrameIndexAtTime(source!, 0.5, true)).toBe(0); // loop wrap
+    expect(sourceFrameIndexAtTime(source!, 9, false)).toBe(1); // hold last frame
+  });
+
+  it('returns null for single-frame sources so the still path is used', async () => {
+    const png = await createTestImageFixture('png');
+    expect(await decodeAnimatedSourceToRasters(png.buffer)).toBeNull();
+  });
+
+  it('preserves an animated GIF source motion through an animated render', async () => {
+    const gif = await createBlackWhiteGif(32, 24, 250);
+    const artifact = await renderAnimated(gif, stillRequest({
+      effectId: 'threshold',
+      params: { threshold: 120 },
+      output: { mode: 'animated', format: 'gif', preset: 'preview' },
+      timeline: { durationMs: 500, fps: 8, loop: true },
+    }));
+    expect(artifact.contentType).toBe('image/gif');
+    // Output frames at t<0.25s sample the black source frame, later ones the
+    // white frame. sharp's GIF encoder merges identical consecutive frames
+    // (summing their delays), so assert the black->white sequence and the
+    // preserved overall duration rather than an exact page count.
+    const luminances = await pageLuminances(artifact.buffer);
+    expect(luminances.length).toBeGreaterThanOrEqual(2);
+    expect(luminances[0]).toBeLessThan(64);
+    expect(luminances[luminances.length - 1]).toBeGreaterThan(192);
+    const meta = await sharp(artifact.buffer, { animated: true }).metadata();
+    const totalDelayMs = (meta.delay ?? []).reduce((sum, d) => sum + d, 0);
+    expect(totalDelayMs).toBeGreaterThanOrEqual(400);
+    expect(totalDelayMs).toBeLessThanOrEqual(600);
+  });
+
+  it('derives the timeline from the animated source when the request omits it', async () => {
+    const gif = await createBlackWhiteGif(32, 24, 250);
+    const artifact = await renderAnimated(gif, stillRequest({
+      effectId: 'threshold',
+      params: { threshold: 120 },
+      output: { mode: 'animated', format: 'gif', preset: 'preview' },
+      timeline: undefined,
+    }));
+    // Source cadence: 2 frames x 250ms -> 4fps over 500ms -> 2 output frames.
+    const luminances = await pageLuminances(artifact.buffer);
+    expect(luminances).toHaveLength(2);
+    expect(luminances[0]).toBeLessThan(64);
+    expect(luminances[1]).toBeGreaterThan(192);
   });
 
   it('renders RGB display animated previews with multiple frames', async () => {

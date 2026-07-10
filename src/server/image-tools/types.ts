@@ -7,7 +7,9 @@ export type ImageToolAdapterKind =
   | 'grainrad-inproc'
   | 'grainrad-http'
   | 'grainrad-eight-bit-reinterpretation';
-export type ImageToolInputAssetType = 'image' | 'video';
+// 'animatedImage' marks tools that preserve the motion of animated image assets
+// (GIF / animated WebP) rather than flattening them to their first frame.
+export type ImageToolInputAssetType = 'image' | 'video' | 'animatedImage';
 export type ImageToolOutputMode = 'still' | 'animated';
 export type ImageToolControlType = 'text' | 'number' | 'slider' | 'switch' | 'select' | 'color';
 export type ImageToolRunStatus = 'queued' | 'running' | 'completed' | 'failed';
