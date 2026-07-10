@@ -132,12 +132,14 @@ export function inferExtensionFromUrl(url) {
   }
 }
 
-export async function runWithConcurrency(items, concurrency, worker) {
+export async function runWithConcurrency(items, concurrency, worker, options = {}) {
   const results = new Array(items.length);
   let nextIndex = 0;
+  const shouldStart = options.shouldStart || (() => true);
 
   async function runWorker() {
     while (true) {
+      if (!shouldStart()) return;
       const index = nextIndex;
       nextIndex += 1;
       if (index >= items.length) return;
@@ -178,4 +180,3 @@ export async function retryWithBackoff(task, options) {
     }
   }
 }
-

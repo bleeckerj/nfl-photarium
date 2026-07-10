@@ -227,6 +227,7 @@ npm run flickr:ingest -- \
 - `--tag <tag>`: tag selector, repeatable
 - `--tag-mode <any|all>`: tag matching behavior; default `any`
 - `--limit <n>`: stop after N selected photos
+- `--runtime <duration>`: start uploads for the requested duration, accepting plain milliseconds or `ms`, `s`, `m`, and `h` suffixes; cannot be combined with `--limit`
 - `--dry-run`: resolve and log work without uploading
 - `--no-resume`: ignore prior successful checkpoint state
 - `--checkpoint-file <path>`: custom checkpoint file
@@ -258,6 +259,14 @@ Checkpoint behavior:
 - failed items keep error state so you can rerun later
 
 If a run is interrupted, rerun the same command and it will resume from checkpoint state unless you pass `--no-resume`.
+
+Runtime mode stops starting new work when its deadline arrives and waits for uploads already in progress to finish:
+
+```bash
+npm run flickr:ingest -- --selector all --runtime 2h
+```
+
+The final elapsed time can exceed the requested runtime by the time needed to finish those in-flight uploads.
 
 ## Metadata Mapping
 

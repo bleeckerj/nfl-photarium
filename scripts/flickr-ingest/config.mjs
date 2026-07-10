@@ -45,6 +45,7 @@ Ingest options:
   --retry-max <n>              Retry attempts for network failures (default: 4)
   --retry-base-ms <n>          Base backoff delay in ms (default: 1200)
   --limit <n>                  Stop after N selected photos
+  --runtime <duration>         Run for a duration (e.g. 500ms, 20m, 2h); cannot be combined with --limit
   --dry-run                    Resolve and log work without uploading
   --no-resume                  Ignore prior checkpoint success states
   --no-color                   Disable ANSI colors
@@ -101,6 +102,7 @@ export function parseCliArgs(argv) {
     retryMax: DEFAULT_RETRY_MAX,
     retryBaseMs: DEFAULT_RETRY_BASE_MS,
     limit: 0,
+    runtimeMs: 0,
     dryRun: false,
     resume: true,
     noColor: false,
@@ -193,6 +195,13 @@ export function parseCliArgs(argv) {
       if (!requireValue()) continue;
       options.limit = parseInteger(next, 0);
       i += 1;
+    } else if (arg === '--runtime') {
+      if (!requireValue()) continue;
+      options.runtimeMs = parseRuntimeDuration(next);
+      if (options.runtimeMs <= 0) {
+        options.errors.push(`Invalid runtime duration: ${next}. Use ms, s, m, or h (for example 500ms, 20m, 2h).`);
+      }
+      i += 1;
     } else if (arg === '--dry-run') {
       options.dryRun = true;
     } else if (arg === '--resume') {
@@ -227,6 +236,9 @@ export function parseCliArgs(argv) {
   }
 
   if (options.command === 'ingest') {
+    if (options.limit > 0 && options.runtimeMs > 0) {
+      options.errors.push('--limit and --runtime are mutually exclusive.');
+    }
     if (!['all', 'album', 'tag'].includes(options.selector)) {
       options.errors.push(`Invalid selector: ${options.selector}`);
     }
@@ -249,4 +261,12 @@ export function parseCliArgs(argv) {
   options.runLogFile = options.runLogFile || defaultRunLogPath(options.stateDir, selectorSpec);
 
   return options;
+}
+
+export function parseRuntimeDuration(value) {
+  const match = String(value || '').trim().toLowerCase().match(/^(\d+(?:\.\d+)?)\s*(ms|s|m|h)?$/);
+  if (!match) return 0;
+  const amount = Number(match[1]);
+  const multiplier = { ms: 1, s: 1000, m: 60_000, h: 3_600_000 }[match[2] || 'ms'];
+  return Number.isFinite(amount) ? Math.round(amount * multiplier) : 0;
 }

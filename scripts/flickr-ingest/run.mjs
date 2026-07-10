@@ -379,12 +379,16 @@ export async function runIngestCommand(options, logger) {
   };
   const trancheStartedAt = Date.now();
 
+  const runtimeDeadline = options.runtimeMs > 0 ? trancheStartedAt + options.runtimeMs : null;
+  let startedCount = 0;
+
   await runWithConcurrency(selected, options.concurrency, async (listPhoto, index) => {
+    startedCount += 1;
     const existingEntry = checkpoint.entries[listPhoto.id];
     const wasComplete = isSuccessfulCheckpointEntry(existingEntry);
     const prefix = () => `${formatPhotoProgress({
       index,
-      trancheSize: selected.length,
+      trancheSize: options.runtimeMs > 0 ? 'runtime' : selected.length,
       completionProgress,
       elapsedMs: Date.now() - trancheStartedAt,
     })} ${listPhoto.id}`;
@@ -598,6 +602,8 @@ export async function runIngestCommand(options, logger) {
         error: message,
       });
     }
+  }, {
+    shouldStart: () => runtimeDeadline === null || Date.now() < runtimeDeadline,
   });
 
   const trancheElapsedMs = Date.now() - trancheStartedAt;
@@ -609,9 +615,12 @@ export async function runIngestCommand(options, logger) {
     remaining,
   });
   logger.banner('Run complete');
+  if (runtimeDeadline !== null && startedCount < selected.length) {
+    logger.info(`runtime deadline reached; started=${startedCount} deferred=${selected.length - startedCount}`);
+  }
   logger.info(`uploaded=${counts.uploaded} duplicate=${counts.duplicate} skipped=${counts.skipped} unsupported=${counts.unsupported} failed=${counts.failed}`);
   logger.info(
-    `tranche elapsed=${formatElapsedTime(trancheElapsedMs)} successful=${successful}/${selected.length}`
+    `tranche elapsed=${formatElapsedTime(trancheElapsedMs)} successful=${successful}/${startedCount}`
     + ` estimated-account-remaining=${estimatedRemainingMs === null ? 'unavailable' : formatElapsedTime(estimatedRemainingMs)}`
   );
 }

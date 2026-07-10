@@ -33,4 +33,13 @@ describe('flickr ingest config', async () => {
 
     expect(options.errors).toContain('Tag selector requires at least one --tag.');
   });
+
+  it('parses runtime units and rejects combining runtime with limit', () => {
+    const runtime = parseCliArgs(['ingest', '--runtime', '1.5h']);
+    expect(runtime.errors).toEqual([]);
+    expect(runtime.runtimeMs).toBe(5_400_000);
+
+    const conflicting = parseCliArgs(['ingest', '--runtime', '20m', '--limit', '25']);
+    expect(conflicting.errors).toContain('--limit and --runtime are mutually exclusive.');
+  });
 });
