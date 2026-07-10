@@ -66,12 +66,11 @@ describe('Flickr ingest selection', async () => {
     expect(formatPhotoProgress({
       index: 0,
       trancheSize: 25,
-      accountProgress: { position: 26, total: 3291 },
       completionProgress: { completed: 25, total: 3291 },
-    })).toBe('[26/3,291] [1/25 tranche] [25 complete, 3,266 left]');
+    })).toBe('[25/3,266/3,291 complete/left/total] [1/25 tranche]');
   });
 
   it('formats completed and remaining account totals', () => {
-    expect(formatCompletionProgress(51, 3291)).toBe('[51 complete, 3,240 left]');
+    expect(formatCompletionProgress(51, 3291)).toBe('[51/3,240/3,291 complete/left/total]');
   });
 });

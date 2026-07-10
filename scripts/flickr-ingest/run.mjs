@@ -297,18 +297,15 @@ export function formatCompletionProgress(completed, total) {
   if (!total) return '';
   const boundedCompleted = Math.min(completed, total);
   const remaining = Math.max(total - boundedCompleted, 0);
-  return `[${boundedCompleted.toLocaleString('en-US')} complete, ${remaining.toLocaleString('en-US')} left]`;
+  return `[${boundedCompleted.toLocaleString('en-US')}/${remaining.toLocaleString('en-US')}/${total.toLocaleString('en-US')} complete/left/total]`;
 }
 
-export function formatPhotoProgress({ index, trancheSize, accountProgress, completionProgress }) {
+export function formatPhotoProgress({ index, trancheSize, completionProgress }) {
   const tranche = `[${index + 1}/${trancheSize} tranche]`;
   const completion = completionProgress
     ? formatCompletionProgress(completionProgress.completed, completionProgress.total)
     : '';
-  if (!accountProgress?.total) return [tranche, completion].filter(Boolean).join(' ');
-  const position = accountProgress.position.toLocaleString('en-US');
-  const total = accountProgress.total.toLocaleString('en-US');
-  return [`[${position}/${total}]`, tranche, completion].filter(Boolean).join(' ');
+  return [completion, tranche].filter(Boolean).join(' ');
 }
 
 export async function runIngestCommand(options, logger) {
@@ -338,7 +335,7 @@ export async function runIngestCommand(options, logger) {
   logger.info(`namespace=${options.namespace} selector=${options.selector} user=${authProfile.username}`);
   logger.info(`checkpoint=${checkpointLogLabel(options.checkpointFile)} runlog=${checkpointLogLabel(options.runLogFile)}`);
 
-  const { selected, selectedAlbumsByPhotoId, accountProgressByPhotoId, accountTotal } = await collectSelectedPhotos({
+  const { selected, selectedAlbumsByPhotoId, accountTotal } = await collectSelectedPhotos({
     client,
     authProfile,
     options,
@@ -373,7 +370,6 @@ export async function runIngestCommand(options, logger) {
     const prefix = () => `${formatPhotoProgress({
       index,
       trancheSize: selected.length,
-      accountProgress: accountProgressByPhotoId.get(listPhoto.id),
       completionProgress,
     })} ${listPhoto.id}`;
 
