@@ -1,6 +1,6 @@
 # Flickr Ingest for Photarium
 
-This utility imports photos you own on Flickr into Photarium.
+This utility imports photos and videos you own on Flickr into Photarium.
 
 It supports:
 
@@ -8,6 +8,9 @@ It supports:
 - album/photoset-title ingest
 - tag-based ingest
 - resumable runs via checkpoint files
+- count-limited tranches that advance past completed media on each resumed run
+- runtime-limited runs that finish in-flight uploads after the deadline
+- account completion, tranche progress, elapsed time, and remaining-time estimates
 - duplicate content is uploaded as an independent Photarium asset for later refinement
 - colorful verbose logging
 - dry-run mode
@@ -196,6 +199,21 @@ npm run flickr:ingest -- \
   -vvv
 ```
 
+Rerunning the same command advances to the next 25 incomplete items. Successfully imported checkpoint entries do not consume the new tranche limit. Failed and previously unsupported items remain eligible for retry.
+
+### Time-boxed run
+
+Use runtime mode when you want the ingest to keep starting uploads for a fixed amount of time:
+
+```bash
+npm run flickr:ingest -- \
+  --selector all \
+  --runtime 2h \
+  -vvv
+```
+
+The runtime begins when media processing starts, after Flickr selector enumeration. When the deadline arrives, no new items start; uploads already in progress are allowed to finish and checkpoint normally. `--runtime` and `--limit` cannot be combined.
+
 ### Full-library backup run
 
 ```bash
@@ -226,7 +244,7 @@ npm run flickr:ingest -- \
 - `--album-id <id>`: explicit Flickr album id, repeatable
 - `--tag <tag>`: tag selector, repeatable
 - `--tag-mode <any|all>`: tag matching behavior; default `any`
-- `--limit <n>`: stop after N selected photos
+- `--limit <n>`: process the next N incomplete media items; resumed runs advance beyond successful checkpoint entries
 - `--runtime <duration>`: start uploads for the requested duration, accepting plain milliseconds or `ms`, `s`, `m`, and `h` suffixes; cannot be combined with `--limit`
 - `--dry-run`: resolve and log work without uploading
 - `--no-resume`: ignore prior successful checkpoint state
@@ -253,10 +271,12 @@ By default it writes:
 
 Checkpoint behavior:
 
-- successful uploads are recorded
-- duplicate detections are recorded
-- unchanged photos can be skipped on rerun
+- successful photo and video uploads are recorded
+- identical image bytes are uploaded independently with Photarium's `duplicateAction=override`
+- videos are uploaded as independent Cloudflare Stream records
+- unchanged successful media is skipped before applying `--limit`
 - failed items keep error state so you can rerun later
+- media previously marked unsupported is retried after ingest support is added
 
 If a run is interrupted, rerun the same command and it will resume from checkpoint state unless you pass `--no-resume`.
 
@@ -267,6 +287,28 @@ npm run flickr:ingest -- --selector all --runtime 2h
 ```
 
 The final elapsed time can exceed the requested runtime by the time needed to finish those in-flight uploads.
+
+## Progress Output
+
+Full-account runs report completed, remaining, and total account media; tranche position; and elapsed processing time:
+
+```text
+✅ [ OK  ] [290/12,626/12,916 complete/left/total] [83/400 tranche] [elapsed 00:14:32] 31900823717 uploaded photo -> <photarium-id>
+```
+
+For runtime runs, the tranche denominator is shown as `runtime` because the number of items that can start depends on throughput:
+
+```text
+✅ [ OK  ] [290/12,626/12,916 complete/left/total] [83/runtime tranche] [elapsed 00:14:32] 31900823717 uploaded photo -> <photarium-id>
+```
+
+The final tally reports the actual tranche duration, successful uploads versus started items, and an estimate for the remaining account based on the current tranche's successful throughput:
+
+```text
+tranche elapsed=01:08:42 successful=396/400 estimated-account-remaining=36:28:15
+```
+
+If no item succeeds, the remaining-time estimate is `unavailable`.
 
 ## Metadata Mapping
 
@@ -279,8 +321,9 @@ Photarium mapping defaults:
 - description: Flickr description
 - source URL: Flickr photo page permalink
 - original URL: chosen downloadable Flickr asset URL
+- duplicate policy for images: `override`, producing an independent Photarium asset
 
-The ingest prefers the original image when Flickr exposes it. If not, it falls back to the best available size and records that fact in image extras provenance.
+The ingest prefers the original image or video rendition when Flickr exposes it. Images fall back to the largest available image size; videos fall back to the largest available video rendition. Image imports retain Flickr provenance in image extras. Video imports retain the Flickr page and selected media URLs in the video record.
 
 ## Examples with Custom Paths
 
