@@ -7,7 +7,7 @@ This guide covers a full local setup of Photarium (Next.js app, Redis, optional 
 - Node.js 18+ and npm
 - Docker Desktop (or Docker Engine + Compose)
 - Python 3.10+ (only needed for local CLIP embeddings)
-- ffmpeg (required for animated WebP generation)
+- ffmpeg (required for video rotation, frame extraction, video-to-animated-WebP generation, and MP4 exports)
   - macOS: `brew install ffmpeg`
   - Ubuntu/Debian: `sudo apt install ffmpeg`
   - Windows: https://ffmpeg.org/download.html
@@ -39,6 +39,9 @@ Optional values:
 - `IMAGE_NAMESPACE` / `NEXT_PUBLIC_IMAGE_NAMESPACE`
 - `OPENAI_API_KEY` (AI alt text)
 - `HUGGINGFACE_API_TOKEN` (remote CLIP embeddings)
+- `FFMPEG_PATH` (absolute path to `ffmpeg` when it is not available on `PATH`)
+- `VIDEO_ROTATION_TIMEOUT_MS` (video rotation timeout in milliseconds; default `120000`)
+- `MAX_VIDEO_UPLOAD_BYTES` (shared video ingest and rotated-output size limit; default `104857600`)
 
 Search settings (optional):
 

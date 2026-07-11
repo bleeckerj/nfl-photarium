@@ -60,6 +60,7 @@ The API does not include built-in authentication. If exposing externally, protec
     - [Batch Prompts Lookup](#batch-prompts-lookup)
   - [Image Manipulation](#image-manipulation)
     - [Rotate Image](#rotate-image)
+    - [Rotate Video](#rotate-video)
     - [Create Animation](#create-animation)
     - [Animate Selection](#animate-selection)
     - [Video to Animated WebP](#video-to-animated-webp)
@@ -1056,7 +1057,9 @@ GET /api/images/prompts?ids=id1,id2,id3
 
 ### Rotate Image
 
-Rotate an image and re-upload to Cloudflare.
+Create a rotated image derivative and upload it to Cloudflare Images. Rotation is non-destructive: the source remains unchanged and the response identifies the new asset.
+
+Animated WebP inputs are decoded from the original Cloudflare blob and rotated frame by frame. The output preserves frame count, per-frame delays, transparency, and loop behavior.
 
 ```
 POST /api/images/{id}/rotate
@@ -1066,12 +1069,9 @@ Content-Type: application/json
 **Request Body:**
 
 ```json
-{ "direction": "right" }  // "left" or "right" for 90°
+{ "direction": "right" }  // right = 90°, left = 270°
 // OR
-{ "degrees": 180 }        // arbitrary degrees
-// OR
-{ "auto": true }          // honor EXIF orientation
-// OR empty body          // defaults to auto
+{ "degrees": 180 }        // accepted values: 90, 180, 270
 ```
 
 **Response:**
@@ -1079,14 +1079,78 @@ Content-Type: application/json
 ```json
 {
   "id": "new-image-id",
+  "filename": "source-rotated-180.webp",
   "url": "https://imagedelivery.net/.../public",
   "variants": [...],
+  "parentId": "canonical-family-parent-id",
   "rotatedFromId": "original-id",
-  "message": "Image rotated and re-uploaded. Update references to use new URL."
+  "rotatedAt": "2026-07-11T17:00:00.000Z",
+  "rotationDegrees": 180,
+  "animated": true,
+  "frameCount": 12,
+  "delaysPreserved": true,
+  "width": 640,
+  "height": 480,
+  "message": "Animated image rotated with 12 frames preserved."
 }
 ```
 
-⚠️ **Note:** Creates a new Cloudflare image. Update any stored references.
+Notes:
+
+- Rotation accepts quarter turns only: `90`, `180`, or `270` degrees.
+- A root image produces a child derivative; a source variant resolves to its canonical image-family parent.
+- Still-image responses use `animated: false`, `frameCount: 1`, and `delaysPreserved: false`.
+- Update persisted delivery references when you intend the derivative to replace the source in another system.
+
+---
+
+### Rotate Video
+
+Create a rotated MP4 derivative from a Photarium video asset and upload it as a new Cloudflare Stream asset.
+
+```
+POST /api/videos/{id}/rotate
+Content-Type: application/json
+```
+
+**Request Body:**
+
+```json
+{ "degrees": 90 }
+```
+
+Accepted values are `90`, `180`, and `270`.
+
+**Response:**
+
+```json
+{
+  "video": {
+    "id": "new-video-id",
+    "assetType": "video",
+    "filename": "clip-rotated-90.mp4",
+    "displayName": "Clip rotated 90°",
+    "streamUid": "new-stream-uid",
+    "playbackUrl": "https://videodelivery.net/.../iframe",
+    "hlsUrl": "https://videodelivery.net/.../manifest/video.m3u8",
+    "videoStatus": "pending",
+    "parentId": "canonical-image-family-parent-id",
+    "rotatedFromId": "original-video-id",
+    "rotatedAt": "2026-07-11T17:00:00.000Z",
+    "rotationDegrees": 90
+  },
+  "message": "Rotated video uploaded to Cloudflare Stream as a new asset."
+}
+```
+
+Behavior:
+
+- Photarium requests a downloadable MP4 from Cloudflare Stream, rotates its first video stream with FFmpeg, preserves optional audio, clears orientation metadata, and encodes H.264/AAC MP4 with fast-start metadata.
+- Cloudflare Stream downloads are generated asynchronously. A `409` response means the downloadable MP4 is still being prepared; retry the same request after a short delay.
+- Output is limited by `MAX_VIDEO_UPLOAD_BYTES`. Oversized output returns `413` without creating a catalog record.
+- The source video remains unchanged. Existing image-family membership is preserved; a standalone video derivative remains standalone.
+- Mux state, embeddings, and animated-WebP derivative links are not copied. Generate animated WebP outputs from the rotated video later when needed.
+- The operation requires `ffmpeg` on `PATH`, or `FFMPEG_PATH` pointing to the executable.
 
 ---
 
@@ -1682,6 +1746,9 @@ CLOUDFLARE_DELIVERY_URL=https://imagedelivery.net/your-hash
 IMAGE_NAMESPACE=default-namespace
 OPENAI_API_KEY=sk-...  # For AI features
 DISABLE_EXTERNAL_API=false
+MAX_VIDEO_UPLOAD_BYTES=104857600
+VIDEO_ROTATION_TIMEOUT_MS=120000
+FFMPEG_PATH=/opt/homebrew/bin/ffmpeg
 ```
 
 ---

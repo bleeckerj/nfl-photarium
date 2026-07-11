@@ -592,6 +592,7 @@ Use image detail pages for:
 - namespace movement
 - variation upload
 - crop variants from still or animated originals
+- non-destructive rotation for still images and animated WebP assets, preserving animation frames and timing
 - adopting an existing asset as a variation
 - parent/child family review
 - image deletion and family deletion
@@ -610,6 +611,7 @@ Use video detail pages for:
 - copying IDs
 - frame extraction
 - video download helper routes
+- non-destructive video rotation with audio preservation and Cloudflare Stream re-upload
 - animated WebP generation from selected segments
 - mixed image/video family workflows when enabled
 
@@ -640,6 +642,7 @@ Representative routes:
 | `GET /api/images/:id` | Fetch image detail metadata. |
 | `PATCH /api/images/:id` | Update image metadata. |
 | `GET /api/images/:id/family` | Fetch parent/child family context. |
+| `POST /api/images/:id/rotate` | Create a rotated image derivative; animated WebP inputs preserve frames, delays, transparency, and loop behavior. |
 | `POST /api/images/:id/alt` | Generate or save alt text. |
 | `GET /api/images/:id/similar` | Fetch semantic/color neighbors when embeddings are available. |
 | `GET /api/images/colors` | Fetch stored dominant colors for gallery cards. |
@@ -647,6 +650,7 @@ Representative routes:
 | `GET /api/videos/:id` | Fetch video detail metadata. |
 | `PATCH /api/videos/:id/update` | Update video metadata. |
 | `POST /api/videos/:id/frames/extract` | Extract frames from video assets. |
+| `POST /api/videos/:id/rotate` | Create a rotated MP4 derivative in Cloudflare Stream while preserving optional audio. |
 | `POST /api/videos/:id/animated-webp` | Generate animated WebP outputs from video assets. |
 | `GET /api/image-tools` | List configured image-tool plugins. |
 | `POST /api/image-tools/:toolId/previews` | Create image-tool previews. |
@@ -822,7 +826,7 @@ Production reminders:
 - Store secrets in deployment secret management.
 - Use `CACHE_STORAGE_TYPE=redis` and a durable Redis instance for large catalogs or vector discovery.
 - Grainrad image tools run in-process (no service); ensure `ffmpeg` is available for MP4 exports.
-- Configure Cloudflare Stream token and ffmpeg availability for video workflows.
+- Configure the Cloudflare Stream token and `ffmpeg` availability for video rotation, frame extraction, animated WebP generation, and MP4 exports.
 - Configure client-site Worker tokens separately when publishing client galleries.
 - Run `npm run build` before deployment.
 

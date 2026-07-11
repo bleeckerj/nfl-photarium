@@ -106,7 +106,7 @@ await fetch(`/api/images/${variantId}/update`, {
 
 ### Rotating stored images
 
-If an asset looks sideways because of EXIF metadata, rotate it server-side via `POST /api/images/{id}/rotate`. The endpoint downloads the chosen Cloudflare variant, runs it through `sharp().rotate()` (or `rotate(degrees)` when you pass `direction: "left"` or `"right"`), re-uploads the corrected bytes with the original metadata, and returns the new Cloudflare delivery URL/variants plus `rotatedFromId` so you can track the replacement.
+Rotate a stored image server-side via `POST /api/images/{id}/rotate`. The endpoint downloads the original Cloudflare blob, creates a non-destructive quarter-turn derivative, uploads it through the shared image pipeline, and returns the new Cloudflare delivery URL plus rotation provenance. Animated WebP files are decoded and rotated frame by frame so frame count, delays, transparency, and loop behavior remain intact.
 
 **Request body**
 
@@ -117,7 +117,8 @@ If an asset looks sideways because of EXIF metadata, rotate it server-side via `
 ```
 
 - `direction` can be `"left"` or `"right"` to rotate a specific 90° step.  
-- Omitting `direction` (or sending `{ "auto": true }`) simply honors the EXIF orientation flag.
+- `degrees` accepts `90`, `180`, or `270`.
+- Missing, zero, or arbitrary-angle input returns `400`.
 
 **Sample fetch**
 
@@ -131,7 +132,9 @@ const body = await response.json();
 console.log('New Cloudflare URL', body.url);
 ```
 
-The response also includes `message` advising that a new Cloudflare URL was created; update any persisted references, and consider showing a persistent toast warning that the old delivery URL must be replaced.
+The response includes `rotatedFromId`, `rotatedAt`, `rotationDegrees`, family `parentId`, output dimensions, and animation fields. The source remains available. Update persisted references only where the new derivative should be used.
+
+Video assets use `POST /api/videos/{id}/rotate` with `{ "degrees": 90 }`. Photarium obtains Cloudflare Stream's downloadable MP4, rotates and re-encodes it with FFmpeg while preserving optional audio, then uploads a new Stream asset. A `409` response means Stream is still preparing the download; retry after a short delay. The rotated video does not inherit Mux state, embeddings, or animated-WebP derivative links.
 
 ### Error details for 400 responses
 
