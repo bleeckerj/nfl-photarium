@@ -33,6 +33,7 @@ import { selectorFingerprint } from './constants.mjs';
 import {
   contentHash,
   createMinIntervalLimiter,
+  createSharedDownloadGate,
   createSerializedTaskQueue,
   retryWithBackoff,
   runWithConcurrency,
@@ -58,9 +59,10 @@ async function loadStoredAuth(options) {
   return payload;
 }
 
-async function downloadBuffer(url, options, logger) {
+async function downloadBuffer(url, options, logger, downloadGate) {
   const response = await retryWithBackoff(
     async () => {
+      await downloadGate.waitForTurn();
       const res = await fetch(url, {
         headers: {
           'user-agent': 'Photarium Flickr Ingest/1.0',
@@ -68,10 +70,34 @@ async function downloadBuffer(url, options, logger) {
       });
       if (!res.ok) {
         const error = new Error(`Download failed (${res.status})`);
-        error.retryAfterMs = Number(res.headers.get('retry-after') || 0) * 1000;
+        const retryAfterHeader = res.headers.get('retry-after') || '';
+        const retryAfterMs = Number(retryAfterHeader || 0) * 1000;
+        error.retryAfterMs = retryAfterMs;
         error.status = res.status;
+        error.host = new URL(url).host;
+        error.retryAfterHeader = retryAfterHeader;
+        error.rateLimitRemaining = res.headers.get('x-ratelimit-remaining') || '';
+        error.rateLimitReset = res.headers.get('x-ratelimit-reset') || '';
+        error.cacheStatus = res.headers.get('x-cache') || res.headers.get('cf-cache-status') || '';
+        error.responseExcerpt = (await res.text().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 240);
+        if (res.status === 429) {
+          const cooldown = downloadGate.reportRateLimit(retryAfterMs);
+          error.retryAfterMs = cooldown.cooldownMs;
+          error.sharedCooldownMs = cooldown.cooldownMs;
+          error.consecutiveRateLimits = cooldown.consecutiveRateLimits;
+        }
+        error.downloadDiagnostics = [
+          `host=${error.host}`,
+          `retry-after=${error.retryAfterHeader || 'absent'}`,
+          `rate-remaining=${error.rateLimitRemaining || 'unknown'}`,
+          `rate-reset=${error.rateLimitReset || 'unknown'}`,
+          `cache=${error.cacheStatus || 'unknown'}`,
+          error.sharedCooldownMs ? `shared-cooldown-ms=${error.sharedCooldownMs}` : '',
+          error.responseExcerpt ? `response=${JSON.stringify(error.responseExcerpt)}` : '',
+        ].filter(Boolean).join(' ');
         throw error;
       }
+      downloadGate.reportSuccess();
       return res;
     },
     {
@@ -82,7 +108,7 @@ async function downloadBuffer(url, options, logger) {
         return status === 429 || status >= 500;
       },
       onRetry(error, attempt, waitMs) {
-        logger.warn(`retrying download after attempt ${attempt} in ${waitMs}ms (${error.message})`);
+        logger.warn(`retrying download after attempt ${attempt} in ${waitMs}ms (${error.message}; ${error.downloadDiagnostics})`);
       },
     }
   );
@@ -317,7 +343,7 @@ export async function runIngestCommand(options, logger) {
   }
   const checkpointWrite = createSerializedTaskQueue();
   const apiLimiter = createMinIntervalLimiter(options.apiThrottleMs);
-  const uploadLimiter = createMinIntervalLimiter(options.throttleMs);
+  const downloadGate = createSharedDownloadGate({ minIntervalMs: options.throttleMs });
 
   logger.banner('Flickr ingest');
   logger.info(`namespace=${options.namespace} selector=${options.selector} user=${authProfile.username}`);
@@ -439,8 +465,7 @@ export async function runIngestCommand(options, logger) {
         return;
       }
 
-      await uploadLimiter();
-      const download = await downloadBuffer(source.url, options, logger);
+      const download = await downloadBuffer(source.url, options, logger, downloadGate);
       const fileName = inferDownloadFileName(listPhoto, source.url, download.contentType);
       const downloadedContentHash = contentHash(download.buffer);
       const extrasPatch = buildFlickrExtras({
@@ -524,7 +549,10 @@ export async function runIngestCommand(options, logger) {
       throw new Error(outcome.payload?.error || outcome.payload?.message || `Upload failed (${outcome.status})`);
     } catch (error) {
       counts.failed += 1;
-      const message = error instanceof Error ? error.message : String(error);
+      const baseMessage = error instanceof Error ? error.message : String(error);
+      const message = error?.downloadDiagnostics
+        ? `${baseMessage}; ${error.downloadDiagnostics}`
+        : baseMessage;
       logger.error(`${prefix()} ${message}`);
       checkpoint.entries[listPhoto.id] = buildEntryUpdate({
         existingEntry,

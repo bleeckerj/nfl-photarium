@@ -107,6 +107,51 @@ export function createMinIntervalLimiter(minIntervalMs) {
   };
 }
 
+export function createSharedDownloadGate({
+  minIntervalMs = 0,
+  defaultRateLimitCooldownMs = 60_000,
+  maxRateLimitCooldownMs = 15 * 60_000,
+} = {}) {
+  const interval = Math.max(0, Number(minIntervalMs) || 0);
+  const defaultCooldown = Math.max(1_000, Number(defaultRateLimitCooldownMs) || 60_000);
+  const maxCooldown = Math.max(defaultCooldown, Number(maxRateLimitCooldownMs) || 15 * 60_000);
+  let chain = Promise.resolve();
+  let lastStartedAt = 0;
+  let blockedUntil = 0;
+  let consecutiveRateLimits = 0;
+
+  async function waitForTurn() {
+    const next = chain.then(async () => {
+      const now = Date.now();
+      const waitMs = Math.max(0, lastStartedAt + interval - now, blockedUntil - now);
+      if (waitMs > 0) await sleep(waitMs);
+      lastStartedAt = Date.now();
+    });
+    chain = next.catch(() => {});
+    await next;
+  }
+
+  function reportRateLimit(retryAfterMs = 0) {
+    consecutiveRateLimits += 1;
+    const serverCooldown = Number(retryAfterMs);
+    const fallbackCooldown = Math.min(
+      defaultCooldown * (2 ** (consecutiveRateLimits - 1)),
+      maxCooldown,
+    );
+    const cooldownMs = Number.isFinite(serverCooldown) && serverCooldown > 0
+      ? serverCooldown
+      : fallbackCooldown;
+    blockedUntil = Math.max(blockedUntil, Date.now() + cooldownMs);
+    return { cooldownMs, blockedUntil, consecutiveRateLimits };
+  }
+
+  function reportSuccess() {
+    consecutiveRateLimits = 0;
+  }
+
+  return { waitForTurn, reportRateLimit, reportSuccess };
+}
+
 export function contentHash(buffer) {
   return createHash('sha256').update(buffer).digest('hex');
 }

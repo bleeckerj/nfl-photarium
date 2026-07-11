@@ -253,7 +253,7 @@ npm run flickr:ingest -- \
 - `--auth-file <path>`: custom OAuth token storage path
 - `--concurrency <n>`: parallel worker count
 - `--api-throttle-ms <n>`: minimum interval between Flickr API calls
-- `--throttle-ms <n>`: minimum interval between Photarium upload attempts
+- `--throttle-ms <n>`: minimum interval between Flickr media download attempts across all workers
 - `--retry-max <n>`: retry attempts for retryable failures
 - `--retry-base-ms <n>`: base backoff delay
 - `-v` through `-vvvvv`: increasing verbosity
@@ -309,6 +309,17 @@ tranche elapsed=01:08:42 successful=396/400 estimated-account-remaining=36:28:15
 ```
 
 If no item succeeds, the remaining-time estimate is `unavailable`.
+
+### Flickr download rate limits
+
+All Flickr media download attempts, including retries, pass through a shared gate. `--throttle-ms` sets the minimum interval between those attempts across every worker. When Flickr returns `429`:
+
+- the script honors `Retry-After` when Flickr supplies it
+- without `Retry-After`, all workers pause for 60 seconds
+- consecutive `429` responses increase the shared cooldown, capped at 15 minutes
+- retry logs include the media host, rate-limit/cache headers, and a short response excerpt when available
+
+This prevents concurrent workers from retrying in parallel and extending a Flickr media-host rate limit.
 
 ## Metadata Mapping
 
