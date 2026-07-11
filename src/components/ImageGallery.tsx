@@ -139,6 +139,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [serverFacets, setServerFacets] = useState<GalleryServerFacets | null>(null);
   const [serverFamilySummaryMap, setServerFamilySummaryMap] = useState<Record<string, GalleryFamilySummary>>({});
   const [serverDuplicateSummary, setServerDuplicateSummary] = useState<GalleryDuplicateSummary | null>(null);
+  const [dismissedDuplicateSignature, setDismissedDuplicateSignature] = useState<string | null>(null);
   const [videoResultsNotice, setVideoResultsNotice] = useState<string | null>(null);
   const [colorSearchHex, setColorSearchHex] = useState<string | null>(
     normalizeColorSearchHex(storedPreferencesRef.current.colorSearchHex ?? null)
@@ -730,6 +731,13 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
 
   const duplicateGroupCount = serverDuplicateSummary?.groupCount ?? duplicateGroups.length;
   const duplicateImageCount = serverDuplicateSummary?.imageCount ?? duplicateIds.size;
+  const duplicateSignature = useMemo(() => {
+    const ids = serverDuplicateSummary?.allDuplicateIds ?? Array.from(duplicateIds);
+    return ids.length ? [...ids].sort().join('|') : null;
+  }, [duplicateIds, serverDuplicateSummary?.allDuplicateIds]);
+  const visibleDuplicateGroupCount = duplicateSignature === dismissedDuplicateSignature
+    ? 0
+    : duplicateGroupCount;
 
   const uniqueTags = useMemo(() => {
     if (serverFacets?.tags) {
@@ -832,10 +840,11 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         onJumpForwardTen: jumpForwardTenPages, onLastPage: goToLastPage,
       }}
       noticeStackProps={{
-        duplicateGroupCount, duplicateImageCount, showDuplicatesOnly, colorSearchHex, colorSearchLoading,
+        duplicateGroupCount: visibleDuplicateGroupCount, duplicateImageCount, showDuplicatesOnly, colorSearchHex, colorSearchLoading,
         colorSearchError, galleryResultCount, focusNotice,
         onToggleDuplicatesOnly: () => setShowDuplicatesOnly(!showDuplicatesOnly),
         onSelectDuplicateImages: selectDuplicateImages, onSelectDuplicatesKeepSingle: selectDuplicatesKeepSingle,
+        onDismissDuplicates: () => setDismissedDuplicateSignature(duplicateSignature),
         onClearColorSearch: clearColorSearch, onDismissFocusNotice: () => setFocusNotice(null),
       }}
       controlsPanelProps={{

@@ -104,7 +104,11 @@ export const computeDuplicateGroups = (images: CloudflareImage[]): DuplicateGrou
     const mapKey = `${keyFromUrl}|${keyFromHash}`;
     const existing = byKey.get(mapKey);
     if (existing) {
-      existing.items.push(image);
+      // Cached and merged gallery sources can briefly repeat the same asset row.
+      // A duplicate group must contain distinct Cloudflare assets.
+      if (!existing.items.some(item => item.id === image.id)) {
+        existing.items.push(image);
+      }
     } else {
       byKey.set(mapKey, { items: [image], reason });
     }

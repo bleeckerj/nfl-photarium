@@ -87,6 +87,20 @@ describe('queryGalleryAssets', () => {
     expect(result.duplicateSummary.duplicateIdsExcludingOldest).toEqual(['dupe-2']);
   });
 
+  it('does not treat repeated rows for one asset as duplicate images', () => {
+    const repeated = asset({
+      id: 'same-asset',
+      originalUrlNormalized: 'https://example.com/a.jpg',
+      contentHash: hash,
+    });
+    const result = queryGalleryAssets([repeated, { ...repeated }], {}, 1, 60);
+
+    expect(result.duplicateSummary.groupCount).toBe(0);
+    expect(result.duplicateSummary.imageCount).toBe(0);
+    expect(result.duplicateSummary.allDuplicateIds).toEqual([]);
+    expect(result.duplicateSummary.duplicateIdsExcludingNewest).toEqual([]);
+  });
+
   it('returns global duplicate selection ids even when duplicate assets are off page', () => {
     const result = queryGalleryAssets(
       [

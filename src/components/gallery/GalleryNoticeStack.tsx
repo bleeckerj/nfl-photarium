@@ -10,6 +10,7 @@ interface GalleryNoticeStackProps {
   onToggleDuplicatesOnly: () => void;
   onSelectDuplicateImages: () => void;
   onSelectDuplicatesKeepSingle: (strategy: 'newest' | 'oldest') => void;
+  onDismissDuplicates: () => void;
   onClearColorSearch: () => void;
   onDismissFocusNotice: () => void;
 }
@@ -26,6 +27,7 @@ export default function GalleryNoticeStack({
   onToggleDuplicatesOnly,
   onSelectDuplicateImages,
   onSelectDuplicatesKeepSingle,
+  onDismissDuplicates,
   onClearColorSearch,
   onDismissFocusNotice,
 }: GalleryNoticeStackProps) {
@@ -60,6 +62,13 @@ export default function GalleryNoticeStack({
               className="px-3 py-1 rounded-md border border-amber-300 bg-amber-100 text-amber-900 hover:bg-amber-200 transition"
             >
               Select duplicates (keep oldest)
+            </button>
+            <button
+              type="button"
+              onClick={onDismissDuplicates}
+              className="px-3 py-1 rounded-md border border-amber-300 bg-white text-amber-900 hover:bg-amber-100 transition"
+            >
+              Ignore this warning
             </button>
           </div>
         </div>
