@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
-const { getCachedImagesMock, getImageExtrasRecordsMock } = vi.hoisted(() => ({
+const { getCachedImagesMock, getImageExtrasRecordsMock, queryMetadataIndexMock } = vi.hoisted(() => ({
   getCachedImagesMock: vi.fn(),
   getImageExtrasRecordsMock: vi.fn(),
+  queryMetadataIndexMock: vi.fn(),
 }));
 
 vi.mock('@/server/cloudflareImageCache', () => ({ getCachedImages: getCachedImagesMock }));
 vi.mock('@/server/imageExtras', () => ({ getImageExtrasRecords: getImageExtrasRecordsMock }));
+vi.mock('@/server/metadataSearchIndex', () => ({ queryMetadataIndex: queryMetadataIndexMock }));
 
 import { POST } from '@/app/api/images/metadata-search/route';
 
@@ -28,6 +30,15 @@ describe('POST /api/images/metadata-search', () => {
       source: { imageId: 'source', schemaVersion: 1, createdAt: '', updatedAt: '', description: 'Foucault', altText: 'Bald man with glasses' },
       other: { imageId: 'other', schemaVersion: 1, createdAt: '', updatedAt: '', description: 'Foucault elsewhere' },
     });
+    queryMetadataIndexMock.mockResolvedValue(null);
+  });
+
+  it('verifies Redis candidates with the canonical matcher', async () => {
+    queryMetadataIndexMock.mockResolvedValue({ imageIds: ['source'], version: 'v1' });
+    const response = await POST(request({ query: 'foucault', fields: ['description'], namespace: 'cf-grainrad' }));
+    const payload = await response.json();
+    expect(payload.results.map((result: { id: string }) => result.id)).toEqual(['source']);
+    expect(payload.diagnostics).toMatchObject({ backend: 'redis-index', candidateCount: 1, indexVersion: 'v1' });
   });
 
   it('finds an extras-only description inside the requested namespace', async () => {

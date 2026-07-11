@@ -6,6 +6,7 @@ import {
 } from '@/utils/cloudflareMetadata';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { getCachedImages } from '@/server/cloudflareImageCache';
+import { syncMetadataImageById } from '@/server/metadataSearchIndex';
 import { listImageFamilyIds } from '@/server/imageFamily';
 import { upsertRegistryNamespace } from '@/server/namespaceRegistry';
 import { validateParentAssignmentForExistingImage } from '@/server/parentValidation';
@@ -312,6 +313,8 @@ export async function PATCH(
     if (!targetResult) {
       throw new Error('Failed to update image metadata');
     }
+
+    await Promise.all(updatedIds.map((updatedId) => syncMetadataImageById(updatedId)));
 
     const metadataPayload = targetResult.metadataPayload;
     const finalParentId = cleanString(metadataPayload.variationParentId as string | undefined);

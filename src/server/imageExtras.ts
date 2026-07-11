@@ -508,12 +508,18 @@ export async function setImageExtrasRecord(record: ImageExtrasRecord): Promise<v
   const sanitized = sanitizeImageExtrasRecord(record) ?? record;
   await storage.set(getImageExtrasKey(record.imageId), sanitized);
   applyFolderOverrideUpdate(record.imageId, sanitized);
+  void import('@/server/metadataSearchIndex')
+    .then(({ syncMetadataImageById }) => syncMetadataImageById(record.imageId, sanitized))
+    .catch((error) => console.warn('[ImageExtras] Metadata search index sync failed', { imageId: record.imageId, error }));
 }
 
 export async function deleteImageExtrasRecord(imageId: string): Promise<void> {
   const storage = getExtrasStorage();
   await storage.delete(getImageExtrasKey(imageId));
   applyFolderOverrideUpdate(imageId, null);
+  void import('@/server/metadataSearchIndex')
+    .then(({ removeMetadataImage }) => removeMetadataImage(imageId))
+    .catch((error) => console.warn('[ImageExtras] Metadata search index removal failed', { imageId, error }));
 }
 
 export async function listImageExtrasImageIds(): Promise<string[]> {

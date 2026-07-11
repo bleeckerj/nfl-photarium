@@ -1,5 +1,6 @@
 import { getCachedImages, type CachedCloudflareImage } from '@/server/cloudflareImageCache';
 import { getImageExtrasRecords, type ImageExtrasRecord } from '@/server/imageExtras';
+import { queryMetadataIndex } from '@/server/metadataSearchIndex';
 
 export const METADATA_SEARCH_FIELDS = [
   'filename',
@@ -36,6 +37,13 @@ export type MetadataSearchResponse = {
   count: number;
   fields: MetadataSearchField[];
   match: MetadataMatchMode;
+  diagnostics?: {
+    backend: 'redis-index' | 'server-scan';
+    candidateCount: number;
+    fallbackReason?: string;
+    indexVersion?: string;
+    elapsedMs: number;
+  };
 };
 
 const hasOwn = (record: object, key: string) => Object.prototype.hasOwnProperty.call(record, key);
@@ -88,6 +96,7 @@ function resolveFields(fields?: MetadataSearchField[]): MetadataSearchField[] {
 }
 
 export async function searchImageMetadata(request: MetadataSearchRequest): Promise<MetadataSearchResponse> {
+  const startedAt = performance.now();
   const query = request.query.trim();
   if (!query) throw new Error('query is required');
   const match = request.match ?? 'contains';
@@ -99,11 +108,20 @@ export async function searchImageMetadata(request: MetadataSearchRequest): Promi
     }
     return true;
   });
-  const extrasById = await getImageExtrasRecords(images.map((image) => image.id));
+  const indexResult = match === 'regex' ? null : await queryMetadataIndex({
+    query,
+    fields,
+    namespace: request.namespace,
+    folder: request.folder,
+    expectedCount: images.length,
+  }).catch(() => null);
+  const candidateIds = indexResult ? new Set(indexResult.imageIds) : null;
+  const candidates = candidateIds ? images.filter((image) => candidateIds.has(image.id)) : images;
+  const extrasById = await getImageExtrasRecords(candidates.map((image) => image.id));
   const limit = request.limit ?? 50;
   const results: MetadataSearchImage[] = [];
 
-  for (const source of images) {
+  for (const source of candidates) {
     const image = mergeExtras(source, extrasById[source.id] ?? null);
     if (request.folder !== undefined && image.folder !== request.folder) continue;
     const matchedFields = fields.filter((field) => fieldValues(image, field).some(matcher));
@@ -112,5 +130,18 @@ export async function searchImageMetadata(request: MetadataSearchRequest): Promi
     if (limit > 0 && results.length >= limit) break;
   }
 
-  return { results, query, count: results.length, fields, match };
+  return {
+    results,
+    query,
+    count: results.length,
+    fields,
+    match,
+    diagnostics: {
+      backend: indexResult ? 'redis-index' : 'server-scan',
+      candidateCount: candidates.length,
+      fallbackReason: indexResult ? undefined : match === 'regex' ? 'regex' : query.length < 3 ? 'short-query' : 'index-unavailable-or-incomplete',
+      indexVersion: indexResult?.version,
+      elapsedMs: Number((performance.now() - startedAt).toFixed(1)),
+    },
+  };
 }

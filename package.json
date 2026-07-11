@@ -41,6 +41,7 @@
     "variants:folderize": "node scripts/folder-to-variants.mjs",
     "aspect:backfill": "node --import tsx ./scripts/backfill-image-metadata.ts",
     "image:metadata:backfill": "node --import tsx ./scripts/backfill-image-metadata.ts",
+    "metadata-search:index": "node --import tsx ./scripts/metadata-search-index.ts",
     "video:metadata:backfill": "node --import tsx ./scripts/backfill-video-metadata.ts",
     "page:ingest": "node scripts/page-ingest.mjs ingest",
     "page:browser-ingest": "node scripts/page-ingest.mjs browser-ingest",
