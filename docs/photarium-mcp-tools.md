@@ -71,6 +71,7 @@ The crop preserves source width. If the requested ratio needs more height than t
 ## AI Features
 - `photarium_generate_alt`
 - `photarium_generate_description`
+- `photarium_generate_tags`
 - `photarium_generate_prompt`
 - `photarium_generate_image`
 - `photarium_generate_from_references`

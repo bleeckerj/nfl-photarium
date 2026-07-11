@@ -7,6 +7,12 @@ export declare function generateDescription(imageId: string, options?: {
 }): Promise<{
     description: string;
 }>;
+export declare function generateTags(imageId: string, options?: {
+    count?: number;
+}): Promise<{
+    tags: string[];
+    model?: string;
+}>;
 export declare function generatePrompt(imageId: string, options?: {
     force?: boolean;
     existingPrompt?: string;

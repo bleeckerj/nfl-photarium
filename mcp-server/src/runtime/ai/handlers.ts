@@ -1,16 +1,42 @@
 import type { RuntimeToolHandler } from '../types.js';
 import { normalizeManualPrompt } from '../shared/prompts.js';
 import { downloadOriginalImageById, getImage } from '../discovery/client.js';
+import { updateMetadata } from '../organization/client.js';
 import { uploadFileBase64 } from '../upload/client.js';
 import {
   generateAlt,
   generateDescription,
+  generateTags,
   generatePrompt,
   getConcepts,
   getHaiku,
   getPromptRecord,
   getPromptsBulk,
 } from './client.js';
+
+function mergeTags(existingTags: string[], generatedTags: string[]): { appendedTags: string[]; tags: string[] } {
+  const tags = [...existingTags];
+  const knownTags = new Set(existingTags.map((tag) => tag.toLocaleLowerCase()));
+  const appendedTags: string[] = [];
+
+  for (const tag of generatedTags) {
+    const normalizedTag = tag.trim();
+    const lookupKey = normalizedTag.toLocaleLowerCase();
+    if (!normalizedTag || knownTags.has(lookupKey)) continue;
+    knownTags.add(lookupKey);
+    appendedTags.push(normalizedTag);
+    tags.push(normalizedTag);
+  }
+
+  return { appendedTags, tags };
+}
+
+function readTags(image: Record<string, unknown> | null): string[] {
+  if (!image) throw new Error('Image not found');
+  return Array.isArray(image.tags)
+    ? image.tags.filter((tag): tag is string => typeof tag === 'string')
+    : [];
+}
 import {
   generatePhotariumImage,
   generatePhotariumAspectRatioVariant,
@@ -42,6 +68,31 @@ export const aiHandlers: Record<string, RuntimeToolHandler> = {
         {
           type: 'text',
           text: JSON.stringify(result, null, 2),
+        },
+      ],
+    };
+  },
+
+  'photarium_generate_tags': async (args: Record<string, unknown>) => {
+    const { imageId, count } = args as { imageId: string; count?: number };
+    const [image, generated] = await Promise.all([
+      getImage(imageId),
+      generateTags(imageId, { count }),
+    ]);
+    const merged = mergeTags(readTags(image), generated.tags);
+    const savedImage = await updateMetadata(imageId, { tags: merged.tags });
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            imageId,
+            generatedTags: generated.tags,
+            appendedTags: merged.appendedTags,
+            tags: savedImage.tags || merged.tags,
+            model: generated.model,
+            saved: true,
+          }, null, 2),
         },
       ],
     };

@@ -19,6 +19,16 @@ export async function generateDescription(
   return data;
 }
 
+export async function generateTags(
+  imageId: string,
+  options: { count?: number } = {}
+): Promise<{ tags: string[]; model?: string }> {
+  return apiRequest(`/api/images/${encodeURIComponent(imageId)}/tags`, {
+    method: 'POST',
+    body: JSON.stringify({ count: options.count ?? 8 }),
+  });
+}
+
 export async function generatePrompt(
   imageId: string,
   options: { force?: boolean; existingPrompt?: string } = {}

@@ -33,6 +33,27 @@ export const aiTools = [
         },
     },
     {
+        name: 'photarium_generate_tags',
+        description: 'Generate semantic tags for an image using AI vision, merge them with existing tags, and save the complete tag set to Photarium.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                imageId: {
+                    type: 'string',
+                    description: 'The ID of the image to tag',
+                },
+                count: {
+                    type: 'integer',
+                    minimum: 1,
+                    maximum: 20,
+                    default: 8,
+                    description: 'Number of semantic tags to generate. Defaults to 8.',
+                },
+            },
+            required: ['imageId'],
+        },
+    },
+    {
         name: 'photarium_generate_prompt',
         description: 'Generate a text-to-image prompt that could recreate the given image. Useful for understanding visual style and for prompt engineering.',
         inputSchema: {

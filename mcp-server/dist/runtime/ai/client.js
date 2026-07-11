@@ -12,6 +12,12 @@ export async function generateDescription(imageId, options = {}) {
     });
     return data;
 }
+export async function generateTags(imageId, options = {}) {
+    return apiRequest(`/api/images/${encodeURIComponent(imageId)}/tags`, {
+        method: 'POST',
+        body: JSON.stringify({ count: options.count ?? 8 }),
+    });
+}
 export async function generatePrompt(imageId, options = {}) {
     const params = new URLSearchParams();
     if (options.force)

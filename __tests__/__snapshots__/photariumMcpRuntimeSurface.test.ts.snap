@@ -352,6 +352,25 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
     ],
     "type": "object",
   },
+  "photarium_generate_tags": {
+    "properties": {
+      "count": {
+        "default": 8,
+        "description": "Number of semantic tags to generate. Defaults to 8.",
+        "maximum": 20,
+        "minimum": 1,
+        "type": "integer",
+      },
+      "imageId": {
+        "description": "The ID of the image to tag",
+        "type": "string",
+      },
+    },
+    "required": [
+      "imageId",
+    ],
+    "type": "object",
+  },
   "photarium_image_tool_preview": {
     "properties": {
       "imageId": {

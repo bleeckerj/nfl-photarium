@@ -11,6 +11,7 @@ const HIGH_RISK_SCHEMA_NAMES = [
   'photarium_image_tool_run',
   'photarium_image_tool_preview',
   'photarium_generate_image',
+  'photarium_generate_tags',
   'photarium_aspect_ratio_variant',
   'photarium_semantic_merge',
   'photarium_fs_ingest',
@@ -67,6 +68,62 @@ describe('Photarium MCP runtime surface', () => {
     expect(sorted((payload.tools || []).map((tool) => tool.name))).toEqual(
       sorted(RUNTIME_TOOLS.map((tool) => tool.name)),
     );
+  });
+
+  it('generates semantic tags and saves them without replacing existing tags', async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url === 'http://localhost:3000/api/images/img-123' && !init?.method) {
+        return new Response(JSON.stringify({
+          image: {
+            id: 'img-123',
+            filename: 'portrait.png',
+            variants: [],
+            tags: ['grainrad', 'portrait'],
+          },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      if (url === 'http://localhost:3000/api/images/img-123/tags' && init?.method === 'POST') {
+        expect(JSON.parse(String(init.body))).toEqual({ count: 6 });
+        return new Response(JSON.stringify({
+          tags: ['Portrait', 'glasses', 'pixel'],
+          model: 'tag-model',
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      if (url === 'http://localhost:3000/api/images/img-123/update' && init?.method === 'PATCH') {
+        expect(JSON.parse(String(init.body))).toEqual({
+          tags: ['grainrad', 'portrait', 'glasses', 'pixel'],
+        });
+        return new Response(JSON.stringify({
+          id: 'img-123',
+          filename: 'portrait.png',
+          variants: [],
+          tags: ['grainrad', 'portrait', 'glasses', 'pixel'],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      return new Response(JSON.stringify({ error: `Unexpected request: ${url}` }), { status: 500 });
+    }) as typeof global.fetch;
+
+    const result = await handleRuntimeToolCall('photarium_generate_tags', {
+      imageId: 'img-123',
+      count: 6,
+    });
+    const payload = JSON.parse(result.content[0]?.text || '{}');
+
+    expect(result.isError).not.toBe(true);
+    expect(payload).toEqual({
+      imageId: 'img-123',
+      generatedTags: ['Portrait', 'glasses', 'pixel'],
+      appendedTags: ['glasses', 'pixel'],
+      tags: ['grainrad', 'portrait', 'glasses', 'pixel'],
+      model: 'tag-model',
+      saved: true,
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(3);
   });
 
   it('defaults namespace rename calls to dry-run through the namespace API', async () => {
