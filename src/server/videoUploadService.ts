@@ -37,6 +37,9 @@ export type VideoUploadContext = {
   namespace?: string;
   parentId?: string;
   requireSignedUrls?: boolean;
+  rotatedFromId?: string;
+  rotatedAt?: string;
+  rotationDegrees?: number;
 };
 
 export type VideoUploadSuccess = {
@@ -60,6 +63,9 @@ export type VideoUploadSuccess = {
   width?: number;
   height?: number;
   aspectRatio?: string;
+  rotatedFromId?: string;
+  rotatedAt?: string;
+  rotationDegrees?: number;
   hasClipEmbedding?: boolean;
   folder?: string;
   tags: string[];
@@ -126,6 +132,9 @@ const cleanVideoContext = (context: VideoUploadContext): VideoUploadContext => (
   namespace: cleanString(context.namespace),
   parentId: cleanString(context.parentId),
   requireSignedUrls: context.requireSignedUrls === true,
+  rotatedFromId: cleanString(context.rotatedFromId),
+  rotatedAt: cleanString(context.rotatedAt),
+  rotationDegrees: context.rotationDegrees,
 });
 
 const isExplicitNamespace = (value?: string) =>
@@ -214,6 +223,9 @@ const mapRecordToResponse = (record: VideoAssetRecord): VideoUploadSuccess => ({
   width: record.width,
   height: record.height,
   aspectRatio: record.aspectRatio,
+  rotatedFromId: record.rotatedFromId,
+  rotatedAt: record.rotatedAt,
+  rotationDegrees: record.rotationDegrees,
   hasClipEmbedding: record.hasClipEmbedding,
   folder: record.folder,
   tags: record.tags,
@@ -335,6 +347,9 @@ export async function uploadVideoBuffer(
       width: dimensions.width,
       height: dimensions.height,
       aspectRatio: dimensions.aspectRatio,
+      rotatedFromId: effectiveContext.rotatedFromId,
+      rotatedAt: effectiveContext.rotatedAt,
+      rotationDegrees: effectiveContext.rotationDegrees,
       folder: effectiveContext.folder,
       tags: effectiveContext.tags,
       description: effectiveContext.description,
@@ -429,6 +444,9 @@ export async function uploadVideoFromRemoteUrl(
       width: dimensions.width,
       height: dimensions.height,
       aspectRatio: dimensions.aspectRatio,
+      rotatedFromId: effectiveContext.rotatedFromId,
+      rotatedAt: effectiveContext.rotatedAt,
+      rotationDegrees: effectiveContext.rotationDegrees,
       folder: effectiveContext.folder,
       tags: effectiveContext.tags,
       description: effectiveContext.description,

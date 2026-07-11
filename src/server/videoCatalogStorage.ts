@@ -26,6 +26,9 @@ export type VideoAssetRecord = {
   width?: number;
   height?: number;
   aspectRatio?: string;
+  rotatedFromId?: string;
+  rotatedAt?: string;
+  rotationDegrees?: number;
   streamSyncedAt?: string;
   streamError?: string;
   hasClipEmbedding?: boolean;

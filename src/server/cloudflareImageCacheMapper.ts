@@ -48,6 +48,9 @@ export interface CachedCloudflareImage {
   aspectRatio?: string;
   aspectRatioClass?: AspectRatioClass;
   dimensions?: { width: number; height: number };
+  rotatedFromId?: string;
+  rotatedAt?: string;
+  rotationDegrees?: number;
 }
 
 export const buildMetadataOverride = (
@@ -85,6 +88,9 @@ export const buildMetadataOverride = (
   assign('dimensions', image.dimensions);
   assign('type', image.contentType);
   assign('isAnimated', image.isAnimated);
+  assign('rotatedFromId', image.rotatedFromId);
+  assign('rotatedAt', image.rotatedAt);
+  assign('rotationDegrees', image.rotationDegrees);
   return override;
 };
 
@@ -276,5 +282,10 @@ export const transformImage = (
     aspectRatio: parsedAspectRatio,
     aspectRatioClass: parsedAspectRatioClass ?? undefined,
     dimensions: parsedDimensions,
+    rotatedFromId: cleanString(mergedMeta.rotatedFromId as string | undefined),
+    rotatedAt: cleanString(mergedMeta.rotatedAt as string | undefined),
+    rotationDegrees: typeof mergedMeta.rotationDegrees === 'number'
+      ? mergedMeta.rotationDegrees
+      : undefined,
   };
 };

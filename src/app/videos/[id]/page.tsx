@@ -18,6 +18,8 @@ import { AssetTypeBadge } from '@/components/asset-detail/AssetTypeBadge';
 import { ComfyIndicator } from '@/components/asset-detail/ComfyIndicator';
 import AnimatedWebpSection from '@/components/video-detail/AnimatedWebpSection';
 import FrameExtractionSection from '@/components/video-detail/FrameExtractionSection';
+import { VideoRotationControls } from '@/components/video-detail/VideoRotationControls';
+import { useVideoRotation } from '@/components/video-detail/useVideoRotation';
 
 import { copyToClipboard } from '@/utils/clipboard';
 import { getAssetCopyUrl } from '@/utils/assetUrls';
@@ -73,6 +75,7 @@ export default function VideoDetailPage() {
   const rawId = params?.id;
   const id = Array.isArray(rawId) ? rawId[0] : rawId;
   const toast = useToast();
+  const videoRotation = useVideoRotation(id || '');
 
   const galleryPageParam = search.get('gpage');
   const galleryNamespaceParam = search.get('gns') ?? '';
@@ -1759,6 +1762,7 @@ export default function VideoDetailPage() {
               allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
               allowFullScreen
               title={video.displayName || video.filename}
+              style={videoRotation.previewStyle}
             />
           ) : (
             <div className="flex h-[40vh] flex-col items-center justify-center gap-2 rounded text-center font-mono text-gray-300">
@@ -1776,6 +1780,14 @@ export default function VideoDetailPage() {
             </div>
           )}
         </section>
+        <VideoRotationControls
+          normalizedRotation={videoRotation.normalizedRotation}
+          loading={videoRotation.loading}
+          error={videoRotation.error}
+          rotatedAsset={videoRotation.rotatedAsset}
+          onAdjust={videoRotation.adjust}
+          onConfirm={() => void videoRotation.confirm()}
+        />
       </div>
 
       {hoverPreview && (

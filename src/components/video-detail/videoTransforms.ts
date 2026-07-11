@@ -22,6 +22,9 @@ export type VideoRecord = {
   width?: number;
   height?: number;
   aspectRatio?: string;
+  rotatedFromId?: string;
+  rotatedAt?: string;
+  rotationDegrees?: number;
   streamSyncedAt?: string;
   streamError?: string;
   hasClipEmbedding?: boolean;

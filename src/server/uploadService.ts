@@ -67,6 +67,10 @@ export type UploadContext = {
   generatedBy?: string;
   comfyMetadataDetected?: boolean;
   comfyMetadataSource?: string;
+  rotatedFromId?: string;
+  rotatedAt?: string;
+  rotationDegrees?: number;
+  isAnimated?: boolean;
 };
 
 export type UploadSuccess = {
@@ -159,6 +163,10 @@ export async function uploadImageBuffer({
     generatedBy,
     comfyMetadataDetected,
     comfyMetadataSource,
+    rotatedFromId,
+    rotatedAt,
+    rotationDegrees,
+    isAnimated,
   } = context;
   const isSnagx = fileName.toLowerCase().endsWith('.snagx');
   const normalizedNamespace = typeof namespace === 'string' && namespace.trim()
@@ -321,6 +329,10 @@ export async function uploadImageBuffer({
     generatedBy: effectiveGeneratedBy,
     comfyMetadataDetected: effectiveComfyMetadataDetected,
     comfyMetadataSource: effectiveComfyMetadataSource,
+    rotatedFromId,
+    rotatedAt,
+    rotationDegrees,
+    isAnimated,
   };
   const extrasMetadata: Record<string, unknown> = {
     originalUrl: originalUrl || undefined,

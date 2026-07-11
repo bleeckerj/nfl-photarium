@@ -49,6 +49,10 @@ export type CloudflareMetadata = {
   uploadedAt?: string;
   updatedAt?: string;
   variationSort?: number;
+  rotatedFromId?: string;
+  rotatedAt?: string;
+  rotationDegrees?: number;
+  isAnimated?: boolean;
   [key: string]: unknown;
 };
 
@@ -75,6 +79,10 @@ export const CLOUDFLARE_METADATA_FIELDS = [
   'comfyMetadataSource',
   'uploadNormalization',
   'variationSort',
+  'rotatedFromId',
+  'rotatedAt',
+  'rotationDegrees',
+  'isAnimated',
   'size',
   'aspectRatio',
   'aspectRatioClass',
@@ -221,6 +229,10 @@ export function enforceCloudflareMetadataLimit(
     'duplicateDetectionOverride',
     'linkedAssetId',
     'variationSort',
+    'rotatedAt',
+    'rotationDegrees',
+    'rotatedFromId',
+    'isAnimated',
     'description',
     'tags',
     'originalUrl',
