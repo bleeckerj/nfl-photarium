@@ -15,30 +15,15 @@ export async function semanticSearch(query, limit = 20, namespace) {
 }
 // Traditional text search - matches filename, folder, tags, description, alt text
 export async function textSearch(query, options = {}) {
-    const { images } = await listImages({
+    const data = await metadataSearch(query, {
         folder: options.folder,
         namespace: options.namespace,
-        limit: 0,
-        refresh: options.refresh,
+        limit: options.limit ?? 50,
     });
-    const needle = query.toLowerCase();
-    const matchesText = (value) => (value || '').toLowerCase().includes(needle);
-    const matchesTags = (tags) => (tags || []).some((tag) => matchesText(tag));
-    const filtered = images.filter((img) => {
-        return (matchesText(img.filename) ||
-            matchesText(img.folder || img.meta?.folder) ||
-            matchesText(img.description || img.meta?.description) ||
-            matchesText(img.altTag || img.meta?.altTag) ||
-            matchesText(img.originalUrl) ||
-            matchesText(img.sourceUrl) ||
-            matchesTags(img.tags || img.meta?.tags));
-    });
-    const limit = options.limit || 50;
-    const limited = filtered.slice(0, limit);
     return {
-        results: limited.map(formatImageResult),
+        results: data.results.map(formatImageResult),
         query,
-        count: limited.length,
+        count: data.count,
     };
 }
 export const METADATA_SEARCH_FIELDS = [
@@ -51,45 +36,6 @@ export const METADATA_SEARCH_FIELDS = [
     'sourceUrl',
     'originalUrl',
 ];
-function getFieldValues(img, field) {
-    switch (field) {
-        case 'filename':
-            return img.filename ? [img.filename] : [];
-        case 'folder':
-            return img.folder ? [img.folder] : [];
-        case 'tags':
-            return img.tags ?? [];
-        case 'description':
-            return img.description ? [img.description] : [];
-        case 'altText':
-            return img.altTag ? [img.altTag] : [];
-        case 'namespace':
-            return img.namespace ? [img.namespace] : [];
-        case 'sourceUrl':
-            return img.sourceUrl ? [img.sourceUrl] : [];
-        case 'originalUrl':
-            return img.originalUrl ? [img.originalUrl] : [];
-        default:
-            return [];
-    }
-}
-function buildMatcher(query, match, caseSensitive) {
-    if (match === 'regex') {
-        const regex = new RegExp(query, caseSensitive ? undefined : 'i');
-        return (value) => regex.test(value);
-    }
-    const normalize = (value) => (caseSensitive ? value : value.toLowerCase());
-    const needle = normalize(query);
-    switch (match) {
-        case 'exact':
-            return (value) => normalize(value) === needle;
-        case 'prefix':
-            return (value) => normalize(value).startsWith(needle);
-        case 'contains':
-        default:
-            return (value) => normalize(value).includes(needle);
-    }
-}
 export async function metadataSearch(query, options = {}) {
     const match = options.match ?? 'contains';
     const caseSensitive = options.caseSensitive ?? false;
@@ -97,35 +43,18 @@ export async function metadataSearch(query, options = {}) {
     // Preserve a stable field order and drop anything unrecognized; fall back to all fields.
     const resolved = METADATA_SEARCH_FIELDS.filter((field) => requested.includes(field));
     const fields = resolved.length ? resolved : METADATA_SEARCH_FIELDS;
-    let matcher;
-    try {
-        matcher = buildMatcher(query, match, caseSensitive);
-    }
-    catch (error) {
-        throw new Error(`Invalid ${match} pattern: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    const { images } = await listImages({
-        folder: options.folder,
-        namespace: options.namespace,
-        limit: 0,
-        refresh: options.refresh,
+    return apiRequest('/api/images/metadata-search', {
+        method: 'POST',
+        body: JSON.stringify({
+            query,
+            fields,
+            match,
+            caseSensitive,
+            folder: options.folder,
+            namespace: options.namespace,
+            limit: options.limit ?? 50,
+        }),
     });
-    const matched = [];
-    for (const img of images) {
-        const matchedFields = fields.filter((field) => getFieldValues(img, field).some((value) => matcher(value)));
-        if (matchedFields.length > 0) {
-            matched.push({ ...img, matchedFields });
-        }
-    }
-    const limit = options.limit ?? 50;
-    const limited = limit > 0 ? matched.slice(0, limit) : matched;
-    return {
-        results: limited,
-        query,
-        count: limited.length,
-        fields,
-        match,
-    };
 }
 export async function searchByColor(hexColor, limit = 20, namespace) {
     // Normalize hex color
