@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { sanitizeFilename, needsSanitization, MAX_FILENAME_LENGTH } from '@/utils/filename';
 import { inferAssetTypeFromUrl } from '@/utils/mediaAssetType';
 import type { UploaderQueueItem } from '@/features/page-import/types';
@@ -98,6 +99,25 @@ export function PageImportQueueItem(props: PageImportQueueItemProps) {
       : `Below ${MIN_SMALL_ASSET_DIMENSION} px dimension threshold`
     : null;
 
+  const previewFrameUrls = item.previewFrameUrls ?? [];
+  const canCycleFrames = previewFrameUrls.length > 1;
+  const [hoveringPreview, setHoveringPreview] = useState(false);
+  const [frameIndex, setFrameIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!hoveringPreview || !canCycleFrames) {
+      setFrameIndex(null);
+      return;
+    }
+    setFrameIndex(0);
+    const timer = setInterval(() => {
+      setFrameIndex((index) => ((index ?? 0) + 1) % previewFrameUrls.length);
+    }, 450);
+    return () => clearInterval(timer);
+  }, [hoveringPreview, canCycleFrames, previewFrameUrls.length]);
+
+  const cyclingFrameUrl = frameIndex !== null ? previewFrameUrls[frameIndex] : undefined;
+
   return (
     <div
       className={`w-full rounded-lg border p-3 transition-colors ${
@@ -107,25 +127,36 @@ export function PageImportQueueItem(props: PageImportQueueItemProps) {
       }`}
     >
       <div className="flex items-start gap-3">
-        {previewUrl && !previewFailed ? (
+        {(previewUrl || item.posterUrl) && !previewFailed ? (
           effectiveAssetType === 'video' ? (
             <div
               className={`relative h-28 w-28 overflow-hidden rounded border border-blue-200 bg-black transition-opacity ${
                 isSmallAssetPendingReview ? 'opacity-60' : 'opacity-100'
               }`}
+              onMouseEnter={() => setHoveringPreview(true)}
+              onMouseLeave={() => setHoveringPreview(false)}
+              title={canCycleFrames ? 'Hover to preview' : undefined}
             >
               {(item.posterUrl || (!item.file ? previewUrl : undefined)) ? (
                 <img
-                  src={item.posterUrl || previewUrl}
+                  src={cyclingFrameUrl || item.posterUrl || previewUrl}
                   alt={item.filename}
                   className="h-full w-full object-cover"
-                  onError={() => onPreviewLoadError(item)}
+                  onError={() => {
+                    if (cyclingFrameUrl) {
+                      setFrameIndex(null);
+                      return;
+                    }
+                    onPreviewLoadError(item);
+                  }}
                   referrerPolicy="no-referrer"
                 />
               ) : (
                 <div className="flex h-full w-full items-center justify-center text-[10px] text-gray-300">VIDEO</div>
               )}
-              <div className="absolute bottom-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white">VIDEO</div>
+              <div className="absolute bottom-1 left-1 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white">
+                VIDEO{frameIndex !== null ? ` · ${frameIndex + 1}/${previewFrameUrls.length}` : ''}
+              </div>
             </div>
           ) : (
             <img
@@ -140,7 +171,11 @@ export function PageImportQueueItem(props: PageImportQueueItemProps) {
           )
         ) : (
           <div className="flex h-28 w-28 items-center justify-center rounded border border-blue-200 bg-white text-[10px] text-gray-400">
-            {item.file ? 'Local file' : 'No preview (source blocked?)'}
+            {item.file
+              ? effectiveAssetType === 'video' && item.metadata?.status !== 'failed'
+                ? 'Generating preview'
+                : 'Local file'
+              : 'No preview (source blocked?)'}
           </div>
         )}
 

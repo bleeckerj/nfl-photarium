@@ -52,6 +52,7 @@ export type UploaderQueueItem = {
   remoteUrl?: string;
   previewUrl?: string;
   posterUrl?: string;
+  previewFrameUrls?: string[];
   isBlobSource?: boolean;
   sizeBytes?: number;
   contentType?: string;

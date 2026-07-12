@@ -15,10 +15,13 @@ export type MetadataPatch = {
   tempAssetKey?: string;
 };
 
-const revokePreviewUrl = (item: UploaderQueueItem) => {
-  if (item.previewUrl && item.previewUrl.startsWith('blob:')) {
-    URL.revokeObjectURL(item.previewUrl);
-  }
+const revokeQueueItemObjectUrls = (item: UploaderQueueItem) => {
+  const urls = new Set([item.previewUrl, item.posterUrl, ...(item.previewFrameUrls ?? [])]);
+  urls.forEach((url) => {
+    if (url && url.startsWith('blob:')) {
+      URL.revokeObjectURL(url);
+    }
+  });
 };
 
 const deleteImportSession = async (sessionId: string) => {
@@ -154,7 +157,7 @@ export function usePageImportSession() {
   const removeQueuedFile = useCallback((id: string) => {
     const target = queuedFilesRef.current.find((item) => item.id === id);
     if (!target) return;
-    revokePreviewUrl(target);
+    revokeQueueItemObjectUrls(target);
     setQueuedFiles((prev) => prev.filter((item) => item.id !== id));
     if (target.importSessionId) {
       void deleteImportAsset(target.importSessionId, target.tempAssetKey, target.remoteUrl);
@@ -163,7 +166,7 @@ export function usePageImportSession() {
 
   const clearQueue = useCallback(() => {
     const items = [...queuedFilesRef.current];
-    items.forEach(revokePreviewUrl);
+    items.forEach(revokeQueueItemObjectUrls);
     setQueuedFiles([]);
 
     const sessionIds = new Set(
@@ -181,7 +184,7 @@ export function usePageImportSession() {
   useEffect(() => {
     return () => {
       const items = [...queuedFilesRef.current];
-      items.forEach(revokePreviewUrl);
+      items.forEach(revokeQueueItemObjectUrls);
       const sessionIds = new Set(
         items.map((item) => item.importSessionId).filter((value): value is string => Boolean(value))
       );

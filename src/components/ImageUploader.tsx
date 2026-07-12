@@ -8,6 +8,7 @@ import { appendTextToFilename, removeFilenameExtension, sanitizeFilename } from 
 import { usePageImportSession } from "@/features/page-import/hooks/usePageImportSession";
 import { usePageImportDiscovery } from "@/features/page-import/hooks/usePageImportDiscovery";
 import { useCandidateMetadataEnrichment } from "@/features/page-import/hooks/useCandidateMetadataEnrichment";
+import { useLocalVideoPreviews } from "@/features/page-import/hooks/useLocalVideoPreviews";
 import { PageImportControls } from "@/features/page-import/components/PageImportControls";
 import { PageImportQueue } from "@/features/page-import/components/PageImportQueue";
 import type { UploaderQueueItem } from "@/features/page-import/types";
@@ -391,6 +392,8 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     cookieHeader: pageImportCookieHeader,
     applyMetadataPatches,
   });
+
+  useLocalVideoPreviews({ queuedFiles, updateQueuedFile });
 
   const { activityStats, isActivityActive } = useUploaderActivityStats({
     uploadedImages,
