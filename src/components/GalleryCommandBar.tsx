@@ -40,7 +40,7 @@ const baseHelp = [
   'Available commands:',
   '- hide folder <name>: Temporarily remove a folder from the gallery',
   '- show folder <name>: Bring a hidden folder back into the gallery',
-  '- hide namespace <name>: Temporarily remove a namespace from All namespaces',
+  '- hide namespace <name>: Immediately remove a namespace from the gallery',
   '- show namespace <name>: Bring a hidden namespace back into the gallery',
   '- hide tag <name>: Temporarily remove a tag from the gallery',
   '- show tag <name>: Filter the gallery to a specific tag',

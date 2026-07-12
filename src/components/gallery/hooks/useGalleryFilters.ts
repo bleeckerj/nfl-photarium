@@ -31,7 +31,6 @@ import type {
 
 interface UseGalleryFiltersOptions {
   images: CloudflareImage[];
-  namespace?: string;
   familySourceImages?: CloudflareImage[];
   serverPagination?: {
     page: number;
@@ -148,7 +147,6 @@ interface UseGalleryFiltersReturn {
 
 export function useGalleryFilters({
   images,
-  namespace,
   familySourceImages,
   initialPreferences,
   brokenImageIds,
@@ -336,12 +334,11 @@ export function useGalleryFilters({
       onlyCanonical,
       hiddenFolders,
       hiddenTags,
-      hiddenNamespaces: namespace === '__all__' ? hiddenNamespaces : [],
+      hiddenNamespaces,
       showFavoritesOnly,
     });
   }, [
     images,
-    namespace,
     selectedFolder,
     selectedTag,
     searchTerm,

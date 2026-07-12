@@ -36,7 +36,7 @@ import { normalizeGridSize } from './gallery/gridSizing';
 import { toDateKey } from './gallery/dateFilter';
 import { collectFacetFolders, collectImageFolders, mergeFolderNames } from './gallery/folderOptions';
 import { loadHiddenNamespaces } from './gallery/storage';
-import { getAppliedHiddenNamespaces, getKnownNamespaces } from './gallery/namespaceVisibility';
+import { getKnownNamespaces } from './gallery/namespaceVisibility';
 import { clearGalleryReturnState, GALLERY_RETURN_SNAPSHOT_KEY } from './gallery/returnState';
 import { useSearchParams } from 'next/navigation';
 import { isLikelySourceSearchTerm } from '@/utils/galleryFilter';
@@ -234,7 +234,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     dateTimeZone: getBrowserDateTimeZone(),
     hiddenFolders: storedPreferencesRef.current.hiddenFolders ?? [],
     hiddenTags: storedPreferencesRef.current.hiddenTags ?? [],
-    hiddenNamespaces: namespace === '__all__' ? loadHiddenNamespaces() : [],
+    hiddenNamespaces: loadHiddenNamespaces(),
     showMotionAssetsOnly: storedPreferencesRef.current.showMotionAssetsOnly ?? false,
   });
   const didInitServerQueryFetchRef = useRef(false);
@@ -467,7 +467,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   } = useGalleryFilters({
     images: galleryImages,
     familySourceImages: imagesWithPrompts,
-    namespace,
     serverPagination: colorSearchHex ? null : serverPagination,
     serverFamilySummaryMap: colorSearchHex ? undefined : serverFamilySummaryMap,
     serverDuplicateIds: colorSearchHex ? undefined : serverDuplicateSummary?.pageDuplicateIds,
@@ -552,7 +551,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
 
   const hiddenFolderSet = useMemo(() => new Set(hiddenFolders), [hiddenFolders]);
   const hiddenTagSet = useMemo(() => new Set(hiddenTags.map(tag => tag.toLowerCase())), [hiddenTags]);
-  const hiddenNamespacesForQuery = getAppliedHiddenNamespaces(namespace, hiddenNamespaces);
+  const hiddenNamespacesForQuery = hiddenNamespaces;
   const shouldIncludeExtrasForSearch = useMemo(
     () => isLikelySourceSearchTerm(searchTerm),
     [searchTerm]

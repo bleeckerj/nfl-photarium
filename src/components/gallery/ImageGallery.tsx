@@ -183,7 +183,6 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       clearFilters,
     } = useGalleryFilters({
       images,
-      namespace,
       initialPreferences: {
         ...storedPreferencesRef.current,
         hiddenNamespaces: loadHiddenNamespaces(),

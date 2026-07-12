@@ -2,11 +2,6 @@ type NamespaceBearingImage = {
   namespace?: string;
 };
 
-export const getAppliedHiddenNamespaces = (
-  namespace: string | undefined,
-  hiddenNamespaces: string[]
-): string[] => (namespace === '__all__' ? hiddenNamespaces : []);
-
 export const getKnownNamespaces = (
   registryNamespaces: string[],
   images: NamespaceBearingImage[],

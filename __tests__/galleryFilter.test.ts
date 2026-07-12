@@ -131,7 +131,7 @@ describe('filterImagesForGallery', () => {
     expect(result.map((img) => img.id)).toContain('6');
   });
 
-  it('filters hidden namespaces from the all-namespaces result set', () => {
+  it('filters hidden namespaces from the result set', () => {
     const result = filterImagesForGallery([
       makeImage({ id: 'flickr', namespace: 'cf-flickr' }),
       makeImage({ id: 'default', namespace: 'cf-default' }),
