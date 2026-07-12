@@ -46,6 +46,7 @@ export interface GalleryFilterOptions {
   onlyCanonical: boolean;
   hiddenFolders?: string[];
   hiddenTags?: string[];
+  hiddenNamespaces?: string[];
   showFavoritesOnly?: boolean;
 }
 
@@ -128,11 +129,26 @@ const matchesHiddenTagFilter = (image: GalleryImage, hiddenTags?: string[]) => {
   return !image.tags.some(tag => hiddenSet.has(normalize(tag)));
 };
 
+const matchesHiddenNamespaceFilter = (image: GalleryImage, hiddenNamespaces?: string[]) => {
+  if (!hiddenNamespaces || hiddenNamespaces.length === 0 || !image.namespace) return true;
+  const hiddenSet = new Set(hiddenNamespaces.map(normalize));
+  return !hiddenSet.has(normalize(image.namespace));
+};
+
 export const filterImagesForGallery = (
   images: GalleryImage[],
   options: GalleryFilterOptions
 ): GalleryImage[] => {
-  const { selectedFolder, selectedTag, searchTerm, onlyCanonical, hiddenFolders, hiddenTags, showFavoritesOnly } = options;
+  const {
+    selectedFolder,
+    selectedTag,
+    searchTerm,
+    onlyCanonical,
+    hiddenFolders,
+    hiddenTags,
+    hiddenNamespaces,
+    showFavoritesOnly,
+  } = options;
   return images.filter((image) => {
     if (!matchesFolderFilter(image, selectedFolder)) return false;
     if (!matchesTagFilter(image, selectedTag)) return false;
@@ -141,6 +157,7 @@ export const filterImagesForGallery = (
     if (onlyCanonical && image.parentId) return false;
     if (!matchesHiddenFolderFilter(image, hiddenFolders)) return false;
     if (!matchesHiddenTagFilter(image, hiddenTags)) return false;
+    if (!matchesHiddenNamespaceFilter(image, hiddenNamespaces)) return false;
     return true;
   });
 };

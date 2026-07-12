@@ -6,14 +6,19 @@ import { useToast } from './Toast';
 interface GalleryCommandBarProps {
   hiddenFolders: string[];
   hiddenTags: string[];
+  hiddenNamespaces: string[];
   knownFolders: string[];
   knownTags: string[];
+  knownNamespaces: string[];
   onHideFolder: (folderName: string) => boolean;
   onUnhideFolder: (folderName: string) => boolean;
   onClearHidden: () => boolean;
   onHideTag: (tagName: string) => boolean;
   onUnhideTag: (tagName: string) => boolean;
   onClearHiddenTags: () => boolean;
+  onHideNamespace: (namespaceName: string) => boolean;
+  onUnhideNamespace: (namespaceName: string) => boolean;
+  onClearHiddenNamespaces: () => boolean;
   onSelectFolder: (folderName: string) => void;
   selectedTag: string;
   onSelectTag: (tagName: string) => void;
@@ -35,14 +40,18 @@ const baseHelp = [
   'Available commands:',
   '- hide folder <name>: Temporarily remove a folder from the gallery',
   '- show folder <name>: Bring a hidden folder back into the gallery',
+  '- hide namespace <name>: Temporarily remove a namespace from All namespaces',
+  '- show namespace <name>: Bring a hidden namespace back into the gallery',
   '- hide tag <name>: Temporarily remove a tag from the gallery',
   '- show tag <name>: Filter the gallery to a specific tag',
   '- clear tag: Remove the tag filter',
   '- unhide tag <name>: Bring a hidden tag back into the gallery',
   '- list hidden folders: Show currently hidden folders',
   '- list hidden tags: Show currently hidden tags',
+  '- list hidden namespaces: Show currently hidden namespaces',
   '- clear hidden: Unhide every folder',
   '- clear hidden tags: Unhide every tag',
+  '- clear hidden namespaces: Unhide every namespace',
   '- list folders: List all known folders',
   '- show only folders <a,b>: Hide every folder except the listed ones',
   '- show only tags <a,b>: Hide every tag except the listed ones',
@@ -61,14 +70,19 @@ const baseHelp = [
 export default function GalleryCommandBar({
   hiddenFolders,
   hiddenTags,
+  hiddenNamespaces,
   knownFolders,
   knownTags,
+  knownNamespaces,
   onHideFolder,
   onUnhideFolder,
   onClearHidden,
   onHideTag,
   onUnhideTag,
   onClearHiddenTags,
+  onHideNamespace,
+  onUnhideNamespace,
+  onClearHiddenNamespaces,
   onSelectFolder,
   selectedTag,
   onSelectTag,
@@ -93,17 +107,26 @@ export default function GalleryCommandBar({
 
   const suggestions = useMemo(() => {
     const showOnlyMatch = /^\s*show\s+only\s+(folders?|tags?)\s*(.*)$/i.exec(inputValue);
-    const baseMatch = /^\s*(hide|show|unhide)\s+(folders?|tags?)\s*(.*)$/i.exec(inputValue);
+    const baseMatch = /^\s*(hide|show|unhide)\s+(folders?|tags?|namespaces?)\s*(.*)$/i.exec(inputValue);
     if (!showOnlyMatch && !baseMatch) {
       return [];
     }
     const action = (showOnlyMatch ? 'show only' : baseMatch?.[1] || '').toLowerCase();
-    const target = (showOnlyMatch ? showOnlyMatch[1] : baseMatch?.[2] || '').toLowerCase().startsWith('tag')
+    const targetValue = (showOnlyMatch ? showOnlyMatch[1] : baseMatch?.[2] || '').toLowerCase();
+    const target = targetValue.startsWith('tag')
       ? 'tag'
-      : 'folder';
+      : targetValue.startsWith('namespace')
+        ? 'namespace'
+        : 'folder';
     const query = (showOnlyMatch ? showOnlyMatch[2] : baseMatch?.[3] || '').trim().toLowerCase();
     const baseList =
-      target === 'folder'
+      target === 'namespace'
+        ? action === 'hide'
+          ? knownNamespaces.filter(namespace => !hiddenNamespaces.some(hidden => hidden.toLowerCase() === namespace.toLowerCase()))
+          : hiddenNamespaces.length
+            ? hiddenNamespaces
+            : knownNamespaces
+        : target === 'folder'
         ? action === 'hide'
           ? knownFolders.filter(folder => !hiddenFolders.includes(folder))
           : action === 'show' || action === 'unhide'
@@ -126,7 +149,7 @@ export default function GalleryCommandBar({
       .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
       .slice(0, 8)
       .map((item) => `${action} ${target} ${item}`);
-  }, [inputValue, knownFolders, knownTags, hiddenFolders, hiddenTags]);
+  }, [inputValue, knownFolders, knownTags, knownNamespaces, hiddenFolders, hiddenTags, hiddenNamespaces]);
 
   const applySuggestion = (value: string) => {
     setInputValue(value);
@@ -148,6 +171,11 @@ export default function GalleryCommandBar({
 
     if (/^(list|show)\s+hidden\s+tags?$/i.test(trimmed)) {
       setStatusLine(hiddenTags.length ? `Hidden tags: ${hiddenTags.join(', ')}` : 'No hidden tags.');
+      return;
+    }
+
+    if (/^(list|show)\s+hidden\s+namespaces?$/i.test(trimmed)) {
+      setStatusLine(hiddenNamespaces.length ? `Hidden namespaces: ${hiddenNamespaces.join(', ')}` : 'No hidden namespaces.');
       return;
     }
 
@@ -279,6 +307,15 @@ export default function GalleryCommandBar({
       setStatusLine(cleared ? 'Hidden tags cleared.' : 'No hidden tags to clear.');
       if (cleared) {
         toast.push('All hidden tags cleared');
+      }
+      return;
+    }
+
+    if (/^(clear|reset)\s+hidden\s+namespaces?$/i.test(trimmed)) {
+      const cleared = onClearHiddenNamespaces();
+      setStatusLine(cleared ? 'Hidden namespaces cleared.' : 'No hidden namespaces to clear.');
+      if (cleared) {
+        toast.push('All hidden namespaces cleared');
       }
       return;
     }
@@ -478,6 +515,48 @@ export default function GalleryCommandBar({
         toast.push(`Visible tag${removedTags.length > 1 ? 's' : ''}: ${summary}`);
       } else {
         setStatusLine('None of those tags were hidden.');
+      }
+      return;
+    }
+
+    const hideNamespaceMatch = /^(hide)\s+namespaces?\s+(.+)$/i.exec(trimmed);
+    if (hideNamespaceMatch) {
+      const namespaceList = hideNamespaceMatch[2]
+        .split(',')
+        .map(namespace => namespace.trim())
+        .filter(Boolean);
+      if (namespaceList.length === 0) {
+        setStatusLine('Provide at least one namespace to hide.');
+        return;
+      }
+      const addedNamespaces = namespaceList.filter(namespace => onHideNamespace(namespace));
+      if (addedNamespaces.length > 0) {
+        const summary = addedNamespaces.join(', ');
+        setStatusLine(`Hiding namespace${addedNamespaces.length > 1 ? 's' : ''}: ${summary}.`);
+        toast.push(`Hidden namespace${addedNamespaces.length > 1 ? 's' : ''}: ${summary}`);
+      } else {
+        setStatusLine('All provided namespaces are already hidden.');
+      }
+      return;
+    }
+
+    const showNamespaceMatch = /^(unhide|show)\s+namespaces?\s+(.+)$/i.exec(trimmed);
+    if (showNamespaceMatch) {
+      const namespaceList = showNamespaceMatch[2]
+        .split(',')
+        .map(namespace => namespace.trim())
+        .filter(Boolean);
+      if (namespaceList.length === 0) {
+        setStatusLine('Provide at least one namespace to show.');
+        return;
+      }
+      const removedNamespaces = namespaceList.filter(namespace => onUnhideNamespace(namespace));
+      if (removedNamespaces.length > 0) {
+        const summary = removedNamespaces.join(', ');
+        setStatusLine(`Showing namespace${removedNamespaces.length > 1 ? 's' : ''}: ${summary}.`);
+        toast.push(`Visible namespace${removedNamespaces.length > 1 ? 's' : ''}: ${summary}`);
+      } else {
+        setStatusLine('None of those namespaces were hidden.');
       }
       return;
     }

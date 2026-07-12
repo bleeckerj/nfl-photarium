@@ -6,6 +6,8 @@ import { GalleryPagerStrip } from '@/components/gallery/GalleryPagerStrip';
 import { GalleryFilters } from '@/components/gallery/GalleryFilters';
 import { GalleryNamespaceModal } from '@/components/gallery/GalleryNamespaceModal';
 import LegacyTopBar from '@/components/gallery/LegacyTopBar';
+import GalleryCommandBar from '@/components/GalleryCommandBar';
+import { ToastProvider } from '@/components/Toast';
 
 describe('gallery toolbar components', () => {
   it('renders the compact header with counts, page state, and a manual toggle', () => {
@@ -325,5 +327,45 @@ describe('gallery toolbar components', () => {
     expect(markup).toContain('&quot;cf-default&quot; is a system namespace');
     expect(markup).not.toContain('Delete namespace');
     expect(markup).not.toContain('Rename namespace');
+  });
+
+  it('advertises namespace visibility commands in the Gallery CLI', () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(
+        ToastProvider,
+        null,
+        React.createElement(GalleryCommandBar, {
+          hiddenFolders: [],
+          hiddenTags: [],
+          hiddenNamespaces: [],
+          knownFolders: [],
+          knownTags: [],
+          knownNamespaces: ['cf-flickr'],
+          onHideFolder: vi.fn(),
+          onUnhideFolder: vi.fn(),
+          onClearHidden: vi.fn(),
+          onHideTag: vi.fn(),
+          onUnhideTag: vi.fn(),
+          onClearHiddenTags: vi.fn(),
+          onHideNamespace: vi.fn(),
+          onUnhideNamespace: vi.fn(),
+          onClearHiddenNamespaces: vi.fn(),
+          onSelectFolder: vi.fn(),
+          selectedTag: '',
+          onSelectTag: vi.fn(),
+          onClearTagFilter: vi.fn(),
+          showParentsOnly: false,
+          onSetParentsOnly: vi.fn(),
+          currentPage: 1,
+          totalPages: 1,
+          onGoToPage: vi.fn(),
+          embeddingFilter: 'none',
+          onSetEmbeddingFilter: vi.fn(),
+        })
+      )
+    );
+
+    expect(markup).toContain('hide namespace &lt;name&gt;');
+    expect(markup).toContain('list hidden namespaces');
   });
 });

@@ -23,6 +23,7 @@ export const STORAGE_KEYS = {
   PREFERENCES: 'galleryPreferences',
   HIDDEN_FOLDERS: 'galleryHiddenFolders',
   HIDDEN_TAGS: 'galleryHiddenTags',
+  HIDDEN_NAMESPACES: 'galleryHiddenNamespaces',
   BROKEN_AUDIT: 'galleryBrokenAudit',
 } as const;
 

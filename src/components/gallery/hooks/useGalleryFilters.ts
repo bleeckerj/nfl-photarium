@@ -9,7 +9,14 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { filterImagesForGallery } from '@/utils/galleryFilter';
 import { matchesAspectRatioClass } from '@/utils/aspectRatioClass';
-import { loadHiddenFolders, loadHiddenTags, persistHiddenFolders, persistHiddenTags } from '../storage';
+import {
+  loadHiddenFolders,
+  loadHiddenNamespaces,
+  loadHiddenTags,
+  persistHiddenFolders,
+  persistHiddenNamespaces,
+  persistHiddenTags,
+} from '../storage';
 import { computeDuplicateGroups, buildChildrenMap, buildFamilySummaryMap, formatDateRangeLabel } from '../utils';
 import { DEFAULT_PAGE_SIZE } from '../constants';
 import { getDateKeyRangeMs } from '../dateFilter';
@@ -24,6 +31,7 @@ import type {
 
 interface UseGalleryFiltersOptions {
   images: CloudflareImage[];
+  namespace?: string;
   familySourceImages?: CloudflareImage[];
   serverPagination?: {
     page: number;
@@ -50,6 +58,7 @@ interface UseGalleryFiltersOptions {
     dateFilter: DateFilter | null;
     hiddenFolders?: string[];
     hiddenTags?: string[];
+    hiddenNamespaces?: string[];
     pageSize?: number;
     currentPage?: number;
   };
@@ -92,12 +101,16 @@ interface UseGalleryFiltersReturn {
   // Hidden folders/tags
   hiddenFolders: string[];
   hiddenTags: string[];
+  hiddenNamespaces: string[];
   hideFolderByName: (name: string) => boolean;
   unhideFolderByName: (name: string) => boolean;
   clearHiddenFolders: () => boolean;
   hideTagByName: (name: string) => boolean;
   unhideTagByName: (name: string) => boolean;
   clearHiddenTags: () => boolean;
+  hideNamespaceByName: (name: string) => boolean;
+  unhideNamespaceByName: (name: string) => boolean;
+  clearHiddenNamespaces: () => boolean;
   
   // Computed values
   filteredImages: CloudflareImage[];
@@ -135,6 +148,7 @@ interface UseGalleryFiltersReturn {
 
 export function useGalleryFilters({
   images,
+  namespace,
   familySourceImages,
   initialPreferences,
   brokenImageIds,
@@ -173,6 +187,9 @@ export function useGalleryFilters({
   const [hiddenTags, setHiddenTags] = useState<string[]>(
     () => initialPreferences.hiddenTags ?? loadHiddenTags()
   );
+  const [hiddenNamespaces, setHiddenNamespaces] = useState<string[]>(
+    () => initialPreferences.hiddenNamespaces ?? loadHiddenNamespaces()
+  );
   const didInitFilterPageRef = useRef(false);
 
   // Persist hidden folders/tags
@@ -183,6 +200,10 @@ export function useGalleryFilters({
   useEffect(() => {
     persistHiddenTags(hiddenTags);
   }, [hiddenTags]);
+
+  useEffect(() => {
+    persistHiddenNamespaces(hiddenNamespaces);
+  }, [hiddenNamespaces]);
 
   // Reset selected folder if it becomes hidden
   useEffect(() => {
@@ -259,6 +280,38 @@ export function useGalleryFilters({
     return true;
   }, [hiddenTags]);
 
+  const hideNamespaceByName = useCallback((namespaceName: string) => {
+    const sanitized = namespaceName.trim();
+    if (!sanitized) return false;
+    const normalized = sanitized.toLowerCase();
+    let added = false;
+    setHiddenNamespaces(prev => {
+      if (prev.some(namespace => namespace.toLowerCase() === normalized)) return prev;
+      added = true;
+      return [...prev, sanitized];
+    });
+    return added;
+  }, []);
+
+  const unhideNamespaceByName = useCallback((namespaceName: string) => {
+    const sanitized = namespaceName.trim();
+    if (!sanitized) return false;
+    const normalized = sanitized.toLowerCase();
+    let removed = false;
+    setHiddenNamespaces(prev => {
+      if (!prev.some(namespace => namespace.toLowerCase() === normalized)) return prev;
+      removed = true;
+      return prev.filter(namespace => namespace.toLowerCase() !== normalized);
+    });
+    return removed;
+  }, []);
+
+  const clearHiddenNamespaces = useCallback(() => {
+    if (hiddenNamespaces.length === 0) return false;
+    setHiddenNamespaces([]);
+    return true;
+  }, [hiddenNamespaces]);
+
   const familyImages = familySourceImages ?? images;
   const isServerPaged = Boolean(serverPagination);
 
@@ -283,9 +336,21 @@ export function useGalleryFilters({
       onlyCanonical,
       hiddenFolders,
       hiddenTags,
+      hiddenNamespaces: namespace === '__all__' ? hiddenNamespaces : [],
       showFavoritesOnly,
     });
-  }, [images, selectedFolder, selectedTag, searchTerm, onlyCanonical, hiddenFolders, hiddenTags, showFavoritesOnly]);
+  }, [
+    images,
+    namespace,
+    selectedFolder,
+    selectedTag,
+    searchTerm,
+    onlyCanonical,
+    hiddenFolders,
+    hiddenTags,
+    hiddenNamespaces,
+    showFavoritesOnly,
+  ]);
 
   // Duplicate groups
   const duplicateGroups = useMemo(() => computeDuplicateGroups(baseFilteredImages), [baseFilteredImages]);
@@ -396,6 +461,7 @@ export function useGalleryFilters({
     aspectRatioFilters.length > 0 ||
     hiddenFolders.length > 0 ||
     hiddenTags.length > 0 ||
+    hiddenNamespaces.length > 0 ||
     dateFilter !== null
   );
 
@@ -416,6 +482,7 @@ export function useGalleryFilters({
     setAspectRatioFilters([]);
     setHiddenFolders([]);
     setHiddenTags([]);
+    setHiddenNamespaces([]);
     setDateFilter(null);
   }, []);
 
@@ -551,12 +618,16 @@ export function useGalleryFilters({
     setDateFilter,
     hiddenFolders,
     hiddenTags,
+    hiddenNamespaces,
     hideFolderByName,
     unhideFolderByName,
     clearHiddenFolders,
     hideTagByName,
     unhideTagByName,
     clearHiddenTags,
+    hideNamespaceByName,
+    unhideNamespaceByName,
+    clearHiddenNamespaces,
     filteredImages,
     filteredWithVariants,
     sortedImages,

@@ -17,6 +17,7 @@ export type GalleryServerQueryState = {
   dateTimeZone?: string;
   hiddenFolders: string[];
   hiddenTags: string[];
+  hiddenNamespaces?: string[];
   showMotionAssetsOnly: boolean;
 };
 
@@ -85,6 +86,7 @@ export const buildGalleryImagesUrl = ({
     if (serverQuery.dateFilter && serverQuery.dateTimeZone) params.set('dateTimeZone', serverQuery.dateTimeZone);
     if (serverQuery.hiddenFolders.length) params.set('hiddenFolders', serverQuery.hiddenFolders.join(','));
     if (serverQuery.hiddenTags.length) params.set('hiddenTags', serverQuery.hiddenTags.join(','));
+    if (serverQuery.hiddenNamespaces?.length) params.set('hiddenNamespaces', serverQuery.hiddenNamespaces.join(','));
   }
   const queryString = params.toString();
   return queryString ? `/api/images?${queryString}` : '/api/images';

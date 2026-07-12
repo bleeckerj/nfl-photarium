@@ -35,6 +35,8 @@ import { DEFAULT_GRID_SIZE, VARIANT_OPTIONS } from './gallery/constants';
 import { normalizeGridSize } from './gallery/gridSizing';
 import { toDateKey } from './gallery/dateFilter';
 import { collectFacetFolders, collectImageFolders, mergeFolderNames } from './gallery/folderOptions';
+import { loadHiddenNamespaces } from './gallery/storage';
+import { getAppliedHiddenNamespaces, getKnownNamespaces } from './gallery/namespaceVisibility';
 import { clearGalleryReturnState, GALLERY_RETURN_SNAPSHOT_KEY } from './gallery/returnState';
 import { useSearchParams } from 'next/navigation';
 import { isLikelySourceSearchTerm } from '@/utils/galleryFilter';
@@ -232,6 +234,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     dateTimeZone: getBrowserDateTimeZone(),
     hiddenFolders: storedPreferencesRef.current.hiddenFolders ?? [],
     hiddenTags: storedPreferencesRef.current.hiddenTags ?? [],
+    hiddenNamespaces: namespace === '__all__' ? loadHiddenNamespaces() : [],
     showMotionAssetsOnly: storedPreferencesRef.current.showMotionAssetsOnly ?? false,
   });
   const didInitServerQueryFetchRef = useRef(false);
@@ -453,8 +456,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     setOnlyWithVariants, showMotionAssetsOnly, setShowMotionAssetsOnly, showFavoritesOnly,
     setShowFavoritesOnly, showComfyOnly, setShowComfyOnly, showDuplicatesOnly, setShowDuplicatesOnly,
     showBrokenOnly, setShowBrokenOnly, embeddingFilter, setEmbeddingFilter, aspectRatioFilters,
-    setAspectRatioFilters, dateFilter, setDateFilter, hiddenFolders, hiddenTags, hideFolderByName,
-    unhideFolderByName, clearHiddenFolders, hideTagByName, unhideTagByName, clearHiddenTags,
+    setAspectRatioFilters, dateFilter, setDateFilter, hiddenFolders, hiddenTags, hiddenNamespaces,
+    hideFolderByName, unhideFolderByName, clearHiddenFolders, hideTagByName, unhideTagByName,
+    clearHiddenTags, hideNamespaceByName, unhideNamespaceByName, clearHiddenNamespaces,
     filteredImages, filteredWithVariants, sortedImages, duplicateGroups, duplicateIds, childrenMap,
     familySummaryMap, hasActiveFilters, clearFilters, currentPage, pageSize, setPageSize, totalPages,
     pageImages, showPagination, hasResults, pageIndex, currentPageRangeLabel, prevPageRangeLabel,
@@ -463,6 +467,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   } = useGalleryFilters({
     images: galleryImages,
     familySourceImages: imagesWithPrompts,
+    namespace,
     serverPagination: colorSearchHex ? null : serverPagination,
     serverFamilySummaryMap: colorSearchHex ? undefined : serverFamilySummaryMap,
     serverDuplicateIds: colorSearchHex ? undefined : serverDuplicateSummary?.pageDuplicateIds,
@@ -483,6 +488,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       dateFilter: storedPreferencesRef.current.dateFilter ?? null,
       hiddenFolders: storedPreferencesRef.current.hiddenFolders ?? [],
       hiddenTags: storedPreferencesRef.current.hiddenTags ?? [],
+      hiddenNamespaces: storedPreferencesRef.current.hiddenNamespaces ?? loadHiddenNamespaces(),
       pageSize: storedPreferencesRef.current.pageSize ?? DEFAULT_PAGE_SIZE,
       currentPage: storedPreferencesRef.current.currentPage ?? 1,
     },
@@ -546,6 +552,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
 
   const hiddenFolderSet = useMemo(() => new Set(hiddenFolders), [hiddenFolders]);
   const hiddenTagSet = useMemo(() => new Set(hiddenTags.map(tag => tag.toLowerCase())), [hiddenTags]);
+  const hiddenNamespacesForQuery = getAppliedHiddenNamespaces(namespace, hiddenNamespaces);
   const shouldIncludeExtrasForSearch = useMemo(
     () => isLikelySourceSearchTerm(searchTerm),
     [searchTerm]
@@ -574,6 +581,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       dateTimeZone: getBrowserDateTimeZone(),
       hiddenFolders,
       hiddenTags,
+      hiddenNamespaces: hiddenNamespacesForQuery,
       showMotionAssetsOnly,
     }),
     [
@@ -583,6 +591,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       embeddingFilter,
       hiddenFolders,
       hiddenTags,
+      hiddenNamespacesForQuery,
       onlyCanonical,
       onlyWithVariants,
       pageSize,
@@ -624,6 +633,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       [bulkFolderInput, editFolderSelect]
     );
   }, [bulkFolderInput, editFolderSelect, hiddenFolders, images, selectedFolder, serverFacets]);
+  const uniqueNamespaces = getKnownNamespaces(registryNamespaces, images, hiddenNamespaces);
   const handleFolderFilterChange = useCallback((folder: string) => {
     if (
       folder &&
@@ -638,7 +648,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
 
   const { galleryReturnHrefSuffix, saveGalleryReturnState } = useGalleryReturnState({
     aspectRatioFilters, colorSearchHex, currentPage, dateFilter, embeddingFilter, filteredImages,
-    hiddenFolders, hiddenTags, namespace, onlyCanonical, onlyWithVariants, pageImages, pageSize,
+    hiddenFolders, hiddenTags, hiddenNamespaces, namespace, onlyCanonical, onlyWithVariants, pageImages, pageSize,
     searchTerm, selectedFolder, selectedTag, showBrokenOnly, showComfyOnly, showDuplicatesOnly,
     showFavoritesOnly, showMotionAssetsOnly,
   });
@@ -890,9 +900,12 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         },
         auditLoading, auditEntries, auditProgress, showCli,
         commandBarProps: {
-          hiddenFolders, hiddenTags, knownFolders: uniqueFolders, knownTags: uniqueTags,
+          hiddenFolders, hiddenTags, hiddenNamespaces, knownFolders: uniqueFolders, knownTags: uniqueTags,
+          knownNamespaces: uniqueNamespaces,
           onHideFolder: hideFolderByName, onUnhideFolder: unhideFolderByName, onClearHidden: clearHiddenFolders,
           onHideTag: hideTagByName, onUnhideTag: unhideTagByName, onClearHiddenTags: clearHiddenTags,
+          onHideNamespace: hideNamespaceByName, onUnhideNamespace: unhideNamespaceByName,
+          onClearHiddenNamespaces: clearHiddenNamespaces,
           onSelectFolder: setSelectedFolder, selectedTag, onSelectTag: setSelectedTag,
           onClearTagFilter: () => setSelectedTag(''), showParentsOnly: onlyWithVariants,
           onSetParentsOnly: setOnlyWithVariants, showComfyOnly, onSetComfyOnly: setShowComfyOnly,

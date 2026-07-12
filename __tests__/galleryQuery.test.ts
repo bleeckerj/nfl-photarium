@@ -66,6 +66,22 @@ describe('queryGalleryAssets', () => {
     ]);
   });
 
+  it('filters hidden namespaces before pagination and facet counts', () => {
+    const result = queryGalleryAssets(
+      [
+        asset({ id: 'flickr', namespace: 'cf-flickr', tags: ['source'] }),
+        asset({ id: 'default', namespace: 'cf-default', tags: ['source'] }),
+      ],
+      { hiddenNamespaces: ['CF-FLICKR'] },
+      1,
+      60
+    );
+
+    expect(result.images.map(image => image.id)).toEqual(['default']);
+    expect(result.total).toBe(1);
+    expect(result.facets.tags).toEqual([{ value: 'source', count: 1 }]);
+  });
+
   it('returns duplicate summaries and filters duplicate mode server-side', () => {
     const result = queryGalleryAssets(
       [

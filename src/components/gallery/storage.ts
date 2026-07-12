@@ -94,6 +94,42 @@ export const persistHiddenTags = (tags: string[]): void => {
 };
 
 /**
+ * Load namespaces hidden from the all-namespaces gallery view.
+ */
+export const loadHiddenNamespaces = (): string[] => {
+  if (!isBrowser()) return [];
+
+  try {
+    const storedValue = window.localStorage.getItem(STORAGE_KEYS.HIDDEN_NAMESPACES);
+    if (!storedValue) return [];
+
+    const parsed = JSON.parse(storedValue);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .filter((item): item is string => typeof item === 'string')
+        .map(item => item.trim())
+        .filter(Boolean);
+    }
+  } catch (error) {
+    console.warn('Failed to parse hidden namespaces', error);
+  }
+  return [];
+};
+
+/**
+ * Persist namespaces hidden from the all-namespaces gallery view.
+ */
+export const persistHiddenNamespaces = (namespaces: string[]): void => {
+  if (!isBrowser()) return;
+
+  try {
+    window.localStorage.setItem(STORAGE_KEYS.HIDDEN_NAMESPACES, JSON.stringify(namespaces));
+  } catch (error) {
+    console.warn('Failed to save hidden namespaces', error);
+  }
+};
+
+/**
  * Load broken audit state from localStorage
  */
 export const loadBrokenAudit = (): BrokenAudit => {

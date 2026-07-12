@@ -53,6 +53,7 @@ export type GalleryQueryFilters = {
   dateTimeZone?: string;
   hiddenFolders?: string[];
   hiddenTags?: string[];
+  hiddenNamespaces?: string[];
 };
 
 export type GalleryQueryFacets = {
@@ -145,7 +146,12 @@ const matchesTag = (asset: GalleryQueryAsset, tag?: string) => {
   return Array.isArray(asset.tags) && asset.tags.includes(tag);
 };
 
-const matchesHidden = (asset: GalleryQueryAsset, hiddenFolders?: string[], hiddenTags?: string[]) => {
+const matchesHidden = (
+  asset: GalleryQueryAsset,
+  hiddenFolders?: string[],
+  hiddenTags?: string[],
+  hiddenNamespaces?: string[]
+) => {
   if (hiddenFolders?.length) {
     const hiddenNoFolder = hiddenFolders.some((folder) => normalize(folder).replace(/\s+/g, '-') === 'no-folder');
     if (!asset.folder && hiddenNoFolder) return false;
@@ -154,6 +160,10 @@ const matchesHidden = (asset: GalleryQueryAsset, hiddenFolders?: string[], hidde
   if (hiddenTags?.length && Array.isArray(asset.tags)) {
     const hiddenSet = new Set(hiddenTags.map(normalize));
     if (asset.tags.some((tag) => hiddenSet.has(normalize(tag)))) return false;
+  }
+  if (hiddenNamespaces?.length && asset.namespace) {
+    const hiddenSet = new Set(hiddenNamespaces.map(normalize));
+    if (hiddenSet.has(normalize(asset.namespace))) return false;
   }
   return true;
 };
@@ -311,7 +321,7 @@ const getOrBuildScopeMemo = <T extends GalleryQueryAsset>(
   }
   const familySummaryMapAll = buildFamilySummaryMap(assets as never);
   const facetBase = assets.filter((asset) =>
-    matchesHidden(asset, filters.hiddenFolders, filters.hiddenTags)
+    matchesHidden(asset, filters.hiddenFolders, filters.hiddenTags, filters.hiddenNamespaces)
   );
   const facets = buildFacets(facetBase);
   const entry: ScopeMemoEntry = {
@@ -337,7 +347,8 @@ const buildScopeMemoKey = (
 ): string => {
   const hiddenFolders = (filters.hiddenFolders ?? []).slice().sort().join(',');
   const hiddenTags = (filters.hiddenTags ?? []).slice().sort().join(',');
-  return `${scopeKey}|hf:${hiddenFolders}|ht:${hiddenTags}`;
+  const hiddenNamespaces = (filters.hiddenNamespaces ?? []).slice().sort().join(',');
+  return `${scopeKey}|hf:${hiddenFolders}|ht:${hiddenTags}|hn:${hiddenNamespaces}`;
 };
 
 export const queryGalleryAssets = <T extends GalleryQueryAsset>(
@@ -362,7 +373,7 @@ export const queryGalleryAssets = <T extends GalleryQueryAsset>(
   } else {
     familySummaryMapAll = buildFamilySummaryMap(assets as never);
     facetBase = assets.filter((asset) =>
-      matchesHidden(asset, filters.hiddenFolders, filters.hiddenTags)
+      matchesHidden(asset, filters.hiddenFolders, filters.hiddenTags, filters.hiddenNamespaces)
     );
     facets = buildFacets(facetBase);
   }

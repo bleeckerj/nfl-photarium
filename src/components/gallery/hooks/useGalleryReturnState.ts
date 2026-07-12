@@ -20,6 +20,7 @@ type UseGalleryReturnStateOptions = {
   filteredImages: CloudflareImage[];
   hiddenFolders: string[];
   hiddenTags: string[];
+  hiddenNamespaces: string[];
   namespace?: string;
   onlyCanonical: boolean;
   onlyWithVariants: boolean;
@@ -44,6 +45,7 @@ export function useGalleryReturnState({
   filteredImages,
   hiddenFolders,
   hiddenTags,
+  hiddenNamespaces,
   namespace,
   onlyCanonical,
   onlyWithVariants,
@@ -94,6 +96,7 @@ export function useGalleryReturnState({
           dateFilter,
           hiddenFolders,
           hiddenTags,
+          hiddenNamespaces,
           pageSize,
           currentPage,
         },
@@ -119,6 +122,7 @@ export function useGalleryReturnState({
     filteredImages,
     hiddenFolders,
     hiddenTags,
+    hiddenNamespaces,
     namespace,
     onlyCanonical,
     onlyWithVariants,

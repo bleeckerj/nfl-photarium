@@ -32,6 +32,7 @@ export type GalleryReturnFilters = {
   dateFilter: DateFilter | null;
   hiddenFolders: string[];
   hiddenTags: string[];
+  hiddenNamespaces: string[];
   pageSize: number;
   currentPage: number;
 };
@@ -167,6 +168,7 @@ const normalizeFilters = (value: unknown): GalleryReturnFilters | null => {
     dateFilter: normalizeDateFilterValue(raw.dateFilter),
     hiddenFolders: normalizeStringArray(raw.hiddenFolders),
     hiddenTags: normalizeStringArray(raw.hiddenTags),
+    hiddenNamespaces: normalizeStringArray(raw.hiddenNamespaces),
     pageSize: normalizePageSize(raw.pageSize),
     currentPage: normalizePositiveInteger(raw.currentPage, 1),
   };

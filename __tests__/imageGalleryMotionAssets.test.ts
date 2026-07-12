@@ -117,11 +117,12 @@ describe('ImageGallery motion assets helpers', () => {
           dateTimeZone: 'America/Los_Angeles',
           hiddenFolders: ['Archive'],
           hiddenTags: ['private'],
+          hiddenNamespaces: ['cf-flickr'],
           showMotionAssetsOnly: false,
         },
       })
     ).toBe(
-      '/api/images?namespace=studio&page=2&pageSize=60&search=blue+chair&folder=editorial&tag=hero&onlyCanonical=1&onlyWithVariants=1&favorites=1&duplicates=1&comfy=1&embedding=missing-any&aspectRatioClasses=horizontal&dateStart=2026-01-01&dateEnd=2026-01-31&dateTimeZone=America%2FLos_Angeles&hiddenFolders=Archive&hiddenTags=private'
+      '/api/images?namespace=studio&page=2&pageSize=60&search=blue+chair&folder=editorial&tag=hero&onlyCanonical=1&onlyWithVariants=1&favorites=1&duplicates=1&comfy=1&embedding=missing-any&aspectRatioClasses=horizontal&dateStart=2026-01-01&dateEnd=2026-01-31&dateTimeZone=America%2FLos_Angeles&hiddenFolders=Archive&hiddenTags=private&hiddenNamespaces=cf-flickr'
     );
   });
 

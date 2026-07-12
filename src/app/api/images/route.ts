@@ -74,6 +74,7 @@ export async function GET(request: NextRequest) {
     const dateTimeZone = request.nextUrl.searchParams.get('dateTimeZone')?.trim() || '';
     const hiddenFolders = parseCsvParam(request.nextUrl.searchParams.get('hiddenFolders'));
     const hiddenTags = parseCsvParam(request.nextUrl.searchParams.get('hiddenTags'));
+    const hiddenNamespaces = parseCsvParam(request.nextUrl.searchParams.get('hiddenNamespaces'));
     const focusAssetId = request.nextUrl.searchParams.get('focus')?.trim() || '';
     const namespaceParam = request.nextUrl.searchParams.get('namespace');
     const videoLimitParam = request.nextUrl.searchParams.get('videoLimit');
@@ -283,7 +284,8 @@ export async function GET(request: NextRequest) {
       dateEnd ||
       dateTimeZone ||
       hiddenFolders.length > 0 ||
-      hiddenTags.length > 0
+      hiddenTags.length > 0 ||
+      hiddenNamespaces.length > 0
     );
     const hasFocusQuery = Boolean(focusAssetId);
     // Folder filtering, hidden-folder filtering, and folder facets all need the
@@ -356,6 +358,7 @@ export async function GET(request: NextRequest) {
               dateTimeZone,
               hiddenFolders,
               hiddenTags,
+              hiddenNamespaces,
             },
             page,
             hasPagination || hasFocusQuery ? pageSize : Math.max(1, finalImages.length),

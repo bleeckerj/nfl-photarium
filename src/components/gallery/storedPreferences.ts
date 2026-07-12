@@ -30,6 +30,7 @@ export type StoredGalleryPreferences = {
   aspectRatioFilters: AspectRatioClass[];
   hiddenFolders: string[];
   hiddenTags: string[];
+  hiddenNamespaces?: string[];
   showCli: boolean;
   controlsVisible: boolean;
   pageSize: number;
@@ -172,6 +173,7 @@ export const getStoredPreferences = (
     next.dateFilter = initialGalleryReturnState.filters.dateFilter;
     next.hiddenFolders = initialGalleryReturnState.filters.hiddenFolders;
     next.hiddenTags = initialGalleryReturnState.filters.hiddenTags;
+    next.hiddenNamespaces = initialGalleryReturnState.filters.hiddenNamespaces;
     next.pageSize = initialGalleryReturnState.filters.pageSize;
     next.currentPage = initialGalleryReturnState.filters.currentPage;
     return next;
@@ -223,6 +225,7 @@ export const neutralizeStoredPreferenceFilters = (
   aspectRatioFilters: [],
   hiddenFolders: [],
   hiddenTags: [],
+  hiddenNamespaces: [],
   dateFilter: null,
   currentPage: 1,
 });

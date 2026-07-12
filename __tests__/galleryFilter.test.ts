@@ -14,6 +14,7 @@ const makeImage = (overrides: Partial<GalleryImage> = {}): GalleryImage => ({
   altText: overrides.altText,
   description: overrides.description,
   parentId: overrides.parentId,
+  namespace: overrides.namespace,
   originalUrl: overrides.originalUrl,
   promptThis: overrides.promptThis
 });
@@ -128,6 +129,22 @@ describe('filterImagesForGallery', () => {
     });
 
     expect(result.map((img) => img.id)).toContain('6');
+  });
+
+  it('filters hidden namespaces from the all-namespaces result set', () => {
+    const result = filterImagesForGallery([
+      makeImage({ id: 'flickr', namespace: 'cf-flickr' }),
+      makeImage({ id: 'default', namespace: 'cf-default' }),
+      makeImage({ id: 'missing' }),
+    ], {
+      selectedFolder: 'all',
+      selectedTag: '',
+      searchTerm: '',
+      onlyCanonical: false,
+      hiddenNamespaces: ['CF-FLICKR'],
+    });
+
+    expect(result.map(image => image.id)).toEqual(['default', 'missing']);
   });
 
   it('detects Discord/source-id style search terms', () => {

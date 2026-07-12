@@ -41,6 +41,7 @@ import {
 import { ImageGalleryModalStack } from './ImageGalleryModalStack';
 import {
   loadPreferences,
+  loadHiddenNamespaces,
   persistPreferences,
 } from './storage';
 import {
@@ -163,12 +164,16 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       setDateFilter,
       hiddenFolders,
       hiddenTags,
+      hiddenNamespaces,
       hideFolderByName,
       unhideFolderByName,
       clearHiddenFolders,
       hideTagByName,
       unhideTagByName,
       clearHiddenTags,
+      hideNamespaceByName,
+      unhideNamespaceByName,
+      clearHiddenNamespaces,
       sortedImages,
       duplicateGroups,
       duplicateIds,
@@ -178,7 +183,11 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       clearFilters,
     } = useGalleryFilters({
       images,
-      initialPreferences: storedPreferencesRef.current,
+      namespace,
+      initialPreferences: {
+        ...storedPreferencesRef.current,
+        hiddenNamespaces: loadHiddenNamespaces(),
+      },
       brokenImageIds,
     });
     
@@ -274,6 +283,13 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     const namespaceOptions = useMemo(
       () => getNamespaceOptions(images, registryNamespaces),
       [images, registryNamespaces]
+    );
+    const knownNamespaces = useMemo(
+      () => Array.from(new Set([
+        ...namespaceOptions.map(option => option.value),
+        ...hiddenNamespaces,
+      ].filter(value => value && value !== '__all__' && value !== '__custom__'))).sort((a, b) => a.localeCompare(b)),
+      [hiddenNamespaces, namespaceOptions]
     );
     
     const duplicateGroupCount = duplicateGroups.length;
@@ -753,14 +769,19 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
             <GalleryCommandBar
               hiddenFolders={hiddenFolders}
               hiddenTags={hiddenTags}
+              hiddenNamespaces={hiddenNamespaces}
               knownFolders={uniqueFolders}
               knownTags={uniqueTags}
+              knownNamespaces={knownNamespaces}
               onHideFolder={hideFolderByName}
               onUnhideFolder={unhideFolderByName}
               onClearHidden={clearHiddenFolders}
               onHideTag={hideTagByName}
               onUnhideTag={unhideTagByName}
               onClearHiddenTags={clearHiddenTags}
+              onHideNamespace={hideNamespaceByName}
+              onUnhideNamespace={unhideNamespaceByName}
+              onClearHiddenNamespaces={clearHiddenNamespaces}
               onSelectFolder={setSelectedFolder}
               selectedTag={selectedTag}
               onSelectTag={setSelectedTag}
