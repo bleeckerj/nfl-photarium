@@ -106,7 +106,7 @@ await fetch(`/api/images/${variantId}/update`, {
 
 ### Rotating stored images
 
-Rotate a stored image server-side via `POST /api/images/{id}/rotate`. The endpoint downloads the original Cloudflare blob, creates a non-destructive quarter-turn derivative, uploads it through the shared image pipeline, and returns the new Cloudflare delivery URL plus rotation provenance. Animated WebP files are decoded and rotated frame by frame so frame count, delays, transparency, and loop behavior remain intact.
+Rotate a stored image server-side via `POST /api/images/{id}/rotate`. The endpoint prefers the original Cloudflare blob, then falls back to the available delivery variant with the highest verified frame count when blob access is denied. It creates a non-destructive quarter-turn derivative, uploads it through the shared image pipeline, and returns the new Cloudflare delivery URL plus rotation provenance. Animated WebP files are decoded and rotated frame by frame so frame count, delays, transparency, and loop behavior remain intact. A known animation is never uploaded from a still fallback.
 
 **Request body**
 

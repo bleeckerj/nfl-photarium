@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import sharp from 'sharp';
 import { buildAnimatedWebpFromFrames } from '@/server/animatedWebpService';
 
@@ -26,6 +26,10 @@ vi.mock('@/server/uploadService', () => ({ uploadImageBuffer: mocks.uploadImageB
 import { rotateCloudflareImage } from '@/server/imageRotationService';
 
 describe('image rotation workflow', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getCloudflareCredentials.mockReturnValue({ accountId: 'account', apiToken: 'token' });
@@ -38,6 +42,7 @@ describe('image rotation workflow', () => {
         namespace: 'test-space',
         variationParentId: 'canonical-parent',
         tags: ['animation'],
+        isAnimated: true,
       },
     });
     mocks.getImageExtrasRecord.mockResolvedValue({
@@ -94,5 +99,44 @@ describe('image rotation workflow', () => {
       frameCount: 2,
       parentId: 'canonical-parent',
     });
+  });
+
+  it('falls back to an animated delivery variant when blob access is forbidden', async () => {
+    const frames = await Promise.all([
+      sharp({ create: { width: 3, height: 2, channels: 4, background: '#f00' } }).png().toBuffer(),
+      sharp({ create: { width: 3, height: 2, channels: 4, background: '#0f0' } }).png().toBuffer(),
+    ]);
+    const animated = await buildAnimatedWebpFromFrames(
+      frames.map((buffer) => ({ buffer })),
+      { delays: [100, 200] }
+    );
+    mocks.fetchOriginalImageBlob.mockRejectedValue(new Error('Failed to fetch original image blob (403)'));
+    const deliveryFetch = vi.fn().mockResolvedValue(
+      new Response(new Uint8Array(animated.buffer), { headers: { 'content-type': 'image/webp' } })
+    );
+    vi.stubGlobal('fetch', deliveryFetch);
+
+    const result = await rotateCloudflareImage('source-image', 270);
+
+    expect(deliveryFetch).toHaveBeenCalledWith(
+      'https://example.com/public',
+      expect.objectContaining({ cache: 'no-store' })
+    );
+    expect(result).toMatchObject({ animated: true, frameCount: 2, rotationDegrees: 270 });
+  });
+
+  it('refuses a still fallback for a known animated source', async () => {
+    const still = await sharp({
+      create: { width: 3, height: 2, channels: 4, background: '#f00' },
+    }).png().toBuffer();
+    mocks.fetchOriginalImageBlob.mockRejectedValue(new Error('Failed to fetch original image blob (403)'));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(new Uint8Array(still), { headers: { 'content-type': 'image/png' } })
+    ));
+
+    await expect(rotateCloudflareImage('source-image', 90)).rejects.toThrow(
+      'every delivery variant resolved to a still image'
+    );
+    expect(mocks.uploadImageBuffer).not.toHaveBeenCalled();
   });
 });

@@ -31,6 +31,15 @@ export type ImageRotationResult = RotatedImageBuffer & {
   rotationDegrees: QuarterTurn;
 };
 
+type CloudflareImageForRotation = Awaited<ReturnType<typeof fetchCloudflareImage>>;
+
+type RotationSource = {
+  buffer: Buffer;
+  contentType?: string;
+  frameCount: number;
+  source: 'original-blob' | 'delivery-variant';
+};
+
 const DEFAULT_DELAY_MS = 1000;
 
 const FORMAT_TO_OUTPUT: Partial<Record<keyof FormatEnum, { contentType: string; extension: string }>> = {
@@ -45,6 +54,79 @@ export function normalizeQuarterTurn(value: unknown): QuarterTurn | null {
   if (typeof value !== 'number' || !Number.isFinite(value)) return null;
   const normalized = ((Math.round(value) % 360) + 360) % 360;
   return normalized === 90 || normalized === 180 || normalized === 270 ? normalized : null;
+}
+
+const countFrames = async (buffer: Buffer) => {
+  const metadata = await sharp(buffer, { animated: true }).metadata();
+  return Math.max(1, Math.round(metadata.pages ?? 1));
+};
+
+const prioritizeDeliveryVariants = (variants: string[]) =>
+  [...new Set(variants)].sort((left, right) => {
+    const score = (value: string) => {
+      if (value.includes('/full')) return 0;
+      if (value.includes('/public')) return 1;
+      return 2;
+    };
+    return score(left) - score(right);
+  });
+
+export async function fetchImageRotationSource(
+  image: CloudflareImageForRotation,
+  options?: { expectedAnimated?: boolean }
+): Promise<RotationSource> {
+  let originalError: unknown;
+  try {
+    const original = await fetchOriginalImageBlob(image.id);
+    return {
+      ...original,
+      frameCount: await countFrames(original.buffer),
+      source: 'original-blob',
+    };
+  } catch (error) {
+    originalError = error;
+    console.info('[image-rotate] Original blob unavailable; trying delivery variants', {
+      imageId: image.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  let best: RotationSource | null = null;
+  const failures: string[] = [];
+  for (const variantUrl of prioritizeDeliveryVariants(image.variants ?? [])) {
+    try {
+      const response = await fetch(variantUrl, {
+        cache: 'no-store',
+        headers: { Accept: 'image/webp,image/*;q=0.9,*/*;q=0.1' },
+      });
+      if (!response.ok) {
+        failures.push(`${response.status} ${variantUrl}`);
+        continue;
+      }
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const candidate: RotationSource = {
+        buffer,
+        contentType: response.headers.get('content-type') || undefined,
+        frameCount: await countFrames(buffer),
+        source: 'delivery-variant',
+      };
+      if (!best || candidate.frameCount > best.frameCount) best = candidate;
+      if (candidate.frameCount > 1) return candidate;
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (best && !options?.expectedAnimated) return best;
+  if (best) {
+    throw new Error(
+      'Cloudflare denied original blob access and every delivery variant resolved to a still image. '
+      + 'Grant Images Read permission to CLOUDFLARE_API_TOKEN and retry.'
+    );
+  }
+  const originalMessage = originalError instanceof Error ? originalError.message : String(originalError);
+  const failureSuffix = failures.length ? ` Delivery fallback errors: ${failures.join('; ')}` : '';
+  throw new Error(`${originalMessage}.${failureSuffix}`);
 }
 
 const normalizeDelays = (raw: number[] | undefined, frameCount: number) =>
@@ -151,13 +233,15 @@ export async function rotateCloudflareImage(
   degrees: QuarterTurn
 ): Promise<ImageRotationResult> {
   const credentials = getCloudflareCredentials();
-  const [image, original, extras] = await Promise.all([
+  const [image, extras] = await Promise.all([
     fetchCloudflareImage(imageId, credentials),
-    fetchOriginalImageBlob(imageId),
     getImageExtrasRecord(imageId),
   ]);
   const metadata = parseCloudflareMetadata(image.meta);
-  const rotated = await rotateImageBuffer(original.buffer, degrees);
+  const source = await fetchImageRotationSource(image, {
+    expectedAnimated: metadata.isAnimated === true,
+  });
+  const rotated = await rotateImageBuffer(source.buffer, degrees);
   const rotatedAt = new Date().toISOString();
   const filename = buildRotatedFilename(image.filename || 'image', degrees, rotated.extension);
   const upload = await uploadImageBuffer({

@@ -1059,7 +1059,7 @@ GET /api/images/prompts?ids=id1,id2,id3
 
 Create a rotated image derivative and upload it to Cloudflare Images. Rotation is non-destructive: the source remains unchanged and the response identifies the new asset.
 
-Animated WebP inputs are decoded from the original Cloudflare blob and rotated frame by frame. The output preserves frame count, per-frame delays, transparency, and loop behavior.
+Photarium prefers the original Cloudflare blob. If the token cannot download blobs, it inspects the available delivery variants and uses the candidate with the highest frame count. Animated WebP inputs are rotated frame by frame, preserving frame count, per-frame delays, transparency, and loop behavior. A known animation is rejected when every fallback candidate resolves to a still image.
 
 ```
 POST /api/images/{id}/rotate
@@ -1098,6 +1098,7 @@ Content-Type: application/json
 Notes:
 
 - Rotation accepts quarter turns only: `90`, `180`, or `270` degrees.
+- Original blob access requires Cloudflare Images Read or Write permission. A public animated delivery variant can serve as a validated fallback when blob access returns `401` or `403`.
 - A root image produces a child derivative; a source variant resolves to its canonical image-family parent.
 - Still-image responses use `animated: false`, `frameCount: 1`, and `delaysPreserved: false`.
 - Update persisted delivery references when you intend the derivative to replace the source in another system.
