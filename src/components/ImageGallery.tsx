@@ -255,7 +255,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     forceRefresh = false,
     syncNamespaces = false,
     firstPage = false,
-  }: { silent?: boolean; forceRefresh?: boolean; syncNamespaces?: boolean; firstPage?: boolean } = {}) => {
+    serverQuery: serverQueryOverride,
+  }: { silent?: boolean; forceRefresh?: boolean; syncNamespaces?: boolean; firstPage?: boolean; serverQuery?: GalleryServerQueryState } = {}) => {
     const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -272,7 +273,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     try {
       const focusTarget = initialFocusTargetRef.current;
       const focusAssetId = focusTarget && !focusAppliedRef.current ? focusTarget.assetId : undefined;
-      const effectiveServerQuery = resolveGalleryRefreshServerQuery(galleryServerQueryRef.current, { firstPage });
+      const effectiveServerQuery = resolveGalleryRefreshServerQuery(
+        serverQueryOverride ?? galleryServerQueryRef.current,
+        { firstPage }
+      );
       const url = buildGalleryImagesUrl({
         forceRefresh,
         namespace,
@@ -616,7 +620,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       focusReconcileSkipRef.current = false;
       return;
     }
-    void fetchImages({ silent: true });
+    void fetchImages({ silent: true, serverQuery: serverGalleryQuery });
   }, [fetchImages, focusReconcileSkipRef, serverGalleryQueryKey, serverGalleryQuery]);
 
   const uniqueFolders = useMemo(() => {
