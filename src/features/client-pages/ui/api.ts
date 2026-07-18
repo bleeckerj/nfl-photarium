@@ -7,6 +7,7 @@ import type {
   ClientPagePublishResult,
   CreateClientPageProjectInput,
   UpdateClientPageProjectInput,
+  ClientPageAssetIssue,
 } from '../types';
 
 export interface ClientSiteSummary {
@@ -36,6 +37,10 @@ export interface ClientPageListResponse {
 
 export interface ClientSiteListResponse {
   clientSites: ClientSiteSummary[];
+}
+
+export interface ClientPageRepairResponse extends ClientPageProjectResponse {
+  removedAssets: ClientPageAssetIssue[];
 }
 
 const readJson = async <T>(response: Response): Promise<T> => {
@@ -83,6 +88,13 @@ export const clientPageApi = {
     sendJson<ClientPagePublishResult>(`/api/client-pages/${projectId}/publish`, {
       method: 'POST',
       body: JSON.stringify({}),
+    }),
+  inspectRepair: (projectId: string) =>
+    sendJson<{ issues: ClientPageAssetIssue[] }>(`/api/client-pages/${projectId}/repair`),
+  repairProject: (projectId: string) =>
+    sendJson<ClientPageRepairResponse>(`/api/client-pages/${projectId}/repair`, {
+      method: 'POST',
+      body: JSON.stringify({ confirm: true }),
     }),
   shadowProject: (projectId: string) =>
     sendJson<ClientPageProjectResponse>(`/api/client-pages/${projectId}/shadow`, {

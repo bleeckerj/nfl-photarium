@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useToast } from '@/components/Toast';
 import type { CloudflareImage } from '@/components/gallery/types';
 import { dedupeImageIds } from '../utils/imageIds';
-import type { ClientPageProjectRecord } from '../types';
+import type { ClientPageAssetIssue, ClientPageProjectRecord } from '../types';
 import { clientPageApi, type ClientSiteSummary } from './api';
 import { ClientPageMetadataForm } from './ClientPageMetadataForm';
 import { ClientPagePublishPanel } from './ClientPagePublishPanel';
@@ -54,6 +54,8 @@ export function ClientPageEditor({ initialProject, initialShareUrl }: ClientPage
   const [selectionBusy, setSelectionBusy] = useState(false);
   const [publishBusy, setPublishBusy] = useState(false);
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
+  const [repairIssues, setRepairIssues] = useState<ClientPageAssetIssue[]>([]);
+  const [repairBusy, setRepairBusy] = useState(false);
   const toast = useToast();
 
   const selectedImages = useMemo(
@@ -69,6 +71,10 @@ export function ClientPageEditor({ initialProject, initialShareUrl }: ClientPage
         // Non-fatal; project metadata can still be edited without the site lookup.
       });
   }, []);
+
+  useEffect(() => {
+    clientPageApi.inspectRepair(project.id).then((result) => setRepairIssues(result.issues)).catch(() => setRepairIssues([]));
+  }, [project.id, project.selectedImageIds]);
 
   const replaceSelection = async (selectedImageIds: string[]) => {
     try {
@@ -150,6 +156,26 @@ export function ClientPageEditor({ initialProject, initialShareUrl }: ClientPage
                 toast.push(error instanceof Error ? error.message : 'Failed to publish client page.');
               } finally {
                 setPublishBusy(false);
+              }
+            }}
+            repairIssues={repairIssues}
+            repairBusy={repairBusy}
+            onRepair={async () => {
+              const confirmed = window.confirm(
+                `Remove ${repairIssues.length} unusable asset(s) from this client page? The source assets will remain in Photarium.`
+              );
+              if (!confirmed) return;
+              try {
+                setRepairBusy(true);
+                const result = await clientPageApi.repairProject(project.id);
+                setProject(result.project);
+                setShareUrl(result.shareUrl);
+                setRepairIssues([]);
+                toast.push(`Removed ${result.removedAssets.length} unusable asset(s). You can add new assets and publish again.`);
+              } catch (error) {
+                toast.push(error instanceof Error ? error.message : 'Failed to repair client page assets.');
+              } finally {
+                setRepairBusy(false);
               }
             }}
             onCopyLink={async () => {

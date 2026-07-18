@@ -66,6 +66,13 @@ export interface ClientPagePublishResult {
   manifestRevisionId: string;
 }
 
+export interface ClientPageAssetIssue {
+  id: string;
+  assetType: 'image' | 'video' | 'unknown';
+  filename: string;
+  missing: string[];
+}
+
 export interface ClientPagesStorePayload {
   projects: ClientPageProjectRecord[];
   updatedAt: string;
