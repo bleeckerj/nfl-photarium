@@ -1,4 +1,4 @@
-import { Cpu, Settings } from 'lucide-react';
+import { Cpu, RefreshCw, Settings } from 'lucide-react';
 import type { ReactNode } from 'react';
 import DateNavigator from '@/components/DateNavigator';
 import MonoSelect from '@/components/MonoSelect';
@@ -107,8 +107,8 @@ export default function LegacyTopBar({
         </div>
       </div>
 
-      <div id="second-row-controls" className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
+      <div id="second-row-controls" className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
           <button
             onClick={onToggleBulkSelection}
             className="px-3 py-1 text-[0.7em] font-mono border border-gray-200 rounded-md hover:bg-gray-100 transition"
@@ -132,8 +132,8 @@ export default function LegacyTopBar({
           </button>
           {backupControls}
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 bg-gray-100/50 rounded-md px-2 py-0.5">
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+          <div className="flex shrink-0 items-center gap-1 rounded-md bg-gray-100/50 px-2 py-0.5">
             <label htmlFor="page-size-toolbar" className="text-[0.65rem] font-mono text-gray-500 whitespace-nowrap">
               Gallery Size:
             </label>
@@ -149,18 +149,21 @@ export default function LegacyTopBar({
               size="sm"
             />
           </div>
-          <GridSizeToggle value={gridSize} onChange={onGridSizeChange} />
+          <div className="shrink-0">
+            <GridSizeToggle value={gridSize} onChange={onGridSizeChange} />
+          </div>
           <button
             onClick={onRefreshCache}
             disabled={refreshingCache}
-            className="px-3 py-1 text-[0.7em] font-mono border border-gray-200 rounded-md hover:bg-gray-100 transition disabled:opacity-50"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-gray-200 font-mono text-[0.7em] transition hover:bg-gray-100 disabled:opacity-50"
             title="Refresh the server-side Cloudflare cache"
+            aria-label="Refresh cache"
           >
-            {refreshingCache ? 'Refreshing…' : 'Refresh cache'}
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshingCache ? 'animate-spin' : ''}`} />
           </button>
           <button
             onClick={onOpenNamespaceSettings}
-            className="px-3 py-1 text-[0.7em] font-mono border border-gray-200 rounded-md hover:bg-gray-100 transition flex items-center gap-2"
+            className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md border border-gray-200 px-3 py-1 font-mono text-[0.7em] transition hover:bg-gray-100"
             title="Namespace settings"
           >
             <Settings className="h-3 w-3" />
@@ -168,7 +171,7 @@ export default function LegacyTopBar({
           </button>
           <button
             onClick={onToggleViewMode}
-            className="px-3 py-1 text-[0.7em] font-mono bg-gray-100 hover:bg-gray-200 rounded-md"
+            className="shrink-0 whitespace-nowrap rounded-md bg-gray-100 px-3 py-1 font-mono text-[0.7em] hover:bg-gray-200"
           >
             {viewMode === 'grid' ? '📋 List' : '🔲 Grid'}
           </button>
