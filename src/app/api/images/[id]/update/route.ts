@@ -13,6 +13,7 @@ import { validateParentAssignmentForExistingImage } from '@/server/parentValidat
 import { patchImageExtrasRecord } from '@/server/imageExtras';
 import { mergeUserTagsPreservingSystemTags } from '@/utils/systemTags';
 import { patchCloudflareImageMetadata } from '@/server/cloudflareImageMetadata';
+import { requireValidFolderName } from '@/server/folderPolicy';
 
 const MAX_CLOUDFLARE_TEXT_MIRROR_CHARS = 160;
 
@@ -113,6 +114,17 @@ export async function PATCH(
       }
       return [];
     })();
+
+    if (folderProvided && cleanFolder) {
+      try {
+        requireValidFolderName(cleanFolder);
+      } catch (error) {
+        return NextResponse.json(
+          { error: error instanceof Error ? error.message : 'Invalid folder name' },
+          { status: 400 }
+        );
+      }
+    }
 
     const applyToFamilyRequested = applyToFamily === true;
     const allowedFamilyFields = new Set(['folder', 'namespace']);

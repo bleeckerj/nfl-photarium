@@ -18,6 +18,7 @@ import { extractComfyWorkflowMetadata } from '@/utils/comfyMetadata';
 import { ingestComfyWorkflowForImage } from '@/server/comfy/workflowIngestion';
 import { validateParentForNewChild } from '@/server/parentValidation';
 import { patchImageExtrasRecord } from '@/server/imageExtras';
+import { requireValidFolderName } from '@/server/folderPolicy';
 import {
   applyWorkflowOverride,
   parseCloudflareUploadApiResponse,
@@ -92,6 +93,17 @@ export async function POST(request: NextRequest) {
       promptField,
       workflowJsonField,
     } = parsedFields.fields;
+
+    if (cleanFolder) {
+      try {
+        requireValidFolderName(cleanFolder);
+      } catch (error) {
+        return withCors(NextResponse.json(
+          { error: error instanceof Error ? error.message : 'Invalid folder name' },
+          { status: 400 }
+        ));
+      }
+    }
 
     if (!promptField.ok) {
       logExternalIssue('Rejected invalid prompt payload');

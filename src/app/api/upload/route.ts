@@ -3,6 +3,7 @@ import AdmZip from 'adm-zip';
 import { toDuplicateSummary } from '@/server/duplicateDetector';
 import { upsertRegistryNamespace } from '@/server/namespaceRegistry';
 import { validateParentForNewChild } from '@/server/parentValidation';
+import { requireValidFolderName } from '@/server/folderPolicy';
 import { getPromptThisRecord, setPromptThisRecord, type PromptThisRecord } from '@/server/promptThis';
 import { resolveUploadNamespace, SPECIFIC_NAMESPACE_REQUIRED_ERROR } from '@/server/uploadNamespace';
 import { SUPPORTED_IMAGE_TYPES, uploadImageBuffer } from '@/server/uploadService';
@@ -191,6 +192,16 @@ export async function POST(request: NextRequest) {
     
     // Clean up values - handle empty strings and "undefined" strings
     const cleanFolder = folder && folder.trim() && folder !== 'undefined' ? folder.trim() : undefined;
+    if (cleanFolder) {
+      try {
+        requireValidFolderName(cleanFolder);
+      } catch (error) {
+        return NextResponse.json(
+          { error: error instanceof Error ? error.message : 'Invalid folder name' },
+          { status: 400 }
+        );
+      }
+    }
     const cleanTags = tags && tags.trim() ? tags.trim().split(',').map(t => t.trim()).filter(t => t) : [];
     const cleanDescription = description && description.trim() && description !== 'undefined' ? description.trim() : undefined;
     const cleanDisplayName = displayName && displayName.trim() && displayName !== 'undefined' ? displayName.trim() : undefined;

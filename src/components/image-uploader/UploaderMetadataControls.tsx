@@ -1,5 +1,3 @@
-import type { Dispatch, SetStateAction } from 'react';
-
 import MonoSelect from '@/components/MonoSelect';
 
 interface SelectOption {
@@ -10,10 +8,6 @@ interface SelectOption {
 interface UploaderMetadataControlsProps {
   selectedFolder: string;
   setSelectedFolder: (value: string) => void;
-  newFolder: string;
-  setNewFolder: (value: string) => void;
-  folders: string[];
-  setFolders: Dispatch<SetStateAction<string[]>>;
   folderSelectOptions: SelectOption[];
   tags: string;
   setTags: (value: string) => void;
@@ -30,10 +24,6 @@ interface UploaderMetadataControlsProps {
 export default function UploaderMetadataControls({
   selectedFolder,
   setSelectedFolder,
-  newFolder,
-  setNewFolder,
-  folders,
-  setFolders,
   folderSelectOptions,
   tags,
   setTags,
@@ -52,33 +42,16 @@ export default function UploaderMetadataControls({
         <label htmlFor="folder-select" className="block text-xs fonto-mono text-gray-700 mb-2">
           Folder (Optional)
         </label>
-        <div className="flex space-x-2">
+        <div className="space-y-2">
           <MonoSelect
             id="folder-select"
             value={selectedFolder}
             onChange={setSelectedFolder}
             options={folderSelectOptions}
             placeholder="Choose folder"
-            className="flex-1"
+            className="w-full"
           />
-          <input
-            type="text"
-            placeholder="New folder"
-            value={newFolder}
-            onChange={(event) => setNewFolder(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && newFolder.trim()) {
-                event.preventDefault();
-                const folderName = newFolder.trim().toLowerCase().replace(/\s+/g, '-');
-                if (!folders.includes(folderName)) {
-                  setFolders((prev) => [...prev, folderName]);
-                  setSelectedFolder(folderName);
-                }
-                setNewFolder('');
-              }
-            }}
-            className="w-32 border border-gray-300 rounded-md px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
+          <p className="text-xs text-gray-500">Choose an approved folder. Create new folders from the operator folder manager.</p>
         </div>
         <p className="text-xs text-gray-500 mt-1">Press Enter to create new folder</p>
       </div>

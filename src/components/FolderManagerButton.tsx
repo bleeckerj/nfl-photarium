@@ -13,6 +13,12 @@ interface FolderManagerButtonProps {
 
 interface FolderResponse {
   folders: string[];
+  folderStats?: Array<{
+    name: string;
+    imageCount: number;
+    status: 'empty' | 'singleton' | 'healthy' | 'policy-invalid';
+    issues: string[];
+  }>;
 }
 
 export default function FolderManagerButton({
@@ -25,6 +31,7 @@ export default function FolderManagerButton({
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [folders, setFolders] = useState<string[]>([]);
+  const [folderStats, setFolderStats] = useState<FolderResponse['folderStats']>([]);
   const [error, setError] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState('');
   const [editingFolder, setEditingFolder] = useState<string | null>(null);
@@ -55,6 +62,7 @@ export default function FolderManagerButton({
       }
       const data = (await resp.json()) as FolderResponse;
       setFolders(data.folders || []);
+      setFolderStats(data.folderStats || []);
     } catch (err) {
       console.error('Load folders error', err);
       setError(err instanceof Error ? err.message : 'Failed to load folders');
@@ -152,12 +160,18 @@ export default function FolderManagerButton({
       toast.push('Choose a specific namespace before deleting folders');
       return;
     }
-    if (!confirm(`Delete folder "${folder}"? Images will be set to [none].`)) {
+    const query = getNamespaceQuery();
+    const previewResp = await fetch(
+      `/api/folders/${encodeURIComponent(folder)}?${[query, 'dryRun=true'].filter(Boolean).join('&')}`,
+      { method: 'DELETE' }
+    );
+    const preview = previewResp.ok ? await previewResp.json() as { imageCount?: number } : undefined;
+    const imageCount = preview?.imageCount ?? 0;
+    if (!confirm(`Remove folder "${folder}" from ${imageCount} image${imageCount === 1 ? '' : 's'}? Assets will be preserved.`)) {
       return;
     }
     try {
       setLoading(true);
-      const query = getNamespaceQuery();
       const resp = await fetch(`${`/api/folders/${encodeURIComponent(folder)}`}${query ? `?${query}` : ''}`, {
         method: 'DELETE'
       });
@@ -233,7 +247,10 @@ export default function FolderManagerButton({
                   <p className="text-[0.7em] font-mono text-gray-500">No folders yet</p>
                 ) : (
                   <div className="space-y-2">
-                    {folders.map((folder) => (
+                    {folders.map((folder) => {
+                      const stat = folderStats?.find((entry) => entry.name === folder);
+                      const statusLabel = stat ? `${stat.imageCount} image${stat.imageCount === 1 ? '' : 's'} · ${stat.status}` : 'count unavailable';
+                      return (
                       <div key={folder} className="flex items-center gap-2 border border-gray-200 rounded-md px-3 py-2">
                         {editingFolder === folder ? (
                           <>
@@ -258,7 +275,10 @@ export default function FolderManagerButton({
                           </>
                         ) : (
                           <>
-                            <span className="flex-1 text-[0.7em] font-mono font-mono">{folder}</span>
+                            <span className="flex-1 text-[0.7em] font-mono font-mono">
+                              <span className="block">{folder}</span>
+                              <span className={`block text-[10px] ${stat?.status === 'policy-invalid' ? 'text-red-600' : stat?.status === 'singleton' ? 'text-amber-700' : 'text-gray-500'}`}>{statusLabel}</span>
+                            </span>
                             <button
                               onClick={() => startRename(folder)}
                               disabled={isAllNamespacesView}
@@ -276,7 +296,8 @@ export default function FolderManagerButton({
                           </>
                         )}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

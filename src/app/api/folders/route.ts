@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchCloudflareImages } from '@/utils/cloudflareClient';
 import { addFolder, listStoredFolders } from '@/utils/folderStore';
+import { buildFolderInventory } from '@/server/folderInventory';
+import { requireValidFolderName, FolderPolicyError } from '@/server/folderPolicy';
 
 const resolveNamespaceFilter = (request: NextRequest): string | null => {
   const namespaceParam = request.nextUrl.searchParams.get('namespace');
@@ -43,7 +45,8 @@ export async function GET(request: NextRequest) {
       ])
     ).sort((a, b) => a.localeCompare(b));
 
-    return NextResponse.json({ folders: allFolders });
+    const folderStats = await buildFolderInventory(namespace, cloudflareImages);
+    return NextResponse.json({ folders: allFolders, folderStats });
   } catch (error) {
     console.error('List folders error', error);
     return NextResponse.json({ error: 'Failed to load folders' }, { status: 500 });
@@ -60,14 +63,14 @@ export async function POST(request: NextRequest) {
       );
     }
     const body = await request.json();
-    const name = typeof body?.name === 'string' ? body.name.trim() : '';
-    if (!name) {
-      return NextResponse.json({ error: 'Folder name is required' }, { status: 400 });
-    }
+    const name = requireValidFolderName(typeof body?.name === 'string' ? body.name : '');
     await addFolder(name, namespace);
     return NextResponse.json({ success: true, name });
   } catch (error) {
     console.error('Create folder error', error);
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to create folder' }, { status: 500 });
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to create folder' },
+      { status: error instanceof FolderPolicyError ? error.status : 500 }
+    );
   }
 }

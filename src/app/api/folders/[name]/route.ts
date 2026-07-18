@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchCloudflareImages, updateImageFolder } from '@/utils/cloudflareClient';
 import { removeFolder, renameFolder } from '@/utils/folderStore';
-import { cleanString } from '@/utils/cloudflareMetadata';
+import { FolderPolicyError, requireValidFolderName } from '@/server/folderPolicy';
 
 const resolveNamespaceFilter = (request: NextRequest): string | null => {
   const namespaceParam = request.nextUrl.searchParams.get('namespace');
@@ -23,6 +23,7 @@ async function updateAllImages(oldName: string, newName: string | undefined, nam
   for (const image of targets) {
     await updateImageFolder(image.id, newName);
   }
+  return targets.length;
 }
 
 export async function PATCH(
@@ -39,19 +40,27 @@ export async function PATCH(
       );
     }
     const body = await request.json();
-    const newName = cleanString(typeof body?.newName === 'string' ? body.newName : undefined);
+    const newName = requireValidFolderName(typeof body?.newName === 'string' ? body.newName : '');
     if (!name) {
       return NextResponse.json({ error: 'Folder name is required' }, { status: 400 });
     }
     if (!newName) {
       return NextResponse.json({ error: 'New folder name is required' }, { status: 400 });
     }
+    const images = await fetchCloudflareImages();
+    const targets = images.filter((image) =>
+      (namespace === null || (namespace === '' ? !image.namespace : image.namespace === namespace)) &&
+      image.folder === name
+    );
+    if (request.nextUrl.searchParams.get('dryRun') === 'true') {
+      return NextResponse.json({ dryRun: true, operation: 'rename', from: name, to: newName, imageCount: targets.length });
+    }
     await renameFolder(name, newName, namespace);
     await updateAllImages(name, newName, namespace);
-    return NextResponse.json({ success: true, name: newName });
+    return NextResponse.json({ success: true, name: newName, imageCount: targets.length });
   } catch (error) {
     console.error('Rename folder error', error);
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to rename folder' }, { status: 500 });
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to rename folder' }, { status: error instanceof FolderPolicyError ? error.status : 500 });
   }
 }
 
@@ -71,9 +80,17 @@ export async function DELETE(
     if (!name) {
       return NextResponse.json({ error: 'Folder name is required' }, { status: 400 });
     }
+    const images = await fetchCloudflareImages();
+    const targets = images.filter((image) =>
+      (namespace === null || (namespace === '' ? !image.namespace : image.namespace === namespace)) &&
+      image.folder === name
+    );
+    if (request.nextUrl.searchParams.get('dryRun') === 'true') {
+      return NextResponse.json({ dryRun: true, operation: 'unfile', folder: name, imageCount: targets.length });
+    }
     await removeFolder(name, namespace);
     await updateAllImages(name, undefined, namespace);
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, imageCount: targets.length, assetsDeleted: 0 });
   } catch (error) {
     console.error('Delete folder error', error);
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to delete folder' }, { status: 500 });

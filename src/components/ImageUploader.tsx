@@ -81,12 +81,7 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
   const [originalUrl, setOriginalUrl] = useState<string>("");
   const [omitOriginalUrl, setOmitOriginalUrl] = useState(false);
   const [sourceUrl, setSourceUrl] = useState<string>("");
-  const [folders, setFolders] = useState<string[]>([
-    "email-campaigns",
-    "website-images",
-    "social-media",
-    "blog-posts",
-  ]);
+  const [folders, setFolders] = useState<string[]>([]);
   const {
     queuedFiles,
     setQueuedFiles,
@@ -333,8 +328,8 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
   );
 
   const resolveFolder = useCallback(
-    () => newFolder.trim() || selectedFolder,
-    [newFolder, selectedFolder]
+    () => selectedFolder,
+    [selectedFolder]
   );
 
   const selectedQueuedCount = useMemo(
@@ -812,10 +807,6 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
       <UploaderMetadataControls
         selectedFolder={selectedFolder}
         setSelectedFolder={setSelectedFolder}
-        newFolder={newFolder}
-        setNewFolder={setNewFolder}
-        folders={folders}
-        setFolders={setFolders}
         folderSelectOptions={folderSelectOptions}
         tags={tags}
         setTags={setTags}
