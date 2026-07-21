@@ -26,6 +26,7 @@ import {
   buildVideoAnimatedWebpComfyProvenanceMap,
 } from '@/server/videoAnimatedWebpComfyProvenance';
 import { matchesAspectRatioClass, normalizeAspectRatioClass } from '@/utils/aspectRatioClass';
+import { hydrateMissingAspectMetadata } from '@/server/aspectMetadataHydration';
 
 export async function GET(request: NextRequest) {
   const startedAt = performance.now();
@@ -253,7 +254,11 @@ export async function GET(request: NextRequest) {
         console.warn('[ImagesAPI] Redis unavailable for embedding status:', redisError);
       }
     }
-    
+
+    if (aspectRatioClasses.length > 0 || normalizedAspectRatioClass || aspectRatio) {
+      imagesWithEmbeddings = (await hydrateMissingAspectMetadata(imagesWithEmbeddings)).images;
+    }
+
     const enrichedImageMap = new Map(imagesWithEmbeddings.map((image) => [image.id, image]));
     const finalAssetsBeforeQuery = scopedAssets.map((asset) => {
       if ('assetType' in asset && asset.assetType === 'video') {

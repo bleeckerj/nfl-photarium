@@ -130,6 +130,36 @@ describe('asset metadata enrichment', () => {
     });
   });
 
+  it('supports aspect-only enrichment without probing file size', async () => {
+    const image: CachedCloudflareImage = {
+      id: 'img-aspect-only',
+      filename: 'aspect-only.jpg',
+      uploaded: '2026-04-27T00:00:00.000Z',
+      variants: ['https://cdn.example.com/img-aspect-only/public'],
+      tags: [],
+    };
+    getCachedImageMock.mockResolvedValue(image);
+    fetchImageDimensionsMock.mockResolvedValue({ width: 1200, height: 1200 });
+    vi.stubGlobal('fetch', vi.fn());
+
+    const { enrichImageAssetMetadata } = await import('@/server/assetMetadataEnrichment');
+    const enriched = await enrichImageAssetMetadata('img-aspect-only', { includeSize: false });
+
+    expect(enriched).toMatchObject({
+      aspectRatio: '1:1',
+      dimensions: { width: 1200, height: 1200 },
+    });
+    expect(enriched?.size).toBeUndefined();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(storeImageAspectMetadataMock).toHaveBeenCalledWith({
+      imageId: 'img-aspect-only',
+      aspectRatio: '1:1',
+      aspectRatioClass: 'square',
+      width: 1200,
+      height: 1200,
+    });
+  });
+
   it('enriches video metadata from stream sync, HEAD size, and ffprobe fallback', async () => {
     const syncedVideo: VideoAssetRecord = {
       id: 'vid-1',

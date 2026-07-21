@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { GET } from '@/app/api/images/route';
+import { clearGalleryQueryScopeMemo } from '@/server/galleryQuery';
 
 const {
   getCachedImagesMock,
@@ -12,6 +13,7 @@ const {
   batchGetAspectMetadataMock,
   batchGetColorMetadataMock,
   isVectorSearchAvailableMock,
+  hydrateMissingAspectMetadataMock,
 } = vi.hoisted(() => ({
   getCachedImagesMock: vi.fn(),
   getCacheStatsMock: vi.fn(),
@@ -22,6 +24,7 @@ const {
   batchGetAspectMetadataMock: vi.fn(),
   batchGetColorMetadataMock: vi.fn(),
   isVectorSearchAvailableMock: vi.fn(),
+  hydrateMissingAspectMetadataMock: vi.fn(),
 }));
 
 vi.mock('@/server/cloudflareImageCache', () => ({
@@ -33,6 +36,10 @@ vi.mock('@/server/vectorSearch', () => ({
   batchGetAspectMetadata: batchGetAspectMetadataMock,
   batchGetColorMetadata: batchGetColorMetadataMock,
   isVectorSearchAvailable: isVectorSearchAvailableMock,
+}));
+
+vi.mock('@/server/aspectMetadataHydration', () => ({
+  hydrateMissingAspectMetadata: hydrateMissingAspectMetadataMock,
 }));
 
 vi.mock('@/server/videoCatalogStorage', () => ({
@@ -50,6 +57,7 @@ vi.mock('@/server/imageExtras', () => ({
 describe('GET /api/images video integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearGalleryQueryScopeMemo();
     process.env.ENABLE_VIDEO_ASSETS = '1';
     getCachedImagesMock.mockResolvedValue([
       {
@@ -84,6 +92,12 @@ describe('GET /api/images video integration', () => {
     batchGetAspectMetadataMock.mockResolvedValue(new Map());
     batchGetColorMetadataMock.mockResolvedValue(new Map());
     isVectorSearchAvailableMock.mockResolvedValue(false);
+    hydrateMissingAspectMetadataMock.mockImplementation(async (images: unknown[]) => ({
+      images,
+      candidateCount: 0,
+      resolvedCount: images.length,
+      unresolvedCount: 0,
+    }));
   });
 
   it('returns merged image and video assets', async () => {
@@ -752,6 +766,56 @@ describe('GET /api/images video integration', () => {
         dimensions: { width: 1600, height: 900 },
       })
     );
+    expect(payload.pagination).toEqual(
+      expect.objectContaining({
+        total: 1,
+        scopeTotal: 2,
+        totalPages: 1,
+      })
+    );
+  });
+
+  it('hydrates missing aspect metadata before counting a filtered corpus', async () => {
+    getCachedImagesMock.mockResolvedValue([
+      {
+        id: 'square-from-hydration',
+        filename: 'square.jpg',
+        uploaded: '2026-02-20T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/square-from-hydration/public'],
+        tags: [],
+      },
+      {
+        id: 'wide-from-hydration',
+        filename: 'wide.jpg',
+        uploaded: '2026-02-19T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/wide-from-hydration/public'],
+        tags: [],
+      },
+    ]);
+    listVideoAssetRecordsWithSyncMock.mockResolvedValue([]);
+    isVectorSearchAvailableMock.mockResolvedValueOnce(true);
+    batchGetAspectMetadataMock.mockResolvedValueOnce(new Map());
+    hydrateMissingAspectMetadataMock.mockImplementationOnce(async (images: Array<{ id: string }>) => ({
+      images: images.map((image) => ({
+        ...image,
+        aspectRatio: image.id === 'square-from-hydration' ? '1:1' : '16:9',
+        dimensions: image.id === 'square-from-hydration'
+          ? { width: 1000, height: 1000 }
+          : { width: 1600, height: 900 },
+      })),
+      candidateCount: images.length,
+      resolvedCount: images.length,
+      unresolvedCount: 0,
+    }));
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/images?namespace=__all__&page=1&pageSize=60&aspectRatioClasses=square')
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(hydrateMissingAspectMetadataMock).toHaveBeenCalledTimes(1);
+    expect(payload.images.map((image: { id: string }) => image.id)).toEqual(['square-from-hydration']);
     expect(payload.pagination).toEqual(
       expect.objectContaining({
         total: 1,

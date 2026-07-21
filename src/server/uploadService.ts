@@ -105,17 +105,42 @@ const logIssue = (message: string, details?: Record<string, unknown>) => {
   console.warn('[upload] ' + message, details);
 };
 
-const persistAspectMetadataFromBuffer = async (imageId: string, buffer: Buffer) => {
+type BufferedAspectMetadata = {
+  aspectRatio: string;
+  aspectRatioClass: ReturnType<typeof classifyAspectRatio>;
+  dimensions: { width: number; height: number };
+};
+
+const readAspectMetadataFromBuffer = async (buffer: Buffer): Promise<BufferedAspectMetadata | undefined> => {
   try {
     const metadata = await sharp(buffer).metadata();
     if (!metadata.width || !metadata.height) return;
     const ratio = calculateAspectRatio(metadata.width, metadata.height);
-    await storeImageAspectMetadata({
-      imageId,
+    return {
       aspectRatio: ratio.common,
       aspectRatioClass: classifyAspectRatio(metadata.width, metadata.height),
-      width: metadata.width,
-      height: metadata.height,
+      dimensions: { width: metadata.width, height: metadata.height },
+    };
+  } catch (error) {
+    console.warn('[upload] Failed to read aspect ratio metadata', error);
+    return undefined;
+  }
+};
+
+const persistAspectMetadataFromBuffer = async (
+  imageId: string,
+  buffer: Buffer,
+  knownMetadata?: BufferedAspectMetadata
+) => {
+  try {
+    const metadata = knownMetadata ?? await readAspectMetadataFromBuffer(buffer);
+    if (!metadata) return;
+    await storeImageAspectMetadata({
+      imageId,
+      aspectRatio: metadata.aspectRatio,
+      aspectRatioClass: metadata.aspectRatioClass,
+      width: metadata.dimensions.width,
+      height: metadata.dimensions.height,
     });
   } catch (error) {
     console.warn('[upload] Failed to persist aspect ratio metadata', error);
@@ -310,6 +335,7 @@ export async function uploadImageBuffer({
 
   const uploadFormData = new FormData();
   uploadFormData.append('file', new Blob([new Uint8Array(finalBuffer)], { type: workingFileType }), normalizedName);
+  const bufferedAspectMetadata = await readAspectMetadataFromBuffer(finalBuffer);
 
   const metadataPayload: Record<string, unknown> = {
     filename: normalizedName,
@@ -329,6 +355,7 @@ export async function uploadImageBuffer({
     generatedBy: effectiveGeneratedBy,
     comfyMetadataDetected: effectiveComfyMetadataDetected,
     comfyMetadataSource: effectiveComfyMetadataSource,
+    ...(bufferedAspectMetadata ?? {}),
     rotatedFromId,
     rotatedAt,
     rotationDegrees,
@@ -443,7 +470,7 @@ export async function uploadImageBuffer({
     });
   }
 
-  await persistAspectMetadataFromBuffer(imageData.id, finalBuffer);
+  await persistAspectMetadataFromBuffer(imageData.id, finalBuffer, bufferedAspectMetadata);
 
   const autoEmbeddings = await queueAutoEmbeddingsForImage(primaryCached);
 

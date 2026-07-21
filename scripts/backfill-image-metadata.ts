@@ -2,8 +2,12 @@
 
 import { parseArgs } from 'node:util';
 import { loadEnvConfig } from '@next/env';
-import { getCachedImages } from '@/server/cloudflareImageCache';
+import {
+  flushCloudflareImageCachePersistence,
+  getCachedImages,
+} from '@/server/cloudflareImageCache';
 import { enrichImageAssetMetadata } from '@/server/assetMetadataEnrichment';
+import { batchGetAspectMetadata } from '@/server/vectorSearch';
 import { FileClientPageProjectStore } from '@/features/client-pages/storage/fileStore';
 
 loadEnvConfig(process.cwd());
@@ -24,6 +28,7 @@ const main = async () => {
     options: {
       namespace: { type: 'string' },
       limit: { type: 'string' },
+      concurrency: { type: 'string' },
       force: { type: 'boolean' },
       'published-only': { type: 'boolean' },
     },
@@ -37,6 +42,12 @@ const main = async () => {
         ? ''
         : namespaceFlag ?? null;
   const limit = typeof values.limit === 'string' ? Number(values.limit) : undefined;
+  const configuredConcurrency = typeof values.concurrency === 'string'
+    ? Number(values.concurrency)
+    : 8;
+  const concurrency = Number.isFinite(configuredConcurrency) && configuredConcurrency > 0
+    ? Math.min(16, Math.floor(configuredConcurrency))
+    : 8;
   const force = values.force === true;
   const publishedOnly = values['published-only'] === true;
 
@@ -54,11 +65,11 @@ const main = async () => {
 
   images = images.filter((image) => matchesNamespace(image.namespace, namespace));
   if (!force) {
-    images = images.filter(
-      (image) =>
-        !(typeof image.size === 'number' && image.size > 0) ||
-        !(image.aspectRatio || (image.dimensions?.width && image.dimensions?.height))
-    );
+    const indexedAspectMetadata = await batchGetAspectMetadata(images.map((image) => image.id));
+    images = images.filter((image) => {
+      const indexed = indexedAspectMetadata.get(image.id);
+      return !(indexed?.aspectRatioClass && indexed.width && indexed.height);
+    });
   }
   if (typeof limit === 'number' && Number.isFinite(limit) && limit > 0) {
     images = images.slice(0, Math.floor(limit));
@@ -66,19 +77,39 @@ const main = async () => {
 
   logger(`Backfilling ${images.length} image records`);
   let updated = 0;
-  for (const [index, image] of images.entries()) {
-    logger(`Processing ${index + 1}/${images.length}: ${image.id} (${image.filename})`);
-    const enriched = await enrichImageAssetMetadata(image);
-    const changed =
-      force ||
-      (enriched?.size ?? 0) !== (image.size ?? 0) ||
-      enriched?.aspectRatio !== image.aspectRatio ||
-      enriched?.dimensions?.width !== image.dimensions?.width ||
-      enriched?.dimensions?.height !== image.dimensions?.height;
-    if (changed) updated += 1;
-  }
+  let failed = 0;
+  let cursor = 0;
+  const worker = async (): Promise<void> => {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= images.length) return;
 
-  logger(`Complete. Updated ${updated} images.`);
+      const image = images[index];
+      logger(`Processing ${index + 1}/${images.length}: ${image.id} (${image.filename})`);
+      try {
+        const enriched = await enrichImageAssetMetadata(image, { includeSize: false });
+        const changed =
+          force ||
+          enriched?.aspectRatio !== image.aspectRatio ||
+          enriched?.dimensions?.width !== image.dimensions?.width ||
+          enriched?.dimensions?.height !== image.dimensions?.height;
+        if (changed) updated += 1;
+      } catch (error) {
+        failed += 1;
+        logger(
+          `Failed ${index + 1}/${images.length}: ${image.id} (${image.filename}) - ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, images.length) }, () => worker()));
+  await flushCloudflareImageCachePersistence();
+
+  logger(`Complete. Updated ${updated} images. Failed ${failed} images.`);
 };
 
 main()

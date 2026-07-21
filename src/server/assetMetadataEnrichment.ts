@@ -25,6 +25,9 @@ type ResolvedSource =
   | { kind: 'local'; value: string };
 
 type ImageMetadataPatch = Partial<Pick<CachedCloudflareImage, 'size' | 'aspectRatio' | 'dimensions'>>;
+export type ImageMetadataEnrichmentOptions = {
+  includeSize?: boolean;
+};
 type VideoMetadataPatch = Partial<
   Pick<VideoAssetRecord, 'fileSizeBytes' | 'durationSeconds' | 'width' | 'height' | 'aspectRatio'>
 >;
@@ -180,6 +183,9 @@ const getImageSources = (image: CachedCloudflareImage): ResolvedSource[] =>
     toLocalSource(image.originalUrl),
     toRemoteSource(image.sourceUrl),
     toLocalSource(image.sourceUrl),
+    // Image Delivery's small variant preserves the source aspect ratio while
+    // keeping the metadata probe substantially smaller than the public asset.
+    toRemoteSource(image.variants?.find((value) => value.includes('/small'))),
     toRemoteSource(image.variants?.find((value) => value.includes('/public')) || image.variants?.[0]),
     (() => {
       try {
@@ -229,12 +235,17 @@ const hasImageMetadata = (image: CachedCloudflareImage) =>
   Boolean(image.aspectRatio) &&
   hasImageDimensions(image);
 
+const hasImageAspectMetadata = (image: CachedCloudflareImage) =>
+  Boolean(image.aspectRatio) && hasImageDimensions(image);
+
 export async function enrichImageAssetMetadata(
-  input: string | CachedCloudflareImage
+  input: string | CachedCloudflareImage,
+  options: ImageMetadataEnrichmentOptions = {}
 ): Promise<CachedCloudflareImage | null> {
   const image = typeof input === 'string' ? await getCachedImage(input) : input;
   if (!image) return null;
-  if (hasImageMetadata(image)) {
+  const includeSize = options.includeSize ?? true;
+  if ((includeSize && hasImageMetadata(image)) || (!includeSize && hasImageAspectMetadata(image))) {
     await persistImageAspectMetadata(image);
     return image;
   }
@@ -242,7 +253,7 @@ export async function enrichImageAssetMetadata(
   const patch: ImageMetadataPatch = {};
   const sources = getImageSources(image);
 
-  if (!(typeof image.size === 'number' && image.size > 0)) {
+  if (includeSize && !(typeof image.size === 'number' && image.size > 0)) {
     for (const source of sources) {
       const size =
         source.kind === 'remote'

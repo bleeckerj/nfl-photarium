@@ -741,6 +741,10 @@ export const refreshCloudflareImageCache = async () => {
   return getCachedImages(true);
 };
 
+export const flushCloudflareImageCachePersistence = async (): Promise<void> => {
+  await flushPersistentCacheSave();
+};
+
 export const upsertCachedImage = (image: CachedCloudflareImage) => {
   if (CLOUDFLARE_CACHE_DISABLED) {
     cacheState.map.set(image.id, image);
