@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCachedImages, getCacheStats } from '@/server/cloudflareImageCache';
-import { batchGetAspectMetadata, batchGetColorMetadata, isVectorSearchAvailable } from '@/server/vectorSearch';
 import { listVideoAssetRecordsWithSync } from '@/server/videoCatalogStorage';
 import {
   getImageExtrasRecords,
@@ -26,7 +25,7 @@ import {
   buildVideoAnimatedWebpComfyProvenanceMap,
 } from '@/server/videoAnimatedWebpComfyProvenance';
 import { matchesAspectRatioClass, normalizeAspectRatioClass } from '@/utils/aspectRatioClass';
-import { hydrateMissingAspectMetadata } from '@/server/aspectMetadataHydration';
+import { loadGalleryOptionalMetadata } from '@/server/galleryOptionalMetadata';
 
 export async function GET(request: NextRequest) {
   const startedAt = performance.now();
@@ -196,66 +195,49 @@ export async function GET(request: NextRequest) {
       includeVectorMeta ||
       aspectRatioClasses.length > 0 ||
       Boolean(normalizedAspectRatioClass || aspectRatio);
-    if (needsColorMetadata || needsAspectMetadata) {
-      try {
-        const redisCheckStart = performance.now();
-        const redisAvailable = await isVectorSearchAvailable();
-        timings.redis_check = mark(performance.now() - redisCheckStart);
+    const optionalMetadata = await loadGalleryOptionalMetadata({
+      imageIds: imagesWithEmbeddings.map((image) => image.id),
+      needsColorMetadata,
+      needsAspectMetadata,
+    });
+    Object.assign(timings, optionalMetadata.timings);
+    Object.assign(diagnostics, optionalMetadata.diagnostics);
 
-        if (redisAvailable && imagesWithEmbeddings.length > 0) {
-          const redisBatchStart = performance.now();
-          const imageIds = imagesWithEmbeddings.map(img => img.id);
-          const [colorMetadata, aspectMetadata] = await Promise.all([
-            needsColorMetadata
-              ? batchGetColorMetadata(imageIds)
-              : Promise.resolve(new Map()),
-            needsAspectMetadata
-              ? batchGetAspectMetadata(imageIds)
-              : Promise.resolve(new Map()),
-          ]);
-          timings.redis_batch = mark(performance.now() - redisBatchStart);
-          diagnostics.redis_image_count = imageIds.length;
-          diagnostics.redis_color_lookup = needsColorMetadata;
-          diagnostics.redis_aspect_lookup = needsAspectMetadata;
-          
-          imagesWithEmbeddings = imagesWithEmbeddings.map(img => {
-            const meta = colorMetadata.get(img.id);
-            const aspect = aspectMetadata.get(img.id);
-            const aspectRatioClass = normalizeAspectRatioClass(aspect?.aspectRatioClass);
-            if (meta) {
-              return {
-                ...img,
-                hasClipEmbedding: meta.hasClipEmbedding,
-                hasColorEmbedding: meta.hasColorEmbedding,
-                dominantColors: meta.dominantColors ?? img.dominantColors,
-                averageColor: meta.averageColor ?? img.averageColor,
-                aspectRatio: aspect?.aspectRatio ?? img.aspectRatio,
-                aspectRatioClass: aspectRatioClass ?? img.aspectRatioClass,
-                dimensions: aspect?.width && aspect?.height
-                  ? { width: aspect.width, height: aspect.height }
-                  : img.dimensions,
-              };
-            }
-            if (aspect) {
-              return {
-                ...img,
-                aspectRatio: aspect.aspectRatio ?? img.aspectRatio,
-                aspectRatioClass: aspectRatioClass ?? img.aspectRatioClass,
-                dimensions: aspect.width && aspect.height
-                  ? { width: aspect.width, height: aspect.height }
-                  : img.dimensions,
-              };
-            }
-            return img;
-          });
+    if (optionalMetadata.redisAvailable && imagesWithEmbeddings.length > 0) {
+      imagesWithEmbeddings = imagesWithEmbeddings.map(img => {
+        const meta = optionalMetadata.colorMetadata.get(img.id);
+        const aspect = optionalMetadata.aspectMetadata.get(img.id);
+        const aspectRatioClass = normalizeAspectRatioClass(aspect?.aspectRatioClass);
+        if (meta) {
+          return {
+            ...img,
+            hasClipEmbedding: meta.hasClipEmbedding,
+            hasColorEmbedding: meta.hasColorEmbedding,
+            dominantColors: meta.dominantColors ?? img.dominantColors,
+            averageColor: meta.averageColor ?? img.averageColor,
+            aspectRatio: aspect?.aspectRatio ?? img.aspectRatio,
+            aspectRatioClass: aspectRatioClass ?? img.aspectRatioClass,
+            dimensions: aspect?.width && aspect?.height
+              ? { width: aspect.width, height: aspect.height }
+              : img.dimensions,
+          };
         }
-      } catch (redisError) {
-        // Redis not available, continue without embedding status
-        console.warn('[ImagesAPI] Redis unavailable for embedding status:', redisError);
-      }
+        if (aspect) {
+          return {
+            ...img,
+            aspectRatio: aspect.aspectRatio ?? img.aspectRatio,
+            aspectRatioClass: aspectRatioClass ?? img.aspectRatioClass,
+            dimensions: aspect.width && aspect.height
+              ? { width: aspect.width, height: aspect.height }
+              : img.dimensions,
+          };
+        }
+        return img;
+      });
     }
 
     if (aspectRatioClasses.length > 0 || normalizedAspectRatioClass || aspectRatio) {
+      const { hydrateMissingAspectMetadata } = await import('@/server/aspectMetadataHydration');
       imagesWithEmbeddings = (await hydrateMissingAspectMetadata(imagesWithEmbeddings)).images;
     }
 
