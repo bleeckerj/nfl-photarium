@@ -325,10 +325,12 @@ export async function prepareOutpaintEditImage(input: {
     .png()
     .toBuffer();
 
-  const maskRaw = Buffer.alloc(canvas.targetWidth * canvas.targetHeight * 4, 255);
+  // OpenAI preserves opaque mask pixels and edits transparent pixels. Keep the
+  // source image opaque so the expansion is limited to the added canvas area.
+  const maskRaw = Buffer.alloc(canvas.targetWidth * canvas.targetHeight * 4, 0);
   for (let row = canvas.y; row < canvas.y + canvas.sourceHeight; row += 1) {
     for (let column = canvas.x; column < canvas.x + canvas.sourceWidth; column += 1) {
-      maskRaw[(row * canvas.targetWidth + column) * 4 + 3] = 0;
+      maskRaw[(row * canvas.targetWidth + column) * 4 + 3] = 255;
     }
   }
   const maskPng = await sharp(maskRaw, {

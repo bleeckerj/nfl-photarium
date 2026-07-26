@@ -186,8 +186,8 @@ describe('cropVariantService', () => {
     const sourceAlpha = maskPixel[(10 * canvasWidth + prepared.canvas.x + 10) * 4 + 3];
 
     expect(prepared.canvas).toMatchObject({ targetWidth: 1280, targetHeight: 1280, x: 128, y: 0 });
-    expect(leftCanvasAlpha).toBe(255);
-    expect(sourceAlpha).toBe(0);
+    expect(leftCanvasAlpha).toBe(0);
+    expect(sourceAlpha).toBe(255);
   });
 
   it('requires an OpenAI API key for outpaint generation', async () => {
