@@ -18,6 +18,7 @@ import {
   type GenerationProvider,
   type SourceRelationship,
 } from './client.js';
+import { enrichCreativeBriefImage } from './creative-brief-enrichment.js';
 
 function mergeTags(existingTags: string[], generatedTags: string[]): { appendedTags: string[]; tags: string[] } {
   const tags = [...existingTags];
@@ -179,7 +180,13 @@ export const aiHandlers: Record<string, RuntimeToolHandler> = {
       actualDimensions,
       actualAspectRatio,
     });
-    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    const metadataEnrichment = await enrichCreativeBriefImage(generatedImageId);
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({ ...result, metadataEnrichment }, null, 2),
+      }],
+    };
   },
 
   'photarium_generate_image': async (args: Record<string, unknown>) => {
@@ -273,15 +280,17 @@ export const aiHandlers: Record<string, RuntimeToolHandler> = {
       [{ imageId, role: 'subject_reference' }],
       'creative_brief',
     );
-    if (!dryRun && result.imageId) {
+    const generatedImageId = typeof result.imageId === 'string' ? result.imageId : undefined;
+    if (!dryRun && generatedImageId) {
       await recordPromptDerivationResult(imageId, {
         derivationId: prepared.plan.derivationId,
         provider: 'photarium_openai',
-        generatedImageId: String(result.imageId),
+        generatedImageId,
         actualDimensions: dimensionsFromSize(outputSize),
         actualAspectRatio: prepared.plan.aspectRatio,
       });
     }
+    const metadataEnrichment = await enrichCreativeBriefImage(generatedImageId);
     return {
       content: [{
         type: 'text',
@@ -289,6 +298,7 @@ export const aiHandlers: Record<string, RuntimeToolHandler> = {
           plan: { ...prepared.plan, provider },
           derivation: prepared.derivation,
           result,
+          metadataEnrichment,
         }, null, 2),
       }],
     };

@@ -130,7 +130,7 @@ export const aiTools: Tool[] = [
   },
   {
     name: 'photarium_record_creative_brief_result',
-    description: 'Record a Codex imagegen or ComfyUI result against a previously prepared creative-brief derivation.',
+    description: 'Record a Codex imagegen or ComfyUI result against a previously prepared creative-brief derivation, then generate and save description and alt text for the uploaded child.',
     inputSchema: {
       type: 'object',
       properties: {

@@ -91,7 +91,7 @@ Creative-brief generation is provider-neutral. Photarium owns source-image conte
 - `photarium_generate_prompt` accepts `creativeBrief`, `sourceRelationship`, and optional `aspectRatio`; a non-empty brief creates a new derivation while leaving the canonical recreation prompt unchanged unless `saveAsCurrent: true` is supplied.
 - `photarium_prompt_history` returns prior briefs, prompts, providers, ratios, reference roles, and generated children for a source image.
 - `photarium_generate_from_creative_brief` executes directly only when `provider: "photarium_openai"` is selected. `codex_imagegen` and `comfyui` return a handoff plan for the agent/provider layer.
-- `photarium_record_creative_brief_result` records an externally generated child, provider/job ID, actual dimensions, and actual aspect ratio after Codex or ComfyUI completes.
+- `photarium_record_creative_brief_result` records an externally generated child, provider/job ID, actual dimensions, and actual aspect ratio after Codex or ComfyUI completes, then generates and saves description and alt text for that child. Its response includes `metadataEnrichment.status` as `completed`, `partial`, or `skipped`.
 
 For a ComfyUI handoff, the agent must resolve a declared workflow capability/configured workflow ID that accepts the source image, positive prompt, optional negative prompt, and ratio or dimensions. It should use the ComfyUI MCP upload/run/watch/download flow, then upload the result to Photarium with `parentId` set to the source image and call `photarium_record_creative_brief_result`. The existing aspect-ratio adjustment workflow is a separate reframing operation and should not be selected as a general creative-transformation workflow by inference.
 
@@ -99,7 +99,7 @@ Supported source relationships are `brief_led`, `faithful_adaptation`, `related_
 
 Aspect ratios normalize to forms such as `1:1`, `4:5`, `16:9`, and `9:16`. Providers receive the normalized target, and recorded results retain both the requested and actual ratio when available. Exact post-processing remains a separate operation.
 
-The image generation tools call OpenAI image generation from the Photarium MCP server and upload generated outputs back into Photarium. They require `OPENAI_API_KEY` in the MCP server environment.
+The image generation tools call OpenAI image generation from the Photarium MCP server and upload generated outputs back into Photarium. Creative-brief results also request generated description and alt text for the child image. They require `OPENAI_API_KEY` in the MCP server environment.
 
 - `photarium_generate_image` creates a new image from a text prompt.
 - `photarium_generate_from_references` creates a new image from a prompt plus Photarium image IDs or direct image URLs.
