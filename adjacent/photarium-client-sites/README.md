@@ -47,6 +47,12 @@ localhost admin publish routes can run without a configured publish secret.
 - `src/worker/shortlists`: shortlist capture
 - `src/client`: public SPA shell
 
+## Gallery Video Controls
+
+Gallery cards keep the video badge and overlay controls in the media frame while a replaceable media slot handles image and inline-video content. Starting or stopping inline playback updates the card's Play/Stop state; the slot's Pause/Play control follows native video `play` and `pause` events and is hidden when inline playback stops.
+
+Playback-state cleanup removes the video listeners and hides the pause control before the media slot is reused or the card is discarded. The behavior is covered by `test/gallery.playback-state.test.ts`.
+
 ## Deployment
 
 This app is designed for Cloudflare Workers with:

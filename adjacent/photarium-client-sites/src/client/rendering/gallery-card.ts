@@ -42,18 +42,29 @@ export const renderGalleryCard = (options: GalleryCardOptions): {
   const mediaFrame = document.createElement('div');
   mediaFrame.className = 'asset-card__media-frame';
   mediaFrame.setAttribute('data-gallery-media-frame', '');
-  applyGalleryCardPlaybackState(mediaFrame, {
-    asset,
-    isInlinePlaying,
-    onOpenLightbox,
-    onStopInlinePlayback,
-  });
+
+  const mediaSlot = document.createElement('div');
+  mediaSlot.className = 'asset-card__media-slot';
+  mediaSlot.setAttribute('data-gallery-media-slot', '');
+  mediaFrame.append(mediaSlot);
+
+  let pauseToggle: HTMLButtonElement | null = null;
 
   if (asset.assetType === 'video') {
     const badge = document.createElement('span');
     badge.className = 'asset-card__badge';
     badge.textContent = 'Video';
     mediaFrame.append(badge);
+
+    const overlayControls = document.createElement('div');
+    overlayControls.className = 'asset-card__overlay-controls';
+
+    pauseToggle = document.createElement('button');
+    pauseToggle.className = 'asset-card__play-toggle';
+    pauseToggle.type = 'button';
+    pauseToggle.setAttribute('data-gallery-pause-toggle', '');
+    pauseToggle.textContent = 'Pause';
+    pauseToggle.hidden = true;
 
     const playToggle = document.createElement('button');
     playToggle.className = isInlinePlaying
@@ -64,14 +75,25 @@ export const renderGalleryCard = (options: GalleryCardOptions): {
     playToggle.textContent = isInlinePlaying ? 'Stop' : 'Play';
     playToggle.disabled = !videoPlayback.hasPlayableSource;
     playToggle.addEventListener('click', () => {
-      if (isInlinePlaying) {
+      // The playing state can change via sync without this card re-rendering,
+      // so read the live state from the toggle instead of the render closure.
+      if (playToggle.classList.contains('asset-card__play-toggle--active')) {
         onStopInlinePlayback();
       } else {
         onStartInlinePlayback(asset.id);
       }
     });
-    mediaFrame.append(playToggle);
+
+    overlayControls.append(pauseToggle, playToggle);
+    mediaFrame.append(overlayControls);
   }
+
+  applyGalleryCardPlaybackState(mediaSlot, {
+    asset,
+    isInlinePlaying,
+    pauseToggle,
+    onOpenLightbox,
+  });
 
   const title = document.createElement('h3');
   title.className = 'asset-card__title';
@@ -121,6 +143,6 @@ export const renderGalleryCard = (options: GalleryCardOptions): {
   card.append(mediaFrame, title, meta, footer);
   return {
     element: card,
-    cleanup: () => cleanupGalleryCardPlaybackState(mediaFrame),
+    cleanup: () => cleanupGalleryCardPlaybackState(mediaSlot),
   };
 };

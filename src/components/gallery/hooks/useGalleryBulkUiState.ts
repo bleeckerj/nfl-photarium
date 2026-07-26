@@ -116,13 +116,13 @@ export function useGalleryBulkUiState({
   );
 
   const handleCopySelectionPayload = useCallback(
-    async (payload: string) => {
+    async (payload: string, label: string = 'Selection JSON') => {
       try {
         await navigator.clipboard.writeText(payload);
-        toastPush('Selection JSON copied');
+        toastPush(`${label} copied`);
       } catch (error) {
-        console.error('Failed to copy selection JSON payload', error);
-        toastPush('Failed to copy selection JSON');
+        console.error(`Failed to copy ${label} payload`, error);
+        toastPush(`Failed to copy ${label}`);
       }
     },
     [toastPush]

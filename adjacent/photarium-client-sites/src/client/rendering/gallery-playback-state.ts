@@ -3,8 +3,9 @@ import { attachResolvedVideoPlayback } from '@client/rendering/video-player';
 import type { ClientAsset } from '@client/domain/types';
 
 const galleryAssetSelector = '[data-gallery-asset-id]';
-const galleryMediaFrameSelector = '[data-gallery-media-frame]';
+const galleryMediaSlotSelector = '[data-gallery-media-slot]';
 const galleryPlayToggleSelector = '[data-gallery-play-toggle]';
+const galleryPauseToggleSelector = '[data-gallery-pause-toggle]';
 
 const mediaCleanupRegistry = new WeakMap<HTMLElement, () => void>();
 
@@ -32,8 +33,41 @@ const renderImageButton = (asset: ClientAsset, onOpenLightbox: (assetId: string)
   return imageButton;
 };
 
+const bindPauseToggle = (
+  video: HTMLVideoElement,
+  pauseToggle: HTMLButtonElement
+): (() => void) => {
+  const handleToggleClick = () => {
+    if (video.paused) {
+      void video.play().catch(() => undefined);
+    } else {
+      video.pause();
+    }
+  };
+  const handlePlay = () => {
+    pauseToggle.textContent = 'Pause';
+  };
+  const handlePause = () => {
+    pauseToggle.textContent = 'Play';
+  };
+
+  pauseToggle.textContent = 'Play';
+  pauseToggle.hidden = false;
+  pauseToggle.addEventListener('click', handleToggleClick);
+  video.addEventListener('play', handlePlay);
+  video.addEventListener('pause', handlePause);
+
+  return () => {
+    pauseToggle.removeEventListener('click', handleToggleClick);
+    video.removeEventListener('play', handlePlay);
+    video.removeEventListener('pause', handlePause);
+    pauseToggle.hidden = true;
+  };
+};
+
 const renderInlinePlaybackVideo = (
-  asset: ClientAsset
+  asset: ClientAsset,
+  pauseToggle: HTMLButtonElement | null
 ): { element: HTMLElement; cleanup: () => void } => {
   const playback = resolveVideoPlayback(asset);
 
@@ -43,6 +77,8 @@ const renderInlinePlaybackVideo = (
   if (playback.posterUrl) {
     video.poster = playback.posterUrl;
   }
+
+  const cleanupPauseToggle = pauseToggle ? bindPauseToggle(video, pauseToggle) : () => undefined;
 
   let cleanup: () => void = () => undefined;
   let disposed = false;
@@ -62,6 +98,7 @@ const renderInlinePlaybackVideo = (
     element: video,
     cleanup: () => {
       disposed = true;
+      cleanupPauseToggle();
       cleanup();
     },
   };
@@ -70,12 +107,16 @@ const renderInlinePlaybackVideo = (
 const renderGalleryCardMedia = (
   asset: ClientAsset,
   isInlinePlaying: boolean,
-  onOpenLightbox: (assetId: string) => void,
-  onStopInlinePlayback: () => void
+  pauseToggle: HTMLButtonElement | null,
+  onOpenLightbox: (assetId: string) => void
 ): { element: HTMLElement; cleanup: () => void } => {
   const playback = resolveVideoPlayback(asset);
   if (asset.assetType === 'video' && isInlinePlaying && playback.hasPlayableSource) {
-    return renderInlinePlaybackVideo(asset);
+    return renderInlinePlaybackVideo(asset, pauseToggle);
+  }
+
+  if (pauseToggle) {
+    pauseToggle.hidden = true;
   }
 
   return {
@@ -85,31 +126,31 @@ const renderGalleryCardMedia = (
 };
 
 export const applyGalleryCardPlaybackState = (
-  mediaFrame: HTMLElement,
+  mediaSlot: HTMLElement,
   options: {
     asset: ClientAsset;
     isInlinePlaying: boolean;
+    pauseToggle: HTMLButtonElement | null;
     onOpenLightbox: (assetId: string) => void;
-    onStopInlinePlayback: () => void;
   }
 ): void => {
-  mediaCleanupRegistry.get(mediaFrame)?.();
+  mediaCleanupRegistry.get(mediaSlot)?.();
 
   const rendered = renderGalleryCardMedia(
     options.asset,
     options.isInlinePlaying,
-    options.onOpenLightbox,
-    options.onStopInlinePlayback
+    options.pauseToggle,
+    options.onOpenLightbox
   );
-  mediaFrame.replaceChildren(rendered.element);
-  mediaCleanupRegistry.set(mediaFrame, rendered.cleanup);
-  mediaFrame.setAttribute('data-inline-playing', String(options.isInlinePlaying));
+  mediaSlot.replaceChildren(rendered.element);
+  mediaCleanupRegistry.set(mediaSlot, rendered.cleanup);
+  mediaSlot.setAttribute('data-inline-playing', String(options.isInlinePlaying));
 };
 
-export const cleanupGalleryCardPlaybackState = (mediaFrame: HTMLElement): void => {
-  mediaCleanupRegistry.get(mediaFrame)?.();
-  mediaCleanupRegistry.delete(mediaFrame);
-  mediaFrame.removeAttribute('data-inline-playing');
+export const cleanupGalleryCardPlaybackState = (mediaSlot: HTMLElement): void => {
+  mediaCleanupRegistry.get(mediaSlot)?.();
+  mediaCleanupRegistry.delete(mediaSlot);
+  mediaSlot.removeAttribute('data-inline-playing');
 };
 
 export const syncGalleryPlaybackState = (
@@ -130,23 +171,24 @@ export const syncGalleryPlaybackState = (
     const asset = assetsById.get(assetId);
     if (!asset || asset.assetType !== 'video') return;
 
-    const mediaFrame = card.querySelector<HTMLElement>(galleryMediaFrameSelector);
+    const mediaSlot = card.querySelector<HTMLElement>(galleryMediaSlotSelector);
     const playToggle = card.querySelector<HTMLButtonElement>(galleryPlayToggleSelector);
-    if (!mediaFrame || !playToggle) return;
+    const pauseToggle = card.querySelector<HTMLButtonElement>(galleryPauseToggleSelector);
+    if (!mediaSlot || !playToggle) return;
 
     const isInlinePlaying = options.inlinePlayingAssetId === assetId;
     playToggle.classList.toggle('asset-card__play-toggle--active', isInlinePlaying);
     playToggle.textContent = isInlinePlaying ? 'Stop' : 'Play';
 
-    if (mediaFrame.getAttribute('data-inline-playing') === String(isInlinePlaying)) {
+    if (mediaSlot.getAttribute('data-inline-playing') === String(isInlinePlaying)) {
       return;
     }
 
-    applyGalleryCardPlaybackState(mediaFrame, {
+    applyGalleryCardPlaybackState(mediaSlot, {
       asset,
       isInlinePlaying,
+      pauseToggle,
       onOpenLightbox: options.onOpenLightbox,
-      onStopInlinePlayback: options.onStopInlinePlayback,
     });
   });
 };

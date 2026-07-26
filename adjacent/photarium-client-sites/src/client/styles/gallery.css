@@ -93,9 +93,15 @@
   letter-spacing: 0.08em;
 }
 
-.asset-card__play-toggle {
+.asset-card__overlay-controls {
   position: absolute;
-  inset: auto auto 8px 8px;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+.asset-card__play-toggle {
   padding: 8px 12px;
   border: 1px solid rgba(255, 255, 255, 0.95);
   border-radius: 999px;

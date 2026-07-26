@@ -6,6 +6,12 @@
 - Files in this folder own gallery controls, result rendering, modals, bulk state, stored preferences, and gallery-specific view models.
 - Hooks in `hooks/` should own gallery state orchestration that is reusable across the gallery shell and related controls.
 
+## Bulk Selection IDs
+
+`GalleryBulkEditModal.tsx` exposes the current selection as both a comma-separated CSV string and a formatted JSON array. The copy actions delegate clipboard work and toast feedback to `useGalleryBulkUiState`, keeping the modal responsible for format selection and loading state.
+
+Keep both representations derived from `selectedImages` so the preview and copied payload cannot drift apart. Empty selections disable both copy actions.
+
 ## Public Entrypoints
 
 - Keep `src/components/ImageGallery.tsx` as the default import target for app code.

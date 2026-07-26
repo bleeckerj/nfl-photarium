@@ -32,7 +32,7 @@ interface GalleryBulkEditModalProps {
   bulkAnimateOrderMode: 'gallery' | 'reverse-gallery';
   onBulkAnimateOrderModeChange: (value: 'gallery' | 'reverse-gallery') => void;
   bulkAnimateSelectionOrderDiffers: boolean;
-  onCopySelectionPayload: (payload: string) => void | Promise<void>;
+  onCopySelectionPayload: (payload: string, label?: string) => void | Promise<void>;
   bulkApplyFolder: boolean;
   onBulkApplyFolderChange: (value: boolean) => void;
   bulkFolderMode: 'existing' | 'new';
@@ -152,6 +152,7 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
   const [selectionSize, setSelectionSize] = useState('w=900');
   const [sharedAltText, setSharedAltText] = useState('');
   const [copyingSelectionPayload, setCopyingSelectionPayload] = useState(false);
+  const [copyingSelectionIds, setCopyingSelectionIds] = useState<'csv' | 'json' | null>(null);
   const [creatingNamespace, setCreatingNamespace] = useState(false);
   const [namespaceNameInput, setNamespaceNameInput] = useState('');
   const [namespaceDescriptionInput, setNamespaceDescriptionInput] = useState('');
@@ -210,6 +211,27 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
       await onCopySelectionPayload(buildSelectionPayload());
     } finally {
       setCopyingSelectionPayload(false);
+    }
+  };
+
+  const selectionIdsCsv = useMemo(
+    () => selectedImages.map((image) => image.id).join(','),
+    [selectedImages]
+  );
+  const selectionIdsJson = useMemo(
+    () => JSON.stringify(selectedImages.map((image) => image.id), null, 2),
+    [selectedImages]
+  );
+
+  const handleCopySelectionIds = async (format: 'csv' | 'json') => {
+    setCopyingSelectionIds(format);
+    try {
+      await onCopySelectionPayload(
+        format === 'csv' ? selectionIdsCsv : selectionIdsJson,
+        format === 'csv' ? 'Selection IDs CSV' : 'Selection IDs JSON'
+      );
+    } finally {
+      setCopyingSelectionIds(null);
     }
   };
 
@@ -710,6 +732,41 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
               className="px-3 py-2 bg-slate-800 text-white rounded-md disabled:opacity-50"
             >
               {copyingSelectionPayload ? 'Copying…' : 'Copy JSON array'}
+            </button>
+          </div>
+        </div>
+        <div className="space-y-3 border-t border-gray-200 pt-3">
+          <p className="text-[0.65rem] text-gray-500 uppercase tracking-wide">Selection IDs</p>
+          <div className="rounded border border-gray-200 bg-gray-50 px-3 py-2 space-y-2">
+            <div>
+              <p className="text-[0.58rem] text-gray-500">CSV</p>
+              <pre className="mt-1 max-h-24 overflow-auto text-[0.55rem] text-gray-600 whitespace-pre-wrap break-all">
+                {selectionIdsCsv}
+              </pre>
+            </div>
+            <div>
+              <p className="text-[0.58rem] text-gray-500">JSON array</p>
+              <pre className="mt-1 max-h-24 overflow-auto text-[0.55rem] text-gray-600 whitespace-pre-wrap break-all">
+                {selectionIdsJson}
+              </pre>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => handleCopySelectionIds('csv')}
+              disabled={copyingSelectionIds !== null || selectedImages.length === 0}
+              className="px-3 py-2 bg-slate-800 text-white rounded-md disabled:opacity-50"
+            >
+              {copyingSelectionIds === 'csv' ? 'Copying…' : 'Copy IDs as CSV'}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleCopySelectionIds('json')}
+              disabled={copyingSelectionIds !== null || selectedImages.length === 0}
+              className="px-3 py-2 bg-slate-800 text-white rounded-md disabled:opacity-50"
+            >
+              {copyingSelectionIds === 'json' ? 'Copying…' : 'Copy IDs as JSON'}
             </button>
           </div>
         </div>
