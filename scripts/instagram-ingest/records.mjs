@@ -81,3 +81,8 @@ export function buildInstagramSourceRecord(record) {
     capturedAt: record.fetchedAt ?? new Date().toISOString(),
   };
 }
+
+export function isStopAtShortcodeMatch(record, stopAtShortcode) {
+  const target = typeof stopAtShortcode === "string" ? stopAtShortcode.trim() : "";
+  return Boolean(target) && record?.shortcode === target;
+}

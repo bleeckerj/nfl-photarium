@@ -45,6 +45,26 @@ describe('instagram ingest script helpers', async () => {
     expect(options.pushCloudflare).toBe(false);
   });
 
+  it('parses a stop shortcode and starts from newest instead of resuming', () => {
+    const options = script.parseArgs([
+      'ingest',
+      '--username',
+      'demo',
+      '--stop-at-shortcode',
+      'ABC123',
+    ]);
+
+    expect(options.stopAtShortcode).toBe('ABC123');
+    expect(options.resume).toBe(false);
+  });
+
+  it('matches only the configured Instagram boundary shortcode', () => {
+    expect(script.isStopAtShortcodeMatch({ shortcode: 'ABC123' }, 'ABC123')).toBe(true);
+    expect(script.isStopAtShortcodeMatch({ shortcode: 'ABC123' }, 'XYZ789')).toBe(false);
+    expect(script.isStopAtShortcodeMatch({ shortcode: null }, 'ABC123')).toBe(false);
+    expect(script.isStopAtShortcodeMatch({ shortcode: 'ABC123' }, '')).toBe(false);
+  });
+
   it('normalizes profile-ish usernames before deriving ingest paths', () => {
     const options = script.parseArgs([
       'ingest',

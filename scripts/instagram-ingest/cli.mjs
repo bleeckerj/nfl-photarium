@@ -116,6 +116,7 @@ Options:
   --api-base <url>          Base URL for local API (default: http://localhost:3000)
   --namespace <name>        Upload namespace (default: ingest; single-url default: cf-instagram)
   --no-resume               Ignore existing checkpoint and start from newest page
+  --stop-at-shortcode <id>  Stop before processing this post (starts from newest)
   --headful                 Run ingest with visible browser window
   -v, --verbose             Increase verbosity (stackable)
   --quiet                   Minimal logging
@@ -145,6 +146,7 @@ export function parseArgs(argv) {
     apiBase: "http://localhost:3000",
     namespace: "ingest",
     namespaceProvided: false,
+    stopAtShortcode: "",
     resume: true,
     headful: false,
     verbosity: DEFAULT_VERBOSITY,
@@ -202,6 +204,9 @@ export function parseArgs(argv) {
       out.namespace = next.trim();
       out.namespaceProvided = true;
       i += 1;
+    } else if (arg === "--stop-at-shortcode" && next) {
+      out.stopAtShortcode = next.trim();
+      i += 1;
     } else if (arg === "--push-cloudflare") out.pushCloudflare = true;
     else if (arg === "--no-push-cloudflare") out.pushCloudflare = false;
     else if (arg === "--ai-display-name") out.aiDisplayName = true;
@@ -223,6 +228,7 @@ export function parseArgs(argv) {
   if (out.command === "single-url" && !out.namespaceProvided) {
     out.namespace = "cf-instagram";
   }
+  if (out.stopAtShortcode) out.resume = false;
 
   return out;
 }

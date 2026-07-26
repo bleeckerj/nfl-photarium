@@ -26,7 +26,11 @@ import {
   pushVideoToCloudflare,
   reduceVideoUrlsForUpload,
 } from "./instagram-ingest/cloudflare-upload.mjs";
-import { buildInstagramSourceRecord, mapItemToRecord } from "./instagram-ingest/records.mjs";
+import {
+  buildInstagramSourceRecord,
+  isStopAtShortcodeMatch,
+  mapItemToRecord,
+} from "./instagram-ingest/records.mjs";
 import {
   extractSingleUrlRecord,
   fetchSingleUrlRecordFromApiByShortcode,
@@ -41,6 +45,7 @@ export {
   pushImageToCloudflare,
   suggestDisplayNameFromBuffer,
 } from "./instagram-ingest/cloudflare-upload.mjs";
+export { isStopAtShortcodeMatch } from "./instagram-ingest/records.mjs";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -143,6 +148,9 @@ async function runIngest(opts, log) {
   log.info(
     `resume=${opts.resume} count=${opts.count} delay_ms=${opts.delayMs} request_delay_ms=${opts.requestDelayMs} max_pages=${opts.maxPages || "unbounded"}`,
   );
+  if (opts.stopAtShortcode) {
+    log.info(`stop_at_shortcode=${opts.stopAtShortcode} (starting at newest; checkpoint ignored)`);
+  }
   if (opts.downloadDir) log.info(`download_dir=${opts.downloadDir}`);
   if (opts.pushCloudflare) {
     if (opts.namespace === "__all__" || opts.namespace === "__none__") {
@@ -202,6 +210,7 @@ async function runIngest(opts, log) {
   let cloudflareImagePushFail = 0;
   let cloudflareVideoPushOk = 0;
   let cloudflareVideoPushFail = 0;
+  let stopAtShortcodeFound = false;
 
   await ensureParentDir(opts.outputPath);
   const out = fs.createWriteStream(opts.outputPath, { flags: "a" });
@@ -233,6 +242,13 @@ async function runIngest(opts, log) {
 
     for (const item of items) {
       const record = mapItemToRecord(item, opts.username, userId);
+      if (isStopAtShortcodeMatch(record, opts.stopAtShortcode)) {
+        stopAtShortcodeFound = true;
+        log.info(
+          `stop_at_shortcode_found shortcode=${record.shortcode} records_written=${recordCount} checkpoint_unchanged=true`,
+        );
+        break;
+      }
       record.cloudflare = [];
       const captionPreview = (record.caption || "").replace(/\s+/g, " ").slice(0, 80);
       log.trace(
@@ -385,6 +401,8 @@ async function runIngest(opts, log) {
       recordCount += 1;
     }
 
+    if (stopAtShortcodeFound) break;
+
     pageCount += 1;
     maxId = resp.json.next_max_id ?? "";
 
@@ -426,6 +444,10 @@ async function runIngest(opts, log) {
 
   out.end();
   await browser.close();
+
+  if (opts.stopAtShortcode && !stopAtShortcodeFound) {
+    log.warn(`stop_at_shortcode_not_found shortcode=${opts.stopAtShortcode}`);
+  }
 
   log.success(`Ingest complete for @${opts.username}`);
   log.success(`records_written=${recordCount} pages_fetched=${pageCount}`);
