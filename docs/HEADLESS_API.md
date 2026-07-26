@@ -55,6 +55,7 @@ The API does not include built-in authentication. If exposing externally, protec
     - [Generate ALT Text](#generate-alt-text)
     - [Generate Description](#generate-description)
     - [Generate Prompt (PromptThis)](#generate-prompt-promptthis)
+    - [Creative Brief Derivations](#creative-brief-derivations)
     - [Concept Radar](#concept-radar)
     - [Generate Haiku](#generate-haiku)
     - [Batch Prompts Lookup](#batch-prompts-lookup)
@@ -960,6 +961,17 @@ POST /api/images/{id}/prompt
 GET /api/images/{id}/prompt?force=1
 ```
 
+For a transformation request, send a non-empty `creativeBrief`. The prompt generator incorporates the brief throughout the product description and creates a separate derivation record. `sourceRelationship` may be `brief_led`, `faithful_adaptation`, `related_design`, or `inspired_concept`; it defaults to `brief_led`. An optional `aspectRatio` such as `4:5` is normalized and carried through the provider plan. Set `saveAsCurrent: true` only when the derived prompt should replace the canonical Prompt This value.
+
+```json
+{
+  "creativeBrief": "Translate the Sony computer into an Apple II-era product: beige materials, rainbow Apple logo, period-appropriate industrial design, and a newspaper product-ad aesthetic.",
+  "sourceRelationship": "related_design",
+  "aspectRatio": "4:5",
+  "saveAsCurrent": false
+}
+```
+
 **Response:**
 
 ```json
@@ -970,6 +982,34 @@ GET /api/images/{id}/prompt?force=1
   "generatedAt": "2025-12-05T21:59:41.036Z"
 }
 ```
+
+### Creative Brief Derivations
+
+Read the persisted derivation history for a source image:
+
+```
+GET /api/images/{id}/prompt/derivations
+```
+
+Record the result of an external provider such as Codex imagegen or ComfyUI:
+
+```
+POST /api/images/{id}/prompt/derivations
+Content-Type: application/json
+```
+
+```json
+{
+  "derivationId": "derivation-id",
+  "provider": "codex_imagegen",
+  "generatedImageId": "generated-child-id",
+  "externalJobId": "optional-provider-job-id",
+  "actualDimensions": { "width": 1024, "height": 1280 },
+  "actualAspectRatio": "4:5"
+}
+```
+
+The persisted plan includes the source image ID, creative brief, final prompt, source relationship, normalized requested ratio, reference roles, provider, and generated child linkage. External providers must upload the result through Photarium's upload/provenance path and attach the source image as the parent before recording the result.
 
 ---
 
@@ -1745,7 +1785,8 @@ CLOUDFLARE_DELIVERY_URL=https://imagedelivery.net/your-hash
 
 # Optional
 IMAGE_NAMESPACE=default-namespace
-OPENAI_API_KEY=sk-...  # For AI features
+OPENAI_API_KEY=sk-...  # For Photarium-side AI features
+PHOTARIUM_ENABLE_CREATIVE_BRIEF_TOOL=true  # Optional feature-gated image-detail plugin
 DISABLE_EXTERNAL_API=false
 MAX_VIDEO_UPLOAD_BYTES=104857600
 VIDEO_ROTATION_TIMEOUT_MS=120000

@@ -175,7 +175,7 @@ export const startImageToolPreviewRun = (toolId: string, input: ImageToolRunInpu
           phase: 'preview.completed',
           message: 'Image tool preview completed',
         });
-        completeImageToolPreview(preview.id, result.artifact, result.externalJobId);
+        completeImageToolPreview(preview.id, result);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Image tool preview failed';
         logImageToolEvent({

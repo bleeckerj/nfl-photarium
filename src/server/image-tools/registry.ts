@@ -1,9 +1,14 @@
 import { grainradAdapter } from '@/server/image-tools/grainradAdapter';
 import { eightBitAdapter } from '@/server/image-tools/eightBitAdapter';
+import { creativeBriefAdapter } from '@/server/image-tools/creativeBriefAdapter';
 import { ImageToolManifestError, mergeImageToolRequest, validateImageToolManifest } from '@/server/image-tools/manifest';
 import type { ImageToolAdapter, ImageToolManifest, ImageToolRunInput } from '@/server/image-tools/types';
 
-const adapters: ImageToolAdapter[] = [grainradAdapter, eightBitAdapter];
+const getAdapters = (): ImageToolAdapter[] => [
+  grainradAdapter,
+  eightBitAdapter,
+  ...(process.env.PHOTARIUM_ENABLE_CREATIVE_BRIEF_TOOL === 'true' ? [creativeBriefAdapter] : []),
+];
 
 class ImageToolRegistry {
   private readonly adapterMap = new Map<string, ImageToolAdapter>();
@@ -35,6 +40,6 @@ class ImageToolRegistry {
   }
 }
 
-export const getImageToolRegistry = () => new ImageToolRegistry(adapters);
+export const getImageToolRegistry = () => new ImageToolRegistry(getAdapters());
 
 export { ImageToolManifestError, validateImageToolManifest };

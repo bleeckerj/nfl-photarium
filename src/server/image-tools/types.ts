@@ -1,17 +1,19 @@
 import type { UploadSuccess } from '@/server/uploadService';
 import type { VideoUploadSuccess } from '@/server/videoUploadService';
+import type { CreativeBriefGenerationPlan } from '@/server/creativeBrief';
 
 // 'grainrad-inproc' is the active in-process adapter. 'grainrad-http' is retained
 // only so historical provenance records (imageExtras.imageToolRun) still type-check.
 export type ImageToolAdapterKind =
   | 'grainrad-inproc'
   | 'grainrad-http'
-  | 'grainrad-eight-bit-reinterpretation';
+  | 'grainrad-eight-bit-reinterpretation'
+  | 'creative-brief';
 // 'animatedImage' marks tools that preserve the motion of animated image assets
 // (GIF / animated WebP) rather than flattening them to their first frame.
 export type ImageToolInputAssetType = 'image' | 'video' | 'animatedImage';
 export type ImageToolOutputMode = 'still' | 'animated';
-export type ImageToolControlType = 'text' | 'number' | 'slider' | 'switch' | 'select' | 'color';
+export type ImageToolControlType = 'text' | 'textarea' | 'number' | 'slider' | 'switch' | 'select' | 'color';
 export type ImageToolRunStatus = 'queued' | 'running' | 'completed' | 'failed';
 export type ImageToolDiagnosticLevel = 'info' | 'warn' | 'error';
 
@@ -97,6 +99,7 @@ export type ImageToolManifest = {
   inputAssetTypes: ImageToolInputAssetType[];
   outputModes: ImageToolOutputMode[];
   supportsAsync: boolean;
+  resultKinds?: Array<'image' | 'prompt'>;
   presentation: ImageToolPresentation;
   controls: ImageToolControl[];
   workflows?: ImageToolWorkflowManifest[];
@@ -131,7 +134,10 @@ export type ImageToolRunInput = {
 };
 
 export type ImageToolRunResult = {
-  uploadedAsset: UploadSuccess | VideoUploadSuccess;
+  kind?: 'image' | 'prompt';
+  uploadedAsset?: UploadSuccess | VideoUploadSuccess;
+  prompt?: string;
+  plan?: CreativeBriefGenerationPlan;
   artifact?: {
     filename?: string;
     contentType?: string;
@@ -141,7 +147,10 @@ export type ImageToolRunResult = {
 };
 
 export type ImageToolPreviewResult = {
-  artifact: {
+  kind?: 'image' | 'prompt';
+  prompt?: string;
+  plan?: CreativeBriefGenerationPlan;
+  artifact?: {
     buffer: Buffer;
     contentType: string;
     filename: string;

@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cleanString, parseCloudflareMetadata } from '@/utils/cloudflareMetadata';
 import { getPromptThisRecord, setPromptThisRecord, type PromptThisRecord } from '@/server/promptThis';
 import { getOpenAiPromptThisModel, OPENAI_CHAT_COMPLETIONS_URL } from '@/server/openAiGeneratorModels';
+import {
+  appendPromptDerivation,
+  createCreativeBriefPlan,
+  normalizeAspectRatio,
+  normalizeSourceRelationship,
+  type PromptDerivationRecord,
+  type SourceRelationship,
+} from '@/server/creativeBrief';
 
 function parseForce(request: NextRequest): boolean {
   const fromQuery = request.nextUrl.searchParams.get('force');
@@ -63,6 +71,9 @@ function buildPromptThisUserText(options: {
   storedAlt?: string;
   namespace?: string;
   existingPrompt?: string;
+  creativeBrief?: string;
+  sourceRelationship?: SourceRelationship;
+  aspectRatio?: string;
 }) {
   const contextSegments: string[] = [];
   if (options.filename) contextSegments.push(`Filename: ${options.filename}`);
@@ -72,12 +83,26 @@ function buildPromptThisUserText(options: {
   if (options.storedDescription) contextSegments.push(`Stored description: ${options.storedDescription}`);
   if (options.storedAlt) contextSegments.push(`Stored ALT text: ${options.storedAlt}`);
   if (options.existingPrompt) contextSegments.push(`Existing prompt draft: ${options.existingPrompt}`);
+  if (options.creativeBrief) contextSegments.push(`Creative brief: ${options.creativeBrief}`);
+  if (options.sourceRelationship) contextSegments.push(`Source relationship: ${options.sourceRelationship}`);
+  if (options.aspectRatio) contextSegments.push(`Target aspect ratio: ${options.aspectRatio}`);
+
+  const hasCreativeBrief = Boolean(options.creativeBrief);
+  const transformationInstruction = hasCreativeBrief
+    ? [
+        'A creative brief is present. Create a new transformation prompt rather than reusing a generic recreation prompt.',
+        'Treat the creative brief as the governing direction and integrate it throughout the product identity, category, implied function, geometry, materials, branding, era, composition, lighting, and medium.',
+        'Do not impose an unrequested degree of divergence. Follow the selected source relationship: brief_led follows the brief, faithful_adaptation preserves recognizable form, related_design preserves category and function while creating a distinct related design, and inspired_concept allows broad conceptual departure.',
+        'Derive plausible mechanical and technological character from visible evidence and the brief without asserting hidden specifications as facts.',
+      ].join(' ')
+    : 'Create a faithful recreation prompt from the visible source image; preserve the existing default behavior when no creative brief is supplied.';
 
   return [
     'You are a prompt engineer for text-to-image models (Stable Diffusion / ComfyUI / Midjourney-like).',
-    'Create ONE highly detailed, production-ready prompt that recreates the uploaded image as closely as possible. This is not a caption; it should be a dense generative prompt with enough specificity for another model to rebuild the image.',
+    transformationInstruction,
+    'Create ONE highly detailed, production-ready prompt. This is not a caption; it should be a dense generative prompt with enough specificity for another model to build the requested result.',
     'Describe concrete visual evidence from the image in rich detail: subject identity and count, poses, expressions, wardrobe, props, setting, foreground/background, composition, crop, perspective, camera angle, lens/framing cues, lighting direction, shadows, color palette, textures, materials, surface wear, typography/logos/text if visible, mood, era, style, medium, rendering/photographic qualities, and any distinctive imperfections or artifacts.',
-    'Preserve specific observable details over generic adjectives. Name the visual medium clearly, such as line illustration, oil painting, watercolor, 3D render, product photo, vintage photograph, phone snapshot, editorial portrait, screenshot, UI mockup, or other visible style. Do not invent hidden context that is not visible, but include reasonable visual descriptors needed to reproduce what can be seen.',
+    'Preserve specific observable details over generic adjectives. Name the visual medium clearly, such as line illustration, oil painting, watercolor, 3D render, product photo, vintage photograph, phone snapshot, editorial portrait, screenshot, UI mockup, or other visible style. Do not invent hidden context that is not visible, but include reasonable visual descriptors needed to reproduce what can be seen or what the brief explicitly asks to transform.',
     'Write as one flowing prompt paragraph, using semicolons or comma-separated clauses where useful. Avoid markdown, labels, bullet points, file formats, "alt text", and phrases like "this image".',
     'Return ONLY the prompt text. Aim for 1200-3000 characters when the image has enough detail; shorter is acceptable only for very simple images.',
     contextSegments.length ? `Context:\n${contextSegments.join('\n')}` : null
@@ -182,13 +207,25 @@ export async function POST(
 
     const force = Boolean(body?.force) || forceFromQuery;
     const existingPromptFromClient = typeof body?.existingPrompt === 'string' ? body.existingPrompt : undefined;
+    const creativeBrief = cleanString(typeof body?.creativeBrief === 'string' ? body.creativeBrief : undefined);
+
+    let sourceRelationship: SourceRelationship;
+    let aspectRatio: string | undefined;
+    try {
+      sourceRelationship = normalizeSourceRelationship(body?.sourceRelationship);
+      aspectRatio = normalizeAspectRatio(body?.aspectRatio);
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid creative brief options' }, { status: 400 });
+    }
+    const saveAsCurrent = Boolean(body?.saveAsCurrent);
+    const hasCreativeBrief = Boolean(creativeBrief);
 
     const existing = await getPromptThisRecord(imageId);
     const hasClientPrompt = typeof existingPromptFromClient === 'string';
     // If we already have a prompt, reuse it unless the caller explicitly forces
     // regeneration _and_ didn't provide a client prompt (cleared/edited text
     // counts as an intentional request to regenerate).
-    if (existing && !force && !hasClientPrompt) {
+    if (existing && !hasCreativeBrief && !force && !hasClientPrompt) {
       return NextResponse.json({ imageId, record: existing, generated: false, saved: true });
     }
 
@@ -218,7 +255,10 @@ export async function POST(
       tags,
       storedDescription,
       storedAlt,
-      existingPrompt: cleanString(existingPromptFromClient)
+      existingPrompt: cleanString(existingPromptFromClient),
+      creativeBrief,
+      sourceRelationship: hasCreativeBrief ? sourceRelationship : undefined,
+      aspectRatio,
     });
 
     const ai = await generatePromptFromOpenAI(imageUrl, userText);
@@ -233,19 +273,60 @@ export async function POST(
       prompt: ai.payload.prompt,
       model: ai.payload.model,
       provider: 'openai',
+      ...(hasCreativeBrief ? {
+        creativeBrief,
+        sourceRelationship,
+        aspectRatio,
+      } : {}),
       createdAt: existing?.createdAt || now,
       updatedAt: now
     };
 
+    const plan = hasCreativeBrief
+      ? createCreativeBriefPlan({
+          sourceImageId: imageId,
+          creativeBrief: creativeBrief!,
+          prompt: ai.payload.prompt,
+          sourceRelationship,
+          aspectRatio,
+        })
+      : undefined;
+    const recordToSave = plan ? { ...record, derivationId: plan.derivationId } : record;
+
     let saved = true;
-    try {
-      await setPromptThisRecord(record);
-    } catch (storageError) {
-      console.warn('[PromptThis] Failed to persist prompt:', storageError);
-      saved = false;
+    if (!hasCreativeBrief || saveAsCurrent) {
+      try {
+        await setPromptThisRecord(recordToSave);
+      } catch (storageError) {
+        console.warn('[PromptThis] Failed to persist prompt:', storageError);
+        saved = false;
+      }
     }
 
-    return NextResponse.json({ imageId, record, generated: true, saved });
+    let derivation: PromptDerivationRecord | undefined;
+    if (plan) {
+      derivation = {
+        ...plan,
+        createdAt: now,
+        updatedAt: now,
+      };
+      try {
+        await appendPromptDerivation(derivation);
+      } catch (storageError) {
+        console.warn('[PromptThis] Failed to persist creative brief derivation:', storageError);
+        saved = false;
+      }
+    }
+
+    return NextResponse.json({
+      imageId,
+      prompt: ai.payload.prompt,
+      record: saveAsCurrent || !hasCreativeBrief ? recordToSave : existing,
+      derivation,
+      plan,
+      generated: true,
+      saved,
+    });
   } catch (error) {
     console.error('[PromptThis] POST error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

@@ -4,6 +4,7 @@ import type {
   ImageToolDiagnosticEvent,
   ImageToolDiagnosticEventInput,
   ImageToolRequest,
+  ImageToolPreviewResult,
 } from '@/server/image-tools/types';
 
 export type ImageToolPreviewStatus = 'queued' | 'running' | 'completed' | 'failed';
@@ -19,6 +20,9 @@ export type ImageToolPreviewRecord = {
   updatedAt: string;
   expiresAt: string;
   request: ImageToolRequest;
+  kind?: 'image' | 'prompt';
+  prompt?: string;
+  plan?: ImageToolPreviewResult['plan'];
   artifactUrl?: string;
   contentType?: string;
   filename?: string;
@@ -86,6 +90,9 @@ const publicPreview = (preview: StoredPreview): ImageToolPreviewRecord => {
     updatedAt: preview.updatedAt,
     expiresAt: preview.expiresAt,
     request: preview.request,
+    kind: preview.kind,
+    prompt: preview.prompt,
+    plan: preview.plan,
     artifactUrl: preview.artifactUrl,
     contentType: preview.contentType,
     filename: preview.filename,
@@ -172,28 +179,46 @@ export const addImageToolPreviewEvent = (
   return publicPreview(next);
 };
 
-export const completeImageToolPreview = (
+export function completeImageToolPreview(
   previewId: string,
-  artifact: { buffer: Buffer; contentType: string; filename: string },
-  externalJobId?: string
-) => {
+  result: ImageToolPreviewResult,
+): ImageToolPreviewRecord | undefined;
+/** Preserve the pre-prompt-result artifact signature for existing adapters and tests. */
+export function completeImageToolPreview(
+  previewId: string,
+  artifact: NonNullable<ImageToolPreviewResult['artifact']>,
+  externalJobId?: string,
+): ImageToolPreviewRecord | undefined;
+export function completeImageToolPreview(
+  previewId: string,
+  resultOrArtifact: ImageToolPreviewResult | NonNullable<ImageToolPreviewResult['artifact']>,
+  externalJobId?: string,
+) {
   const current = state.previews.get(previewId);
   if (!current) return undefined;
+  const result: ImageToolPreviewResult = 'buffer' in resultOrArtifact
+    ? { kind: 'image', artifact: resultOrArtifact, externalJobId }
+    : resultOrArtifact;
   const next = {
     ...current,
     status: 'completed' as const,
     message: 'Preview ready',
     percent: 1,
-    artifactBuffer: artifact.buffer,
-    artifactUrl: `/api/image-tools/previews/${encodeURIComponent(previewId)}/artifact`,
-    contentType: artifact.contentType,
-    filename: artifact.filename,
-    externalJobId: externalJobId ?? current.externalJobId,
+    ...(result.artifact ? {
+      artifactBuffer: result.artifact.buffer,
+      artifactUrl: `/api/image-tools/previews/${encodeURIComponent(previewId)}/artifact`,
+      contentType: result.artifact.contentType,
+      filename: result.artifact.filename,
+    } : {}),
+    kind: result.kind,
+    prompt: result.prompt,
+    plan: result.plan,
+    externalJobId: result.externalJobId ?? current.externalJobId,
     updatedAt: now(),
   };
   state.previews.set(previewId, next);
   return publicPreview(next);
-};
+}
 
 export const failImageToolPreview = (previewId: string, error: string) => {
   addImageToolPreviewEvent(previewId, {

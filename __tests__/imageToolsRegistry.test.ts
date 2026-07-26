@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { GET } from '@/app/api/image-tools/route';
 import { mergeImageToolRequest } from '@/server/image-tools/manifest';
-import { ImageToolManifestError, validateImageToolManifest } from '@/server/image-tools/registry';
+import { getImageToolRegistry, ImageToolManifestError, validateImageToolManifest } from '@/server/image-tools/registry';
 import type { ImageToolManifest } from '@/server/image-tools/types';
 
 const findControl = (manifest: ImageToolManifest, id: string) =>
@@ -37,6 +37,10 @@ const validManifest: ImageToolManifest = {
     },
   },
 };
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe('image tool manifest validation', () => {
   it('accepts a valid manifest', () => {
@@ -85,6 +89,22 @@ describe('GET /api/image-tools', () => {
         }),
       ])
     );
+  });
+
+  it('keeps Creative Brief feature-gated in the image-tools catalog', () => {
+    vi.stubEnv('PHOTARIUM_ENABLE_CREATIVE_BRIEF_TOOL', 'false');
+    expect(getImageToolRegistry().listManifests().some((tool) => tool.id === 'creative-brief')).toBe(false);
+
+    vi.stubEnv('PHOTARIUM_ENABLE_CREATIVE_BRIEF_TOOL', 'true');
+    expect(getImageToolRegistry().listManifests()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'creative-brief',
+        resultKinds: ['prompt'],
+        controls: expect.arrayContaining([
+          expect.objectContaining({ id: 'params.creativeBrief', type: 'textarea' }),
+        ]),
+      }),
+    ]));
   });
 
   it('lists generic Grainrad effects and restored VHS controls', async () => {

@@ -12,6 +12,10 @@ export type PromptThisRecord = {
   prompt: string;
   model: string;
   provider: PromptThisProvider;
+  creativeBrief?: string;
+  sourceRelationship?: string;
+  aspectRatio?: string;
+  derivationId?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -26,6 +30,10 @@ function fromEntry(imageId: string, entry: PromptThisEntry): PromptThisRecord {
     prompt: entry.prompt,
     model: entry.model,
     provider: entry.provider,
+    creativeBrief: entry.creativeBrief,
+    sourceRelationship: entry.sourceRelationship,
+    aspectRatio: entry.aspectRatio,
+    derivationId: entry.derivationId,
     createdAt: entry.createdAt,
     updatedAt: entry.updatedAt
   };
@@ -49,6 +57,10 @@ export async function getPromptThisRecord(imageId: string): Promise<PromptThisRe
           prompt: legacy.prompt,
           model: legacy.model,
           provider: legacy.provider,
+          creativeBrief: legacy.creativeBrief,
+          sourceRelationship: legacy.sourceRelationship,
+          aspectRatio: legacy.aspectRatio,
+          derivationId: legacy.derivationId,
           createdAt: legacy.createdAt,
           updatedAt: legacy.updatedAt
         }
@@ -69,6 +81,10 @@ export async function setPromptThisRecord(record: PromptThisRecord): Promise<voi
       prompt: record.prompt,
       model: record.model,
       provider: record.provider,
+      creativeBrief: record.creativeBrief,
+      sourceRelationship: record.sourceRelationship,
+      aspectRatio: record.aspectRatio,
+      derivationId: record.derivationId,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt
     }
@@ -107,10 +123,14 @@ export async function getPromptThisRecords(imageIds: string[]): Promise<Record<s
         try {
           await patchImageExtrasRecord(imageId, {
             promptThis: {
-              prompt: legacy.prompt,
-              model: legacy.model,
-              provider: legacy.provider,
-              createdAt: legacy.createdAt,
+            prompt: legacy.prompt,
+            model: legacy.model,
+            provider: legacy.provider,
+            creativeBrief: legacy.creativeBrief,
+            sourceRelationship: legacy.sourceRelationship,
+            aspectRatio: legacy.aspectRatio,
+            derivationId: legacy.derivationId,
+            createdAt: legacy.createdAt,
               updatedAt: legacy.updatedAt
             }
           });

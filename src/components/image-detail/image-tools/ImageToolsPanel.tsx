@@ -12,6 +12,7 @@ import {
   getImageToolRun,
   isImageToolTransientStatusError,
   listImageTools,
+  savePromptThis,
   startImageToolRun,
   type ImageToolUploadedAsset,
   type ImageToolControl,
@@ -128,6 +129,9 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
   const [acceptingPreview, setAcceptingPreview] = useState(false);
   const [acceptError, setAcceptError] = useState<string | null>(null);
   const [acceptedAsset, setAcceptedAsset] = useState<ImageToolUploadedAsset | null>(null);
+  const [editedPrompt, setEditedPrompt] = useState('');
+  const [promptSaveStatus, setPromptSaveStatus] = useState<string | null>(null);
+  const [promptSaveError, setPromptSaveError] = useState<string | null>(null);
 
   const loadTools = () => {
     setLoadingTools(true);
@@ -229,6 +233,16 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
     return () => window.clearInterval(timer);
   }, [preview]);
 
+  const promptResult = preview?.kind === 'prompt' && preview.prompt
+    ? preview.prompt
+    : run?.result?.kind === 'prompt' && run.result.prompt
+      ? run.result.prompt
+      : null;
+
+  useEffect(() => {
+    if (promptResult) setEditedPrompt(promptResult);
+  }, [promptResult]);
+
   const resetToolExecutionState = () => {
     setRun(null);
     setRunError(null);
@@ -240,6 +254,9 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
     setAcceptingPreview(false);
     setAcceptError(null);
     setAcceptedAsset(null);
+    setEditedPrompt('');
+    setPromptSaveStatus(null);
+    setPromptSaveError(null);
   };
 
   const handleSelectTool = (tool: ImageToolManifest) => {
@@ -314,6 +331,19 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
       setAcceptError(error instanceof Error ? error.message : 'Failed to accept image tool preview');
     } finally {
       setAcceptingPreview(false);
+    }
+  };
+
+  const handleSavePrompt = async () => {
+    const prompt = editedPrompt.trim();
+    if (!prompt) return;
+    setPromptSaveStatus(null);
+    setPromptSaveError(null);
+    try {
+      await savePromptThis(imageId, prompt);
+      setPromptSaveStatus('Saved as current Prompt This');
+    } catch (error) {
+      setPromptSaveError(error instanceof Error ? error.message : 'Failed to save Prompt This');
     }
   };
 
@@ -488,6 +518,29 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
                       <p className="font-mono text-[11px] text-red-600">{acceptError}</p>
                     )}
                     {previewStatus && <p className="font-mono text-[10px] text-gray-500">{previewStatus}</p>}
+                    {preview?.kind === 'prompt' && preview.prompt && (
+                      <textarea
+                        value={editedPrompt}
+                        onChange={(event) => setEditedPrompt(event.target.value)}
+                        rows={8}
+                        aria-label="Derived prompt preview"
+                        className="w-full rounded border border-gray-200 bg-gray-50 px-2 py-1.5 font-mono text-[10px] leading-relaxed text-gray-700"
+                      />
+                    )}
+                    {preview?.kind === 'prompt' && preview.prompt && (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleSavePrompt}
+                          disabled={busy || !editedPrompt.trim()}
+                          className="rounded border border-gray-300 bg-white px-2 py-1 font-mono text-[10px] text-gray-700 hover:border-gray-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Save as current Prompt This
+                        </button>
+                        {promptSaveStatus && <span className="font-mono text-[10px] text-green-700">{promptSaveStatus}</span>}
+                        {promptSaveError && <span className="font-mono text-[10px] text-red-600">{promptSaveError}</span>}
+                      </div>
+                    )}
                     {preview && <DiagnosticList events={preview.events ?? []} />}
                   </div>
                 )}
@@ -500,6 +553,29 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
                       />
                     </div>
                     <p className="mt-1 font-mono text-[10px] text-gray-500">{run.message}</p>
+                    {run.result?.kind === 'prompt' && run.result.prompt && (
+                      <div className="mt-2 rounded border border-gray-200 bg-white p-2">
+                        <p className="mb-1 font-mono text-[10px] font-semibold text-gray-700">Derived prompt</p>
+                        <textarea
+                          value={editedPrompt}
+                          onChange={(event) => setEditedPrompt(event.target.value)}
+                          rows={8}
+                          className="w-full rounded border border-gray-200 bg-gray-50 px-2 py-1.5 font-mono text-[10px] leading-relaxed text-gray-700"
+                        />
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleSavePrompt}
+                            disabled={busy || !editedPrompt.trim()}
+                            className="rounded border border-gray-300 bg-white px-2 py-1 font-mono text-[10px] text-gray-700 hover:border-gray-500 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Save as current Prompt This
+                          </button>
+                          {promptSaveStatus && <span className="font-mono text-[10px] text-green-700">{promptSaveStatus}</span>}
+                          {promptSaveError && <span className="font-mono text-[10px] text-red-600">{promptSaveError}</span>}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

@@ -8,6 +8,7 @@ import type {
 
 const CONTROL_TYPES = new Set<ImageToolControlType>([
   'text',
+  'textarea',
   'number',
   'slider',
   'switch',
@@ -16,6 +17,7 @@ const CONTROL_TYPES = new Set<ImageToolControlType>([
 ]);
 
 const OUTPUT_MODES = new Set<ImageToolOutputMode>(['still', 'animated']);
+const RESULT_KINDS = new Set(['image', 'prompt']);
 
 export class ImageToolManifestError extends Error {
   constructor(message: string) {
@@ -66,6 +68,13 @@ export const validateImageToolManifest = (manifest: ImageToolManifest): ImageToo
       throw new ImageToolManifestError(`Image tool ${manifest.id} has unsupported output mode: ${mode}`);
     }
   });
+  if (manifest.resultKinds) {
+    manifest.resultKinds.forEach((kind) => {
+      if (!RESULT_KINDS.has(kind)) {
+        throw new ImageToolManifestError(`Image tool ${manifest.id} has unsupported result kind: ${kind}`);
+      }
+    });
+  }
 
   if (!Array.isArray(manifest.controls)) {
     throw new ImageToolManifestError(`Image tool ${manifest.id} requires controls`);

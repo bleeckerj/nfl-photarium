@@ -12,6 +12,11 @@ import {
   getHaiku,
   getPromptRecord,
   getPromptsBulk,
+  getPromptDerivations,
+  recordPromptDerivationResult,
+  aspectRatioToSize,
+  type GenerationProvider,
+  type SourceRelationship,
 } from './client.js';
 
 function mergeTags(existingTags: string[], generatedTags: string[]): { appendedTags: string[]; tags: string[] } {
@@ -45,6 +50,13 @@ import {
   type ImageGenerationSettings,
   type ImageReferenceInput,
 } from './image-generation.js';
+
+function dimensionsFromSize(size?: string): { width: number; height: number } | undefined {
+  if (!size) return undefined;
+  const match = size.match(/^(\d+)x(\d+)$/i);
+  if (!match) return undefined;
+  return { width: Number(match[1]), height: Number(match[2]) };
+}
 
 export const aiHandlers: Record<string, RuntimeToolHandler> = {
   'photarium_generate_alt': async (args: Record<string, unknown>) => {
@@ -99,8 +111,16 @@ export const aiHandlers: Record<string, RuntimeToolHandler> = {
   },
 
   'photarium_generate_prompt': async (args: Record<string, unknown>) => {
-    const { imageId, force, existingPrompt } = args as { imageId: string; force?: boolean; existingPrompt?: string };
-    const result = await generatePrompt(imageId, { force, existingPrompt });
+    const { imageId, force, existingPrompt, creativeBrief, sourceRelationship, aspectRatio, saveAsCurrent } = args as {
+      imageId: string;
+      force?: boolean;
+      existingPrompt?: string;
+      creativeBrief?: string;
+      sourceRelationship?: SourceRelationship;
+      aspectRatio?: string;
+      saveAsCurrent?: boolean;
+    };
+    const result = await generatePrompt(imageId, { force, existingPrompt, creativeBrief, sourceRelationship, aspectRatio, saveAsCurrent });
     return {
       content: [
         {
@@ -109,6 +129,57 @@ export const aiHandlers: Record<string, RuntimeToolHandler> = {
         },
       ],
     };
+  },
+
+  'photarium_prompt_history': async (args: Record<string, unknown>) => {
+    const { imageId } = args as { imageId: string };
+    const result = await getPromptDerivations(imageId);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  },
+
+  'photarium_prepare_creative_brief_generation': async (args: Record<string, unknown>) => {
+    const { imageId, creativeBrief, sourceRelationship, aspectRatio, existingPrompt } = args as {
+      imageId: string;
+      creativeBrief: string;
+      sourceRelationship?: SourceRelationship;
+      aspectRatio?: string;
+      existingPrompt?: string;
+    };
+    const result = await generatePrompt(imageId, {
+      creativeBrief,
+      sourceRelationship,
+      aspectRatio,
+      existingPrompt,
+      force: true,
+      saveAsCurrent: false,
+    });
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({ plan: result.plan, derivation: result.derivation, prompt: result.prompt }, null, 2),
+      }],
+    };
+  },
+
+  'photarium_record_creative_brief_result': async (args: Record<string, unknown>) => {
+    const { imageId, derivationId, provider, generatedImageId, externalJobId, actualDimensions, actualAspectRatio } = args as {
+      imageId: string;
+      derivationId: string;
+      provider: GenerationProvider;
+      generatedImageId?: string;
+      externalJobId?: string;
+      actualDimensions?: { width: number; height: number };
+      actualAspectRatio?: string;
+    };
+    const result = await recordPromptDerivationResult(imageId, {
+      derivationId,
+      provider,
+      generatedImageId,
+      externalJobId,
+      actualDimensions,
+      actualAspectRatio,
+    });
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
   },
 
   'photarium_generate_image': async (args: Record<string, unknown>) => {
@@ -141,6 +212,85 @@ export const aiHandlers: Record<string, RuntimeToolHandler> = {
           text: JSON.stringify(result, null, 2),
         },
       ],
+    };
+  },
+
+  'photarium_generate_from_creative_brief': async (args: Record<string, unknown>) => {
+    const {
+      imageId,
+      creativeBrief,
+      sourceRelationship,
+      aspectRatio,
+      provider = 'codex_imagegen',
+      existingPrompt,
+      dryRun,
+      ...settings
+    } = args as unknown as {
+      imageId: string;
+      creativeBrief: string;
+      sourceRelationship?: SourceRelationship;
+      aspectRatio?: string;
+      provider?: GenerationProvider;
+      existingPrompt?: string;
+      dryRun?: boolean;
+      [key: string]: unknown;
+    };
+    const prepared = await generatePrompt(imageId, {
+      creativeBrief,
+      sourceRelationship,
+      aspectRatio,
+      existingPrompt,
+      force: true,
+      saveAsCurrent: false,
+    });
+    if (!prepared.plan || !prepared.prompt) throw new Error('Creative brief prompt generation did not return a plan');
+
+    if (provider !== 'photarium_openai') {
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            handoffRequired: true,
+            provider,
+            plan: { ...prepared.plan, provider },
+            derivation: prepared.derivation,
+            dryRun: Boolean(dryRun),
+          }, null, 2),
+        }],
+      };
+    }
+
+    const generationSettings = settings as unknown as Omit<ImageGenerationSettings, 'prompt'>;
+    const outputSize = generationSettings.size || aspectRatioToSize(prepared.plan.aspectRatio);
+    const result = await generatePhotariumImageFromReferences(
+      { downloadOriginalImageById, uploadFileBase64 },
+      {
+        ...generationSettings,
+        prompt: prepared.prompt,
+        size: outputSize,
+        dryRun,
+      },
+      [{ imageId, role: 'subject_reference' }],
+      'creative_brief',
+    );
+    if (!dryRun && result.imageId) {
+      await recordPromptDerivationResult(imageId, {
+        derivationId: prepared.plan.derivationId,
+        provider: 'photarium_openai',
+        generatedImageId: String(result.imageId),
+        actualDimensions: dimensionsFromSize(outputSize),
+        actualAspectRatio: prepared.plan.aspectRatio,
+      });
+    }
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          plan: { ...prepared.plan, provider },
+          derivation: prepared.derivation,
+          result,
+        }, null, 2),
+      }],
     };
   },
 

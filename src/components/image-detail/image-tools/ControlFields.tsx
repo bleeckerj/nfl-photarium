@@ -61,6 +61,22 @@ export const ControlField = ({
     );
   }
 
+  if (control.type === 'textarea') {
+    return (
+      <label className="block font-mono text-[11px] text-gray-600 sm:col-span-2">
+        <span>{control.label}</span>
+        <textarea
+          value={String(currentValue)}
+          onChange={(event) => onChange(control, event.target.value)}
+          disabled={busy}
+          rows={6}
+          className="mt-1 w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-xs text-gray-800"
+        />
+        {control.helpText && <span className="mt-1 block text-[10px] font-normal text-gray-500">{control.helpText}</span>}
+      </label>
+    );
+  }
+
   if (isSeedControl(control)) {
     return (
       <label className="block font-mono text-[11px] text-gray-600">

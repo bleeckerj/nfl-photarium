@@ -1,5 +1,5 @@
 export type ImageToolOutputMode = 'still' | 'animated';
-export type ImageToolControlType = 'text' | 'number' | 'slider' | 'switch' | 'select' | 'color';
+export type ImageToolControlType = 'text' | 'textarea' | 'number' | 'slider' | 'switch' | 'select' | 'color';
 export type ImageToolRunStatus = 'queued' | 'running' | 'completed' | 'failed';
 export type ImageToolDiagnosticLevel = 'info' | 'warn' | 'error';
 export type ImageToolWorkflowMode = 'filter' | 'reinterpretation';
@@ -84,6 +84,7 @@ export type ImageToolManifest = {
   inputAssetTypes: string[];
   outputModes: ImageToolOutputMode[];
   supportsAsync: boolean;
+  resultKinds?: Array<'image' | 'prompt'>;
   presentation: ImageToolPresentation;
   controls: ImageToolControl[];
   workflows?: ImageToolWorkflowManifest[];
@@ -110,6 +111,9 @@ export type ImageToolRun = {
   updatedAt: string;
   request: ImageToolRequest;
   result?: {
+    kind?: 'image' | 'prompt';
+    prompt?: string;
+    plan?: Record<string, unknown>;
     uploadedAsset?: {
       id?: string;
       assetType?: 'image' | 'video';
@@ -156,6 +160,9 @@ export type ImageToolPreview = {
   updatedAt: string;
   expiresAt: string;
   request: ImageToolRequest;
+  kind?: 'image' | 'prompt';
+  prompt?: string;
+  plan?: Record<string, unknown>;
   artifactUrl?: string;
   contentType?: string;
   filename?: string;
@@ -203,6 +210,22 @@ export const listImageTools = async (): Promise<ImageToolManifest[]> => {
     throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to load image tools');
   }
   return Array.isArray(payload.tools) ? payload.tools : [];
+};
+
+export const savePromptThis = async (imageId: string, prompt: string): Promise<{ imageId: string; prompt: string }> => {
+  const response = await fetch(`/api/images/${encodeURIComponent(imageId)}/prompt`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to save Prompt This');
+  }
+  return {
+    imageId,
+    prompt: typeof payload.prompt === 'string' ? payload.prompt : prompt,
+  };
 };
 
 export const startImageToolRun = async (params: {

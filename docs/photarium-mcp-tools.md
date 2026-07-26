@@ -73,6 +73,10 @@ The crop preserves source width. If the requested ratio needs more height than t
 - `photarium_generate_description`
 - `photarium_generate_tags`
 - `photarium_generate_prompt`
+- `photarium_prepare_creative_brief_generation`
+- `photarium_prompt_history`
+- `photarium_record_creative_brief_result`
+- `photarium_generate_from_creative_brief`
 - `photarium_generate_image`
 - `photarium_generate_from_references`
 - `photarium_aspect_ratio_variant`
@@ -80,6 +84,20 @@ The crop preserves source width. If the requested ratio needs more height than t
 - `photarium_concepts`
 
 ### Image Generation
+
+Creative-brief generation is provider-neutral. Photarium owns source-image context, prompt derivation, derivation history, and catalog provenance. It does not invoke Codex's built-in imagegen tool or another MCP server from the Photarium server.
+
+- `photarium_prepare_creative_brief_generation` creates and persists a `CreativeBriefGenerationPlan` without generating an image.
+- `photarium_generate_prompt` accepts `creativeBrief`, `sourceRelationship`, and optional `aspectRatio`; a non-empty brief creates a new derivation while leaving the canonical recreation prompt unchanged unless `saveAsCurrent: true` is supplied.
+- `photarium_prompt_history` returns prior briefs, prompts, providers, ratios, reference roles, and generated children for a source image.
+- `photarium_generate_from_creative_brief` executes directly only when `provider: "photarium_openai"` is selected. `codex_imagegen` and `comfyui` return a handoff plan for the agent/provider layer.
+- `photarium_record_creative_brief_result` records an externally generated child, provider/job ID, actual dimensions, and actual aspect ratio after Codex or ComfyUI completes.
+
+For a ComfyUI handoff, the agent must resolve a declared workflow capability/configured workflow ID that accepts the source image, positive prompt, optional negative prompt, and ratio or dimensions. It should use the ComfyUI MCP upload/run/watch/download flow, then upload the result to Photarium with `parentId` set to the source image and call `photarium_record_creative_brief_result`. The existing aspect-ratio adjustment workflow is a separate reframing operation and should not be selected as a general creative-transformation workflow by inference.
+
+Supported source relationships are `brief_led`, `faithful_adaptation`, `related_design`, and `inspired_concept`. A non-empty brief is interpreted as a transformation request. The relationship controls how much of the source form is retained; it does not silently add a “make it distinct” instruction when the relationship is `brief_led`.
+
+Aspect ratios normalize to forms such as `1:1`, `4:5`, `16:9`, and `9:16`. Providers receive the normalized target, and recorded results retain both the requested and actual ratio when available. Exact post-processing remains a separate operation.
 
 The image generation tools call OpenAI image generation from the Photarium MCP server and upload generated outputs back into Photarium. They require `OPENAI_API_KEY` in the MCP server environment.
 

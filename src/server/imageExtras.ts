@@ -7,6 +7,10 @@ export type PromptThisEntry = {
   prompt: string;
   model: string;
   provider: PromptThisProvider;
+  creativeBrief?: string;
+  sourceRelationship?: string;
+  aspectRatio?: string;
+  derivationId?: string;
   createdAt: string;
   updatedAt: string;
 };

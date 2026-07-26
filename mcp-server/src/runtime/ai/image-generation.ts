@@ -346,7 +346,7 @@ async function resolveGenerationReference(deps: ImageGenerationDeps, reference: 
   throw new Error(`Reference ${index + 1} must include imageId or url`);
 }
 
-type ReferenceGenerationMode = 'reference_generate' | 'semantic_merge' | 'aspect_ratio_variant';
+type ReferenceGenerationMode = 'reference_generate' | 'semantic_merge' | 'aspect_ratio_variant' | 'creative_brief';
 
 function buildReferencePrompt(prompt: string, references: Array<{ role: ImageReferenceRole; instructions?: string }>, mode: ReferenceGenerationMode): string {
   const lines = [prompt.trim()];

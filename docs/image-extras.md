@@ -18,6 +18,7 @@ These fields can be larger, change frequently, or are derived. They are stored i
 - `description` (long-form)
 - `altText` (long-form)
 - Prompt This (generated prompt text)
+- creative-brief derivation history (briefs, derived prompts, provider handoffs, and generated-child provenance)
 - future fields: captions/OCR, annotations, notes, etc.
 
 ## Storage backend
@@ -62,6 +63,8 @@ Example shape:
 Earlier versions stored Prompt This under a legacy key `prompt-this:<imageId>`.
 
 Current code will read from the unified record first, then fall back to the legacy key and (best-effort) migrate into the unified record.
+
+Creative-brief derivations are stored separately under `prompt-derivations:<imageId>` so the canonical `promptThis` record remains stable. Each derivation retains its source image ID, brief, final prompt, source relationship, reference roles, provider, requested aspect ratio, generated child ID, external job ID, and actual output dimensions/ratio when recorded.
 
 ## Migrating existing Description/ALT
 

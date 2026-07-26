@@ -77,8 +77,79 @@ export const aiTools: Tool[] = [
           type: 'string',
           description: 'Optional existing prompt draft to refine',
         },
+        creativeBrief: {
+          type: 'string',
+          description: 'Optional freeform transformation direction, such as changing the brand, era, materials, product aesthetic, or visual medium.',
+        },
+        sourceRelationship: {
+          type: 'string',
+          enum: ['brief_led', 'faithful_adaptation', 'related_design', 'inspired_concept'],
+          description: 'Optional relationship to the source. Defaults to brief_led, which adds no hidden distinctness rule.',
+        },
+        aspectRatio: {
+          type: 'string',
+          description: 'Optional target aspect ratio such as 1:1, 4:5, 16:9, or 9:16.',
+        },
+        saveAsCurrent: {
+          type: 'boolean',
+          description: 'If true, save a creative-brief result as the current Prompt This value. Defaults to false.',
+        },
       },
       required: ['imageId'],
+    },
+  },
+  {
+    name: 'photarium_prompt_history',
+    description: 'Retrieve creative-brief prompt derivations and any generated child image records for a Photarium image.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        imageId: { type: 'string', description: 'The source Photarium image ID.' },
+      },
+      required: ['imageId'],
+    },
+  },
+  {
+    name: 'photarium_prepare_creative_brief_generation',
+    description: 'Derive and persist a provider-neutral creative-brief generation plan without generating an image.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        imageId: { type: 'string', description: 'The source Photarium image ID.' },
+        creativeBrief: { type: 'string', description: 'Freeform transformation direction for the source image.' },
+        sourceRelationship: {
+          type: 'string',
+          enum: ['brief_led', 'faithful_adaptation', 'related_design', 'inspired_concept'],
+          description: 'Relationship to the source. Defaults to brief_led.',
+        },
+        aspectRatio: { type: 'string', description: 'Optional target aspect ratio such as 4:5.' },
+        existingPrompt: { type: 'string', description: 'Optional prompt draft to revise under the brief.' },
+      },
+      required: ['imageId', 'creativeBrief'],
+    },
+  },
+  {
+    name: 'photarium_record_creative_brief_result',
+    description: 'Record a Codex imagegen or ComfyUI result against a previously prepared creative-brief derivation.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        imageId: { type: 'string', description: 'The source Photarium image ID.' },
+        derivationId: { type: 'string', description: 'The prepared creative-brief derivation ID.' },
+        provider: { type: 'string', enum: ['codex_imagegen', 'comfyui', 'photarium_openai'], description: 'Provider that created the result.' },
+        generatedImageId: { type: 'string', description: 'Photarium ID of the generated child image, after upload.' },
+        externalJobId: { type: 'string', description: 'External provider job ID, if available.' },
+        actualDimensions: {
+          type: 'object',
+          properties: {
+            width: { type: 'integer', minimum: 1 },
+            height: { type: 'integer', minimum: 1 },
+          },
+          description: 'Actual generated image dimensions.',
+        },
+        actualAspectRatio: { type: 'string', description: 'Actual output aspect ratio.' },
+      },
+      required: ['imageId', 'derivationId', 'provider'],
     },
   },
   {
@@ -144,6 +215,42 @@ export const aiTools: Tool[] = [
         dryRun: { type: 'boolean', description: 'If true, return the planned OpenAI/upload request without generating or uploading.' },
       },
       required: ['prompt', 'references'],
+    },
+  },
+  {
+    name: 'photarium_generate_from_creative_brief',
+    description: 'Derive a creative-brief prompt from a Photarium source image and generate with Photarium OpenAI, or return an agent handoff plan for Codex imagegen or ComfyUI.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        imageId: { type: 'string', description: 'The primary Photarium source image ID.' },
+        creativeBrief: { type: 'string', description: 'Freeform transformation direction.' },
+        sourceRelationship: {
+          type: 'string',
+          enum: ['brief_led', 'faithful_adaptation', 'related_design', 'inspired_concept'],
+          description: 'Relationship to the source. Defaults to brief_led.',
+        },
+        aspectRatio: { type: 'string', description: 'Optional target aspect ratio such as 4:5.' },
+        provider: {
+          type: 'string',
+          enum: ['codex_imagegen', 'comfyui', 'photarium_openai'],
+          description: 'Generation provider. Defaults to codex_imagegen for agent handoff; photarium_openai executes inside Photarium MCP.',
+        },
+        existingPrompt: { type: 'string', description: 'Optional prompt draft to revise under the brief.' },
+        model: { type: 'string', description: 'Photarium OpenAI image model when provider is photarium_openai.' },
+        size: { type: 'string', description: 'Optional output size override for Photarium OpenAI.' },
+        quality: { type: 'string', description: 'Image quality for Photarium OpenAI.' },
+        outputFormat: { type: 'string', enum: ['png', 'jpeg', 'jpg', 'webp'] },
+        background: { type: 'string', enum: ['transparent', 'opaque', 'auto'] },
+        filename: { type: 'string' },
+        namespace: { type: 'string' },
+        folder: { type: 'string' },
+        tags: { type: 'array', items: { type: 'string' } },
+        description: { type: 'string' },
+        displayName: { type: 'string' },
+        dryRun: { type: 'boolean', description: 'Return the derived plan and, for Photarium OpenAI, the planned image request without generating.' },
+      },
+      required: ['imageId', 'creativeBrief'],
     },
   },
   {
