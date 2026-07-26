@@ -4,7 +4,10 @@ import {
   getAspectRatioExpansionProviderStatuses,
   resolveAspectRatioExpansionProvider,
 } from '@/server/aspectRatioExpansion/registry';
-import { resolveAspectRatioSourceMetadata } from '@/server/aspectRatioExpansion/service';
+import {
+  resolveAspectRatioSourceDescription,
+  resolveAspectRatioSourceMetadata,
+} from '@/server/aspectRatioExpansion/service';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -58,5 +61,15 @@ describe('aspect-ratio expansion provider resolution', () => {
       folder: 'turing-clamp',
       tags: ['raw-tag'],
     });
+  });
+
+  it('prefers a source description and leaves AI generation for missing descriptions', () => {
+    expect(resolveAspectRatioSourceDescription(
+      { description: 'Cloudflare source description.' },
+      { description: 'Extras source description.' },
+    )).toBe('Extras source description.');
+    expect(resolveAspectRatioSourceDescription({ description: 'Cloudflare source description.' }, null))
+      .toBe('Cloudflare source description.');
+    expect(resolveAspectRatioSourceDescription({}, null)).toBeUndefined();
   });
 });

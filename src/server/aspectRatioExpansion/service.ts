@@ -1,10 +1,11 @@
 import { fetchCloudflareImage, getCloudflareCredentials } from '@/server/cloudflareClient';
 import { getCachedImage, type CachedCloudflareImage } from '@/server/cloudflareImageCache';
 import { downloadSourceImage } from '@/server/image-tools/sourceDownloader';
+import { generateAndPersistImageDescription } from '@/server/imageDescriptionService';
 import { getImageExtrasRecord, patchImageExtrasRecord } from '@/server/imageExtras';
 import { uploadImageBuffer, type UploadSuccess } from '@/server/uploadService';
 import { parseCloudflareMetadata } from '@/utils/cloudflareMetadata';
-import type { CloudflareMetadata } from '@/utils/cloudflareMetadata';
+import { cleanString, type CloudflareMetadata } from '@/utils/cloudflareMetadata';
 import { sanitizeFilename } from '@/utils/filename';
 import { resolveAspectRatioExpansionProvider } from '@/server/aspectRatioExpansion/registry';
 import type {
@@ -49,6 +50,13 @@ export function resolveAspectRatioSourceMetadata(
     displayName: rawMetadata.displayName || cachedImage?.displayName,
     contentHash: rawMetadata.contentHash || cachedImage?.contentHash,
   };
+}
+
+export function resolveAspectRatioSourceDescription(
+  sourceMetadata: CloudflareMetadata,
+  extras?: { description?: string } | null,
+) {
+  return cleanString(extras?.description) ?? cleanString(sourceMetadata.description);
 }
 
 export type AspectRatioExpansionOperation = {
@@ -157,7 +165,7 @@ export async function uploadAspectRatioExpansionArtifact(params: {
       folder: extras?.folder ?? sourceMetadata.folder,
       tags,
       displayName: filename,
-      description: params.request.description?.trim() || `Generative ${params.provenance.aspectRatio} expansion via ${params.provenance.resolvedProvider}`,
+      description: resolveAspectRatioSourceDescription(sourceMetadata, extras),
       originalUrl: sourceMetadata.originalUrl,
       sourceUrl: sourceMetadata.sourceUrl,
       namespace,
@@ -167,6 +175,12 @@ export async function uploadAspectRatioExpansionArtifact(params: {
     },
   });
   if (!outcome.ok) throw new Error(outcome.error);
+  const sourceDescription = resolveAspectRatioSourceDescription(sourceMetadata, extras);
+  if (sourceDescription) {
+    await patchImageExtrasRecord(outcome.data.id, { description: sourceDescription });
+  } else {
+    await generateAndPersistImageDescription({ imageId: outcome.data.id });
+  }
   return outcome.data;
 }
 
