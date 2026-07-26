@@ -4,6 +4,7 @@ import {
   getAspectRatioExpansionProviderStatuses,
   resolveAspectRatioExpansionProvider,
 } from '@/server/aspectRatioExpansion/registry';
+import { resolveAspectRatioSourceMetadata } from '@/server/aspectRatioExpansion/service';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -40,5 +41,22 @@ describe('aspect-ratio expansion provider resolution', () => {
       expect.objectContaining({ id: 'comfyui', available: false }),
     ]));
     expect(JSON.stringify(statuses)).not.toContain('test-key');
+  });
+
+  it('uses normalized Photarium metadata when Cloudflare metadata omits the namespace', () => {
+    const metadata = resolveAspectRatioSourceMetadata(
+      { tags: ['raw-tag'] },
+      {
+        namespace: 'cf-artifacts',
+        folder: 'turing-clamp',
+        tags: ['cached-tag'],
+      },
+    );
+
+    expect(metadata).toMatchObject({
+      namespace: 'cf-artifacts',
+      folder: 'turing-clamp',
+      tags: ['raw-tag'],
+    });
   });
 });

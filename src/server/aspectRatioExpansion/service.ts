@@ -1,8 +1,10 @@
 import { fetchCloudflareImage, getCloudflareCredentials } from '@/server/cloudflareClient';
+import { getCachedImage, type CachedCloudflareImage } from '@/server/cloudflareImageCache';
 import { downloadSourceImage } from '@/server/image-tools/sourceDownloader';
 import { getImageExtrasRecord, patchImageExtrasRecord } from '@/server/imageExtras';
 import { uploadImageBuffer, type UploadSuccess } from '@/server/uploadService';
 import { parseCloudflareMetadata } from '@/utils/cloudflareMetadata';
+import type { CloudflareMetadata } from '@/utils/cloudflareMetadata';
 import { sanitizeFilename } from '@/utils/filename';
 import { resolveAspectRatioExpansionProvider } from '@/server/aspectRatioExpansion/registry';
 import type {
@@ -31,6 +33,23 @@ const normalizeRequest = (request: AspectRatioExpansionRequest): Required<Pick<A
   placement: normalizePlacement(request.placement),
   provider: request.provider || 'auto',
 });
+
+export function resolveAspectRatioSourceMetadata(
+  rawMetadata: CloudflareMetadata,
+  cachedImage?: Pick<CachedCloudflareImage, 'folder' | 'tags' | 'description' | 'originalUrl' | 'sourceUrl' | 'namespace' | 'displayName' | 'contentHash'> | null,
+): CloudflareMetadata {
+  return {
+    ...rawMetadata,
+    folder: rawMetadata.folder || cachedImage?.folder,
+    tags: rawMetadata.tags ?? cachedImage?.tags,
+    description: rawMetadata.description || cachedImage?.description,
+    originalUrl: rawMetadata.originalUrl || cachedImage?.originalUrl,
+    sourceUrl: rawMetadata.sourceUrl || cachedImage?.sourceUrl,
+    namespace: rawMetadata.namespace || cachedImage?.namespace,
+    displayName: rawMetadata.displayName || cachedImage?.displayName,
+    contentHash: rawMetadata.contentHash || cachedImage?.contentHash,
+  };
+}
 
 export type AspectRatioExpansionOperation = {
   source: Awaited<ReturnType<typeof downloadSourceImage>>;
@@ -106,7 +125,11 @@ export async function uploadAspectRatioExpansionArtifact(params: {
 }): Promise<UploadSuccess> {
   const credentials = getCloudflareCredentials();
   const sourceImage = await fetchCloudflareImage(params.sourceImageId, credentials);
-  const sourceMetadata = parseCloudflareMetadata(sourceImage.meta);
+  const cachedSource = await getCachedImage(params.sourceImageId);
+  const sourceMetadata = resolveAspectRatioSourceMetadata(
+    parseCloudflareMetadata(sourceImage.meta),
+    cachedSource,
+  );
   const extras = await getImageExtrasRecord(params.sourceImageId);
   const namespace = sourceMetadata.namespace;
   if (!namespace) throw new Error('Source image is missing namespace metadata');
