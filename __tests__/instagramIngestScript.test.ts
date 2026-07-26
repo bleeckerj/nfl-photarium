@@ -33,6 +33,18 @@ describe('instagram ingest script helpers', async () => {
     expect(options.namespace).toBe('ingest');
   });
 
+  it('enables Cloudflare pushes by default for profile ingest', () => {
+    const options = script.parseArgs(['ingest', '--username', 'demo']);
+
+    expect(options.pushCloudflare).toBe(true);
+  });
+
+  it('allows profile ingest to opt out of Cloudflare pushes', () => {
+    const options = script.parseArgs(['ingest', '--username', 'demo', '--no-push-cloudflare']);
+
+    expect(options.pushCloudflare).toBe(false);
+  });
+
   it('normalizes profile-ish usernames before deriving ingest paths', () => {
     const options = script.parseArgs([
       'ingest',

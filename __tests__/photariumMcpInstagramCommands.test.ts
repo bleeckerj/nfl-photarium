@@ -98,6 +98,20 @@ describe('Photarium MCP Instagram command wrappers', async () => {
     );
   });
 
+  it('passes the explicit profile-ingest upload opt-out through to the CLI', async () => {
+    mockSpawnResult(0);
+
+    await commands.runInstagramProfileIngest({
+      username: 'demo',
+      namespace: 'ig-archive',
+      pushCloudflare: false,
+    });
+
+    const [, args] = spawnMock.mock.calls[0];
+    expect(args).toEqual(expect.arrayContaining(['ingest', '--no-push-cloudflare']));
+    expect(args).not.toContain('--push-cloudflare');
+  });
+
   it('builds recovery dry-run commands without executing nested Instagram work', async () => {
     mockSpawnResult(0);
 

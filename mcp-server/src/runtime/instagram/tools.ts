@@ -51,7 +51,7 @@ export const instagramTools: Tool[] = [
   {
     name: 'photarium_instagram_ingest_profile',
     description:
-      'Ingest Instagram profile feed posts through the existing authenticated CLI/browser profile flow, optionally downloading source images and pushing discovered media into Photarium.',
+      'Ingest Instagram profile feed posts through the existing authenticated CLI/browser profile flow, optionally downloading source images and pushing discovered media into Photarium. Cloudflare/Photarium push defaults to enabled; set pushCloudflare to false to opt out.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -66,7 +66,7 @@ export const instagramTools: Tool[] = [
         output: { type: 'string', description: 'Optional NDJSON output path override.' },
         checkpoint: { type: 'string', description: 'Optional checkpoint path override.' },
         downloadDir: { type: 'string', description: 'Optional local directory to download discovered image assets.' },
-        pushCloudflare: { type: 'boolean', description: 'Push discovered media to Photarium/Cloudflare.' },
+        pushCloudflare: { type: 'boolean', description: 'Push discovered media to Photarium/Cloudflare. Defaults to true.' },
         aiDisplayName: { type: 'boolean', description: 'Generate display names for image uploads during ingest.' },
         skipVideoPush: { type: 'boolean', description: 'Skip pushing videos during profile ingest.' },
         noResume: { type: 'boolean', description: 'Ignore existing checkpoint and start from the newest page.' },

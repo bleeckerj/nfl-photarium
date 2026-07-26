@@ -156,7 +156,7 @@ async function runIngest(opts, log) {
       log.warn("skip_video_push=true (videos will be deferred; only images pushed during ingest)");
     }
   } else {
-    log.warn("push_cloudflare=false (use --push-cloudflare to catalog assets in Cloudflare).");
+    log.warn("push_cloudflare=false (explicit opt-out; omit --no-push-cloudflare to catalog assets in Cloudflare).");
   }
 
   log.debug(`Launching browser in ${opts.headful ? "headful" : "headless"} mode.`);

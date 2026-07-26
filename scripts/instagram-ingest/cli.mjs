@@ -109,8 +109,8 @@ Options:
   --checkpoint <path>       Checkpoint path (default: data/instagram/<username>.checkpoint.json)
   --url <url>               Instagram post/reel URL for single-url mode
   --download-dir <path>     Optional directory to download image assets
-  --push-cloudflare         Push discovered images to /api/upload/external
-  --no-push-cloudflare      Disable Cloudflare pushes for single-url mode
+  --push-cloudflare         Push discovered media to Photarium/Cloudflare (default for ingest/single-url)
+  --no-push-cloudflare      Disable Photarium/Cloudflare pushes
   --ai-display-name         Generate display names for image uploads during ingest
   --skip-video-push         Skip pushing videos during ingest
   --api-base <url>          Base URL for local API (default: http://localhost:3000)
@@ -154,7 +154,7 @@ export function parseArgs(argv) {
 
   const [command, ...rest] = argv;
   out.command = command ?? "help";
-  if (out.command === "single-url") out.pushCloudflare = true;
+  if (out.command === "ingest" || out.command === "single-url") out.pushCloudflare = true;
 
   for (let i = 0; i < rest.length; i += 1) {
     const arg = rest[i];
