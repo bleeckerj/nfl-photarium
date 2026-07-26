@@ -26,7 +26,7 @@ import {
   pushVideoToCloudflare,
   reduceVideoUrlsForUpload,
 } from "./instagram-ingest/cloudflare-upload.mjs";
-import { mapItemToRecord } from "./instagram-ingest/records.mjs";
+import { buildInstagramSourceRecord, mapItemToRecord } from "./instagram-ingest/records.mjs";
 import {
   extractSingleUrlRecord,
   fetchSingleUrlRecordFromApiByShortcode,
@@ -267,7 +267,7 @@ async function runIngest(opts, log) {
           `cloudflare_image_skip_video_post shortcode=${record.shortcode ?? "n/a"} media_type=${record.mediaType} images=${record.imageUrls.length}`,
         );
       } else if (opts.pushCloudflare && record.imageUrls.length > 0) {
-        const sourcePageUrl = `https://www.instagram.com/${opts.username}/`;
+        const sourcePageUrl = record.permalink || `https://www.instagram.com/${opts.username}/`;
         for (const imageUrl of record.imageUrls) {
           try {
             const pushed = await ingestImageToCloudflare({
@@ -278,6 +278,8 @@ async function runIngest(opts, log) {
               shortcode: record.shortcode,
               permalink: record.permalink,
               sourcePageUrl,
+              description: record.caption,
+              instagramSource: buildInstagramSourceRecord(record),
               namespace: opts.namespace,
               log,
               aiDisplayName: opts.aiDisplayName,
@@ -327,7 +329,7 @@ async function runIngest(opts, log) {
           `cloudflare_video_skip shortcode=${record.shortcode ?? "n/a"} reason=skip_video_push urls=${record.videoUrls.length}`,
         );
       } else if (opts.pushCloudflare && record.videoUrls.length > 0) {
-        const sourcePageUrl = `https://www.instagram.com/${opts.username}/`;
+        const sourcePageUrl = record.permalink || `https://www.instagram.com/${opts.username}/`;
         for (const videoUrl of record.videoUrls) {
           try {
             const pushed = await pushVideoToCloudflare({
@@ -337,6 +339,7 @@ async function runIngest(opts, log) {
               shortcode: record.shortcode,
               permalink: record.permalink,
               sourcePageUrl,
+              description: record.caption,
               namespace: opts.namespace,
               log,
             });
@@ -499,7 +502,7 @@ async function runVideosFromNdjson(opts, log) {
       const key = `${shortcode || "no_shortcode"}|${videoUrl}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      queue.push({ username, shortcode, permalink, sourcePageUrl, videoUrl });
+      queue.push({ username, shortcode, permalink, sourcePageUrl, caption: row?.caption || "", videoUrl });
     }
   }
 
@@ -524,6 +527,7 @@ async function runVideosFromNdjson(opts, log) {
         shortcode: item.shortcode,
         permalink: item.permalink,
         sourcePageUrl: item.sourcePageUrl,
+        description: item.caption,
         namespace: opts.namespace,
         log,
       });
@@ -589,7 +593,10 @@ async function runSingleUrl(opts, log) {
     record.profileUsername = sourceUsername || null;
     record.uploadTags = buildInstagramUploadTags(sourceUsername, "");
 
-    if (record.videoUrls.length === 0 && record.shortcode) {
+    if (
+      record.shortcode &&
+      (record.videoUrls.length === 0 || record.likeCount == null || record.commentCount == null)
+    ) {
       const apiFallback = await fetchSingleUrlRecordFromApiByShortcode(
         page,
         record.shortcode,
@@ -603,6 +610,9 @@ async function runSingleUrl(opts, log) {
         record.userId = record.userId || apiFallback.userId || null;
         record.mediaId = record.mediaId || apiFallback.mediaId || null;
         record.pk = record.pk || apiFallback.pk || null;
+        record.likeCount = record.likeCount ?? apiFallback.likeCount ?? null;
+        record.commentCount = record.commentCount ?? apiFallback.commentCount ?? null;
+        record.viewCount = record.viewCount ?? apiFallback.viewCount ?? null;
         if (!record.caption && apiFallback.caption) record.caption = apiFallback.caption;
         if (!record.takenAtUnix && apiFallback.takenAtUnix) {
           record.takenAtUnix = apiFallback.takenAtUnix;
@@ -636,7 +646,11 @@ async function runSingleUrl(opts, log) {
     }
 
     const feedLookupUsername = sourceUsername || "";
-    if (record.videoUrls.length === 0 && record.shortcode && feedLookupUsername) {
+    if (
+      record.shortcode &&
+      feedLookupUsername &&
+      (record.videoUrls.length === 0 || record.likeCount == null || record.commentCount == null)
+    ) {
       const feedFallback = await fetchSingleUrlRecordFromUserFeedByShortcode(
         page,
         feedLookupUsername,
@@ -649,6 +663,9 @@ async function runSingleUrl(opts, log) {
         record.userId = record.userId || feedFallback.userId || null;
         record.mediaId = record.mediaId || feedFallback.mediaId || null;
         record.pk = record.pk || feedFallback.pk || null;
+        record.likeCount = record.likeCount ?? feedFallback.likeCount ?? null;
+        record.commentCount = record.commentCount ?? feedFallback.commentCount ?? null;
+        record.viewCount = record.viewCount ?? feedFallback.viewCount ?? null;
         if (!record.caption && feedFallback.caption) record.caption = feedFallback.caption;
         if (!record.takenAtUnix && feedFallback.takenAtUnix) {
           record.takenAtUnix = feedFallback.takenAtUnix;
@@ -747,6 +764,8 @@ async function runSingleUrl(opts, log) {
               shortcode: record.shortcode,
               permalink: record.permalink,
               sourcePageUrl,
+              description: record.caption,
+              instagramSource: buildInstagramSourceRecord(record),
               namespace: opts.namespace,
               log,
             });
@@ -795,6 +814,7 @@ async function runSingleUrl(opts, log) {
               shortcode: record.shortcode,
               permalink: record.permalink,
               sourcePageUrl,
+              description: record.caption,
               namespace: opts.namespace,
               log,
             });

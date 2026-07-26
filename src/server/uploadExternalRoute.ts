@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getPromptThisRecord, setPromptThisRecord, type PromptThisRecord } from '@/server/promptThis';
 import type { ComfyWorkflowExtraction } from '@/utils/comfyMetadata';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
+import { parseOptionalInstagramSource } from '@/server/instagramSource';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -42,6 +43,7 @@ export type ExternalUploadFormFields = {
   normalizedOriginalUrl?: string;
   cleanSourceUrl?: string;
   normalizedSourceUrl?: string;
+  instagramSourceField: ReturnType<typeof parseOptionalInstagramSource>;
   effectiveNamespace: string;
   cleanParentId?: string;
   duplicateAction: FormDataEntryValue | null;
@@ -120,6 +122,7 @@ export function parseExternalUploadFormFields(
       normalizedOriginalUrl: normalizeOriginalUrl(cleanOriginalUrl),
       cleanSourceUrl,
       normalizedSourceUrl: normalizeOriginalUrl(cleanSourceUrl),
+      instagramSourceField: parseOptionalInstagramSource(formData.get('instagramSource')),
       effectiveNamespace,
       cleanParentId: parentId,
       duplicateAction: formData.get('duplicateAction'),

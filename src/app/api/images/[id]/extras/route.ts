@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cleanString } from '@/utils/cloudflareMetadata';
 import { getImageExtrasRecord, patchImageExtrasRecord } from '@/server/imageExtras';
 import type { DngIngestRecord, FlickrSourceRecord, ImageExifRecord, RawSourceReference, SnagitSourceRecord } from '@/server/imageExtras';
+import type { InstagramSourceRecord } from '@/server/instagramSource';
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -52,6 +53,7 @@ export async function PATCH(
       sourceUrlNormalized?: string;
       originalUrl?: string;
       originalUrlNormalized?: string;
+      instagramSource?: InstagramSourceRecord;
       rawSource?: RawSourceReference;
       exif?: ImageExifRecord;
       dngIngest?: DngIngestRecord;
@@ -110,6 +112,15 @@ export async function PATCH(
         patch.originalUrlNormalized = undefined;
       } else if (typeof raw === 'string') {
         patch.originalUrlNormalized = cleanString(raw);
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body ?? {}, 'instagramSource')) {
+      const raw = body?.instagramSource;
+      if (raw === null) {
+        patch.instagramSource = undefined;
+      } else if (isPlainObject(raw)) {
+        patch.instagramSource = raw as InstagramSourceRecord;
       }
     }
 

@@ -1,4 +1,5 @@
 import { getExtrasStorage } from '@/server/extrasStorage';
+import type { InstagramSourceRecord } from '@/server/instagramSource';
 
 export type PromptThisProvider = 'openai' | 'manual';
 
@@ -133,6 +134,7 @@ export type ImageExtrasRecordV1 = {
   sourceUrlNormalized?: string;
   originalUrl?: string;
   originalUrlNormalized?: string;
+  instagramSource?: InstagramSourceRecord;
 
   /** Prompt This (generated prompt for recreating the image). */
   promptThis?: PromptThisEntry;

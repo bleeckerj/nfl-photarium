@@ -87,12 +87,20 @@ export async function POST(request: NextRequest) {
       normalizedOriginalUrl,
       cleanSourceUrl,
       normalizedSourceUrl,
+      instagramSourceField,
       effectiveNamespace,
       cleanParentId,
       duplicateAction,
       promptField,
       workflowJsonField,
     } = parsedFields.fields;
+
+    if (!instagramSourceField.ok) {
+      return withCors(NextResponse.json(
+        { error: instagramSourceField.error },
+        { status: 400 }
+      ));
+    }
 
     if (cleanFolder) {
       try {
@@ -258,6 +266,7 @@ export async function POST(request: NextRequest) {
       originalUrlNormalized: normalizedOriginalUrl,
       sourceUrl: cleanSourceUrl || undefined,
       sourceUrlNormalized: normalizedSourceUrl,
+      instagramSource: instagramSourceField.instagramSource,
       exif: exifSummary,
     };
     const cachedMetadataPayload = {

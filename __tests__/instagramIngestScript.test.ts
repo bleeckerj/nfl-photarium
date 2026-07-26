@@ -164,6 +164,76 @@ describe('instagram ingest script helpers', async () => {
     expect(namespaceValues).toEqual(['ingest', 'ingest']);
   });
 
+  it('sends Instagram captions and source metrics with image uploads', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ id: 'img-instagram-1' }), { status: 200 }),
+    );
+
+    await script.pushImageToCloudflare({
+      apiBase: 'http://localhost:3000',
+      imageUrl: 'https://example.com/image.jpg',
+      username: 'an_improbable_future',
+      uploadTags: ['instagram', 'an_improbable_future'],
+      shortcode: 'abc126',
+      permalink: 'https://www.instagram.com/p/abc126/',
+      sourcePageUrl: 'https://www.instagram.com/p/abc126/',
+      description: 'A post caption',
+      instagramSource: {
+        username: 'an_improbable_future',
+        shortcode: 'abc126',
+        likeCount: 42,
+        commentCount: 7,
+        viewCount: 900,
+      },
+      namespace: 'cf-instagram',
+      log: noopLogger,
+      fetchedImage: { bytes: Buffer.from('image-bytes'), contentType: 'image/jpeg' },
+    });
+
+    const [, init] = vi.mocked(globalThis.fetch).mock.calls[0];
+    const uploadBody = init?.body as FormData;
+    expect(uploadBody.get('description')).toBe('A post caption');
+    expect(JSON.parse(String(uploadBody.get('instagramSource')))).toMatchObject({
+      likeCount: 42,
+      commentCount: 7,
+      viewCount: 900,
+    });
+  });
+
+  it('enriches an existing duplicate image with Instagram metadata', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ duplicates: [{ id: 'existing-img-1' }] }), { status: 409 }),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ imageId: 'existing-img-1' }), { status: 200 }));
+
+    const result = await script.pushImageToCloudflare({
+      apiBase: 'http://localhost:3000',
+      imageUrl: 'https://example.com/image.jpg',
+      username: 'demo',
+      uploadTags: ['instagram', 'demo'],
+      shortcode: 'abc127',
+      permalink: 'https://www.instagram.com/p/abc127/',
+      sourcePageUrl: 'https://www.instagram.com/p/abc127/',
+      description: 'Backfilled caption',
+      instagramSource: { likeCount: 3, commentCount: 1 },
+      namespace: 'cf-instagram',
+      log: noopLogger,
+      fetchedImage: { bytes: Buffer.from('image-bytes'), contentType: 'image/jpeg' },
+    });
+
+    expect(result).toMatchObject({ alreadyExists: true, duplicateIds: ['existing-img-1'] });
+    const [, init] = fetchMock.mock.calls[1];
+    expect(String(fetchMock.mock.calls[1][0])).toBe(
+      'http://localhost:3000/api/images/existing-img-1/extras',
+    );
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      description: 'Backfilled caption',
+      instagramSource: { likeCount: 3, commentCount: 1 },
+    });
+  });
+
   it('continues uploading when AI display-name generation fails', async () => {
     const warn = vi.fn();
     let uploadDisplayName: FormDataEntryValue | null = 'unexpected';

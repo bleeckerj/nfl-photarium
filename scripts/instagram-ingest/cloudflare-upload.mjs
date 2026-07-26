@@ -250,8 +250,9 @@ export async function pushImageToCloudflare({
   username,
   uploadTags,
   shortcode,
-  permalink,
   sourcePageUrl,
+  description,
+  instagramSource,
   namespace,
   log,
   displayName,
@@ -272,7 +273,8 @@ export async function pushImageToCloudflare({
   form.append("originalUrl", imageUrl);
   form.append("namespace", uploadNamespace);
   if (displayName) form.append("displayName", displayName);
-  if (permalink) form.append("description", permalink);
+  if (description) form.append("description", description);
+  if (instagramSource) form.append("instagramSource", JSON.stringify(instagramSource));
 
   const endpoint = `${apiBase}/api/upload/external`;
   log.trace(`cloudflare_push_start endpoint=${endpoint} file=${fileName} namespace=${uploadNamespace}`);
@@ -287,9 +289,28 @@ export async function pushImageToCloudflare({
 
   if (!res.ok) {
     if (res.status === 409 && Array.isArray(body?.duplicates) && body.duplicates.length > 0) {
+      const duplicateIds = body.duplicates.map((d) => d.id).filter(Boolean);
+      if (description || instagramSource || sourcePageUrl) {
+        for (const duplicateId of duplicateIds) {
+          try {
+            await patchExistingImageMetadata({
+              apiBase,
+              imageId: duplicateId,
+              description,
+              sourceUrl: sourcePageUrl,
+              instagramSource,
+              log,
+            });
+          } catch (error) {
+            log.warn(
+              `cloudflare_duplicate_metadata_failed image_id=${duplicateId} err=${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+        }
+      }
       return {
         alreadyExists: true,
-        duplicateIds: body.duplicates.map((d) => d.id).filter(Boolean),
+        duplicateIds,
       };
     }
     const err = body?.error || body?.message || `HTTP ${res.status}`;
@@ -304,14 +325,43 @@ export async function pushImageToCloudflare({
   };
 }
 
+async function patchExistingImageMetadata({
+  apiBase,
+  imageId,
+  description,
+  sourceUrl,
+  instagramSource,
+  log,
+}) {
+  const payload = {
+    ...(description ? { description } : {}),
+    ...(sourceUrl ? { sourceUrl } : {}),
+    ...(instagramSource ? { instagramSource } : {}),
+  };
+  if (Object.keys(payload).length === 0) return;
+
+  const endpoint = `${apiBase}/api/images/${encodeURIComponent(imageId)}/extras`;
+  const res = await fetch(endpoint, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error || `Metadata patch failed (${res.status})`);
+  }
+  log.trace(`cloudflare_duplicate_metadata_ok image_id=${imageId}`);
+}
+
 export async function ingestImageToCloudflare({
   apiBase,
   imageUrl,
   username,
   uploadTags,
   shortcode,
-  permalink,
   sourcePageUrl,
+  description,
+  instagramSource,
   namespace,
   log,
   aiDisplayName = false,
@@ -353,8 +403,9 @@ export async function ingestImageToCloudflare({
     username,
     uploadTags,
     shortcode,
-    permalink,
     sourcePageUrl,
+    description,
+    instagramSource,
     namespace,
     log,
     displayName,
@@ -368,8 +419,8 @@ export async function pushVideoToCloudflare({
   username,
   uploadTags,
   shortcode,
-  permalink,
   sourcePageUrl,
+  description,
   namespace,
   log,
 }) {
@@ -392,7 +443,7 @@ export async function pushVideoToCloudflare({
   form.append("originalUrl", sanitizedVideoUrl);
   form.append("sourceUrl", sourcePageUrl);
   form.append("namespace", uploadNamespace);
-  if (permalink) form.append("description", permalink);
+  if (description) form.append("description", description);
 
   log.trace(
     `cloudflare_video_push_start endpoint=${endpoint} shortcode=${shortcode || "n/a"} mode=file_upload file=${fileName} namespace=${uploadNamespace}`,

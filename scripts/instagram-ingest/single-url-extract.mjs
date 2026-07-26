@@ -449,6 +449,29 @@ export async function extractSingleUrlRecord(page, instagramUrl, fallbackUsernam
       mediaNode?.edge_media_to_caption?.edges?.[0]?.node?.text ||
       mediaNode?.caption?.text ||
       "";
+    const countValue = (...values) => {
+      for (const value of values) {
+        const count = Number(value);
+        if (Number.isFinite(count) && count >= 0) return Math.trunc(count);
+      }
+      return null;
+    };
+    const likeCount = countValue(
+      mediaNode?.like_count,
+      mediaNode?.edge_media_preview_like?.count,
+      mediaNode?.edge_media_to_parent_like?.count,
+    );
+    const commentCount = countValue(
+      mediaNode?.comment_count,
+      mediaNode?.edge_media_to_comment?.count,
+      mediaNode?.edge_media_to_parent_comment?.count,
+    );
+    const viewCount = countValue(
+      mediaNode?.view_count,
+      mediaNode?.video_view_count,
+      mediaNode?.play_count,
+      mediaNode?.ig_play_count,
+    );
     const takenAtUnix =
       Number.isFinite(mediaNode?.taken_at_timestamp)
         ? Number(mediaNode.taken_at_timestamp)
@@ -502,6 +525,9 @@ export async function extractSingleUrlRecord(page, instagramUrl, fallbackUsernam
       mediaType: childMediaType ?? mediaType,
       productType,
       takenAtUnix,
+      likeCount,
+      commentCount,
+      viewCount,
       caption,
       imageUrls: toList(imageUrls),
       videoUrls: toList(videoUrls),
@@ -542,8 +568,9 @@ export async function extractSingleUrlRecord(page, instagramUrl, fallbackUsernam
       productType: extracted.productType ?? null,
       takenAtUnix: extracted.takenAtUnix ?? null,
       takenAtIso,
-      likeCount: null,
-      commentCount: null,
+      likeCount: extracted.likeCount ?? null,
+      commentCount: extracted.commentCount ?? null,
+      viewCount: extracted.viewCount ?? null,
       caption: extracted.caption || "",
       imageUrls,
       videoUrls: [...new Set(mergedVideoUrls.filter(Boolean))],

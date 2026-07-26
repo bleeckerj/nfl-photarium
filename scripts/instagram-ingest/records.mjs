@@ -7,6 +7,14 @@ function bestImageCandidate(candidates = []) {
   })[0];
 }
 
+function firstCount(...values) {
+  for (const value of values) {
+    const count = Number(value);
+    if (Number.isFinite(count) && count >= 0) return Math.trunc(count);
+  }
+  return null;
+}
+
 export function extractMediaUrls(item) {
   const imageUrls = [];
   const videoUrls = [];
@@ -51,8 +59,25 @@ export function mapItemToRecord(item, username, userId) {
     takenAtIso: takenAtUnix ? new Date(takenAtUnix * 1000).toISOString() : null,
     likeCount: item.like_count ?? null,
     commentCount: item.comment_count ?? null,
+    viewCount: firstCount(item.view_count, item.video_view_count, item.play_count, item.ig_play_count),
     caption: item?.caption?.text ?? "",
     imageUrls,
     videoUrls,
+  };
+}
+
+export function buildInstagramSourceRecord(record) {
+  return {
+    username: record.username ?? undefined,
+    userId: record.userId ?? undefined,
+    mediaId: record.mediaId ?? undefined,
+    shortcode: record.shortcode ?? undefined,
+    permalink: record.permalink ?? undefined,
+    takenAtUnix: record.takenAtUnix ?? undefined,
+    takenAtIso: record.takenAtIso ?? undefined,
+    likeCount: firstCount(record.likeCount),
+    commentCount: firstCount(record.commentCount),
+    viewCount: firstCount(record.viewCount),
+    capturedAt: record.fetchedAt ?? new Date().toISOString(),
   };
 }
