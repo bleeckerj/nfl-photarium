@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
-import { Crop, Loader2, X } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Crop, Loader2, Sparkles, X } from 'lucide-react';
 import type { CloudflareImage } from '@/components/image-detail/types';
 import {
   createCropVariant,
@@ -10,6 +10,14 @@ import {
   type CropVariantPlacement,
   type CropVariantResponse,
 } from '@/services/cropVariantService';
+import {
+  acceptImageToolPreview,
+  createImageToolPreview,
+  getAspectRatioExpansionProviders,
+  getImageToolPreview,
+  type AspectRatioExpansionProviderStatus,
+  type ImageToolPreview,
+} from '@/services/imageToolsService';
 
 type RatioOption = {
   label: string;
@@ -21,7 +29,10 @@ type CropVariantModalProps = {
   previewUrl?: string;
   onClose: () => void;
   onCreated: (result: CropVariantResponse) => void | Promise<void>;
+  onAccepted?: () => void | Promise<void>;
 };
+
+type ExpansionProvider = 'auto' | 'openai' | 'comfyui';
 
 const RATIO_OPTIONS: RatioOption[] = [
   { label: '1:1', value: '1:1' },
@@ -86,6 +97,7 @@ export function CropVariantModal({
   previewUrl,
   onClose,
   onCreated,
+  onAccepted,
 }: CropVariantModalProps) {
   const [mode, setMode] = useState<CropVariantMode>('crop');
   const [ratioPreset, setRatioPreset] = useState('1:1');
@@ -93,11 +105,52 @@ export function CropVariantModal({
   const [anchor, setAnchor] = useState<CropVariantAnchor>('center');
   const [placement, setPlacement] = useState<CropVariantPlacement>('center');
   const [quality, setQuality] = useState(90);
+  const [provider, setProvider] = useState<ExpansionProvider>('auto');
+  const [instructions, setInstructions] = useState('');
+  const [negativePrompt, setNegativePrompt] = useState('');
+  const [seedInput, setSeedInput] = useState('');
   const [filename, setFilename] = useState(buildDefaultFilename(image));
   const [description, setDescription] = useState(image.description || '');
   const [tagsInput, setTagsInput] = useState((image.tags || []).join(', '));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<ImageToolPreview | null>(null);
+  const [providerStatuses, setProviderStatuses] = useState<AspectRatioExpansionProviderStatus[]>([]);
+  const [providerStatusError, setProviderStatusError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getAspectRatioExpansionProviders()
+      .then((statuses) => {
+        if (!cancelled) setProviderStatuses(statuses);
+      })
+      .catch((err) => {
+        if (!cancelled) setProviderStatusError(err instanceof Error ? err.message : 'Provider availability could not be loaded');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!preview || preview.status === 'completed' || preview.status === 'failed') return;
+    const timer = window.setInterval(() => {
+      getImageToolPreview(preview.id)
+        .then((nextPreview) => {
+          setPreview(nextPreview);
+          if (nextPreview.status === 'failed') {
+            setError(nextPreview.error || nextPreview.message);
+          }
+        })
+        .catch((err) => setError(err instanceof Error ? err.message : 'Failed to refresh expansion preview'));
+    }, 900);
+    return () => window.clearInterval(timer);
+  }, [preview]);
+
+  const clearGeneratedPreview = () => {
+    setPreview(null);
+    setError(null);
+  };
 
   const resolvedRatio = ratioPreset === 'custom' ? customRatio : ratioPreset;
   const ratio = useMemo(() => parseRatio(resolvedRatio), [resolvedRatio]);
@@ -175,6 +228,11 @@ export function CropVariantModal({
       ? `${sourceWidth} / ${sourceHeight}`
       : '4 / 3';
 
+  const selectedProviderStatus = provider === 'auto'
+    ? undefined
+    : providerStatuses.find((status) => status.id === provider);
+  const expansionPreviewReady = mode === 'outpaint' && preview?.status === 'completed' && Boolean(preview.artifactUrl);
+
   const handleSubmit = async () => {
     if (!ratio || !canSubmit || submitting) {
       return;
@@ -182,6 +240,44 @@ export function CropVariantModal({
     setSubmitting(true);
     setError(null);
     try {
+      if (mode === 'outpaint') {
+        if (expansionPreviewReady && preview) {
+          await acceptImageToolPreview(preview.id);
+          await onAccepted?.();
+          onClose();
+          return;
+        }
+
+        const seed = seedInput.trim() ? Number(seedInput) : undefined;
+        if (seedInput.trim() && !Number.isFinite(seed as number)) {
+          throw new Error('Seed must be a number');
+        }
+        const nextPreview = await createImageToolPreview({
+          toolId: 'aspect-ratio-expand',
+          imageId: image.id,
+          request: {
+            effectId: 'expand',
+            params: {
+              provider,
+              aspectRatio: ratio.label,
+              placement,
+              instructions: instructions.trim(),
+              negativePrompt: negativePrompt.trim(),
+              ...(seed === undefined ? {} : { seed }),
+              filename: filename.trim(),
+              description: description.trim(),
+              tags: splitTags(tagsInput) || [],
+            },
+            output: { mode: 'still', format: 'webp' },
+          },
+        });
+        setPreview(nextPreview);
+        if (nextPreview.status === 'failed') {
+          setError(nextPreview.error || nextPreview.message);
+        }
+        return;
+      }
+
       const result = await createCropVariant(image.id, {
         aspectRatio: ratio.label,
         anchor,
@@ -230,7 +326,19 @@ export function CropVariantModal({
                 aspectRatio: previewAspectRatio,
               }}
             >
-              {mode === 'outpaint' && expandGeometry ? (
+              {expansionPreviewReady && preview?.artifactUrl ? (
+                <div className="relative h-full w-full">
+                  <img
+                    src={preview.artifactUrl}
+                    alt="Generated aspect-ratio expansion preview"
+                    className="h-full w-full object-contain"
+                    draggable={false}
+                  />
+                  <span className="absolute left-2 top-2 rounded bg-black/70 px-2 py-1 text-[10px] text-white">
+                    Generated preview
+                  </span>
+                </div>
+              ) : mode === 'outpaint' && expandGeometry ? (
                 <div
                   className="absolute border-2 border-dashed border-white/80 bg-black"
                   style={{
@@ -292,7 +400,10 @@ export function CropVariantModal({
                     <button
                       key={option.value}
                       type="button"
-                      onClick={() => setMode(option.value)}
+                      onClick={() => {
+                        setMode(option.value);
+                        clearGeneratedPreview();
+                      }}
                       className={`rounded-md border px-2 py-1.5 text-[11px] ${
                         mode === option.value
                           ? 'border-gray-900 bg-gray-900 text-white'
@@ -317,7 +428,10 @@ export function CropVariantModal({
                     <button
                       key={option.value}
                       type="button"
-                      onClick={() => setRatioPreset(option.value)}
+                      onClick={() => {
+                        setRatioPreset(option.value);
+                        clearGeneratedPreview();
+                      }}
                       className={`rounded-md border px-2 py-1.5 text-[11px] ${
                         ratioPreset === option.value
                           ? 'border-gray-900 bg-gray-900 text-white'
@@ -331,7 +445,10 @@ export function CropVariantModal({
                 {ratioPreset === 'custom' && (
                   <input
                     value={customRatio}
-                    onChange={(event) => setCustomRatio(event.target.value)}
+                    onChange={(event) => {
+                      setCustomRatio(event.target.value);
+                      clearGeneratedPreview();
+                    }}
                     className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
                     placeholder="width:height"
                   />
@@ -350,6 +467,7 @@ export function CropVariantModal({
                       onClick={() => {
                         if (mode === 'outpaint') {
                           setPlacement(option.value as CropVariantPlacement);
+                          clearGeneratedPreview();
                         } else {
                           setAnchor(option.value as CropVariantAnchor);
                         }
@@ -366,7 +484,93 @@ export function CropVariantModal({
                 </div>
               </section>
 
-              <section className="space-y-2">
+              {mode === 'outpaint' && (
+                <section className="space-y-2">
+                  <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                    Generator
+                  </label>
+                  <select
+                    value={provider}
+                    onChange={(event) => {
+                      setProvider(event.target.value as ExpansionProvider);
+                      clearGeneratedPreview();
+                    }}
+                    className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                  >
+                    <option value="auto">Automatic</option>
+                    <option value="openai">OpenAI image edit</option>
+                    <option value="comfyui">ComfyUI workflow</option>
+                  </select>
+                  {provider === 'auto' && providerStatuses.length > 0 && (
+                    <p className="text-[10px] text-gray-500">
+                      Automatic uses the configured provider and prefers OpenAI when available.
+                    </p>
+                  )}
+                  {provider === 'auto' && providerStatuses.length > 0 && !providerStatuses.some((status) => status.available) && (
+                    <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] text-amber-800">
+                      No configured expansion provider is currently available.
+                    </p>
+                  )}
+                  {selectedProviderStatus && !selectedProviderStatus.available && (
+                    <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[10px] text-amber-800">
+                      {selectedProviderStatus.reason}
+                    </p>
+                  )}
+                  {providerStatusError && (
+                    <p className="text-[10px] text-amber-700">{providerStatusError}</p>
+                  )}
+                </section>
+              )}
+
+              {mode === 'outpaint' && (
+                <section className="space-y-3">
+                  <label className="block space-y-1">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                      Expansion instructions
+                    </span>
+                    <textarea
+                      value={instructions}
+                      onChange={(event) => {
+                        setInstructions(event.target.value);
+                        clearGeneratedPreview();
+                      }}
+                      className="min-h-16 w-full resize-y rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                      placeholder="Optional guidance for the generated area"
+                    />
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                      Negative prompt
+                    </span>
+                    <textarea
+                      value={negativePrompt}
+                      onChange={(event) => {
+                        setNegativePrompt(event.target.value);
+                        clearGeneratedPreview();
+                      }}
+                      className="min-h-14 w-full resize-y rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                      placeholder="Optional ComfyUI guidance"
+                    />
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                      Seed <span className="font-normal normal-case text-gray-400">(optional)</span>
+                    </span>
+                    <input
+                      value={seedInput}
+                      onChange={(event) => {
+                        setSeedInput(event.target.value);
+                        clearGeneratedPreview();
+                      }}
+                      inputMode="numeric"
+                      className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                      placeholder="ComfyUI only"
+                    />
+                  </label>
+                </section>
+              )}
+
+              {mode === 'crop' && <section className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label htmlFor="crop-quality" className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
                     Quality
@@ -382,7 +586,7 @@ export function CropVariantModal({
                   onChange={(event) => setQuality(Number(event.target.value))}
                   className="w-full"
                 />
-              </section>
+              </section>}
 
               <section className="space-y-3">
                 <label className="block space-y-1">
@@ -391,7 +595,10 @@ export function CropVariantModal({
                   </span>
                   <input
                     value={filename}
-                    onChange={(event) => setFilename(event.target.value)}
+                    onChange={(event) => {
+                      setFilename(event.target.value);
+                      clearGeneratedPreview();
+                    }}
                     className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
                   />
                 </label>
@@ -401,7 +608,10 @@ export function CropVariantModal({
                   </span>
                   <textarea
                     value={description}
-                    onChange={(event) => setDescription(event.target.value)}
+                    onChange={(event) => {
+                      setDescription(event.target.value);
+                      clearGeneratedPreview();
+                    }}
                     className="min-h-20 w-full resize-y rounded-md border border-gray-300 px-2 py-1.5 text-sm"
                   />
                 </label>
@@ -411,7 +621,10 @@ export function CropVariantModal({
                   </span>
                   <input
                     value={tagsInput}
-                    onChange={(event) => setTagsInput(event.target.value)}
+                    onChange={(event) => {
+                      setTagsInput(event.target.value);
+                      clearGeneratedPreview();
+                    }}
                     className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
                   />
                 </label>
@@ -429,7 +642,12 @@ export function CropVariantModal({
               )}
               {mode === 'outpaint' && (
                 <p className="rounded-md border border-blue-200 bg-blue-50 px-2 py-1.5 text-xs text-blue-700">
-                  Expand keeps the full source image and asks AI to fill only the added canvas area.
+                  Expand keeps the full source image and generates only the added canvas area. Review the preview before accepting it as a variant.
+                </p>
+              )}
+              {preview && preview.status !== 'completed' && preview.status !== 'failed' && (
+                <p className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs text-gray-600">
+                  {preview.message || 'Generating preview…'}
                 </p>
               )}
               {error && (
@@ -456,9 +674,11 @@ export function CropVariantModal({
                 {submitting ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
                 ) : (
-                  <Crop className="h-3.5 w-3.5" aria-hidden="true" />
+                  mode === 'outpaint' ? <Sparkles className="h-3.5 w-3.5" aria-hidden="true" /> : <Crop className="h-3.5 w-3.5" aria-hidden="true" />
                 )}
-                {mode === 'outpaint' ? 'Create expanded variant' : 'Create variant'}
+                {mode === 'outpaint'
+                  ? expansionPreviewReady ? 'Accept expanded variant' : 'Generate expansion preview'
+                  : 'Create variant'}
               </button>
             </div>
           </div>

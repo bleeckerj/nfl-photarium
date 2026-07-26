@@ -594,7 +594,7 @@ export default function ImageDetailPage() {
   }, [buildFamilyContextUrl, id, mergeContextImages, syncImageState]);
 
   const handleCropVariantCreated = useCallback(async () => {
-    toast.push('Crop variant created');
+    toast.push('Variant created');
     await refreshImageList();
   }, [refreshImageList, toast]);
 
@@ -2513,6 +2513,7 @@ export default function ImageDetailPage() {
           previewUrl={imageToolSourcePreviewUrl}
           onClose={() => setCropVariantOpen(false)}
           onCreated={handleCropVariantCreated}
+          onAccepted={handleCropVariantCreated}
         />
       )}
       {hoverPreview && <HoverPreviewOverlay preview={hoverPreview} />}

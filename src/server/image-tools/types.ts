@@ -8,7 +8,8 @@ export type ImageToolAdapterKind =
   | 'grainrad-inproc'
   | 'grainrad-http'
   | 'grainrad-eight-bit-reinterpretation'
-  | 'creative-brief';
+  | 'creative-brief'
+  | 'aspect-ratio-provider';
 // 'animatedImage' marks tools that preserve the motion of animated image assets
 // (GIF / animated WebP) rather than flattening them to their first frame.
 export type ImageToolInputAssetType = 'image' | 'video' | 'animatedImage';
@@ -144,6 +145,7 @@ export type ImageToolRunResult = {
     url?: string;
   };
   externalJobId?: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type ImageToolPreviewResult = {
@@ -156,6 +158,7 @@ export type ImageToolPreviewResult = {
     filename: string;
   };
   externalJobId?: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type ImageToolRunRecord = {
@@ -190,4 +193,12 @@ export type ImageToolAdapter = {
     updatePreview: (patch: { message?: string; percent?: number; externalJobId?: string }) => void;
     addEvent: (event: ImageToolDiagnosticEventInput) => void;
   }) => Promise<ImageToolPreviewResult>;
+  uploadArtifact?: (params: {
+    sourceImageId: string;
+    sourceFilename: string;
+    sourceBuffer: Buffer;
+    artifact: NonNullable<ImageToolPreviewResult['artifact']>;
+    request: ImageToolRequest;
+    metadata?: Record<string, unknown>;
+  }) => Promise<UploadSuccess | VideoUploadSuccess>;
 };

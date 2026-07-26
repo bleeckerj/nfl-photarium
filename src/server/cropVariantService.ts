@@ -275,12 +275,13 @@ export function computeOutpaintCanvas(input: {
   };
 }
 
-function buildOutpaintPrompt(canvas: OutpaintCanvasGeometry) {
+function buildOutpaintPrompt(canvas: OutpaintCanvasGeometry, additionalPrompt?: string) {
   return [
     'Expand this image to fill the transparent canvas while preserving the original image exactly.',
     'Only generate visual content in the transparent outer area.',
     'Continue the scene naturally with matching lighting, perspective, texture, color, depth of field, and photographic style.',
     `Target aspect ratio: ${canvas.aspectRatio}. Original image placement: ${canvas.placement}.`,
+    ...(additionalPrompt?.trim() ? [`Additional instructions: ${additionalPrompt.trim()}`] : []),
   ].join(' ');
 }
 
@@ -347,11 +348,11 @@ export async function prepareOutpaintEditImage(input: {
   };
 }
 
-async function callOpenAiOutpaintEdit(prepared: OutpaintPreparedImage): Promise<OpenAiImageResult> {
+async function callOpenAiOutpaintEdit(prepared: OutpaintPreparedImage, additionalPrompt?: string): Promise<OpenAiImageResult> {
   const formData = new FormData();
   const model = DEFAULT_OPENAI_IMAGE_MODEL;
   formData.append('model', model);
-  formData.append('prompt', buildOutpaintPrompt(prepared.canvas));
+  formData.append('prompt', buildOutpaintPrompt(prepared.canvas, additionalPrompt));
   formData.append('size', `${prepared.canvas.targetWidth}x${prepared.canvas.targetHeight}`);
   formData.append('quality', 'high');
   formData.append('output_format', 'webp');
@@ -396,9 +397,10 @@ export async function outpaintImageToWebp(input: {
   buffer: Buffer;
   aspectRatio?: string;
   placement?: CropVariantPlacement;
+  prompt?: string;
 }) {
   const prepared = await prepareOutpaintEditImage(input);
-  const generated = await callOpenAiOutpaintEdit(prepared);
+  const generated = await callOpenAiOutpaintEdit(prepared, input.prompt);
   return {
     buffer: generated.buffer,
     sourceWidth: prepared.canvas.sourceWidth,

@@ -289,7 +289,7 @@ export function VariationsSection(props: VariationsSectionProps) {
                   className="inline-flex items-center gap-1 px-2 py-1 text-[10px] border border-blue-300 rounded-md text-blue-700 hover:bg-blue-50"
                 >
                   <Crop className="h-3 w-3" aria-hidden="true" />
-                  Crop variant
+                  Crop / expand
                 </button>
               )}
               <button

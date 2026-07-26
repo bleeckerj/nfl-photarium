@@ -126,6 +126,7 @@ export type ImageToolRun = {
       contentType?: string;
     };
     externalJobId?: string;
+    metadata?: Record<string, unknown>;
   };
   error?: string;
   externalJobId?: string;
@@ -168,7 +169,15 @@ export type ImageToolPreview = {
   filename?: string;
   error?: string;
   externalJobId?: string;
+  metadata?: Record<string, unknown>;
   events: ImageToolDiagnosticEvent[];
+};
+
+export type AspectRatioExpansionProviderStatus = {
+  id: 'openai' | 'comfyui';
+  label: string;
+  available: boolean;
+  reason?: string;
 };
 
 const STATUS_FETCH_TIMEOUT_MS = 15000;
@@ -210,6 +219,15 @@ export const listImageTools = async (): Promise<ImageToolManifest[]> => {
     throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to load image tools');
   }
   return Array.isArray(payload.tools) ? payload.tools : [];
+};
+
+export const getAspectRatioExpansionProviders = async (): Promise<AspectRatioExpansionProviderStatus[]> => {
+  const response = await fetch('/api/image-tools/aspect-ratio-expand/providers', { cache: 'no-store' });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(typeof payload.error === 'string' ? payload.error : 'Failed to load aspect-ratio providers');
+  }
+  return Array.isArray(payload.providers) ? payload.providers as AspectRatioExpansionProviderStatus[] : [];
 };
 
 export const savePromptThis = async (imageId: string, prompt: string): Promise<{ imageId: string; prompt: string }> => {

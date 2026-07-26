@@ -30,13 +30,32 @@ export const acceptImageToolPreviewArtifact = async (previewId: string): Promise
   }
 
   const source = await downloadSourceImage(preview.imageId);
-  const uploadedAsset = await uploadImageToolArtifactToPhotarium({
-    sourceImageId: preview.imageId,
-    sourceFilename: source.filename,
-    sourceBuffer: source.buffer,
-    artifact,
-    request: preview.request,
-  });
+  const uploadedAsset = adapter.uploadArtifact
+    ? await adapter.uploadArtifact({
+        sourceImageId: preview.imageId,
+        sourceFilename: source.filename,
+        sourceBuffer: source.buffer,
+        artifact,
+        request: preview.request,
+        metadata: preview.metadata,
+      })
+    : await uploadImageToolArtifactToPhotarium({
+        sourceImageId: preview.imageId,
+        sourceFilename: source.filename,
+        sourceBuffer: source.buffer,
+        artifact,
+        request: preview.request,
+      });
+
+  const metadata = preview.metadata && typeof preview.metadata === 'object' && !Array.isArray(preview.metadata)
+    ? preview.metadata
+    : {};
+  const metadataParams = metadata.params && typeof metadata.params === 'object' && !Array.isArray(metadata.params)
+    ? metadata.params as Record<string, unknown>
+    : Object.fromEntries(Object.entries(metadata).filter(([key]) => key !== 'output'));
+  const metadataOutput = metadata.output && typeof metadata.output === 'object' && !Array.isArray(metadata.output)
+    ? metadata.output as Record<string, unknown>
+    : {};
 
   await patchImageExtrasRecord(uploadedAsset.id, {
     imageToolRun: {
@@ -45,8 +64,9 @@ export const acceptImageToolPreviewArtifact = async (previewId: string): Promise
       sourceImageId: preview.imageId,
       effectId: preview.request.effectId,
       paramPreset: preview.request.workflow?.styleStrength ?? preview.request.paramPreset,
-      params: preview.request.params,
-      output: preview.request.output,
+      params: { ...preview.request.params, ...metadataParams },
+      output: { ...preview.request.output, ...metadataOutput },
+      externalJobId: typeof metadata.externalJobId === 'string' ? metadata.externalJobId : preview.externalJobId,
       createdAt: new Date().toISOString(),
     },
   });

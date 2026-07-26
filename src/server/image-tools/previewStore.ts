@@ -28,6 +28,7 @@ export type ImageToolPreviewRecord = {
   filename?: string;
   error?: string;
   externalJobId?: string;
+  metadata?: Record<string, unknown>;
   events: ImageToolDiagnosticEvent[];
 };
 
@@ -98,6 +99,7 @@ const publicPreview = (preview: StoredPreview): ImageToolPreviewRecord => {
     filename: preview.filename,
     error: preview.error,
     externalJobId: preview.externalJobId,
+    metadata: preview.metadata,
     events: preview.events,
   };
 };
@@ -214,6 +216,7 @@ export function completeImageToolPreview(
     prompt: result.prompt,
     plan: result.plan,
     externalJobId: result.externalJobId ?? current.externalJobId,
+    metadata: result.metadata,
     updatedAt: now(),
   };
   state.previews.set(previewId, next);

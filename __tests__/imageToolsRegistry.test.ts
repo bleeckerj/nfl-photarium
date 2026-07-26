@@ -71,6 +71,22 @@ describe('image tool manifest validation', () => {
 });
 
 describe('GET /api/image-tools', () => {
+  it('lists the provider-neutral aspect-ratio expansion tool', async () => {
+    const response = await GET();
+    const payload = await response.json();
+    const tool = (payload.tools as ImageToolManifest[]).find((entry) => entry.id === 'aspect-ratio-expand');
+
+    expect(tool).toEqual(expect.objectContaining({
+      id: 'aspect-ratio-expand',
+      adapterKind: 'aspect-ratio-provider',
+      supportsAsync: true,
+      controls: expect.arrayContaining([
+        expect.objectContaining({ id: 'params.provider', type: 'select' }),
+        expect.objectContaining({ id: 'params.aspectRatio', type: 'text' }),
+      ]),
+    }));
+  });
+
   it('lists the Grainrad manifest', async () => {
     const response = await GET();
     const payload = await response.json();
