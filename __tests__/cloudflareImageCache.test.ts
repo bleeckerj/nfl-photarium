@@ -189,4 +189,57 @@ describe('cloudflareImageCache parent overrides', () => {
 
     expect(transformed.folder).toBeUndefined();
   });
+
+  it('serves a resident snapshot while stale reconciliation is still running', async () => {
+    process.env.CLOUDFLARE_ACCOUNT_ID = 'account';
+    process.env.CLOUDFLARE_API_TOKEN = 'token';
+    process.env.CLOUDFLARE_CACHE_TTL_MS = '1';
+    process.env.CLOUDFLARE_SIZE_BACKFILL_DISABLED = 'true';
+    const originalFetch = global.fetch;
+    let resolveCloudflare: ((response: Response) => void) | undefined;
+    global.fetch = vi.fn(() => new Promise<Response>((resolve) => {
+      resolveCloudflare = resolve;
+    })) as typeof fetch;
+
+    try {
+      const {
+        clearAllCaches,
+        getCachedImages,
+      } = await import('@/server/cloudflareImageCache');
+      await clearAllCaches();
+      store.set('cloudflare-images', {
+        data: [{
+          id: 'resident',
+          filename: 'resident.jpg',
+          uploaded: '2026-01-01T00:00:00.000Z',
+          variants: [],
+          tags: [],
+        }],
+        timestamp: Date.now() - 10_000,
+        version: 2,
+      });
+
+      const first = await getCachedImages(false);
+      await vi.waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+      const second = await getCachedImages(false);
+
+      expect(first.map((image) => image.id)).toEqual(['resident']);
+      expect(second.map((image) => image.id)).toEqual(['resident']);
+      expect(
+        storage.get.mock.calls.filter(([key]) => key === 'cloudflare-images')
+      ).toHaveLength(1);
+
+      resolveCloudflare?.(new Response(JSON.stringify({
+        result: { images: [] },
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }));
+      await vi.waitFor(() => {
+        expect(global.fetch).toHaveBeenCalledTimes(1);
+      });
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
 });

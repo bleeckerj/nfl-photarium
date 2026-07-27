@@ -6,13 +6,15 @@ import type {
   EmbeddingFilter,
 } from '../types';
 import {
-  GALLERY_RETURN_SNAPSHOT_KEY,
+  createGalleryReturnFilterSignature,
   saveDetailAssetSeed,
+  saveGalleryPageSnapshot,
   saveGalleryReturnState as persistGalleryReturnState,
 } from '../returnState';
 
 type UseGalleryReturnStateOptions = {
   aspectRatioFilters: AspectRatioClass[];
+  catalogVersion: number | null;
   colorSearchHex: string | null;
   currentPage: number;
   dateFilter: DateFilter | null;
@@ -38,6 +40,7 @@ type UseGalleryReturnStateOptions = {
 
 export function useGalleryReturnState({
   aspectRatioFilters,
+  catalogVersion,
   colorSearchHex,
   currentPage,
   dateFilter,
@@ -69,6 +72,27 @@ export function useGalleryReturnState({
       if (selectedAsset) {
         saveDetailAssetSeed(selectedAsset, namespace ?? '', savedAt);
       }
+      const filters = {
+        searchTerm,
+        colorSearchHex,
+        selectedFolder,
+        selectedTag,
+        onlyCanonical,
+        onlyWithVariants,
+        showMotionAssetsOnly,
+        showFavoritesOnly,
+        showDuplicatesOnly,
+        showBrokenOnly,
+        showComfyOnly,
+        embeddingFilter,
+        aspectRatioFilters,
+        dateFilter,
+        hiddenFolders,
+        hiddenTags,
+        hiddenNamespaces,
+        pageSize,
+        currentPage,
+      };
       persistGalleryReturnState({
         scrollY: window.scrollY,
         namespace: namespace ?? '',
@@ -79,42 +103,22 @@ export function useGalleryReturnState({
           id: img.id,
           assetType: img.assetType === 'video' ? 'video' : 'image',
         })),
-        filters: {
-          searchTerm,
-          colorSearchHex,
-          selectedFolder,
-          selectedTag,
-          onlyCanonical,
-          onlyWithVariants,
-          showMotionAssetsOnly,
-          showFavoritesOnly,
-          showDuplicatesOnly,
-          showBrokenOnly,
-          showComfyOnly,
-          embeddingFilter,
-          aspectRatioFilters,
-          dateFilter,
-          hiddenFolders,
-          hiddenTags,
-          hiddenNamespaces,
-          pageSize,
-          currentPage,
-        },
+        filters,
       });
-      window.sessionStorage.setItem(
-        GALLERY_RETURN_SNAPSHOT_KEY,
-        JSON.stringify({
-          currentPage,
-          namespace: namespace ?? '',
-          savedAt,
-          images: pageImages,
-        })
-      );
+      saveGalleryPageSnapshot({
+        page: currentPage,
+        namespace: namespace ?? '',
+        savedAt,
+        images: pageImages,
+        catalogVersion,
+        filterSignature: createGalleryReturnFilterSignature(filters),
+      });
     } catch {
       // ignore
     }
   }, [
     aspectRatioFilters,
+    catalogVersion,
     colorSearchHex,
     currentPage,
     dateFilter,

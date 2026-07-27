@@ -98,7 +98,7 @@ export async function PATCH(
       size: fetchedImageResult.result.size,
       meta: finalMetadataPayload,
     });
-    upsertCachedImage(cachedImage);
+    await upsertCachedImage(cachedImage);
 
     const finalTags = Array.isArray(finalMetadataPayload.tags) ? finalMetadataPayload.tags : nextTags;
     return NextResponse.json({

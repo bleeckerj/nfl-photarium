@@ -296,7 +296,7 @@ export async function enrichImageAssetMetadata(
     aspectRatio: patch.aspectRatio ?? image.aspectRatio,
     dimensions: patch.dimensions ?? image.dimensions,
   };
-  upsertCachedImage(next);
+  await upsertCachedImage(next);
   await persistImageAspectMetadata(next);
   return next;
 }

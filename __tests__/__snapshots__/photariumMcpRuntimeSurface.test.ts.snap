@@ -622,7 +622,7 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "type": "string",
       },
       "pushCloudflare": {
-        "description": "Push discovered media to Photarium/Cloudflare.",
+        "description": "Push discovered media to Photarium/Cloudflare. Defaults to true.",
         "type": "boolean",
       },
       "requestDelayMs": {

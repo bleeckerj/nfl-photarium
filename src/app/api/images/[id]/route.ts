@@ -427,12 +427,12 @@ export async function GET(
 
     diagnostics.had_known_size = typeof readKnownSize(responseImage) === 'number';
     if (shouldPersistResponseImage) {
-      upsertCachedImage(responseImage);
+      await upsertCachedImage(responseImage);
     }
     if (typeof readKnownSize(responseImage) !== 'number') {
-      void enrichImageSize(responseImage).then((enriched) => {
+      void enrichImageSize(responseImage).then(async (enriched) => {
         if ((responseImage.size ?? null) !== (enriched.size ?? null)) {
-          upsertCachedImage(enriched);
+          await upsertCachedImage(enriched);
         }
       }).catch((error) => {
         console.warn('[SingleImage] Background size enrichment failed', { imageId, error });

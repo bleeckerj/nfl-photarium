@@ -4,9 +4,11 @@ import type { AspectRatioClass, DateFilter, EmbeddingFilter } from './types';
 
 export const GALLERY_RETURN_STATE_KEY = 'galleryReturnStateV1';
 export const GALLERY_RETURN_SNAPSHOT_KEY = 'galleryReturnSnapshotV1';
+export const GALLERY_PAGE_SNAPSHOTS_KEY = 'galleryPageSnapshotsV2';
 export const DETAIL_ASSET_SEED_KEY = 'detailAssetSeedV1';
 export const GALLERY_RETURN_TTL_MS = 10 * 60 * 1000;
 export const GALLERY_RETURN_STATE_VERSION = 2;
+export const GALLERY_PAGE_SNAPSHOT_LIMIT = 8;
 
 type AssetType = 'image' | 'video';
 
@@ -35,6 +37,15 @@ export type GalleryReturnFilters = {
   hiddenNamespaces: string[];
   pageSize: number;
   currentPage: number;
+};
+
+export type GalleryPageSnapshot<TAsset extends { id: string } = { id: string }> = {
+  namespace: string;
+  page: number;
+  filterSignature: string;
+  catalogVersion: number | null;
+  savedAt: number;
+  images: TAsset[];
 };
 
 type GalleryReturnStateV2 = {
@@ -172,6 +183,149 @@ const normalizeFilters = (value: unknown): GalleryReturnFilters | null => {
     pageSize: normalizePageSize(raw.pageSize),
     currentPage: normalizePositiveInteger(raw.currentPage, 1),
   };
+};
+
+type GallerySnapshotFilterInput = {
+  pageSize?: number;
+  search?: string;
+  folder?: string;
+  tag?: string;
+  onlyCanonical?: boolean;
+  onlyWithVariants?: boolean;
+  favorites?: boolean;
+  duplicates?: boolean;
+  comfy?: boolean;
+  embedding?: string;
+  aspectRatioFilters?: string[];
+  dateFilter?: unknown;
+  hiddenFolders?: string[];
+  hiddenTags?: string[];
+  hiddenNamespaces?: string[];
+  showMotionAssetsOnly?: boolean;
+};
+
+export const createGallerySnapshotFilterSignature = (
+  input: GallerySnapshotFilterInput
+): string => JSON.stringify({
+  pageSize: normalizePageSize(input.pageSize),
+  search: input.search?.trim() ?? '',
+  folder: input.folder?.trim() || 'all',
+  tag: input.tag?.trim() ?? '',
+  onlyCanonical: Boolean(input.onlyCanonical),
+  onlyWithVariants: Boolean(input.onlyWithVariants),
+  favorites: Boolean(input.favorites),
+  duplicates: Boolean(input.duplicates),
+  comfy: Boolean(input.comfy),
+  embedding: input.embedding ?? 'none',
+  aspectRatioFilters: normalizeStringArray(input.aspectRatioFilters).sort(),
+  dateFilter: normalizeDateFilterValue(input.dateFilter),
+  hiddenFolders: normalizeStringArray(input.hiddenFolders).sort(),
+  hiddenTags: normalizeStringArray(input.hiddenTags).sort(),
+  hiddenNamespaces: normalizeStringArray(input.hiddenNamespaces).sort(),
+  showMotionAssetsOnly: Boolean(input.showMotionAssetsOnly),
+});
+
+export const createGalleryReturnFilterSignature = (
+  filters: GalleryReturnFilters
+): string => createGallerySnapshotFilterSignature({
+  pageSize: filters.pageSize,
+  search: filters.searchTerm,
+  folder: filters.selectedFolder,
+  tag: filters.selectedTag,
+  onlyCanonical: filters.onlyCanonical,
+  onlyWithVariants: filters.onlyWithVariants,
+  favorites: filters.showFavoritesOnly,
+  duplicates: filters.showDuplicatesOnly,
+  comfy: filters.showComfyOnly,
+  embedding: filters.embeddingFilter,
+  aspectRatioFilters: filters.aspectRatioFilters,
+  dateFilter: filters.dateFilter,
+  hiddenFolders: filters.hiddenFolders,
+  hiddenTags: filters.hiddenTags,
+  hiddenNamespaces: filters.hiddenNamespaces,
+  showMotionAssetsOnly: filters.showMotionAssetsOnly,
+});
+
+const readGalleryPageSnapshots = <TAsset extends { id: string }>(): GalleryPageSnapshot<TAsset>[] => {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.sessionStorage.getItem(GALLERY_PAGE_SNAPSHOTS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((entry): GalleryPageSnapshot<TAsset>[] => {
+      if (!entry || typeof entry !== 'object') return [];
+      const candidate = entry as Partial<GalleryPageSnapshot<TAsset>>;
+      if (
+        typeof candidate.namespace !== 'string'
+        || typeof candidate.page !== 'number'
+        || typeof candidate.filterSignature !== 'string'
+        || typeof candidate.savedAt !== 'number'
+        || !Array.isArray(candidate.images)
+      ) {
+        return [];
+      }
+      const images = candidate.images.filter(
+        (image): image is TAsset =>
+          Boolean(image) && typeof image === 'object' && typeof image.id === 'string'
+      );
+      return [{
+        namespace: candidate.namespace,
+        page: Math.max(1, Math.floor(candidate.page)),
+        filterSignature: candidate.filterSignature,
+        catalogVersion:
+          typeof candidate.catalogVersion === 'number' ? candidate.catalogVersion : null,
+        savedAt: candidate.savedAt,
+        images,
+      }];
+    }).filter((entry) => Date.now() - entry.savedAt < GALLERY_RETURN_TTL_MS);
+  } catch {
+    return [];
+  }
+};
+
+const galleryPageSnapshotKey = (
+  snapshot: Pick<GalleryPageSnapshot, 'namespace' | 'page' | 'filterSignature'>
+) => `${snapshot.namespace}\u0000${snapshot.page}\u0000${snapshot.filterSignature}`;
+
+export const saveGalleryPageSnapshot = <TAsset extends { id: string }>(
+  snapshot: GalleryPageSnapshot<TAsset>
+): void => {
+  if (typeof window === 'undefined' || snapshot.images.length === 0) return;
+  try {
+    const key = galleryPageSnapshotKey(snapshot);
+    const entries = readGalleryPageSnapshots<TAsset>()
+      .filter((entry) => galleryPageSnapshotKey(entry) !== key);
+    entries.unshift(snapshot);
+    window.sessionStorage.setItem(
+      GALLERY_PAGE_SNAPSHOTS_KEY,
+      JSON.stringify(entries.slice(0, GALLERY_PAGE_SNAPSHOT_LIMIT))
+    );
+  } catch {
+    // Session storage is an optional paint optimization.
+  }
+};
+
+export const getFreshGalleryPageSnapshot = <TAsset extends { id: string }>(options: {
+  namespace: string;
+  page?: number;
+  filterSignature?: string;
+  assetId?: string;
+}): GalleryPageSnapshot<TAsset> | null => {
+  const snapshots = readGalleryPageSnapshots<TAsset>();
+  return snapshots.find((snapshot) => {
+    if (snapshot.namespace !== options.namespace) return false;
+    if (options.page !== undefined && snapshot.page !== options.page) return false;
+    if (
+      options.filterSignature !== undefined
+      && snapshot.filterSignature !== options.filterSignature
+    ) {
+      return false;
+    }
+    if (options.assetId && !snapshot.images.some((image) => image.id === options.assetId)) {
+      return false;
+    }
+    return true;
+  }) ?? null;
 };
 
 const parseRawGalleryReturnState = (): GalleryReturnStateLegacy | GalleryReturnStateV2 | null => {

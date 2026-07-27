@@ -2,9 +2,14 @@ import { useRef } from 'react';
 import type { CloudflareImage } from '../types';
 import { parseCanonicalGalleryFocusFromSearch } from '../focusNavigation';
 import {
+  createGalleryReturnFilterSignature,
+  createGallerySnapshotFilterSignature,
+  getFreshGalleryPageSnapshot,
   getFreshGalleryReturnState,
   GALLERY_RETURN_SNAPSHOT_KEY,
   GALLERY_RETURN_TTL_MS,
+  saveGalleryPageSnapshot,
+  type GalleryPageSnapshot,
   type NormalizedGalleryReturnState,
 } from '../returnState';
 import { getStoredPreferences } from '../storedPreferences';
@@ -17,6 +22,9 @@ type GalleryWarmCacheState = {
   namespace: string;
   images: CloudflareImage[];
   savedAt: number;
+  page: number;
+  filterSignature: string;
+  catalogVersion: number | null;
 };
 
 type GalleryReturnSnapshotState = {
@@ -26,14 +34,55 @@ type GalleryReturnSnapshotState = {
   images?: CloudflareImage[];
 };
 
-let galleryWarmCache: GalleryWarmCacheState | null = null;
+let galleryWarmCaches: GalleryWarmCacheState[] = [];
 
-export const rememberGalleryWarmCache = (namespace: string, images: CloudflareImage[]) => {
-  galleryWarmCache = {
+export const rememberGalleryWarmCache = (
+  namespace: string,
+  images: CloudflareImage[],
+  options: {
+    page?: number;
+    filterSignature?: string;
+    catalogVersion?: number | null;
+  } = {}
+) => {
+  if (images.length === 0) return;
+  const snapshot: GalleryWarmCacheState = {
     namespace,
     images,
     savedAt: Date.now(),
+    page: Math.max(1, options.page ?? 1),
+    filterSignature: options.filterSignature ?? '',
+    catalogVersion: options.catalogVersion ?? null,
   };
+  const key = `${snapshot.namespace}\u0000${snapshot.page}\u0000${snapshot.filterSignature}`;
+  galleryWarmCaches = [
+    snapshot,
+    ...galleryWarmCaches.filter(
+      (entry) => `${entry.namespace}\u0000${entry.page}\u0000${entry.filterSignature}` !== key
+    ),
+  ].slice(0, 8);
+  saveGalleryPageSnapshot(snapshot);
+};
+
+export const rememberGalleryResponseSnapshot = (options: {
+  namespace: string;
+  images: CloudflareImage[];
+  response: Pick<Response, 'headers'>;
+  pagination?: { page?: number } | null;
+  query: Parameters<typeof createGallerySnapshotFilterSignature>[0] & { page?: number };
+}): number | null => {
+  const versionHeader = options.response.headers.get('x-photarium-catalog-version');
+  const parsedVersion = versionHeader === null ? Number.NaN : Number(versionHeader);
+  const catalogVersion = Number.isFinite(parsedVersion) ? parsedVersion : null;
+  rememberGalleryWarmCache(options.namespace, options.images, {
+    page:
+      typeof options.pagination?.page === 'number'
+        ? options.pagination.page
+        : options.query.page,
+    filterSignature: createGallerySnapshotFilterSignature(options.query),
+    catalogVersion,
+  });
+  return catalogVersion;
 };
 
 export const useGalleryInitialLoadState = ({
@@ -64,7 +113,7 @@ export const useGalleryInitialLoadState = ({
   );
 
   const initialReturningFromDetail = (() => {
-    if (initialFocusTargetRef.current) return false;
+    if (initialFocusTargetRef.current) return true;
     if (initialGalleryReturnStateRef.current) return true;
     if (typeof window === 'undefined') return false;
     try {
@@ -76,28 +125,68 @@ export const useGalleryInitialLoadState = ({
     return false;
   })();
 
+  const activeNamespace = namespace ?? '';
+  const snapshotFilterSignature = (() => {
+    const returnFilters = initialGalleryReturnStateRef.current?.filters;
+    if (returnFilters) {
+      return createGalleryReturnFilterSignature(returnFilters);
+    }
+    if (!initialFocusTargetRef.current) return undefined;
+    const preferences = storedPreferencesRef.current;
+    return createGallerySnapshotFilterSignature({
+      pageSize: preferences.pageSize,
+      search: preferences.searchTerm,
+      folder: preferences.selectedFolder,
+      tag: preferences.selectedTag,
+      onlyCanonical: preferences.onlyCanonical,
+      onlyWithVariants: preferences.onlyWithVariants,
+      favorites: preferences.showFavoritesOnly,
+      duplicates: preferences.showDuplicatesOnly,
+      comfy: preferences.showComfyOnly,
+      embedding: preferences.embeddingFilter,
+      aspectRatioFilters: preferences.aspectRatioFilters,
+      dateFilter: preferences.dateFilter,
+      hiddenFolders: preferences.hiddenFolders,
+      hiddenTags: preferences.hiddenTags,
+      hiddenNamespaces: preferences.hiddenNamespaces,
+      showMotionAssetsOnly: preferences.showMotionAssetsOnly,
+    });
+  })();
+  const snapshotPage = initialFocusTargetRef.current
+    ? undefined
+    : initialGalleryReturnStateRef.current?.currentPage;
+  const snapshotAssetId = initialFocusTargetRef.current?.assetId;
+
   const initialWarmImages = (() => {
     if (!initialReturningFromDetail) {
       return [] as CloudflareImage[];
     }
-    const activeNamespace = namespace ?? '';
-    if (!galleryWarmCache) {
-      return [] as CloudflareImage[];
-    }
-    if (galleryWarmCache.namespace !== activeNamespace) {
-      return [] as CloudflareImage[];
-    }
-    if (Date.now() - galleryWarmCache.savedAt > GALLERY_RETURN_TTL_MS) {
-      return [] as CloudflareImage[];
-    }
-    return galleryWarmCache.images;
+    const warm = galleryWarmCaches.find((entry) => (
+      entry.namespace === activeNamespace
+      && (snapshotPage === undefined || entry.page === snapshotPage)
+      && (snapshotFilterSignature === undefined || entry.filterSignature === snapshotFilterSignature)
+      && (!snapshotAssetId || entry.images.some((image) => image.id === snapshotAssetId))
+      && Date.now() - entry.savedAt < GALLERY_RETURN_TTL_MS
+    ));
+    return warm?.images ?? [];
   })();
 
   const initialSnapshotImages = (() => {
     if (!initialReturningFromDetail || typeof window === 'undefined') {
       return [] as CloudflareImage[];
     }
-    const activeNamespace = namespace ?? '';
+    const snapshot = getFreshGalleryPageSnapshot<CloudflareImage>({
+      namespace: activeNamespace,
+      page: snapshotPage,
+      filterSignature: snapshotFilterSignature,
+      assetId: snapshotAssetId,
+    });
+    if (snapshot) {
+      rememberGalleryWarmCache(activeNamespace, snapshot.images, snapshot);
+      return snapshot.images;
+    }
+
+    // One-version compatibility fallback. New writes use the LRU above.
     try {
       const rawSnapshot = window.sessionStorage.getItem(GALLERY_RETURN_SNAPSHOT_KEY);
       if (!rawSnapshot) {
@@ -114,11 +203,15 @@ export const useGalleryInitialLoadState = ({
         (image): image is CloudflareImage => Boolean(image) && typeof image.id === 'string'
       );
       if (snapshotImages.length > 0) {
-        galleryWarmCache = {
+        const legacySnapshot: GalleryPageSnapshot<CloudflareImage> = {
           namespace: activeNamespace,
           images: snapshotImages,
           savedAt: savedAt || Date.now(),
+          page: typeof parsed.currentPage === 'number' ? parsed.currentPage : 1,
+          filterSignature: snapshotFilterSignature ?? '',
+          catalogVersion: null,
         };
+        rememberGalleryWarmCache(activeNamespace, snapshotImages, legacySnapshot);
       }
       return snapshotImages;
     } catch {

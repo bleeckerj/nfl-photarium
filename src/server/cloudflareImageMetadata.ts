@@ -110,7 +110,7 @@ export const patchCloudflareImageMetadata = async (
     size: fetchedImage.size,
     meta: finalMetadataPayload,
   });
-  upsertCachedImage(cachedImage);
+  await upsertCachedImage(cachedImage);
 
   return {
     metadataPayload: finalMetadataPayload,

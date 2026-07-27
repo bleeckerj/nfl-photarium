@@ -84,7 +84,7 @@ export async function cleanupImageArtifacts(
   if (includeCache) {
     steps.push(
       await runStep('cloudflareCache', async () => {
-        removeCachedImage(imageId);
+        await removeCachedImage(imageId);
       })
     );
   }
@@ -129,4 +129,3 @@ export async function cleanupImageArtifacts(
     steps,
   };
 }
-

@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   DETAIL_ASSET_SEED_KEY,
+  GALLERY_PAGE_SNAPSHOT_LIMIT,
+  getFreshGalleryPageSnapshot,
   getFreshDetailAssetSeed,
+  saveGalleryPageSnapshot,
   saveDetailAssetSeed,
 } from '@/components/gallery/returnState';
 
@@ -79,5 +82,65 @@ describe('detail asset seed return state', () => {
     expect(getFreshDetailAssetSeed({ id: 'asset-1', assetType: 'video', namespace: 'images', now })).toBeNull();
 
     expect(sessionStorage.getItem(DETAIL_ASSET_SEED_KEY)).toContain('asset-1');
+  });
+});
+
+describe('gallery page snapshot LRU', () => {
+  afterEach(() => {
+    Reflect.deleteProperty(globalThis, 'window');
+  });
+
+  it('restores only an exact namespace, page, and filter match', () => {
+    installSessionStorage();
+    saveGalleryPageSnapshot({
+      namespace: 'studio',
+      page: 3,
+      filterSignature: 'neutral',
+      catalogVersion: 42,
+      savedAt: Date.now(),
+      images: [{ id: 'target' }, { id: 'other' }],
+    });
+
+    expect(getFreshGalleryPageSnapshot({
+      namespace: 'studio',
+      page: 3,
+      filterSignature: 'neutral',
+      assetId: 'target',
+    })?.catalogVersion).toBe(42);
+    expect(getFreshGalleryPageSnapshot({
+      namespace: 'studio',
+      page: 2,
+      filterSignature: 'neutral',
+    })).toBeNull();
+    expect(getFreshGalleryPageSnapshot({
+      namespace: 'other',
+      page: 3,
+      filterSignature: 'neutral',
+    })).toBeNull();
+  });
+
+  it('keeps the eight most recently saved pages', () => {
+    installSessionStorage();
+    for (let page = 1; page <= GALLERY_PAGE_SNAPSHOT_LIMIT + 2; page += 1) {
+      saveGalleryPageSnapshot({
+        namespace: 'studio',
+        page,
+        filterSignature: 'neutral',
+        catalogVersion: page,
+        savedAt: Date.now() + page,
+        images: [{ id: `asset-${page}` }],
+      });
+    }
+
+    expect(getFreshGalleryPageSnapshot({
+      namespace: 'studio',
+      page: 1,
+      filterSignature: 'neutral',
+    })).toBeNull();
+    expect(getFreshGalleryPageSnapshot({
+      namespace: 'studio',
+      page: 10,
+      filterSignature: 'neutral',
+    })?.images[0]?.id).toBe('asset-10');
   });
 });

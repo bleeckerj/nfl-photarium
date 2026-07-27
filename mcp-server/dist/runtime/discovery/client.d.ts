@@ -39,12 +39,16 @@ export declare function listImages(options: {
     folder?: string;
     namespace?: string;
     limit?: number;
+    page?: number;
     refresh?: boolean;
     aspectRatioClass?: string;
     aspectRatio?: string;
 }): Promise<{
     images: ImageResult[];
     total: number;
+    page: number;
+    pageSize: number;
+    hasMore: boolean;
 }>;
 export declare function getImage(imageId: string): Promise<Record<string, unknown> | null>;
 export declare function getImageMetadata(imageId: string): Promise<Record<string, unknown> | null>;

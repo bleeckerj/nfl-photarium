@@ -6,6 +6,20 @@ import {
   type CachedCloudflareImage,
   type CloudflareImageApiResponse,
 } from './cloudflareImageCacheMapper';
+import {
+  acknowledgeCloudflareImageMutations,
+  applyCloudflareImageMutations,
+  clearCloudflareImageMutationJournal,
+  compactCloudflareImageMutationJournal,
+  getCloudflareImageMutations,
+  recordCloudflareImageMutation,
+  type CloudflareImageMutation,
+} from './cloudflareImageMutationJournal';
+import {
+  catalogContentsEqual,
+  mergeCachedImageRecord,
+  mutationIsReflectedRemotely,
+} from './cloudflareImageReconciliation';
 
 export type {
   CachedCloudflareImage,
@@ -15,11 +29,18 @@ export type {
 interface CacheState {
   images: CachedCloudflareImage[];
   map: Map<string, CachedCloudflareImage>;
+  contentVersion: number;
+  residentAt: number;
   lastFetched: number;
+  lastReconciledAt: number;
+  lastReconcileDurationMs: number;
+  lastReconcileError: string | null;
+  source: 'empty' | 'memory' | 'persistent' | 'cloudflare';
   inflight: Promise<CachedCloudflareImage[]> | null;
   initialized: boolean;
   backgroundRefreshInProgress: boolean;
   backgroundRefreshLastRun: number;
+  localMutations: Map<string, CloudflareImageMutation>;
 }
 
 const GLOBAL_CACHE_KEY = Symbol.for('cloudflare.image.cache');
@@ -30,17 +51,31 @@ const globalObject = globalThis as typeof globalThis & {
 const defaultState: CacheState = {
   images: [],
   map: new Map(),
+  contentVersion: 0,
+  residentAt: 0,
   lastFetched: 0,
+  lastReconciledAt: 0,
+  lastReconcileDurationMs: 0,
+  lastReconcileError: null,
+  source: 'empty',
   inflight: null,
   initialized: false,
   backgroundRefreshInProgress: false,
-  backgroundRefreshLastRun: 0
+  backgroundRefreshLastRun: 0,
+  localMutations: new Map(),
 };
 
 const cacheState: CacheState = globalObject[GLOBAL_CACHE_KEY] ?? defaultState;
 if (!globalObject[GLOBAL_CACHE_KEY]) {
   globalObject[GLOBAL_CACHE_KEY] = cacheState;
 }
+cacheState.contentVersion ??= 0;
+cacheState.residentAt ??= cacheState.lastFetched ?? 0;
+cacheState.lastReconciledAt ??= cacheState.lastFetched ?? 0;
+cacheState.lastReconcileDurationMs ??= 0;
+cacheState.lastReconcileError ??= null;
+cacheState.source ??= cacheState.initialized ? 'memory' : 'empty';
+cacheState.localMutations ??= new Map();
 
 const isTruthyEnv = (value?: string): boolean => {
   if (!value) return false;
@@ -50,16 +85,14 @@ const isTruthyEnv = (value?: string): boolean => {
 
 const CLOUDFLARE_CACHE_DISABLED = isTruthyEnv(process.env.CLOUDFLARE_CACHE_DISABLED);
 
-const CACHE_TTL_MS = Number(process.env.CLOUDFLARE_CACHE_TTL_MS ?? 5 * 60 * 1000);
+const CACHE_TTL_MS = Number(process.env.CLOUDFLARE_CACHE_TTL_MS ?? 60 * 1000);
 const PERSISTENT_CACHE_TTL_MS = Number(process.env.CLOUDFLARE_PERSISTENT_CACHE_TTL_MS ?? 24 * 60 * 60 * 1000); // 24 hours default
 const DEV_BACKGROUND_REFRESH_MIN_MS = Number(
-  process.env.CLOUDFLARE_DEV_BACKGROUND_REFRESH_MIN_MS ?? 60 * 60 * 1000
+  process.env.CLOUDFLARE_DEV_BACKGROUND_REFRESH_MIN_MS ?? 60 * 1000
 );
 const devDisableEnv = process.env.CLOUDFLARE_DEV_BACKGROUND_REFRESH_DISABLED;
 const DEV_BACKGROUND_REFRESH_DISABLED =
-  process.env.NODE_ENV === 'development'
-    ? devDisableEnv !== 'false' && devDisableEnv !== '0'
-    : devDisableEnv === 'true' || devDisableEnv === '1';
+  devDisableEnv === 'true' || devDisableEnv === '1';
 const PAGE_SIZE = Math.min(
   100,
   Math.max(10, Number(process.env.CLOUDFLARE_CACHE_PAGE_SIZE ?? 100))
@@ -321,7 +354,7 @@ const runSizeBackfillQueue = async (): Promise<void> => {
 
   let cursor = 0;
   const workerCount = Math.min(SIZE_BACKFILL_CONCURRENCY, candidates.length);
-  let mutated = false;
+  const mutations: CloudflareImageMutation[] = [];
   const workers = Array.from({ length: workerCount }, async () => {
     while (true) {
       const index = cursor;
@@ -352,17 +385,25 @@ const runSizeBackfillQueue = async (): Promise<void> => {
       if (imageIndex >= 0) {
         cacheState.images[imageIndex] = updated;
       }
-      mutated = true;
+      const mutation: CloudflareImageMutation = {
+        kind: 'upsert',
+        imageId: updated.id,
+        image: updated,
+        recordedAt: Date.now(),
+      };
+      cacheState.localMutations.set(updated.id, mutation);
+      mutations.push(mutation);
       sizeBackfillAttempts.delete(candidate.id);
     }
   });
 
   try {
     await Promise.all(workers);
-    if (mutated && !CLOUDFLARE_CACHE_DISABLED) {
-      saveToPersistentCache(cacheState.images, cacheState.lastFetched).catch((error) => {
-        console.warn('[Cache] Failed to persist size backfill updates:', error);
-      });
+    if (mutations.length > 0 && !CLOUDFLARE_CACHE_DISABLED) {
+      cacheState.contentVersion += 1;
+      cacheState.residentAt = Date.now();
+      cacheState.lastFetched = cacheState.residentAt;
+      await Promise.all(mutations.map((mutation) => recordCloudflareImageMutation(mutation)));
     }
   } finally {
     sizeBackfillInProgress = false;
@@ -383,7 +424,10 @@ const triggerSizeBackfill = (): void => {
 const loadFromPersistentCache = async (): Promise<{ images: CachedCloudflareImage[]; timestamp: number } | null> => {
   if (CLOUDFLARE_CACHE_DISABLED) return null;
   try {
-    const cached = await getStorage().get<CachedCloudflareImage[]>(PERSISTENT_CACHE_KEY);
+    const [cached, mutations] = await Promise.all([
+      getStorage().get<CachedCloudflareImage[]>(PERSISTENT_CACHE_KEY),
+      getCloudflareImageMutations(),
+    ]);
     if (!cached) {
       console.log('[Cache] No persistent cache found');
       return null;
@@ -391,11 +435,15 @@ const loadFromPersistentCache = async (): Promise<{ images: CachedCloudflareImag
 
     const age = Date.now() - cached.timestamp;
     const isStale = age > PERSISTENT_CACHE_TTL_MS;
+    const images = applyCloudflareImageMutations(cached.data, mutations);
     
-    console.log(`[Cache] Loaded ${cached.data.length} images from persistent cache (age: ${Math.round(age / 1000)}s, stale: ${isStale})`);
+    console.log(
+      `[Cache] Loaded ${images.length} images from persistent cache `
+      + `(age: ${Math.round(age / 1000)}s, stale: ${isStale}, journal: ${mutations.length})`
+    );
     
     // Return data even if stale - we'll refresh in background
-    return { images: cached.data, timestamp: cached.timestamp };
+    return { images, timestamp: cached.timestamp };
   } catch (error) {
     console.warn('[Cache] Failed to load from persistent cache:', error);
     return null;
@@ -407,12 +455,14 @@ const loadFromPersistentCache = async (): Promise<{ images: CachedCloudflareImag
  */
 const saveToPersistentCache = async (images: CachedCloudflareImage[], timestamp: number): Promise<void> => {
   if (CLOUDFLARE_CACHE_DISABLED) return;
-  try {
-    await getStorage().set(PERSISTENT_CACHE_KEY, images, timestamp);
-    console.log(`[Cache] Saved ${images.length} images to persistent cache`);
-  } catch (error) {
-    console.warn('[Cache] Failed to save to persistent cache:', error);
+  await getStorage().set(PERSISTENT_CACHE_KEY, images, timestamp);
+  await compactCloudflareImageMutationJournal(timestamp);
+  for (const [imageId, mutation] of cacheState.localMutations) {
+    if (mutation.recordedAt <= timestamp) {
+      cacheState.localMutations.delete(imageId);
+    }
   }
+  console.log(`[Cache] Saved ${images.length} images to persistent cache`);
 };
 
 const flushPersistentCacheSave = async (): Promise<void> => {
@@ -423,9 +473,12 @@ const flushPersistentCacheSave = async (): Promise<void> => {
   }
 
   persistentCacheSaveQueued = false;
-  const images = cacheState.images;
-  const timestamp = cacheState.lastFetched;
+  const images = cacheState.images.slice();
+  const timestamp = Date.now();
   persistentCacheSaveInFlight = saveToPersistentCache(images, timestamp)
+    .catch((error) => {
+      console.warn('[Cache] Failed to save persistent cache:', error);
+    })
     .finally(() => {
       persistentCacheSaveInFlight = null;
       if (persistentCacheSaveQueued) {
@@ -446,61 +499,86 @@ const schedulePersistentCacheSave = (): void => {
   }, PERSISTENT_CACHE_SAVE_DEBOUNCE_MS);
 };
 
-const shouldUseMemoryCache = (forceRefresh?: boolean) => {
+const hasResidentMemorySnapshot = () => {
   if (CLOUDFLARE_CACHE_DISABLED) return false;
-  if (forceRefresh) return false;
-  if (!cacheState.images.length) return false;
-  return Date.now() - cacheState.lastFetched < CACHE_TTL_MS;
+  return cacheState.initialized && cacheState.images.length > 0;
 };
 
-const rebuildState = (images: CachedCloudflareImage[], timestamp?: number) => {
+const shouldReconcileMemorySnapshot = () => {
+  if (!hasResidentMemorySnapshot()) return false;
+  return Date.now() - cacheState.lastReconciledAt >= CACHE_TTL_MS;
+};
+
+const rebuildState = (
+  images: CachedCloudflareImage[],
+  options: {
+    reconciledAt?: number;
+    source?: CacheState['source'];
+    incrementVersion?: boolean;
+  } = {}
+) => {
   cacheState.images = images;
   cacheState.map = new Map(images.map(image => [image.id, image]));
-  cacheState.lastFetched = timestamp ?? Date.now();
-  cacheState.initialized = true;
-};
-
-const mergeCachedImageRecord = (
-  existing: CachedCloudflareImage | undefined,
-  incoming: CachedCloudflareImage
-): CachedCloudflareImage => {
-  if (!existing) {
-    return incoming;
+  cacheState.residentAt = Date.now();
+  cacheState.lastFetched = cacheState.residentAt;
+  cacheState.lastReconciledAt = options.reconciledAt ?? cacheState.lastReconciledAt;
+  cacheState.source = options.source ?? cacheState.source;
+  if (options.incrementVersion !== false) {
+    cacheState.contentVersion += 1;
   }
-
-  return {
-    ...existing,
-    ...incoming,
-    // Preserve known size/type when metadata-only refreshes omit these fields.
-    size: incoming.size ?? existing.size,
-    contentType: incoming.contentType ?? existing.contentType,
-    aspectRatio: incoming.aspectRatio ?? existing.aspectRatio,
-    dimensions: incoming.dimensions ?? existing.dimensions,
-    hasClipEmbedding: incoming.hasClipEmbedding ?? existing.hasClipEmbedding,
-    hasColorEmbedding: incoming.hasColorEmbedding ?? existing.hasColorEmbedding,
-    dominantColors: incoming.dominantColors ?? existing.dominantColors,
-    averageColor: incoming.averageColor ?? existing.averageColor,
-  };
+  cacheState.initialized = true;
 };
 
 /**
  * Fetch fresh data from Cloudflare and update both caches
  */
 const fetchAndUpdateCaches = async (): Promise<CachedCloudflareImage[]> => {
+  const startedAt = Date.now();
   const previousMap = new Map(cacheState.map);
-  const images = (await fetchAllImages()).map((image) =>
+  const fetchedImages = (await fetchAllImages()).map((image) =>
     mergeCachedImageRecord(previousMap.get(image.id), image)
   );
+  const fetchedMap = new Map(fetchedImages.map((image) => [image.id, image]));
   const timestamp = Date.now();
+  const persistedMutations = await getCloudflareImageMutations();
+  const localMutations = Array.from(cacheState.localMutations.values());
+  const mutationsById = new Map<string, CloudflareImageMutation>();
+  [...persistedMutations, ...localMutations].forEach((mutation) => {
+    const existing = mutationsById.get(mutation.imageId);
+    if (!existing || existing.recordedAt <= mutation.recordedAt) {
+      mutationsById.set(mutation.imageId, mutation);
+    }
+  });
+  const acknowledgedMutations: CloudflareImageMutation[] = [];
+  const pendingMutations: CloudflareImageMutation[] = [];
+  for (const mutation of mutationsById.values()) {
+    if (mutationIsReflectedRemotely(mutation, fetchedMap.get(mutation.imageId))) {
+      acknowledgedMutations.push(mutation);
+      cacheState.localMutations.delete(mutation.imageId);
+    } else {
+      pendingMutations.push(mutation);
+    }
+  }
+  const images = applyCloudflareImageMutations(fetchedImages, pendingMutations);
+  const contentChanged = !catalogContentsEqual(previousMap, images);
   
   // Update in-memory cache
-  rebuildState(images, timestamp);
-  
-  // Update persistent cache (fire and forget)
-  saveToPersistentCache(images, timestamp).catch(err => {
-    console.warn('[Cache] Background save to persistent cache failed:', err);
+  rebuildState(images, {
+    reconciledAt: timestamp,
+    source: 'cloudflare',
+    incrementVersion: contentChanged,
   });
-  
+  cacheState.lastReconcileDurationMs = Date.now() - startedAt;
+  cacheState.lastReconcileError = null;
+  void acknowledgeCloudflareImageMutations(acknowledgedMutations).catch((error) => {
+    console.warn('[Cache] Failed to compact reconciled image mutations:', error);
+  });
+
+  // Reconciliation is not on the request path. Compacting the snapshot here
+  // would stringify the entire catalog on the Node event loop, so local writes
+  // remain durable in the small journal and the full snapshot is compacted by
+  // the explicit persistence flush/maintenance path.
+
   return images;
 };
 
@@ -512,7 +590,7 @@ const triggerBackgroundRefresh = (): void => {
   if (CLOUDFLARE_CACHE_DISABLED) {
     return;
   }
-  if (cacheState.backgroundRefreshInProgress) {
+  if (cacheState.backgroundRefreshInProgress || cacheState.inflight) {
     return;
   }
 
@@ -533,17 +611,24 @@ const triggerBackgroundRefresh = (): void => {
   cacheState.backgroundRefreshInProgress = true;
   console.log('[Cache] Starting background refresh from Cloudflare API');
   
-  fetchAndUpdateCaches()
+  const inflight = fetchAndUpdateCaches()
     .then((images) => {
       console.log(`[Cache] Background refresh complete: ${images.length} images`);
       triggerSizeBackfill();
+      return images;
     })
     .catch((error) => {
+      cacheState.lastReconcileError = error instanceof Error ? error.message : String(error);
       console.warn('[Cache] Background refresh failed:', error);
+      return cacheState.images;
     })
     .finally(() => {
+      if (cacheState.inflight === inflight) {
+        cacheState.inflight = null;
+      }
       cacheState.backgroundRefreshInProgress = false;
     });
+  cacheState.inflight = inflight;
 };
 
 /**
@@ -580,8 +665,14 @@ export const getCachedImages = async (forceRefresh = false): Promise<CachedCloud
     return inflight;
   }
 
-  // 1. Check in-memory cache first
-  if (shouldUseMemoryCache(forceRefresh)) {
+  // 1. A resident snapshot is always the navigation fast path. Its TTL only
+  // controls when reconciliation is scheduled; age never makes an ordinary
+  // request synchronously reread the full persistent catalog.
+  if (!forceRefresh && hasResidentMemorySnapshot()) {
+    cacheState.source = 'memory';
+    if (shouldReconcileMemorySnapshot()) {
+      triggerBackgroundRefresh();
+    }
     triggerSizeBackfill();
     return cacheState.images;
   }
@@ -627,7 +718,10 @@ export const getCachedImages = async (forceRefresh = false): Promise<CachedCloud
     // (~200-400ms) instead of hitting the in-memory copy (~5ms). The
     // persistent timestamp is still used below for the staleness check that
     // decides whether to schedule a background refresh from Cloudflare.
-    rebuildState(persistent.images, Date.now());
+    rebuildState(persistent.images, {
+      reconciledAt: persistent.timestamp,
+      source: 'persistent',
+    });
 
     // Check if persistent cache is stale and needs background refresh
     const persistentAge = Date.now() - persistent.timestamp;
@@ -653,6 +747,7 @@ export const getCachedImages = async (forceRefresh = false): Promise<CachedCloud
 
   cacheState.inflight = inflight;
   const images = await inflight;
+  await flushPersistentCacheSave();
   triggerSizeBackfill();
   return images;
 };
@@ -725,7 +820,7 @@ export const getCachedImage = async (id: string) => {
         if (data.result) {
           const cached = transformApiImageToCached(data.result);
           // Add to cache so subsequent lookups are fast
-          upsertCachedImage(cached);
+          await upsertCachedImage(cached);
           return cached;
         }
       }
@@ -745,7 +840,8 @@ export const flushCloudflareImageCachePersistence = async (): Promise<void> => {
   await flushPersistentCacheSave();
 };
 
-export const upsertCachedImage = (image: CachedCloudflareImage) => {
+export const upsertCachedImage = (image: CachedCloudflareImage): Promise<void> => {
+  const recordedAt = Date.now();
   if (CLOUDFLARE_CACHE_DISABLED) {
     cacheState.map.set(image.id, image);
     const index = cacheState.images.findIndex(item => item.id === image.id);
@@ -754,8 +850,11 @@ export const upsertCachedImage = (image: CachedCloudflareImage) => {
     } else {
       cacheState.images.unshift(image);
     }
-    cacheState.lastFetched = Date.now();
-    return;
+    cacheState.residentAt = recordedAt;
+    cacheState.lastFetched = recordedAt;
+    cacheState.contentVersion += 1;
+    cacheState.source = 'memory';
+    return Promise.resolve();
   }
   const existing = cacheState.map.get(image.id);
   const mergedImage = mergeCachedImageRecord(existing, image);
@@ -775,7 +874,17 @@ export const upsertCachedImage = (image: CachedCloudflareImage) => {
   } else {
     cacheState.images.unshift(mergedImage);
   }
-  cacheState.lastFetched = Date.now();
+  cacheState.residentAt = recordedAt;
+  cacheState.lastFetched = recordedAt;
+  cacheState.contentVersion += 1;
+  cacheState.source = 'memory';
+  const mutation: CloudflareImageMutation = {
+    kind: 'upsert',
+    imageId: mergedImage.id,
+    image: mergedImage,
+    recordedAt,
+  };
+  cacheState.localMutations.set(mergedImage.id, mutation);
 
   void loadMetadataOverrides().then(() => {
     const currentImage = cacheState.map.get(mergedImage.id);
@@ -796,27 +905,36 @@ export const upsertCachedImage = (image: CachedCloudflareImage) => {
     }
   });
   
-  // Coalesce full-cache writes so bulk edits do not flood Redis with many large payloads.
-  schedulePersistentCacheSave();
-
   if (mergedImage.size === undefined) {
     triggerSizeBackfill();
   }
+  return recordCloudflareImageMutation(mutation);
 };
 
-export const removeCachedImage = (id: string) => {
+export const removeCachedImage = (id: string): Promise<void> => {
+  const recordedAt = Date.now();
   if (CLOUDFLARE_CACHE_DISABLED) {
     cacheState.map.delete(id);
     cacheState.images = cacheState.images.filter(image => image.id !== id);
-    cacheState.lastFetched = Date.now();
-    return;
+    cacheState.residentAt = recordedAt;
+    cacheState.lastFetched = recordedAt;
+    cacheState.contentVersion += 1;
+    cacheState.source = 'memory';
+    return Promise.resolve();
   }
   cacheState.map.delete(id);
   cacheState.images = cacheState.images.filter(image => image.id !== id);
-  cacheState.lastFetched = Date.now();
-  
-  // Update persistent cache in background
-  schedulePersistentCacheSave();
+  cacheState.residentAt = recordedAt;
+  cacheState.lastFetched = recordedAt;
+  cacheState.contentVersion += 1;
+  cacheState.source = 'memory';
+  const mutation: CloudflareImageMutation = {
+    kind: 'delete',
+    imageId: id,
+    recordedAt,
+  };
+  cacheState.localMutations.set(id, mutation);
+  return recordCloudflareImageMutation(mutation);
 };
 
 export const transformApiImageToCached = (image: CloudflareImageApiResponse) =>
@@ -824,7 +942,13 @@ export const transformApiImageToCached = (image: CloudflareImageApiResponse) =>
 
 export const getCacheStats = () => ({
   count: cacheState.images.length,
+  contentVersion: cacheState.contentVersion,
+  residentAt: cacheState.residentAt,
   lastFetched: cacheState.lastFetched,
+  lastReconciledAt: cacheState.lastReconciledAt,
+  lastReconcileDurationMs: cacheState.lastReconcileDurationMs,
+  lastReconcileError: cacheState.lastReconcileError,
+  source: cacheState.source,
   ttlMs: CACHE_TTL_MS,
   persistentTtlMs: PERSISTENT_CACHE_TTL_MS,
   disabled: CLOUDFLARE_CACHE_DISABLED,
@@ -838,14 +962,22 @@ export const getCacheStats = () => ({
 export const clearAllCaches = async () => {
   cacheState.images = [];
   cacheState.map = new Map();
+  cacheState.contentVersion = 0;
+  cacheState.residentAt = 0;
   cacheState.lastFetched = 0;
+  cacheState.lastReconciledAt = 0;
+  cacheState.lastReconcileDurationMs = 0;
+  cacheState.lastReconcileError = null;
+  cacheState.source = 'empty';
   cacheState.initialized = false;
+  cacheState.localMutations = new Map();
   metadataOverrides.clear();
   metadataOverridesLoaded = false;
   
   try {
     await getStorage().delete(PERSISTENT_CACHE_KEY);
     await getStorage().delete(METADATA_OVERRIDE_KEY);
+    await clearCloudflareImageMutationJournal();
     console.log('[Cache] All caches cleared');
   } catch (error) {
     console.warn('[Cache] Failed to clear persistent cache:', error);

@@ -245,6 +245,10 @@ export const discoveryTools: Tool[] = [
           type: 'number',
           description: 'Maximum number of results (default: 50)',
         },
+        page: {
+          type: 'number',
+          description: 'One-based result page (default: 1)',
+        },
         refresh: {
           type: 'boolean',
           description: 'If true, refresh the Cloudflare cache before listing',

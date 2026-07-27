@@ -71,14 +71,17 @@ export type GalleryQueryResult<T extends GalleryQueryAsset> = {
   focus: GalleryQueryFocusResult | null;
   facets: GalleryQueryFacets;
   familySummaryMap: ReturnType<typeof buildFamilySummaryMap>;
-  duplicateSummary: {
+  duplicateSummary: GalleryDuplicateSummary | null;
+  timings: Record<string, number>;
+};
+
+export type GalleryDuplicateSummary = {
     groupCount: number;
     imageCount: number;
     pageDuplicateIds: string[];
     allDuplicateIds: string[];
     duplicateIdsExcludingNewest: string[];
     duplicateIdsExcludingOldest: string[];
-  };
 };
 
 export type GalleryQueryFocusResult = {
@@ -307,6 +310,21 @@ if (!scopeMemoGlobal[SCOPE_MEMO_CACHE_KEY]) {
   scopeMemoGlobal[SCOPE_MEMO_CACHE_KEY] = scopeMemoCache;
 }
 
+type ProjectionMemoEntry = {
+  baseFiltered: GalleryQueryAsset[];
+  sortedBase: GalleryQueryAsset[];
+};
+const PROJECTION_MEMO_MAX_ENTRIES = 24;
+const PROJECTION_MEMO_CACHE_KEY = Symbol.for('photarium.galleryQuery.projectionMemo');
+const projectionMemoGlobal = globalThis as typeof globalThis & {
+  [PROJECTION_MEMO_CACHE_KEY]?: Map<string, ProjectionMemoEntry>;
+};
+const projectionMemoCache =
+  projectionMemoGlobal[PROJECTION_MEMO_CACHE_KEY] ?? new Map<string, ProjectionMemoEntry>();
+if (!projectionMemoGlobal[PROJECTION_MEMO_CACHE_KEY]) {
+  projectionMemoGlobal[PROJECTION_MEMO_CACHE_KEY] = projectionMemoCache;
+}
+
 const getOrBuildScopeMemo = <T extends GalleryQueryAsset>(
   cacheKey: string,
   assets: T[],
@@ -339,6 +357,7 @@ const getOrBuildScopeMemo = <T extends GalleryQueryAsset>(
 
 export const clearGalleryQueryScopeMemo = () => {
   scopeMemoCache.clear();
+  projectionMemoCache.clear();
 };
 
 const buildScopeMemoKey = (
@@ -351,20 +370,45 @@ const buildScopeMemoKey = (
   return `${scopeKey}|hf:${hiddenFolders}|ht:${hiddenTags}|hn:${hiddenNamespaces}`;
 };
 
+const buildProjectionMemoKey = (scopeKey: string, filters: GalleryQueryFilters) =>
+  `${buildScopeMemoKey(scopeKey, filters)}|projection:${JSON.stringify({
+    search: filters.search ?? '',
+    folder: filters.folder ?? '',
+    tag: filters.tag ?? '',
+    onlyCanonical: Boolean(filters.onlyCanonical),
+    onlyWithVariants: Boolean(filters.onlyWithVariants),
+    favorites: Boolean(filters.favorites),
+    comfy: Boolean(filters.comfy),
+    embedding: filters.embedding ?? 'none',
+    aspectRatioClasses: (filters.aspectRatioClasses ?? []).slice().sort(),
+    dateStart: filters.dateStart ?? '',
+    dateEnd: filters.dateEnd ?? '',
+    dateTimeZone: filters.dateTimeZone ?? '',
+  })}`;
+
 export const queryGalleryAssets = <T extends GalleryQueryAsset>(
   assets: T[],
   filters: GalleryQueryFilters,
   page: number,
   pageSize: number,
   focusAssetId?: string,
-  scopeKey?: string
+  scopeKey?: string,
+  options: {
+    includeDuplicateSummary?: boolean;
+    precomputedDuplicateSummary?: GalleryDuplicateSummary;
+  } = {}
 ): GalleryQueryResult<T> => {
+  const timings: Record<string, number> = {};
+  const measure = (label: string, startedAt: number) => {
+    timings[label] = Number((performance.now() - startedAt).toFixed(1));
+  };
   const scopeTotal = assets.length;
   // If the caller supplied a scopeKey, use the memoized family/facet artifacts
   // for this scope. Otherwise compute them inline (legacy / test path).
   let familySummaryMapAll: ReturnType<typeof buildFamilySummaryMap>;
   let facetBase: T[];
   let facets: GalleryQueryFacets;
+  const facetsStartedAt = performance.now();
   if (scopeKey) {
     const memo = getOrBuildScopeMemo(buildScopeMemoKey(scopeKey, filters), assets, filters);
     familySummaryMapAll = memo.familySummaryMapAll;
@@ -377,26 +421,63 @@ export const queryGalleryAssets = <T extends GalleryQueryAsset>(
     );
     facets = buildFacets(facetBase);
   }
+  measure('facets', facetsStartedAt);
 
-  const baseFiltered = facetBase.filter((asset) => {
-    if (!matchesFolder(asset, filters.folder)) return false;
-    if (!matchesTag(asset, filters.tag)) return false;
-    if (filters.favorites && !hasFavoriteTag(asset.tags)) return false;
-    if (!matchesSearch(asset, filters.search)) return false;
-    if (filters.onlyCanonical && asset.parentId) return false;
-    if (filters.comfy && !matchesComfy(asset)) return false;
-    if (!matchesEmbedding(asset, filters.embedding)) return false;
-    if (!matchesAspect(asset, filters.aspectRatioClasses)) return false;
-    if (!matchesDate(asset, filters.dateStart, filters.dateEnd, filters.dateTimeZone)) return false;
-    if (filters.onlyWithVariants) {
-      const summary = familySummaryMapAll[asset.id];
-      if (summary?.isVariant || (summary?.variantCount ?? 0) === 0) return false;
+  const projectionStartedAt = performance.now();
+  const buildProjection = (): ProjectionMemoEntry => {
+    const baseFiltered = facetBase.filter((asset) => {
+      if (!matchesFolder(asset, filters.folder)) return false;
+      if (!matchesTag(asset, filters.tag)) return false;
+      if (filters.favorites && !hasFavoriteTag(asset.tags)) return false;
+      if (!matchesSearch(asset, filters.search)) return false;
+      if (filters.onlyCanonical && asset.parentId) return false;
+      if (filters.comfy && !matchesComfy(asset)) return false;
+      if (!matchesEmbedding(asset, filters.embedding)) return false;
+      if (!matchesAspect(asset, filters.aspectRatioClasses)) return false;
+      if (!matchesDate(asset, filters.dateStart, filters.dateEnd, filters.dateTimeZone)) return false;
+      if (filters.onlyWithVariants) {
+        const summary = familySummaryMapAll[asset.id];
+        if (summary?.isVariant || (summary?.variantCount ?? 0) === 0) return false;
+      }
+      return true;
+    });
+    return {
+      baseFiltered,
+      sortedBase: sortGalleryAssetsByUploadedDesc(baseFiltered),
+    };
+  };
+  let projection: ProjectionMemoEntry;
+  if (scopeKey) {
+    const projectionKey = buildProjectionMemoKey(scopeKey, filters);
+    const cachedProjection = projectionMemoCache.get(projectionKey);
+    if (cachedProjection) {
+      projection = cachedProjection;
+      projectionMemoCache.delete(projectionKey);
+      projectionMemoCache.set(projectionKey, cachedProjection);
+    } else {
+      projection = buildProjection();
+      projectionMemoCache.set(projectionKey, projection);
+      if (projectionMemoCache.size > PROJECTION_MEMO_MAX_ENTRIES) {
+        const oldest = projectionMemoCache.keys().next().value;
+        if (oldest !== undefined) projectionMemoCache.delete(oldest);
+      }
     }
-    return true;
-  });
+  } else {
+    projection = buildProjection();
+  }
+  const baseFiltered = projection.baseFiltered as T[];
+  measure('projection_lookup_build', projectionStartedAt);
 
-  const duplicateGroups = computeDuplicateGroups(baseFiltered as never);
-  const duplicateIds = new Set<string>();
+  const duplicateStartedAt = performance.now();
+  const shouldAnalyzeDuplicates = Boolean(
+    filters.duplicates || options.includeDuplicateSummary || options.precomputedDuplicateSummary
+  );
+  const duplicateGroups = shouldAnalyzeDuplicates && !options.precomputedDuplicateSummary
+    ? computeDuplicateGroups(baseFiltered as never)
+    : [];
+  const duplicateIds = new Set<string>(
+    options.precomputedDuplicateSummary?.allDuplicateIds ?? []
+  );
   duplicateGroups.forEach((group) => group.items.forEach((asset) => duplicateIds.add(asset.id)));
   const selectDuplicateIdsKeeping = (strategy: 'newest' | 'oldest') => {
     const ids = new Set<string>();
@@ -416,18 +497,20 @@ export const queryGalleryAssets = <T extends GalleryQueryAsset>(
     return Array.from(ids);
   };
 
-  const duplicateFiltered = filters.duplicates
-    ? baseFiltered.filter((asset) => duplicateIds.has(asset.id))
-    : baseFiltered;
-  const sorted = sortGalleryAssetsByUploadedDesc(duplicateFiltered);
+  const sorted = filters.duplicates
+    ? (projection.sortedBase as T[]).filter((asset) => duplicateIds.has(asset.id))
+    : projection.sortedBase as T[];
+  measure('duplicate_work', duplicateStartedAt);
   const safePage = Math.max(1, Math.floor(page));
   const safePageSize = Math.max(1, Math.floor(pageSize));
   const total = sorted.length;
   const totalPages = Math.max(1, Math.ceil(total / safePageSize));
   const normalizedFocusAssetId = focusAssetId?.trim() ?? '';
+  const focusStartedAt = performance.now();
   const focusIndex = normalizedFocusAssetId
     ? sorted.findIndex((asset) => asset.id === normalizedFocusAssetId)
     : -1;
+  measure('focus_lookup', focusStartedAt);
   // When a focus asset is provided and found, return the *natural* page that
   // contains the asset. The asset appears in its real position on that page;
   // the client scrolls and highlights it. We deliberately do NOT anchor the
@@ -450,9 +533,11 @@ export const queryGalleryAssets = <T extends GalleryQueryAsset>(
     : null;
   const start = (pageIndex - 1) * safePageSize;
   const images = sorted.slice(start, start + safePageSize);
-  const pageIds = new Set(images.map((asset) => asset.id));
   const pageFamilySummaryMap = Object.fromEntries(
-    Object.entries(familySummaryMapAll).filter(([id]) => pageIds.has(id))
+    images.flatMap((asset) => {
+      const summary = familySummaryMapAll[asset.id];
+      return summary ? [[asset.id, summary] as const] : [];
+    })
   );
   const pageDuplicateIds = images.filter((asset) => duplicateIds.has(asset.id)).map((asset) => asset.id);
 
@@ -466,13 +551,21 @@ export const queryGalleryAssets = <T extends GalleryQueryAsset>(
     focus,
     facets,
     familySummaryMap: pageFamilySummaryMap,
-    duplicateSummary: {
-      groupCount: duplicateGroups.length,
-      imageCount: duplicateIds.size,
-      pageDuplicateIds,
-      allDuplicateIds: Array.from(duplicateIds),
-      duplicateIdsExcludingNewest: selectDuplicateIdsKeeping('newest'),
-      duplicateIdsExcludingOldest: selectDuplicateIdsKeeping('oldest'),
-    },
+    timings,
+    duplicateSummary: shouldAnalyzeDuplicates
+      ? options.precomputedDuplicateSummary
+        ? {
+            ...options.precomputedDuplicateSummary,
+            pageDuplicateIds,
+          }
+        : {
+          groupCount: duplicateGroups.length,
+          imageCount: duplicateIds.size,
+          pageDuplicateIds,
+          allDuplicateIds: Array.from(duplicateIds),
+          duplicateIdsExcludingNewest: selectDuplicateIdsKeeping('newest'),
+          duplicateIdsExcludingOldest: selectDuplicateIdsKeeping('oldest'),
+          }
+      : null,
   };
 };

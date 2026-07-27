@@ -147,15 +147,24 @@ export const discoveryHandlers: Record<string, RuntimeToolHandler> = {
   },
 
   'photarium_list': async (args: Record<string, unknown>) => {
-    const { folder, namespace, limit, refresh, aspectRatioClass, aspectRatio } = args as {
+    const { folder, namespace, limit, page, refresh, aspectRatioClass, aspectRatio } = args as {
       folder?: string;
       namespace?: string;
       limit?: number;
+      page?: number;
       refresh?: boolean;
       aspectRatioClass?: string;
       aspectRatio?: string;
     };
-    const result = await listImages({ folder, namespace, limit, refresh, aspectRatioClass, aspectRatio });
+    const result = await listImages({
+      folder,
+      namespace,
+      limit,
+      page,
+      refresh,
+      aspectRatioClass,
+      aspectRatio,
+    });
     return {
       content: [
         {

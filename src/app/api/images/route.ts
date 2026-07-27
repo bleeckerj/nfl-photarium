@@ -26,9 +26,13 @@ import {
 } from '@/server/videoAnimatedWebpComfyProvenance';
 import { matchesAspectRatioClass, normalizeAspectRatioClass } from '@/utils/aspectRatioClass';
 import { loadGalleryOptionalMetadata } from '@/server/galleryOptionalMetadata';
+import { analyzeGalleryDuplicates } from '@/server/galleryDuplicateAnalysis';
+import { finalizeGalleryResponseDiagnostics } from '@/server/galleryResponseDiagnostics';
+import { randomUUID } from 'node:crypto';
 
 export async function GET(request: NextRequest) {
   const startedAt = performance.now();
+  const requestId = randomUUID();
   const mark = (value: number) => Number(value.toFixed(1));
   const timings: Record<string, number> = {};
   const diagnostics: Record<string, number | boolean | string | null> = {};
@@ -65,6 +69,8 @@ export async function GET(request: NextRequest) {
     const onlyWithVariants = parseBooleanParam(request.nextUrl.searchParams.get('onlyWithVariants'));
     const favorites = parseBooleanParam(request.nextUrl.searchParams.get('favorites'));
     const duplicates = parseBooleanParam(request.nextUrl.searchParams.get('duplicates'));
+    const includeDuplicateSummary =
+      duplicates || request.nextUrl.searchParams.get('includeDuplicateSummary') === '1';
     const comfy = parseBooleanParam(request.nextUrl.searchParams.get('comfy'));
     const embedding = parseEmbeddingFilter(request.nextUrl.searchParams.get('embedding'));
     const aspectRatioClasses = parseAspectClasses(request.nextUrl.searchParams.get('aspectRatioClasses'));
@@ -118,7 +124,9 @@ export async function GET(request: NextRequest) {
     const animatedWebpComfyProvenance = buildVideoAnimatedWebpComfyProvenanceMap(allVideos);
     const imagesWithVideoProvenance = applyVideoAnimatedWebpComfyProvenance(images, animatedWebpComfyProvenance);
     diagnostics.animated_webp_comfy_provenance_count = animatedWebpComfyProvenance.size;
-    const filteredImages = imagesWithVideoProvenance.filter((image) => matchesNamespace(image.namespace, namespace));
+    const filteredImages = await markStage('namespace_filter', () =>
+      imagesWithVideoProvenance.filter((image) => matchesNamespace(image.namespace, namespace))
+    );
     diagnostics.filtered_image_count = filteredImages.length;
 
     const mappedVideos = allVideos.map((video) => ({
@@ -264,6 +272,7 @@ export async function GET(request: NextRequest) {
       onlyWithVariants ||
       favorites ||
       duplicates ||
+      includeDuplicateSummary ||
       comfy ||
       embedding !== 'none' ||
       aspectRatioClasses.length > 0 ||
@@ -315,9 +324,12 @@ export async function GET(request: NextRequest) {
     // (search, folder, tag, page, etc.) because those are applied AFTER
     // the memoized stage.
     const cacheStats = getCacheStats();
+    const catalogVersion = cacheStats.contentVersion ?? cacheStats.lastFetched ?? 0;
+    const catalogSource = cacheStats.source ?? (cacheStats.initialized ? 'memory' : 'empty');
+    const lastReconciledAt = cacheStats.lastReconciledAt ?? cacheStats.lastFetched ?? 0;
     const scopeKey = [
       'v2',
-      cacheStats.lastFetched,
+      catalogVersion,
       getImageFolderOverridesVersion(),
       namespace ?? '__all__',
       mediaFilter ?? '__none__',
@@ -325,35 +337,59 @@ export async function GET(request: NextRequest) {
       videoLimit,
       videoAssetsEnabled ? 'v1' : 'v0',
     ].join('|');
+    const queryFilters = {
+      search,
+      folder,
+      tag,
+      onlyCanonical,
+      onlyWithVariants,
+      favorites,
+      duplicates,
+      comfy,
+      embedding,
+      aspectRatioClasses,
+      dateStart,
+      dateEnd,
+      dateTimeZone,
+      hiddenFolders,
+      hiddenTags,
+      hiddenNamespaces,
+    };
+    const precomputedDuplicateSummary = includeDuplicateSummary
+      ? await markStage('duplicate_index', async () => {
+          const duplicateScope = queryGalleryAssets<GalleryQueryAsset>(
+            finalImages,
+            { ...queryFilters, duplicates: false },
+            1,
+            Math.max(1, finalImages.length),
+            undefined,
+            scopeKey
+          );
+          return analyzeGalleryDuplicates(duplicateScope.images, {
+            catalogVersion,
+            scopeKey: JSON.stringify({
+              namespace: namespace ?? '__all__',
+              mediaFilter,
+              includeFamilyFor,
+              filters: { ...queryFilters, duplicates: false },
+            }),
+          });
+        })
+      : undefined;
     const queryResult = hasPagination || hasGalleryQueryParams || hasFocusQuery
       ? await markStage('gallery_query', () =>
           queryGalleryAssets<GalleryQueryAsset>(
             finalImages,
-            {
-              search,
-              folder,
-              tag,
-              onlyCanonical,
-              onlyWithVariants,
-              favorites,
-              duplicates,
-              comfy,
-              embedding,
-              aspectRatioClasses,
-              dateStart,
-              dateEnd,
-              dateTimeZone,
-              hiddenFolders,
-              hiddenTags,
-              hiddenNamespaces,
-            },
+            queryFilters,
             page,
             hasPagination || hasFocusQuery ? pageSize : Math.max(1, finalImages.length),
             focusAssetId,
-            scopeKey
+            scopeKey,
+            { includeDuplicateSummary, precomputedDuplicateSummary }
           )
         )
       : null;
+    if (queryResult) Object.assign(timings, queryResult.timings);
     const totalBeforePagination = queryResult?.total ?? finalImages.length;
     if (queryResult && (hasPagination || hasGalleryQueryParams)) {
       finalImages = queryResult.images;
@@ -410,11 +446,9 @@ export async function GET(request: NextRequest) {
         }))
       : finalImages;
 
-    // cacheStats is captured earlier in this function (above gallery_query)
-    // for the scope key; reuse it here for the response body so we don't pay
-    // the (cheap, but still nonzero) cost twice.
     const cache = cacheStats;
-    const serializedImages = await markStage('serialize_images', () =>
+    timings.persistent_read = cache.source === 'persistent' ? timings.cache_load ?? 0 : 0;
+    const serializedImages = await markStage('serialization', () =>
       withExtrasApplied.map((image) => toListableImage(image as Record<string, unknown>))
     );
     diagnostics.response_image_count = serializedImages.length;
@@ -428,6 +462,7 @@ export async function GET(request: NextRequest) {
       diagnostics,
       includeVectorMeta,
       includeExtras,
+      includeDuplicateSummary,
       facets: queryResult?.facets ?? null,
       familySummaryMap: queryResult?.familySummaryMap ?? {},
       duplicateSummary: queryResult?.duplicateSummary ?? null,
@@ -445,32 +480,14 @@ export async function GET(request: NextRequest) {
     const payloadBytes = Buffer.byteLength(JSON.stringify(responseBody));
     diagnostics.payload_kb = mark(payloadBytes / 1024);
     const response = NextResponse.json(responseBody);
-    response.headers.set('Cache-Control', 'no-store, no-cache, max-age=0, must-revalidate');
-    response.headers.set(
-      'Server-Timing',
-      Object.entries(timings)
-        .map(([name, duration]) => `${name};dur=${duration}`)
-        .join(', ')
-    );
-    response.headers.set('X-Photarium-Payload-KB', String(diagnostics.payload_kb));
-    if (timings.total >= 1000) {
-      console.warn('[ImagesAPI] Slow response', {
-        totalMs: timings.total,
-        cacheLoadMs: timings.cache_load,
-        redisBatchMs: timings.redis_batch,
-        extrasLoadMs: timings.extras_load,
-        serializeMs: timings.serialize_images,
-        scopedAssets: diagnostics.scoped_asset_count,
-        extrasImages: diagnostics.extras_image_count,
-        payloadKb: diagnostics.payload_kb,
-      includeVectorMeta,
-      forceRefresh,
-      namespace: namespace ?? null,
-      mediaFilter,
-      videoLimit,
-      includeFamilyFor,
+    finalizeGalleryResponseDiagnostics(response, {
+      requestId, timings, diagnostics,
+      cache: { ...cache, contentVersion: catalogVersion, source: catalogSource, lastReconciledAt },
+      query: {
+        includeVectorMeta, includeDuplicateSummary, forceRefresh,
+        namespace: namespace ?? null, mediaFilter, videoLimit, includeFamilyFor,
+      },
     });
-    }
     return response;
   } catch (error) {
     console.error('Fetch images error:', error);

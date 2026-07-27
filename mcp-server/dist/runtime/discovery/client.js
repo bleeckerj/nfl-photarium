@@ -93,26 +93,32 @@ export async function findSimilar(imageId, type = 'clip', limit = 10, options = 
 }
 export async function listImages(options) {
     const params = new URLSearchParams();
+    const requestedLimit = options.limit ?? 50;
+    const pageSize = Math.max(1, Math.min(500, requestedLimit > 0 ? requestedLimit : 50));
+    const page = Math.max(1, Math.floor(options.page ?? 1));
     if (options.namespace)
         params.set('namespace', options.namespace);
+    if (options.folder)
+        params.set('folder', options.folder);
     if (options.refresh)
         params.set('refresh', '1');
     if (options.aspectRatioClass)
         params.set('aspectRatioClass', options.aspectRatioClass);
     if (options.aspectRatio)
         params.set('aspectRatio', options.aspectRatio);
+    params.set('page', String(page));
+    params.set('pageSize', String(pageSize));
     const data = await apiRequest(`/api/images?${params}`);
-    let images = data.images;
-    // Filter by folder if specified
-    if (options.folder) {
-        images = images.filter((img) => img.meta?.folder === options.folder);
-    }
-    // Apply limit
-    const limit = options.limit ?? 50;
-    const limited = limit > 0 ? images.slice(0, limit) : images;
+    const resolvedPage = data.pagination?.page ?? page;
+    const resolvedPageSize = data.pagination?.pageSize ?? pageSize;
+    const total = data.pagination?.total ?? data.images.length;
+    const totalPages = data.pagination?.totalPages ?? Math.max(1, Math.ceil(total / resolvedPageSize));
     return {
-        images: limited.map(formatImageResult),
-        total: images.length,
+        images: data.images.map(formatImageResult),
+        total,
+        page: resolvedPage,
+        pageSize: resolvedPageSize,
+        hasMore: resolvedPage < totalPages,
     };
 }
 function _toRecord(value) {
@@ -250,8 +256,8 @@ export async function getImageMetadata(imageId) {
     const familyRootId = isVariant ? normalized.parentId : normalized.id;
     let familyVariantCount = null;
     try {
-        const { images } = await listImages({ limit: 0 });
-        familyVariantCount = images.filter((img) => (img.parentId || null) === familyRootId).length;
+        const family = await apiRequest(`/api/images/${encodeURIComponent(imageId)}/family`);
+        familyVariantCount = Array.isArray(family.children) ? family.children.length : 0;
     }
     catch {
         familyVariantCount = null;

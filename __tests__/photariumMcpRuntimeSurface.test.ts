@@ -70,6 +70,45 @@ describe('Photarium MCP runtime surface', () => {
     );
   });
 
+  it('paginates photarium_list on the server', async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      expect(url).toBe(
+        'http://localhost:3000/api/images?namespace=studio&folder=editorial&page=3&pageSize=5'
+      );
+      return new Response(JSON.stringify({
+        images: [{
+          id: 'page-image',
+          filename: 'page-image.jpg',
+          uploaded: '2026-01-01T00:00:00.000Z',
+          variants: [],
+        }],
+        pagination: {
+          page: 3,
+          pageSize: 5,
+          total: 17,
+          totalPages: 4,
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as typeof global.fetch;
+
+    const result = await handleRuntimeToolCall('photarium_list', {
+      namespace: 'studio',
+      folder: 'editorial',
+      page: 3,
+      limit: 5,
+    });
+    const payload = JSON.parse(result.content[0]?.text || '{}');
+
+    expect(payload).toMatchObject({
+      total: 17,
+      page: 3,
+      pageSize: 5,
+      hasMore: true,
+    });
+    expect(payload.images).toHaveLength(1);
+  });
+
   it('generates semantic tags and saves them without replacing existing tags', async () => {
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;

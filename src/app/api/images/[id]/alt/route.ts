@@ -224,7 +224,7 @@ export async function POST(
     }
 
     if (saved) {
-      upsertCachedImage(
+      await upsertCachedImage(
         transformApiImageToCached({
           id: image.id,
           filename: image.filename,

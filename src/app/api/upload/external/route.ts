@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createHash } from 'crypto';
 import sharp from 'sharp';
-import { transformApiImageToCached, upsertCachedImage } from '@/server/cloudflareImageCache';
+import { cacheUploadedCloudflareImage } from '@/server/cloudflareImageWriteThrough';
 import { toDuplicateSummary } from '@/server/duplicateDetector';
 import {
   evaluateUploadDeduplicationPolicy,
@@ -325,15 +325,14 @@ export async function POST(request: NextRequest) {
     const baseMeta = imageData.meta && typeof imageData.meta === 'object'
       ? { ...cachedMetadataPayload, ...(imageData.meta as Record<string, unknown>) }
       : cachedMetadataPayload;
-    const cachedPrimary = transformApiImageToCached({
+    const primaryUpload = {
       id: primaryId,
-      filename: primaryFilename,
+      filename: primaryFilename || workingName,
       uploaded: primaryUploaded,
       variants: primaryVariants,
       size: imageData.size,
-      meta: baseMeta
-    });
-    upsertCachedImage(cachedPrimary);
+    };
+    const cachedPrimary = await cacheUploadedCloudflareImage(primaryUpload, baseMeta);
 
     await patchImageExtrasRecord(primaryId, {
       ...(cleanDescription ? { description: cleanDescription } : {}),
@@ -401,21 +400,16 @@ export async function POST(request: NextRequest) {
           const webpResult = webpJson.result;
           webpVariantId = webpResult?.id;
           if (webpResult) {
-            const cachedWebp = transformApiImageToCached({
-              id: webpResult.id,
-              filename: webpResult.filename,
-              uploaded: webpResult.uploaded,
-              variants: webpResult.variants,
-              size: webpResult.size,
-              meta: webpResult.meta && typeof webpResult.meta === 'object'
+            const cachedWebp = await cacheUploadedCloudflareImage(
+              webpResult,
+              webpResult.meta && typeof webpResult.meta === 'object'
                 ? {
                     ...cachedMetadataPayload,
                     ...limitedWebpMetadata,
                     ...(webpResult.meta as Record<string, unknown>)
                   }
                 : { ...cachedMetadataPayload, ...limitedWebpMetadata }
-            });
-            upsertCachedImage(cachedWebp);
+            );
             await patchImageExtrasRecord(webpResult.id, {
               ...(cleanDescription ? { description: cleanDescription } : {}),
               ...extrasMetadata,
@@ -452,19 +446,10 @@ export async function POST(request: NextRequest) {
           const patchJson = await patchResp.json();
           console.error('Failed to patch SVG metadata', patchJson);
         } else {
-          upsertCachedImage(
-            transformApiImageToCached({
-              id: primaryId,
-              filename: primaryFilename,
-              uploaded: primaryUploaded,
-              variants: primaryVariants,
-              size: imageData.size,
-              meta: {
-                ...updatedMetadata,
-                ...extrasMetadata,
-              }
-            })
-          );
+          await cacheUploadedCloudflareImage(primaryUpload, {
+            ...updatedMetadata,
+            ...extrasMetadata,
+          });
         }
       } catch (err) {
         console.error('Failed to patch SVG metadata', err);

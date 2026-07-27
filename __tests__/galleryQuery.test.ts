@@ -28,6 +28,7 @@ describe('queryGalleryAssets', () => {
     expect(result.images.map((image) => image.id)).toEqual(['a', 'b']);
     expect(result.total).toBe(3);
     expect(result.totalPages).toBe(2);
+    expect(result.duplicateSummary).toBeNull();
     expect(result.facets.folders).toEqual([
       { value: 'archive', count: 1 },
       { value: 'editorial', count: 2 },
@@ -95,12 +96,14 @@ describe('queryGalleryAssets', () => {
     );
 
     expect(result.images.map((image) => image.id)).toEqual(['dupe-2', 'dupe-1']);
-    expect(result.duplicateSummary.groupCount).toBe(1);
-    expect(result.duplicateSummary.imageCount).toBe(2);
-    expect(result.duplicateSummary.pageDuplicateIds).toEqual(['dupe-2', 'dupe-1']);
-    expect(result.duplicateSummary.allDuplicateIds).toEqual(['dupe-1', 'dupe-2']);
-    expect(result.duplicateSummary.duplicateIdsExcludingNewest).toEqual(['dupe-1']);
-    expect(result.duplicateSummary.duplicateIdsExcludingOldest).toEqual(['dupe-2']);
+    const summary = result.duplicateSummary;
+    expect(summary).not.toBeNull();
+    expect(summary?.groupCount).toBe(1);
+    expect(summary?.imageCount).toBe(2);
+    expect(summary?.pageDuplicateIds).toEqual(['dupe-2', 'dupe-1']);
+    expect(summary?.allDuplicateIds).toEqual(['dupe-1', 'dupe-2']);
+    expect(summary?.duplicateIdsExcludingNewest).toEqual(['dupe-1']);
+    expect(summary?.duplicateIdsExcludingOldest).toEqual(['dupe-2']);
   });
 
   it('does not treat repeated rows for one asset as duplicate images', () => {
@@ -109,12 +112,20 @@ describe('queryGalleryAssets', () => {
       originalUrlNormalized: 'https://example.com/a.jpg',
       contentHash: hash,
     });
-    const result = queryGalleryAssets([repeated, { ...repeated }], {}, 1, 60);
+    const result = queryGalleryAssets(
+      [repeated, { ...repeated }],
+      {},
+      1,
+      60,
+      undefined,
+      undefined,
+      { includeDuplicateSummary: true }
+    );
 
-    expect(result.duplicateSummary.groupCount).toBe(0);
-    expect(result.duplicateSummary.imageCount).toBe(0);
-    expect(result.duplicateSummary.allDuplicateIds).toEqual([]);
-    expect(result.duplicateSummary.duplicateIdsExcludingNewest).toEqual([]);
+    expect(result.duplicateSummary?.groupCount).toBe(0);
+    expect(result.duplicateSummary?.imageCount).toBe(0);
+    expect(result.duplicateSummary?.allDuplicateIds).toEqual([]);
+    expect(result.duplicateSummary?.duplicateIdsExcludingNewest).toEqual([]);
   });
 
   it('returns global duplicate selection ids even when duplicate assets are off page', () => {
@@ -126,15 +137,18 @@ describe('queryGalleryAssets', () => {
       ],
       {},
       1,
-      1
+      1,
+      undefined,
+      undefined,
+      { includeDuplicateSummary: true }
     );
 
     expect(result.images.map((image) => image.id)).toEqual(['new-visible']);
-    expect(result.duplicateSummary.groupCount).toBe(1);
-    expect(result.duplicateSummary.pageDuplicateIds).toEqual([]);
-    expect(result.duplicateSummary.allDuplicateIds).toEqual(['older-dupe', 'newer-dupe']);
-    expect(result.duplicateSummary.duplicateIdsExcludingNewest).toEqual(['older-dupe']);
-    expect(result.duplicateSummary.duplicateIdsExcludingOldest).toEqual(['newer-dupe']);
+    expect(result.duplicateSummary?.groupCount).toBe(1);
+    expect(result.duplicateSummary?.pageDuplicateIds).toEqual([]);
+    expect(result.duplicateSummary?.allDuplicateIds).toEqual(['older-dupe', 'newer-dupe']);
+    expect(result.duplicateSummary?.duplicateIdsExcludingNewest).toEqual(['older-dupe']);
+    expect(result.duplicateSummary?.duplicateIdsExcludingOldest).toEqual(['newer-dupe']);
   });
 
   it('returns page-local family summaries computed from the full catalog', () => {

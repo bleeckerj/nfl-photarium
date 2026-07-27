@@ -217,7 +217,7 @@ const applyDirectParentAssignment = async ({
     const images = await getCachedImages(false);
     const cached = images.find((image) => image.id === targetId);
     if (cached) {
-      upsertCachedImage({
+      await upsertCachedImage({
         ...cached,
         parentId: nextParentId || undefined,
       });
@@ -387,7 +387,7 @@ const reparentDirectChildren = async (
       await patchCloudflareImageParent(child.id, nextParentId);
       const cached = cachedById.get(child.id);
       if (cached) {
-        upsertCachedImage({
+        await upsertCachedImage({
           ...cached,
           parentId: nextParentId || undefined,
         });
@@ -515,7 +515,7 @@ export async function assignAssetParent(
     const images = await getCachedImages(false);
     const cached = images.find((image) => image.id === targetId);
     if (cached) {
-      upsertCachedImage({
+      await upsertCachedImage({
         ...cached,
         parentId: canonicalParentId || undefined,
       });

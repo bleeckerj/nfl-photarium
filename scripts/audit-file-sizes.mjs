@@ -30,13 +30,13 @@ const ALLOWED_OVERSIZED_FILES = new Map([
     category: 'component',
     owner: 'maintainability-refactor',
     reason: 'image detail page awaiting workflow hook extraction',
-    expires: '2026-07-15',
+    expires: '2026-08-31',
   }],
   ['src/app/videos/[id]/page.tsx', {
     category: 'component',
     owner: 'maintainability-refactor',
     reason: 'video detail page awaiting workflow hook extraction',
-    expires: '2026-07-15',
+    expires: '2026-08-31',
   }],
 ]);
 

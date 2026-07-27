@@ -19,7 +19,7 @@ import { useGalleryEmbedding } from './gallery/hooks/useGalleryEmbedding';
 import { useGalleryFavoriteToggle } from './gallery/hooks/useGalleryFavoriteToggle';
 import { useGalleryDeleteConfirmation } from './gallery/hooks/useGalleryDeleteConfirmation';
 import { useGalleryFocusNavigation } from './gallery/hooks/useGalleryFocusNavigation';
-import { rememberGalleryWarmCache, useGalleryInitialLoadState } from './gallery/hooks/useGalleryInitialLoadState';
+import { rememberGalleryResponseSnapshot, useGalleryInitialLoadState } from './gallery/hooks/useGalleryInitialLoadState';
 import { useGalleryMetadataEffects } from './gallery/hooks/useGalleryMetadataEffects';
 import { useGalleryNamespaceLifecycle } from './gallery/hooks/useGalleryNamespaceLifecycle';
 import { useGalleryNamespace } from './gallery/hooks/useGalleryNamespace';
@@ -141,6 +141,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [serverFacets, setServerFacets] = useState<GalleryServerFacets | null>(null);
   const [serverFamilySummaryMap, setServerFamilySummaryMap] = useState<Record<string, GalleryFamilySummary>>({});
   const [serverDuplicateSummary, setServerDuplicateSummary] = useState<GalleryDuplicateSummary | null>(null);
+  const [catalogVersion, setCatalogVersion] = useState<number | null>(null);
   const [dismissedDuplicateSignature, setDismissedDuplicateSignature] = useState<string | null>(null);
   const [videoResultsNotice, setVideoResultsNotice] = useState<string | null>(null);
   const [colorSearchHex, setColorSearchHex] = useState<string | null>(
@@ -299,7 +300,11 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         const nextVideoMeta = parseGalleryVideoMeta(data?.videoMeta);
         setVideoMeta(nextVideoMeta);
         setVideoResultsNotice(formatVideoResultsNotice(nextVideoMeta));
-        rememberGalleryWarmCache(namespace ?? '', uniqueImages);
+        setCatalogVersion(rememberGalleryResponseSnapshot({
+          namespace: namespace ?? '', images: uniqueImages, response,
+          pagination: data?.pagination,
+          query: effectiveServerQuery ?? galleryServerQueryRef.current,
+        }));
         if (PERF_LOGGING_ENABLED) {
           const elapsedMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt;
           const serverTiming = response.headers.get('server-timing') ?? 'n/a';
@@ -650,7 +655,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   }, [hiddenFolderSet, setSelectedFolder, unhideFolderByName]);
 
   const { galleryReturnHrefSuffix, saveGalleryReturnState } = useGalleryReturnState({
-    aspectRatioFilters, colorSearchHex, currentPage, dateFilter, embeddingFilter, filteredImages,
+    aspectRatioFilters, catalogVersion, colorSearchHex, currentPage, dateFilter, embeddingFilter, filteredImages,
     hiddenFolders, hiddenTags, hiddenNamespaces, namespace, onlyCanonical, onlyWithVariants, pageImages, pageSize,
     searchTerm, selectedFolder, selectedTag, showBrokenOnly, showComfyOnly, showDuplicatesOnly,
     showFavoritesOnly, showMotionAssetsOnly,

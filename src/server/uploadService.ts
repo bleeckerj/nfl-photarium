@@ -446,7 +446,7 @@ export async function uploadImageBuffer({
     size: imageData.size,
     meta: baseMeta
   });
-  upsertCachedImage(primaryCached);
+  await upsertCachedImage(primaryCached);
 
   await patchImageExtrasRecord(imageData.id, {
     ...(description ? { description } : {}),
@@ -520,7 +520,7 @@ export async function uploadImageBuffer({
               ? { ...cachedMetadataPayload, ...webpMetadataPayload, ...(webpResult.meta as Record<string, unknown>) }
               : { ...cachedMetadataPayload, ...webpMetadataPayload }
           });
-          upsertCachedImage(cachedVariant);
+          await upsertCachedImage(cachedVariant);
           await patchImageExtrasRecord(webpResult.id, {
             ...(description ? { description } : {}),
             ...extrasMetadata,
@@ -571,7 +571,7 @@ export async function uploadImageBuffer({
             ...extrasMetadata,
           }
         });
-        upsertCachedImage(updatedPrimary);
+        await upsertCachedImage(updatedPrimary);
       }
     } catch (err) {
       console.error('Failed to patch SVG metadata', err);

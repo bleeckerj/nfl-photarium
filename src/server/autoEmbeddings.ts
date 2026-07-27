@@ -67,7 +67,7 @@ async function generateAndStoreEmbeddings(image: CachedCloudflareImage): Promise
     averageColor: colorInfo?.averageColor,
   });
 
-  upsertCachedImage({
+  await upsertCachedImage({
     ...image,
     hasClipEmbedding: clipEmbedding ? true : image.hasClipEmbedding,
     hasColorEmbedding: colorInfo ? true : image.hasColorEmbedding,

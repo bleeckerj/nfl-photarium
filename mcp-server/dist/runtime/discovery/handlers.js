@@ -94,8 +94,16 @@ export const discoveryHandlers = {
         };
     },
     'photarium_list': async (args) => {
-        const { folder, namespace, limit, refresh, aspectRatioClass, aspectRatio } = args;
-        const result = await listImages({ folder, namespace, limit, refresh, aspectRatioClass, aspectRatio });
+        const { folder, namespace, limit, page, refresh, aspectRatioClass, aspectRatio } = args;
+        const result = await listImages({
+            folder,
+            namespace,
+            limit,
+            page,
+            refresh,
+            aspectRatioClass,
+            aspectRatio,
+        });
         return {
             content: [
                 {
