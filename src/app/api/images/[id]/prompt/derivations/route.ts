@@ -52,18 +52,42 @@ export async function POST(
     let actualAspectRatio: string | undefined;
     try {
       provider = normalizeGenerationProvider(body.provider);
+      if (!provider) throw new Error('provider is required when recording a creative-brief result');
       actualDimensions = parseDimensions(body.actualDimensions);
       actualAspectRatio = normalizeAspectRatio(body.actualAspectRatio);
     } catch (error) {
       return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid result metadata' }, { status: 400 });
     }
 
+    const generatedImageId = typeof body.generatedImageId === 'string' ? body.generatedImageId.trim() : '';
+    if (!generatedImageId) {
+      return NextResponse.json({ error: 'generatedImageId is required when recording a completed external result' }, { status: 400 });
+    }
+
+    let metadataEnrichment: {
+      status: 'completed' | 'partial' | 'failed';
+      descriptionSaved: boolean;
+      altTextSaved: boolean;
+    } | undefined;
+    if (isRecord(body.metadataEnrichment)) {
+      const status = body.metadataEnrichment.status;
+      if (status !== 'completed' && status !== 'partial' && status !== 'failed') {
+        return NextResponse.json({ error: 'metadataEnrichment.status must be completed, partial, or failed' }, { status: 400 });
+      }
+      metadataEnrichment = {
+        status,
+        descriptionSaved: body.metadataEnrichment.descriptionSaved === true,
+        altTextSaved: body.metadataEnrichment.altTextSaved === true,
+      };
+    }
+
     const updated = await updatePromptDerivation(id, body.derivationId.trim(), {
       provider,
-      generatedImageId: typeof body.generatedImageId === 'string' ? body.generatedImageId.trim() || undefined : undefined,
+      generatedImageId,
       externalJobId: typeof body.externalJobId === 'string' ? body.externalJobId.trim() || undefined : undefined,
       actualDimensions,
       actualAspectRatio,
+      metadataEnrichment,
     });
     return NextResponse.json({ imageId: id, derivation: updated });
   } catch (error) {

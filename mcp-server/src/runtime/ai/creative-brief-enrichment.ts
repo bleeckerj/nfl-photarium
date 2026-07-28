@@ -1,8 +1,10 @@
 import { generateAlt, generateDescription } from './client.js';
 
 export type CreativeBriefMetadataEnrichment = {
-  status: 'completed' | 'partial' | 'skipped';
+  status: 'completed' | 'partial' | 'failed';
   imageId?: string;
+  descriptionSaved: boolean;
+  altTextSaved: boolean;
   description?: string;
   altText?: string;
   errors?: Array<{
@@ -32,7 +34,9 @@ export async function enrichCreativeBriefImage(
 ): Promise<CreativeBriefMetadataEnrichment> {
   if (!imageId) {
     return {
-      status: 'skipped',
+      status: 'failed',
+      descriptionSaved: false,
+      altTextSaved: false,
       reason: 'generatedImageId is required before metadata enrichment can run',
     };
   }
@@ -45,22 +49,26 @@ export async function enrichCreativeBriefImage(
   const result: CreativeBriefMetadataEnrichment = {
     status: 'completed',
     imageId,
+    descriptionSaved: false,
+    altTextSaved: false,
   };
 
   if (descriptionResult.status === 'fulfilled') {
     result.description = descriptionResult.value.description;
+    result.descriptionSaved = true;
   } else {
     errors.push({ field: 'description', message: errorMessage(descriptionResult.reason) });
   }
 
   if (altResult.status === 'fulfilled') {
     result.altText = altResult.value.altTag;
+    result.altTextSaved = true;
   } else {
     errors.push({ field: 'altText', message: errorMessage(altResult.reason) });
   }
 
   if (errors.length > 0) {
-    result.status = 'partial';
+    result.status = errors.length === 2 ? 'failed' : 'partial';
     result.errors = errors;
   }
 

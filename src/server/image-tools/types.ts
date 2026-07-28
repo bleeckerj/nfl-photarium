@@ -16,6 +16,7 @@ export type ImageToolInputAssetType = 'image' | 'video' | 'animatedImage';
 export type ImageToolOutputMode = 'still' | 'animated';
 export type ImageToolControlType = 'text' | 'textarea' | 'number' | 'slider' | 'switch' | 'select' | 'color';
 export type ImageToolRunStatus = 'queued' | 'running' | 'completed' | 'failed';
+export type ImageToolResultState = 'prompt' | 'handoff' | 'running' | 'uploaded' | 'recorded' | 'failed';
 export type ImageToolDiagnosticLevel = 'info' | 'warn' | 'error';
 
 export type ImageToolWorkflowMode = 'filter' | 'reinterpretation';
@@ -136,6 +137,7 @@ export type ImageToolRunInput = {
 
 export type ImageToolRunResult = {
   kind?: 'image' | 'prompt';
+  state?: ImageToolResultState;
   uploadedAsset?: UploadSuccess | VideoUploadSuccess;
   prompt?: string;
   plan?: CreativeBriefGenerationPlan;
@@ -150,6 +152,7 @@ export type ImageToolRunResult = {
 
 export type ImageToolPreviewResult = {
   kind?: 'image' | 'prompt';
+  state?: ImageToolResultState;
   prompt?: string;
   plan?: CreativeBriefGenerationPlan;
   artifact?: {

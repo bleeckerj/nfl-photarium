@@ -10,6 +10,8 @@ describe('creative brief metadata enrichment', () => {
     await expect(enrichCreativeBriefImage('child-1', { generateDescription, generateAlt })).resolves.toEqual({
       status: 'completed',
       imageId: 'child-1',
+      descriptionSaved: true,
+      altTextSaved: true,
       description: 'A beige agricultural robot in a field.',
       altText: 'Beige Apple II-era agricultural robot among crop rows',
     });
@@ -24,17 +26,21 @@ describe('creative brief metadata enrichment', () => {
     await expect(enrichCreativeBriefImage('child-2', { generateDescription, generateAlt })).resolves.toEqual({
       status: 'partial',
       imageId: 'child-2',
+      descriptionSaved: false,
+      altTextSaved: true,
       altText: 'Agricultural robot in a field',
       errors: [{ field: 'description', message: 'description service unavailable' }],
     });
   });
 
-  it('skips enrichment when there is no generated child', async () => {
+  it('fails enrichment when there is no generated child', async () => {
     const generateDescription = vi.fn();
     const generateAlt = vi.fn();
 
     await expect(enrichCreativeBriefImage(undefined, { generateDescription, generateAlt })).resolves.toEqual({
-      status: 'skipped',
+      status: 'failed',
+      descriptionSaved: false,
+      altTextSaved: false,
       reason: 'generatedImageId is required before metadata enrichment can run',
     });
     expect(generateDescription).not.toHaveBeenCalled();

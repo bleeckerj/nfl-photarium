@@ -20,6 +20,67 @@ import {
 } from './client.js';
 import { enrichCreativeBriefImage } from './creative-brief-enrichment.js';
 
+type ImageRecord = Record<string, unknown>;
+
+function positiveDimensions(value: unknown): { width: number; height: number } | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  const width = Number(record.width);
+  const height = Number(record.height);
+  return Number.isInteger(width) && width > 0 && Number.isInteger(height) && height > 0
+    ? { width, height }
+    : undefined;
+}
+
+function ratioFromDimensions(dimensions: { width: number; height: number }): string {
+  const gcd = (left: number, right: number): number => {
+    let a = left;
+    let b = right;
+    while (b !== 0) {
+      const remainder = a % b;
+      a = b;
+      b = remainder;
+    }
+    return a;
+  };
+  const divisor = gcd(dimensions.width, dimensions.height);
+  return `${dimensions.width / divisor}:${dimensions.height / divisor}`;
+}
+
+function stringField(record: ImageRecord | null, key: string): string | undefined {
+  const value = record?.[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+async function verifyCreativeBriefChild(
+  sourceImageId: string,
+  generatedImageId: string,
+  actualDimensions?: { width: number; height: number },
+  actualAspectRatio?: string,
+): Promise<{
+  child: ImageRecord;
+  dimensions: { width: number; height: number };
+  actualAspectRatio: string;
+}> {
+  const [source, child] = await Promise.all([getImage(sourceImageId), getImage(generatedImageId)]);
+  if (!source) throw new Error(`Source image was not found: ${sourceImageId}`);
+  if (!child) throw new Error(`Generated Photarium child was not found: ${generatedImageId}`);
+
+  const sourceRootId = stringField(source, 'parentId') || sourceImageId;
+  const childParentId = stringField(child, 'parentId');
+  if (childParentId !== sourceImageId && childParentId !== sourceRootId) {
+    throw new Error(`Generated image ${generatedImageId} is not linked to source ${sourceImageId} or its family root ${sourceRootId}`);
+  }
+
+  const dimensions = actualDimensions || positiveDimensions(child.dimensions);
+  if (!dimensions) throw new Error(`Generated image ${generatedImageId} has no verified dimensions`);
+  const derivedRatio = ratioFromDimensions(dimensions);
+  if (actualAspectRatio && actualAspectRatio !== derivedRatio) {
+    throw new Error(`Actual aspect ratio ${actualAspectRatio} does not match dimensions ${derivedRatio}`);
+  }
+  return { child, dimensions, actualAspectRatio: derivedRatio };
+}
+
 function mergeTags(existingTags: string[], generatedTags: string[]): { appendedTags: string[]; tags: string[] } {
   const tags = [...existingTags];
   const knownTags = new Set(existingTags.map((tag) => tag.toLocaleLowerCase()));
@@ -167,24 +228,52 @@ export const aiHandlers: Record<string, RuntimeToolHandler> = {
       imageId: string;
       derivationId: string;
       provider: GenerationProvider;
-      generatedImageId?: string;
+      generatedImageId: string;
       externalJobId?: string;
       actualDimensions?: { width: number; height: number };
       actualAspectRatio?: string;
     };
+    if (!generatedImageId?.trim()) {
+      throw new Error('generatedImageId is required: upload the generated image to Photarium before recording the result');
+    }
+    const verified = await verifyCreativeBriefChild(imageId, generatedImageId, actualDimensions, actualAspectRatio);
+    const metadataEnrichment = await enrichCreativeBriefImage(generatedImageId);
     const result = await recordPromptDerivationResult(imageId, {
       derivationId,
       provider,
       generatedImageId,
       externalJobId,
-      actualDimensions,
-      actualAspectRatio,
+      actualDimensions: verified.dimensions,
+      actualAspectRatio: verified.actualAspectRatio,
+      metadataEnrichment: {
+        status: metadataEnrichment.status,
+        descriptionSaved: metadataEnrichment.descriptionSaved,
+        altTextSaved: metadataEnrichment.altTextSaved,
+      },
     });
-    const metadataEnrichment = await enrichCreativeBriefImage(generatedImageId);
+    const hostedUrl = stringField(verified.child, 'url');
+    if (!hostedUrl) throw new Error(`Generated image ${generatedImageId} has no hosted Photarium URL`);
     return {
       content: [{
         type: 'text',
-        text: JSON.stringify({ ...result, metadataEnrichment }, null, 2),
+        text: JSON.stringify({
+          ...result,
+          completion: {
+            sourceImageId: imageId,
+            derivationId,
+            generatedImageId,
+            provider,
+            hostedUrl,
+            promptPersisted: true,
+            parentVerified: true,
+            dimensionsVerified: true,
+            metadataEnrichment: {
+              status: metadataEnrichment.status,
+              descriptionSaved: metadataEnrichment.descriptionSaved,
+              altTextSaved: metadataEnrichment.altTextSaved,
+            },
+          },
+        }, null, 2),
       }],
     };
   },
@@ -281,16 +370,29 @@ export const aiHandlers: Record<string, RuntimeToolHandler> = {
       'creative_brief',
     );
     const generatedImageId = typeof result.imageId === 'string' ? result.imageId : undefined;
+    let metadataEnrichment;
     if (!dryRun && generatedImageId) {
+      const verified = await verifyCreativeBriefChild(
+        imageId,
+        generatedImageId,
+        dimensionsFromSize(outputSize),
+        prepared.plan.aspectRatio,
+      );
+      metadataEnrichment = await enrichCreativeBriefImage(generatedImageId);
       await recordPromptDerivationResult(imageId, {
         derivationId: prepared.plan.derivationId,
         provider: 'photarium_openai',
         generatedImageId,
-        actualDimensions: dimensionsFromSize(outputSize),
-        actualAspectRatio: prepared.plan.aspectRatio,
+        actualDimensions: verified.dimensions,
+        actualAspectRatio: verified.actualAspectRatio,
+        metadataEnrichment: {
+          status: metadataEnrichment.status,
+          descriptionSaved: metadataEnrichment.descriptionSaved,
+          altTextSaved: metadataEnrichment.altTextSaved,
+        },
       });
     }
-    const metadataEnrichment = await enrichCreativeBriefImage(generatedImageId);
+    if (!metadataEnrichment) metadataEnrichment = await enrichCreativeBriefImage(generatedImageId);
     return {
       content: [{
         type: 'text',

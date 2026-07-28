@@ -39,6 +39,11 @@ export type PromptDerivationRecord = CreativeBriefGenerationPlan & {
     height: number;
   };
   actualAspectRatio?: string;
+  metadataEnrichment?: {
+    status: 'completed' | 'partial' | 'failed';
+    descriptionSaved: boolean;
+    altTextSaved: boolean;
+  };
   createdAt: string;
   updatedAt: string;
 };
@@ -131,7 +136,7 @@ export async function appendPromptDerivation(record: PromptDerivationRecord): Pr
 export async function updatePromptDerivation(
   sourceImageId: string,
   derivationId: string,
-  patch: Partial<Pick<PromptDerivationRecord, 'provider' | 'generatedImageId' | 'externalJobId' | 'actualDimensions' | 'actualAspectRatio'>>,
+  patch: Partial<Pick<PromptDerivationRecord, 'provider' | 'generatedImageId' | 'externalJobId' | 'actualDimensions' | 'actualAspectRatio' | 'metadataEnrichment'>>,
 ): Promise<PromptDerivationRecord> {
   const storage = getExtrasStorage();
   const records = await getPromptDerivations(sourceImageId);

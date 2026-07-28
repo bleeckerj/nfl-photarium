@@ -115,7 +115,7 @@ describe('GET /api/image-tools', () => {
     expect(getImageToolRegistry().listManifests()).toEqual(expect.arrayContaining([
       expect.objectContaining({
         id: 'creative-brief',
-        resultKinds: ['prompt'],
+        resultKinds: ['prompt', 'image'],
         controls: expect.arrayContaining([
           expect.objectContaining({ id: 'params.creativeBrief', type: 'textarea' }),
         ]),

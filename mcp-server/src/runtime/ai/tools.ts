@@ -137,7 +137,7 @@ export const aiTools: Tool[] = [
         imageId: { type: 'string', description: 'The source Photarium image ID.' },
         derivationId: { type: 'string', description: 'The prepared creative-brief derivation ID.' },
         provider: { type: 'string', enum: ['codex_imagegen', 'comfyui', 'photarium_openai'], description: 'Provider that created the result.' },
-        generatedImageId: { type: 'string', description: 'Photarium ID of the generated child image, after upload.' },
+        generatedImageId: { type: 'string', description: 'Required Photarium ID of the generated child image, after upload and before recording.' },
         externalJobId: { type: 'string', description: 'External provider job ID, if available.' },
         actualDimensions: {
           type: 'object',
@@ -149,7 +149,7 @@ export const aiTools: Tool[] = [
         },
         actualAspectRatio: { type: 'string', description: 'Actual output aspect ratio.' },
       },
-      required: ['imageId', 'derivationId', 'provider'],
+      required: ['imageId', 'derivationId', 'provider', 'generatedImageId'],
     },
   },
   {

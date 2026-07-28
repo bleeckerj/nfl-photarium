@@ -27,6 +27,11 @@ export type PromptDerivationRecord = CreativeBriefGenerationPlan & {
   externalJobId?: string;
   actualDimensions?: { width: number; height: number };
   actualAspectRatio?: string;
+  metadataEnrichment?: {
+    status: 'completed' | 'partial' | 'failed';
+    descriptionSaved: boolean;
+    altTextSaved: boolean;
+  };
   createdAt: string;
   updatedAt: string;
 };
@@ -109,6 +114,7 @@ export async function recordPromptDerivationResult(
     externalJobId?: string;
     actualDimensions?: { width: number; height: number };
     actualAspectRatio?: string;
+    metadataEnrichment?: PromptDerivationRecord['metadataEnrichment'];
   },
 ): Promise<{ imageId: string; derivation: PromptDerivationRecord }> {
   return apiRequest(`/api/images/${encodeURIComponent(imageId)}/prompt/derivations`, {

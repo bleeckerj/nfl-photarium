@@ -1,0 +1,4 @@
+interface:
+  display_name: "Photarium Creative Derivation"
+  short_description: "Catalog every generated image"
+  default_prompt: "Use $photarium-creative-brief to derive, generate, upload, and verify this image in Photarium."

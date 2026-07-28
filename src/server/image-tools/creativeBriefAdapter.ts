@@ -26,7 +26,7 @@ const manifest = {
   adapterKind: 'creative-brief' as const,
   inputAssetTypes: ['image' as const],
   outputModes: ['still' as const],
-  resultKinds: ['prompt' as const],
+  resultKinds: ['prompt' as const, 'image' as const],
   supportsAsync: false,
   presentation: {
     thumbnailUrl: '/image-tools/grainrad-preview.svg',
@@ -132,7 +132,7 @@ export const creativeBriefAdapter: ImageToolAdapter = {
     const result = await prepare(imageId, request);
     addEvent({ phase: 'creative-brief.handoff', message: 'Provider handoff plan ready' });
     updateRun({ message: 'Provider handoff plan ready', percent: 1 });
-    return { kind: 'prompt', prompt: result.prompt, plan: result.plan };
+    return { kind: 'prompt', state: 'handoff', prompt: result.prompt, plan: result.plan };
   },
   async preview({ imageId, request, updatePreview, addEvent }): Promise<ImageToolPreviewResult> {
     addEvent({ phase: 'creative-brief.prepare', message: 'Deriving creative-brief prompt' });
@@ -140,6 +140,6 @@ export const creativeBriefAdapter: ImageToolAdapter = {
     const result = await prepare(imageId, request);
     addEvent({ phase: 'creative-brief.handoff', message: 'Provider handoff plan ready' });
     updatePreview({ message: 'Provider handoff plan ready', percent: 1 });
-    return { kind: 'prompt', prompt: result.prompt, plan: result.plan };
+    return { kind: 'prompt', state: 'handoff', prompt: result.prompt, plan: result.plan };
   },
 };

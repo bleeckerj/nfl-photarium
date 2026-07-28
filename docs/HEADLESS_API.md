@@ -1009,7 +1009,7 @@ Content-Type: application/json
 }
 ```
 
-The persisted plan includes the source image ID, creative brief, final prompt, source relationship, normalized requested ratio, reference roles, provider, and generated child linkage. External providers must upload the result through Photarium's upload/provenance path and attach the source image as the parent before recording the result. Recording the result also generates description and alt text for the child; the MCP response reports whether both metadata operations completed or whether enrichment was partial.
+The persisted plan includes the source image ID, creative brief, final prompt, source relationship, normalized requested ratio, reference roles, provider, and generated child linkage. External providers must upload the result through Photarium's upload/provenance path and attach the source image as the parent before recording the result. Recording verifies the child, derives actual dimensions and ratio when needed, and generates description and alt text for the child; the MCP response reports `completed`, `partial`, or `failed` metadata enrichment. A result is incomplete until it has a hosted Photarium child URL and successful provenance verification.
 
 ---
 

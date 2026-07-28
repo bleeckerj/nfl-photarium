@@ -1,5 +1,9 @@
 # Repository Operating Instructions
 
+## Photarium Creative-Derivation Invariant
+
+Every actual Codex-generated image must be uploaded to Photarium and verified before the workflow is complete. A local generated file or provider handoff is not a completed result. Completion requires a Photarium child ID and hosted URL, with the final prompt, provider, source relationship, dimensions/aspect ratio, parentage, and description/alt-text enrichment status retained. If upload, recording, or verification fails, report the workflow as incomplete.
+
 ## Reasonable Commenting
 
 Code comments should explain intent, constraints, tradeoffs, and non-obvious behavior that a future maintainer would otherwise have to rediscover.
