@@ -245,7 +245,6 @@ export const aiTools: Tool[] = [
         filename: { type: 'string' },
         namespace: { type: 'string' },
         folder: { type: 'string' },
-        tags: { type: 'array', items: { type: 'string' } },
         description: { type: 'string' },
         displayName: { type: 'string' },
         dryRun: { type: 'boolean', description: 'Return the derived plan and, for Photarium OpenAI, the planned image request without generating.' },

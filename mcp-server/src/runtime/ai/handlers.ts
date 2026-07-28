@@ -356,7 +356,9 @@ export const aiHandlers: Record<string, RuntimeToolHandler> = {
       };
     }
 
-    const generationSettings = settings as unknown as Omit<ImageGenerationSettings, 'prompt'>;
+    const { tags: ignoredTags, ...creativeBriefSettings } = settings as unknown as ImageGenerationSettings;
+    void ignoredTags;
+    const generationSettings = creativeBriefSettings as Omit<ImageGenerationSettings, 'prompt'>;
     const outputSize = generationSettings.size || aspectRatioToSize(prepared.plan.aspectRatio);
     const result = await generatePhotariumImageFromReferences(
       { downloadOriginalImageById, uploadFileBase64 },

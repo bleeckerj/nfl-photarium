@@ -45,7 +45,7 @@ For `codex_imagegen`:
 2. Call built-in imagegen with the inspected source as a reference and state the source role and preservation constraints explicitly.
 3. Include the requested aspect ratio in the prompt when one is supplied.
 4. Inspect the generated output. Make at most one focused correction pass for an obvious text, branding, crop, or source-preservation defect.
-5. Upload the selected output with `photarium_upload_from_path`, passing the source image as `parentId`, the final prompt, provider tag, namespace, folder, and derivation tags.
+5. Upload the selected output with `photarium_upload_from_path`, passing the source image as `parentId`, the final prompt, namespace, and folder. Do not pass tags: provider, derivation, relationship, or workflow data belongs in provenance fields, never semantic image tags.
 6. Call `photarium_record_creative_brief_result` with the prepared derivation ID, provider, generated child ID, actual dimensions, and actual aspect ratio.
 7. Verify the returned hosted URL, child ID, parentage, prompt, provider, dimensions, ratio, description, alt text, and `metadataEnrichment.status`.
 
@@ -58,7 +58,7 @@ For `comfyui`, resolve the declared workflow capability, run the source/prompt/r
 For an image with no source:
 
 1. Generate and inspect the image.
-2. Upload it to Photarium with the final prompt, provider, configured namespace, folder, and tags.
+2. Upload it to Photarium with the final prompt, configured namespace, and folder. Do not add tags unless the user explicitly supplies semantic tags for this standalone image.
 3. Generate and save description and alt text.
 4. Read back the image metadata and hosted URL.
 
