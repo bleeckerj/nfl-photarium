@@ -7,6 +7,7 @@ import {
 import {
   resolveAspectRatioSourceDescription,
   resolveAspectRatioSourceMetadata,
+  resolveAspectRatioExpansionTags,
 } from '@/server/aspectRatioExpansion/service';
 
 afterEach(() => {
@@ -71,5 +72,14 @@ describe('aspect-ratio expansion provider resolution', () => {
     expect(resolveAspectRatioSourceDescription({ description: 'Cloudflare source description.' }, null))
       .toBe('Cloudflare source description.');
     expect(resolveAspectRatioSourceDescription({}, null)).toBeUndefined();
+  });
+
+  it('keeps aspect-ratio child tags semantic and excludes operational metadata', () => {
+    expect(resolveAspectRatioExpansionTags(
+      ['portrait', 'editorial'],
+      ['portrait', 'warm-light'],
+    )).toEqual(['portrait', 'editorial', 'warm-light']);
+    expect(resolveAspectRatioExpansionTags([], [])).toEqual([]);
+    expect(resolveAspectRatioExpansionTags(undefined, undefined)).toEqual([]);
   });
 });

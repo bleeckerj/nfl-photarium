@@ -59,6 +59,16 @@ export function resolveAspectRatioSourceDescription(
   return cleanString(extras?.description) ?? cleanString(sourceMetadata.description);
 }
 
+export function resolveAspectRatioExpansionTags(
+  sourceTags?: string[],
+  requestedTags?: string[],
+): string[] {
+  return Array.from(new Set([
+    ...(Array.isArray(sourceTags) ? sourceTags : []),
+    ...(Array.isArray(requestedTags) ? requestedTags : []),
+  ]));
+}
+
 export type AspectRatioExpansionOperation = {
   source: Awaited<ReturnType<typeof downloadSourceImage>>;
   request: ReturnType<typeof normalizeRequest>;
@@ -147,13 +157,7 @@ export async function uploadAspectRatioExpansionArtifact(params: {
     params.provenance.aspectRatio,
     params.provenance.resolvedProvider
   );
-  const tags = Array.from(new Set([
-    ...(Array.isArray(sourceMetadata.tags) ? sourceMetadata.tags : []),
-    ...(Array.isArray(params.request.tags) ? params.request.tags : []),
-    'image-tool',
-    'aspect-ratio-expand',
-    params.provenance.resolvedProvider,
-  ]));
+  const tags = resolveAspectRatioExpansionTags(sourceMetadata.tags, params.request.tags);
   const outcome = await uploadImageBuffer({
     buffer: params.artifact.buffer,
     originalBuffer: params.artifact.buffer,
