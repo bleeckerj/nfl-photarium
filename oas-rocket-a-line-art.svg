@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" role="img" aria-labelledby="title desc">
+  <title id="title">OAS rocket A line-art logo</title>
+  <desc id="desc">A dark charcoal outline logo reading OAS, with the A shaped like a geometric rocket ship. The surrounding circle is omitted.</desc>
+
+  <g fill="none" stroke="#1c1c1c" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+    <!-- O: double contour, preserved as a simple outlined letter. -->
+    <path d="M175 125C82 125 42 230 42 350s40 225 133 225 133-105 133-225-40-225-133-225Z"/>
+    <path d="M175 205c-47 0-68 65-68 145s21 145 68 145 68-65 68-145-21-145-68-145Z"/>
+
+    <!-- A: rocket body, swept fins, and the lower exhaust-shaped counter. -->
+    <path d="M500 92 407 520l-59 55-14 165 121-91h90l121 91-14-165-59-55Z"/>
+    <path d="m457 398 86 0 8 48h-102Z"/>
+    <path d="m463 548 74 0 10 86h-94Z"/>
+
+    <!-- S: compact outlined form matched to the OAS lockup. -->
+    <path d="M1080 145H850c-61 0-96 37-96 94 0 52 35 82 95 92l135 20c59 9 91 41 91 96 0 65-41 103-105 103H754v-57h198c38 0 59-17 59-48 0-27-21-43-58-49l-135-20c-79-12-114-55-114-131 0-75 54-125 141-125h235Z"/>
+  </g>
+</svg>
