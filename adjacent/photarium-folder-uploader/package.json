@@ -1,0 +1,24 @@
+{
+  "name": "photarium-folder-uploader",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Watch a local folder and upload images to Photarium with generated semantic metadata.",
+  "bin": {
+    "photarium-folder-uploader": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/cli.js",
+    "test": "node --import tsx --test src/**/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.8.3"
+  }
+}

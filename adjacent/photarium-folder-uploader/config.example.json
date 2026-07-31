@@ -1,0 +1,18 @@
+{
+  "watchPath": "~/Pictures/photarium-drop",
+  "namespace": "studio-archive",
+  "stateFile": "~/.photarium-folder-uploader/state.json",
+  "connection": {
+    "mode": "http",
+    "baseUrl": "http://localhost:3000"
+  },
+  "tagCount": 8,
+  "stability": {
+    "pollMs": 500,
+    "checks": 2
+  },
+  "retry": {
+    "maxAttempts": 3,
+    "delayMs": 5000
+  }
+}

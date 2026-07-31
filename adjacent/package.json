@@ -5,6 +5,10 @@
   "scripts": {
     "dev": "npm --prefix ./photarium-client-sites run dev",
     "build": "npm --prefix ./photarium-client-sites run build",
+    "folder-uploader:build": "npm --prefix ./photarium-folder-uploader run build",
+    "folder-uploader:start": "npm --prefix ./photarium-folder-uploader start",
+    "folder-uploader:test": "npm --prefix ./photarium-folder-uploader test",
+    "folder-uploader:typecheck": "npm --prefix ./photarium-folder-uploader run typecheck",
     "seed:demo": "npm --prefix ./photarium-client-sites run seed:demo",
     "test": "npm --prefix ./photarium-client-sites run test",
     "typecheck": "npm --prefix ./photarium-client-sites run typecheck",
