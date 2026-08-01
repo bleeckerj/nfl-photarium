@@ -24,6 +24,16 @@ vi.mock('@/utils/cloudflareClient', () => ({
   updateImageFolder: updateImageFolderMock,
 }));
 
+// The folder routes now read the in-memory catalog (with extras folder
+// overrides) instead of hitting the Cloudflare list API directly.
+vi.mock('@/server/cloudflareImageCache', () => ({
+  getCachedImages: fetchCloudflareImagesMock,
+}));
+
+vi.mock('@/server/imageExtras', () => ({
+  getImageFolderOverrides: async () => new Map<string, string | undefined>(),
+}));
+
 vi.mock('@/utils/folderStore', async () => {
   const actual = await vi.importActual<typeof import('@/utils/folderStore')>('@/utils/folderStore');
   return {

@@ -24,6 +24,7 @@ const {
 
 vi.mock('@/server/namespaceRegistry', () => ({
   DEFAULT_NAMESPACE: 'cf-default',
+  getRegistryUpdatedAt: async () => '2026-01-01T00:00:00.000Z',
   listRegistryNamespaceDetails: listRegistryNamespaceDetailsMock,
   upsertRegistryNamespace: upsertRegistryNamespaceMock,
   removeRegistryNamespace: removeRegistryNamespaceMock,
@@ -40,11 +41,13 @@ vi.mock('@/server/namespaceRegistry', () => ({
 
 vi.mock('@/server/cloudflareImageCache', () => ({
   getCachedImages: getCachedImagesMock,
+  getCacheStats: () => ({ contentVersion: 7 }),
 }));
 
 vi.mock('@/server/videoCatalogStorage', () => ({
   listVideoAssetRecords: listVideoAssetRecordsMock,
   updateVideoAssetRecord: updateVideoAssetRecordMock,
+  getVideoAssetCatalogVersion: () => 0,
 }));
 
 vi.mock('@/server/cloudflareImageMetadata', () => ({
@@ -74,12 +77,13 @@ describe('/api/namespaces', () => {
     renameRegistryNamespaceMock.mockResolvedValue(true);
   });
 
-  it('returns merged namespaces with no-store headers', async () => {
-    const response = await GET();
+  it('returns merged namespaces with revalidation headers', async () => {
+    const response = await GET(new NextRequest('http://localhost/api/namespaces'));
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(response.headers.get('Cache-Control')).toContain('no-store');
+    expect(response.headers.get('Cache-Control')).toContain('no-cache');
+    expect(response.headers.get('ETag')).toBeTruthy();
     expect(payload).toEqual({
       namespaces: ['cf-default', 'discovered-space', 'new-space'],
       namespaceDetails: [
@@ -88,6 +92,18 @@ describe('/api/namespaces', () => {
         { name: 'new-space', description: '' },
       ],
     });
+  });
+
+  it('answers 304 when the If-None-Match tag still matches', async () => {
+    const first = await GET(new NextRequest('http://localhost/api/namespaces'));
+    const etag = first.headers.get('ETag');
+    expect(etag).toBeTruthy();
+
+    const second = await GET(new NextRequest('http://localhost/api/namespaces', {
+      headers: { 'if-none-match': etag as string },
+    }));
+    expect(second.status).toBe(304);
+    expect(second.headers.get('ETag')).toBe(etag);
   });
 
   it('registers a namespace with a description and returns the refreshed list', async () => {

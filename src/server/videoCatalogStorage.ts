@@ -110,6 +110,11 @@ interface VideoCacheState {
   lastFetched: number;
   inflight: Promise<VideoAssetRecord[]> | null;
   initialized: boolean;
+  // Bumped whenever the record set actually changes. Downstream caches (e.g.
+  // the gallery ETag) include this in their keys, so TTL repopulates that find
+  // identical data must NOT bump it.
+  version: number;
+  fingerprint: string;
 }
 
 const VIDEO_CACHE_KEY = Symbol.for('photarium.videoCatalog.cache');
@@ -122,6 +127,8 @@ const videoCacheState: VideoCacheState = videoCacheGlobal[VIDEO_CACHE_KEY] ?? {
   lastFetched: 0,
   inflight: null,
   initialized: false,
+  version: 0,
+  fingerprint: '',
 };
 if (!videoCacheGlobal[VIDEO_CACHE_KEY]) {
   videoCacheGlobal[VIDEO_CACHE_KEY] = videoCacheState;
@@ -135,26 +142,39 @@ const VIDEO_CACHE_TTL_MS = (() => {
 const sortVideoRecordsByUploadedDesc = (records: VideoAssetRecord[]) =>
   [...records].sort((a, b) => Date.parse(b.uploaded) - Date.parse(a.uploaded));
 
+const commitVideoCacheRecords = (sorted: VideoAssetRecord[]) => {
+  const fingerprint = JSON.stringify(sorted);
+  if (fingerprint !== videoCacheState.fingerprint) {
+    videoCacheState.fingerprint = fingerprint;
+    videoCacheState.version += 1;
+  }
+  videoCacheState.records = sorted;
+  videoCacheState.map = new Map(sorted.map((record) => [record.id, record]));
+};
+
 const populateVideoCacheFromStorage = async (): Promise<VideoAssetRecord[]> => {
   const storage = getCacheStorage();
   const index = await storage.get<string[]>(VIDEO_RECORD_INDEX_KEY);
   const ids = index?.data ?? [];
   if (!ids.length) {
-    videoCacheState.records = [];
-    videoCacheState.map = new Map();
+    commitVideoCacheRecords([]);
     videoCacheState.lastFetched = Date.now();
     videoCacheState.initialized = true;
     return [];
   }
-  const records = await Promise.all(
-    ids.map((id) =>
-      storage.get<VideoAssetRecord>(getRecordKey(id)).then((cached) => cached?.data ?? null)
-    )
-  );
+  // One MGET instead of N gets when the backend supports it (~523 round-trips
+  // at the time the per-id fan-out was written).
+  const records = storage.getMany
+    ? (await storage.getMany<VideoAssetRecord>(ids.map(getRecordKey)))
+        .map((cached) => cached?.data ?? null)
+    : await Promise.all(
+        ids.map((id) =>
+          storage.get<VideoAssetRecord>(getRecordKey(id)).then((cached) => cached?.data ?? null)
+        )
+      );
   const valid = records.filter((r): r is VideoAssetRecord => Boolean(r));
   const sorted = sortVideoRecordsByUploadedDesc(valid);
-  videoCacheState.records = sorted;
-  videoCacheState.map = new Map(sorted.map((record) => [record.id, record]));
+  commitVideoCacheRecords(sorted);
   videoCacheState.lastFetched = Date.now();
   videoCacheState.initialized = true;
   return sorted;
@@ -176,20 +196,14 @@ const ensureVideoCacheFresh = async (): Promise<VideoAssetRecord[]> => {
 
 const upsertVideoInCache = (record: VideoAssetRecord) => {
   if (!videoCacheState.initialized) return;
-  videoCacheState.map.set(record.id, record);
-  const idx = videoCacheState.records.findIndex((entry) => entry.id === record.id);
-  if (idx >= 0) {
-    videoCacheState.records[idx] = record;
-  } else {
-    videoCacheState.records.push(record);
-  }
-  videoCacheState.records = sortVideoRecordsByUploadedDesc(videoCacheState.records);
+  const next = videoCacheState.records.filter((entry) => entry.id !== record.id);
+  next.push(record);
+  commitVideoCacheRecords(sortVideoRecordsByUploadedDesc(next));
 };
 
 const removeVideoFromCache = (id: string) => {
   if (!videoCacheState.initialized) return;
-  videoCacheState.map.delete(id);
-  videoCacheState.records = videoCacheState.records.filter((entry) => entry.id !== id);
+  commitVideoCacheRecords(videoCacheState.records.filter((entry) => entry.id !== id));
 };
 
 export const invalidateVideoAssetCache = () => {
@@ -198,7 +212,11 @@ export const invalidateVideoAssetCache = () => {
   videoCacheState.lastFetched = 0;
   videoCacheState.initialized = false;
   videoCacheState.inflight = null;
+  videoCacheState.fingerprint = '';
+  videoCacheState.version += 1;
 };
+
+export const getVideoAssetCatalogVersion = () => videoCacheState.version;
 
 export const getVideoAssetCacheStats = () => ({
   count: videoCacheState.records.length,

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchCloudflareImages, updateImageFolder } from '@/utils/cloudflareClient';
+import { updateImageFolder } from '@/utils/cloudflareClient';
+import { listCatalogImagesWithFolderOverrides } from '@/server/folderInventory';
 import { removeFolder, renameFolder } from '@/utils/folderStore';
 import { FolderPolicyError, requireValidFolderName } from '@/server/folderPolicy';
 
@@ -13,7 +14,7 @@ const resolveNamespaceFilter = (request: NextRequest): string | null => {
 };
 
 async function updateAllImages(oldName: string, newName: string | undefined, namespace: string | null) {
-  const images = await fetchCloudflareImages();
+  const images = await listCatalogImagesWithFolderOverrides();
   const filtered = namespace === null
     ? images
     : namespace === ''
@@ -47,7 +48,7 @@ export async function PATCH(
     if (!newName) {
       return NextResponse.json({ error: 'New folder name is required' }, { status: 400 });
     }
-    const images = await fetchCloudflareImages();
+    const images = await listCatalogImagesWithFolderOverrides();
     const targets = images.filter((image) =>
       (namespace === null || (namespace === '' ? !image.namespace : image.namespace === namespace)) &&
       image.folder === name
@@ -80,7 +81,7 @@ export async function DELETE(
     if (!name) {
       return NextResponse.json({ error: 'Folder name is required' }, { status: 400 });
     }
-    const images = await fetchCloudflareImages();
+    const images = await listCatalogImagesWithFolderOverrides();
     const targets = images.filter((image) =>
       (namespace === null || (namespace === '' ? !image.namespace : image.namespace === namespace)) &&
       image.folder === name

@@ -52,9 +52,14 @@ export const VARIANT_OPTIONS = [
   { value: 'w=150', label: 'Thumbnail-ish (150px)' },
 ];
 
+// Preferences schema version. v2 migrated the inherited 'full' grid variant to
+// the thumbnail default; an explicit Full re-selection persists as v2 and sticks.
+export const GALLERY_PREFERENCES_VERSION = 2;
+export const DEFAULT_GALLERY_VARIANT = 'w=600';
+
 // Default preferences
 export const DEFAULT_PREFERENCES = {
-  variant: 'full',
+  variant: DEFAULT_GALLERY_VARIANT,
   onlyCanonical: false,
   respectAspectRatio: false,
   onlyWithVariants: false,

@@ -397,9 +397,10 @@ export async function GET(
     let responseImage = baseImage;
     if (includeBlockingEnrichment || forceRefresh) {
       const animatedProbeStartedAt = performance.now();
+      const beforeAnimated = responseImage;
       responseImage = await enrichAnimatedState(responseImage);
       timings.animated_probe = mark(performance.now() - animatedProbeStartedAt);
-      if (responseImage !== baseImage) {
+      if (responseImage !== beforeAnimated) {
         shouldPersistResponseImage = true;
       }
     } else {
@@ -409,9 +410,10 @@ export async function GET(
     if (includeVectorMeta || includeBlockingEnrichment) {
       try {
         const vectorStartedAt = performance.now();
+        const beforeVector = responseImage;
         responseImage = await enrichWithVectorMetadata(responseImage);
         timings.vector_enrich = mark(performance.now() - vectorStartedAt);
-        if (responseImage !== baseImage) {
+        if (responseImage !== beforeVector) {
           shouldPersistResponseImage = true;
         }
       } catch (error) {

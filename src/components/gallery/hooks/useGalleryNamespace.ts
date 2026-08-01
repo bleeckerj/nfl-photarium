@@ -34,7 +34,7 @@ export const useGalleryNamespace = ({
     setNamespaceSelectValue(next || '');
   }, [namespace]);
 
-  const fetchNamespaces = useCallback(async (cache: RequestCache = 'no-store') => {
+  const fetchNamespaces = useCallback(async (cache: RequestCache = 'no-cache') => {
     try {
       const response = await fetch('/api/namespaces', { cache });
       const data = await response.json();
@@ -46,7 +46,7 @@ export const useGalleryNamespace = ({
   }, []);
 
   useEffect(() => {
-    void fetchNamespaces('no-store');
+    void fetchNamespaces('no-cache');
   }, [fetchNamespaces]);
 
   const registerNamespace = useCallback(async (value: string, description?: string) => {
@@ -71,7 +71,7 @@ export const useGalleryNamespace = ({
       return true;
     } catch (error) {
       console.warn('Failed to register namespace', error);
-      void fetchNamespaces('no-store');
+      void fetchNamespaces('no-cache');
       return false;
     }
   }, [fetchNamespaces]);
@@ -217,7 +217,7 @@ export const useGalleryNamespace = ({
               ? payload.error
               : 'Namespace delete failed'
         );
-        void fetchNamespaces('no-store');
+        void fetchNamespaces('no-cache');
         return;
       }
 
@@ -228,7 +228,7 @@ export const useGalleryNamespace = ({
       if (namespaces.length > 0) {
         setRegistryNamespaces(namespaces.filter((entry: unknown): entry is string => typeof entry === 'string'));
       } else {
-        void fetchNamespaces('no-store');
+        void fetchNamespaces('no-cache');
       }
       setNamespaceDraft(DEFAULT_NAMESPACE);
       setNamespaceSelectValue(DEFAULT_NAMESPACE);
@@ -307,7 +307,7 @@ export const useGalleryNamespace = ({
               ? payload.error
               : 'Namespace rename failed'
         );
-        void fetchNamespaces('no-store');
+        void fetchNamespaces('no-cache');
         return;
       }
 
@@ -318,7 +318,7 @@ export const useGalleryNamespace = ({
       if (namespaces.length > 0) {
         setRegistryNamespaces(namespaces.filter((entry: unknown): entry is string => typeof entry === 'string'));
       } else {
-        void fetchNamespaces('no-store');
+        void fetchNamespaces('no-cache');
       }
       setNamespaceDraft(targetNamespace);
       setNamespaceSelectValue(targetNamespace);

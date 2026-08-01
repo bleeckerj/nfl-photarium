@@ -737,6 +737,19 @@ npm run threads:url
 npm run telegram:listen
 ```
 
+For an incremental Instagram backfill, use `--stop-at-shortcode` with the shortcode of the newest post already imported. The ingest starts at the newest available post, uploads and records posts newer than the boundary, then stops before processing the boundary post itself. The option ignores the normal resume checkpoint; when the boundary is found, that checkpoint remains unchanged.
+
+```bash
+npm run ig:ingest -- \
+  --username an_improbable_future \
+  --stop-at-shortcode <known-shortcode> \
+  --namespace cf-instagram \
+  --skip-video-push \
+  --no-color
+```
+
+If the shortcode is not found, the ingest continues until the available profile history is exhausted or `--max-pages` is reached, then prints a warning. `--no-resume` is implied by `--stop-at-shortcode` and does not need to be supplied separately.
+
 These helpers are designed for source collections you control or are authorized to archive. Review platform terms and rights before ingesting third-party media.
 
 ### Client Sites
@@ -777,7 +790,7 @@ Photarium
 |
 |-- Server services
 |   |-- Cloudflare Images and Stream clients
-|   |-- Gallery query and cache orchestration
+|   |-- Gallery query, scope assembly, and cache orchestration
 |   |-- Extras storage
 |   |-- Embeddings and vector search
 |   |-- Video processing helpers
@@ -860,6 +873,21 @@ The production build catches static rendering, route compatibility, client/serve
 - Refresh the gallery cache.
 - Run `npm run refresh:hash-cache` if duplicate/cache state looks stale.
 - Check Cloudflare Images token scope.
+- If an edit or upload is not reflected, check whether the write path bumps a
+  gallery version counter. Gallery responses are revalidated by `ETag`, so a
+  write that skips the counter can keep clients on a cached body. See
+  [Gallery Performance & Cache Invariants](./docs/gallery-performance.md).
+
+### The Gallery Is Slow To Load Or Return From Detail
+
+- Check `X-Photarium-Catalog-Version` on `/api/images` across a
+  gallery → detail → gallery round trip. It should not change on a pure read;
+  if it does, something on that path is writing to the catalog and invalidating
+  every cache.
+- Check the `Server-Timing` header for the dominant stage, and the
+  `[ImagesAPI] Slow response` log for requests over 500ms.
+- Confirm repeat requests return `304` rather than `200`.
+- Full diagnosis guide: [Gallery Performance & Cache Invariants](./docs/gallery-performance.md).
 
 ### Semantic Search Is Missing Or Empty
 
@@ -905,6 +933,7 @@ The production build catches static rendering, route compatibility, client/serve
 - [Client Sites Publishing](./docs/client-sites-publishing.md)
 - [Namespaces](./docs/namespace.md)
 - [Image Extras](./docs/image-extras.md)
+- [Gallery Performance & Cache Invariants](./docs/gallery-performance.md)
 - [Filesystem Ingest](./docs/fs-ingest.md)
 - [Variants](./docs/variants.md)
 - [Photarium MCP Tools](./docs/photarium-mcp-tools.md)

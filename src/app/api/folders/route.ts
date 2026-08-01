@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchCloudflareImages } from '@/utils/cloudflareClient';
 import { addFolder, listStoredFolders } from '@/utils/folderStore';
-import { buildFolderInventory } from '@/server/folderInventory';
+import { buildFolderInventory, listCatalogImagesWithFolderOverrides } from '@/server/folderInventory';
 import { requireValidFolderName, FolderPolicyError } from '@/server/folderPolicy';
 
 const resolveNamespaceFilter = (request: NextRequest): string | null => {
@@ -17,8 +16,8 @@ export async function GET(request: NextRequest) {
   try {
     const namespace = resolveNamespaceFilter(request);
     const [cloudflareImages, storedFolders] = await Promise.all([
-      fetchCloudflareImages().catch((err) => {
-        console.error('Failed to fetch Cloudflare images for folder list', err);
+      listCatalogImagesWithFolderOverrides().catch((err) => {
+        console.error('Failed to load catalog images for folder list', err);
         return [];
       }),
       listStoredFolders(namespace)

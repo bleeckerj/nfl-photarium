@@ -1,4 +1,5 @@
 import { getUserVisibleTags, hasFavoriteTag } from '@/utils/systemTags';
+import { clearGalleryScopeAssemblyMemo } from '@/server/galleryScopeAssembly';
 import { computeDuplicateGroups, buildFamilySummaryMap } from '@/components/gallery/utils';
 import {
   matchesAspectRatioClass,
@@ -358,6 +359,7 @@ const getOrBuildScopeMemo = <T extends GalleryQueryAsset>(
 export const clearGalleryQueryScopeMemo = () => {
   scopeMemoCache.clear();
   projectionMemoCache.clear();
+  clearGalleryScopeAssemblyMemo();
 };
 
 const buildScopeMemoKey = (

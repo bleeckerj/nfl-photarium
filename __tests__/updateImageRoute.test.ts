@@ -219,11 +219,19 @@ describe('PATCH /api/images/:id/update', () => {
         { status: 200 }
       );
 
-    mockFetch
-      .mockResolvedValueOnce(makeFetchResponse('child', { namespace: 'old-space', variationParentId: 'parent' }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ result: {} }), { status: 200 }))
-      .mockResolvedValueOnce(makeFetchResponse('parent', { namespace: 'old-space' }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ result: {} }), { status: 200 }));
+    // Family members update concurrently, so dispatch mock responses by
+    // URL/method instead of call order.
+    mockFetch.mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      if (method === 'PATCH') {
+        return new Response(JSON.stringify({ result: {} }), { status: 200 });
+      }
+      if (url.includes('/child')) {
+        return makeFetchResponse('child', { namespace: 'old-space', variationParentId: 'parent' });
+      }
+      return makeFetchResponse('parent', { namespace: 'old-space' });
+    });
 
     const request = createRequest({
       namespace: 'new-space',
@@ -235,12 +243,13 @@ describe('PATCH /api/images/:id/update', () => {
 
     expect(response.status).toBe(200);
     expect(payload.namespace).toBe('new-space');
-    expect(payload.updatedIds).toEqual(['child', 'parent']);
+    expect([...payload.updatedIds].sort()).toEqual(['child', 'parent']);
     expect(upsertRegistryNamespaceMock).toHaveBeenCalledWith('new-space');
 
-    const patchBodies = [mockFetch.mock.calls[1], mockFetch.mock.calls[3]].map((call) =>
-      JSON.parse(String(call?.[1]?.body))
-    );
+    const patchBodies = mockFetch.mock.calls
+      .filter(([, init]) => init?.method === 'PATCH')
+      .map((call) => JSON.parse(String(call?.[1]?.body)));
+    expect(patchBodies).toHaveLength(2);
     expect(patchBodies).toEqual([
       expect.objectContaining({ metadata: expect.objectContaining({ namespace: 'new-space' }) }),
       expect.objectContaining({ metadata: expect.objectContaining({ namespace: 'new-space' }) }),

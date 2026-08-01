@@ -1,4 +1,9 @@
-import { DEFAULT_GRID_SIZE, DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from './constants';
+import {
+  DEFAULT_GALLERY_VARIANT,
+  DEFAULT_GRID_SIZE,
+  DEFAULT_PAGE_SIZE,
+  PAGE_SIZE_OPTIONS,
+} from './constants';
 import { normalizeDateFilterValue } from './dateFilter';
 import { normalizeColorSearchHex } from './colorSearch';
 import { normalizeGridSize } from './gridSizing';
@@ -39,7 +44,7 @@ export type StoredGalleryPreferences = {
 };
 
 export const getDefaultStoredPreferences = (): StoredGalleryPreferences => ({
-  variant: 'full',
+  variant: DEFAULT_GALLERY_VARIANT,
   onlyCanonical: false,
   respectAspectRatio: false,
   onlyWithVariants: false,
@@ -83,6 +88,7 @@ export const getStoredPreferences = (
     const stored = window.localStorage.getItem('galleryPreferences');
     if (stored) {
       const parsed = JSON.parse(stored) as {
+        prefsVersion?: number;
         variant?: string;
         onlyCanonical?: boolean;
         respectAspectRatio?: boolean;
@@ -113,9 +119,17 @@ export const getStoredPreferences = (
       const normalizedPageSize = PAGE_SIZE_OPTIONS.includes(rawPageSize)
         ? rawPageSize
         : DEFAULT_PAGE_SIZE;
-      const storedVariant = typeof parsed.variant === 'string' ? parsed.variant : 'full';
+      const storedVariant = typeof parsed.variant === 'string' ? parsed.variant : DEFAULT_GALLERY_VARIANT;
+      const normalizedVariant =
+        storedVariant === 'public' || storedVariant === 'original' ? 'full' : storedVariant;
+      const storedPrefsVersion = typeof parsed.prefsVersion === 'number' ? parsed.prefsVersion : 1;
 
-      next.variant = storedVariant === 'public' || storedVariant === 'original' ? 'full' : storedVariant;
+      // v1 blobs carried 'full' as the inherited default; migrate them to the
+      // thumbnail default. A Full chosen after v2 was stamped is kept.
+      next.variant =
+        storedPrefsVersion < 2 && normalizedVariant === 'full'
+          ? DEFAULT_GALLERY_VARIANT
+          : normalizedVariant;
       next.onlyCanonical = Boolean(parsed.onlyCanonical);
       next.respectAspectRatio = Boolean(parsed.respectAspectRatio);
       next.onlyWithVariants = Boolean(parsed.onlyWithVariants);

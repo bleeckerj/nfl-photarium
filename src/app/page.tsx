@@ -1,8 +1,12 @@
 'use client';
 
 import { Suspense, useEffect, useRef, useState } from 'react';
-import ImageUploader from '@/components/ImageUploader';
+import dynamic from 'next/dynamic';
 import ImageGallery from '@/components/ImageGallery';
+
+// Below-the-fold and heavy (react-dropzone + ~1000 lines); split it out of the
+// initial bundle so the gallery paints sooner.
+const ImageUploader = dynamic(() => import('@/components/ImageUploader'), { ssr: false });
 import {
   GALLERY_NAMESPACE_STORAGE_KEY,
   parseGalleryNamespaceFromSearch,
@@ -15,7 +19,12 @@ function HomeContent() {
   const envDefaultNamespace = process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || 'cf-default';
   const searchParams = useSearchParams();
   const search = searchParams.toString();
-  const galleryInstanceKey = search ? `gallery:${search}` : 'gallery';
+  // Only a focus navigation needs a fresh mount (it must re-run initial state
+  // hydration around the focus target). Return-state params (gpage/gns/gcolor)
+  // are consumed once and stripped via history.replaceState, so keying on the
+  // full query string would remount — and blank — the gallery on every return.
+  const focusParam = searchParams.get('focus');
+  const galleryInstanceKey = focusParam ? `gallery:focus:${focusParam}` : 'gallery';
   // Derive the initial namespace synchronously from the URL so that a navigation
   // like /?gns=__all__&focus=<id> passes the correct scope into ImageGallery on
   // its very first render. Without this, the gallery would mount under the env

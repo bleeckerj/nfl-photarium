@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
+  getRegistryUpdatedAt,
   listRegistryNamespaceDetails,
   upsertRegistryNamespace,
   type NamespaceRegistryEntry,
 } from '@/server/namespaceRegistry';
-import { getCachedImages } from '@/server/cloudflareImageCache';
-import { listVideoAssetRecords } from '@/server/videoCatalogStorage';
+import { getCachedImages, getCacheStats } from '@/server/cloudflareImageCache';
+import { getVideoAssetCatalogVersion, listVideoAssetRecords } from '@/server/videoCatalogStorage';
+import {
+  buildGalleryCollectionEtag,
+  GALLERY_REVALIDATE_CACHE_CONTROL,
+} from '@/server/galleryResponseDiagnostics';
 import {
   deleteNamespaceByMovingAssets,
   validateNamespaceDeletionName,
@@ -61,10 +66,30 @@ async function loadNamespaces() {
   };
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    // The namespace list derives from the image catalog, the video catalog,
+    // and the registry file. Load/refresh all three exactly as a full response
+    // would, then answer 304 when none of them changed.
+    const [registryUpdatedAt] = await Promise.all([
+      getRegistryUpdatedAt(),
+      getCachedImages(),
+      listVideoAssetRecords(),
+    ]);
+    const etag = buildGalleryCollectionEtag('ns1', [
+      getCacheStats().contentVersion ?? 0,
+      getVideoAssetCatalogVersion(),
+      registryUpdatedAt,
+    ]);
+    const revalidateHeaders = {
+      'Cache-Control': GALLERY_REVALIDATE_CACHE_CONTROL,
+      ETag: etag,
+    };
+    if (request.headers.get('if-none-match') === etag) {
+      return new NextResponse(null, { status: 304, headers: revalidateHeaders });
+    }
     const payload = await loadNamespaces();
-    return NextResponse.json(payload, { headers: NO_STORE_HEADERS });
+    return NextResponse.json(payload, { headers: revalidateHeaders });
   } catch (error) {
     console.error('Fetch namespaces error:', error);
     return NextResponse.json(

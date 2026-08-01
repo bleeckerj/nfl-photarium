@@ -9,6 +9,13 @@ This note documents the intended behavior and current source-code loci for the i
 
 It is diagnostic only. It does not propose or apply a code fix.
 
+> **Status note.** Two of the candidate causes originally listed below (namespace
+> derived asynchronously in an effect, and the remount key) have since been
+> addressed; those sections are marked `Resolved` and describe the current
+> behavior. The remaining candidates have not been re-verified against the
+> current code. For the gallery's caching and performance contract, see
+> [Gallery Performance And Cache Invariants](./gallery-performance.md).
+
 ## Intended User Behavior
 
 ### Show in gallery
@@ -209,14 +216,24 @@ export const parseCanonicalGalleryFocusFromSearch = (
 
 The root page lives in [src/app/page.tsx](/Users/julian/Code/cloud-flare-image-handler/src/app/page.tsx).
 
-It owns the active gallery namespace state:
+It owns the active gallery namespace state. The namespace is derived
+synchronously from the URL in the `useState` initializer, so the very first
+render already carries the `gns` scope; the remount key is derived from the
+`focus` param alone:
 
 ```ts
 const envDefaultNamespace = process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || 'cf-default';
 const searchParams = useSearchParams();
 const search = searchParams.toString();
-const galleryInstanceKey = search ? `gallery:${search}` : 'gallery';
-const [namespace, setNamespace] = useState<string>(envDefaultNamespace);
+const focusParam = searchParams.get('focus');
+const galleryInstanceKey = focusParam ? `gallery:focus:${focusParam}` : 'gallery';
+const [namespace, setNamespace] = useState<string>(() => {
+  const queryNamespace = parseGalleryNamespaceFromSearch(search);
+  if (queryNamespace !== undefined) {
+    return queryNamespace || envDefaultNamespace;
+  }
+  return envDefaultNamespace;
+});
 ```
 
 It synchronizes the namespace from the URL or localStorage:
@@ -473,36 +490,29 @@ but stale client state may still exist from the previous gallery session:
 
 The focus path attempts to ignore return state when `focus` is present, but namespace state and first-render timing can still matter.
 
-### 2. Root page namespace is updated in an effect, after the gallery component is constructed
+### 2. Root page namespace is updated in an effect, after the gallery component is constructed — Resolved
 
-In [src/app/page.tsx](/Users/julian/Code/cloud-flare-image-handler/src/app/page.tsx), namespace starts as:
+Historically, namespace started as `useState<string>(envDefaultNamespace)` and the
+URL namespace was applied later in a `useEffect`. For `/?gns=__all__&focus=<id>`,
+the first render passed `envDefaultNamespace` to `ImageGallery` rather than
+`__all__`.
 
-```ts
-const [namespace, setNamespace] = useState<string>(envDefaultNamespace);
-```
-
-The URL namespace is applied later in `useEffect`.
-
-For `/?gns=__all__&focus=<id>`, the first render may still pass `envDefaultNamespace` to `ImageGallery`, not `__all__`.
-
-Inside `ImageGallery`, the focus target is accepted only if:
+That mattered because `ImageGallery` accepts the focus target only if:
 
 ```ts
 focusTarget.namespace === activeNamespace
 ```
 
-If the gallery's first fetch occurs while `namespace` is still the default namespace, then:
+so the first fetch dropped `focusAssetId` and returned page 1 of the default
+scope — the observed "reverts to All namespaces and shows the latest images on
+page 1" behavior.
 
-- focus target namespace is `__all__`
-- active namespace is something like `cf-default`
-- `focusAssetId` is not sent to the API
-- the API returns page 1 of the current namespace/default scope
+`src/app/page.tsx` now derives the namespace synchronously in the `useState`
+initializer (see the Root Gallery Page Locus section above), so the first render
+already carries the `gns` scope. The `useEffect` remains for the no-query case,
+where `localStorage` is only readable after hydration.
 
-After the root effect sets namespace to `__all__`, a second fetch may happen, but the initial state machine may already be on normal page-1 behavior.
-
-This is a strong candidate reason for the observed behavior: "Show in gallery reverts to All namespaces and takes us to the latest images on the 1st page."
-
-### 3. `ImageGallery` reads focus from `window.location.search` only into an initial ref
+### 3. `ImageGallery` reads focus from `window.location.search` only into an initial ref — Resolved
 
 The focus target is stored here:
 
@@ -512,23 +522,25 @@ const initialFocusTargetRef = useRef(
 );
 ```
 
-Because this is a ref initialized once, any navigation that changes the URL without a clean remount can leave the gallery using an old or missing focus target.
+Because this is a ref initialized once, focus mode depends on the component
+remounting when the focus target changes.
 
-The root page currently uses:
+The root page previously keyed on the whole query string
+(`search ? \`gallery:${search}\` : 'gallery'`), which made correctness depend on
+the timing and stability of `useSearchParams().toString()` during navigation —
+and, separately, remounted and blanked the gallery on every return from a detail
+page, since return-state params (`gpage`, `gns`, `gcolor`) are part of that
+string.
 
-```tsx
-key={galleryInstanceKey}
-```
-
-where:
+The key is now derived from the `focus` param alone:
 
 ```ts
-const galleryInstanceKey = search ? `gallery:${search}` : 'gallery';
+const galleryInstanceKey = focusParam ? `gallery:focus:${focusParam}` : 'gallery';
 ```
 
-That is meant to force remounts when the search string changes. But it also means correctness depends on the timing and stability of `useSearchParams().toString()` during navigation.
-
-If the key does not change when expected, or if it changes before namespace has been derived from the URL, focus mode can be skipped or mis-scoped.
+A focus navigation still forces the fresh mount that re-runs initial hydration
+around the focus target. Return-state params are consumed once and stripped via
+`history.replaceState`, so they no longer participate in component identity.
 
 ### 4. Focus canonicalization clears filters asynchronously
 
@@ -616,5 +628,10 @@ The ideal flow for both buttons is:
 11. `ImageGallery` renders that returned page.
 12. `ImageGallery` scrolls/highlights the focused asset.
 
-The observed failures suggest the flow is breaking before or during steps 2-6, not in the server's focused page calculation.
+The observed failures suggested the flow was breaking before or during steps 2-6, not in the server's focused page calculation.
+
+Steps 2 and 3 now hold: the root page derives the namespace synchronously from
+`gns`, and the remount key is scoped to the `focus` param. Candidates 1, 4, 5,
+and 6 above have not been re-verified since; if focus placement still misbehaves,
+start there.
 

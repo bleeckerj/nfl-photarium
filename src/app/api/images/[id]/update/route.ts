@@ -310,13 +310,23 @@ export async function PATCH(
         imageId
       );
 
-      for (const memberId of memberIds) {
-        const result = await updateImage(memberId, memberId === imageId ? targetFlags : familyFlags);
-        updatedIds.push(memberId);
-        if (memberId === imageId) {
-          targetResult = result;
-        }
-      }
+      // Each member's update is an independent Cloudflare GET+PATCH plus local
+      // writes; run them through a small worker pool instead of serially.
+      const FAMILY_UPDATE_CONCURRENCY = 4;
+      const pending = [...memberIds];
+      await Promise.all(
+        Array.from({ length: Math.min(FAMILY_UPDATE_CONCURRENCY, pending.length) }, async () => {
+          for (;;) {
+            const memberId = pending.shift();
+            if (!memberId) return;
+            const result = await updateImage(memberId, memberId === imageId ? targetFlags : familyFlags);
+            updatedIds.push(memberId);
+            if (memberId === imageId) {
+              targetResult = result;
+            }
+          }
+        })
+      );
     } else {
       targetResult = await updateImage(imageId, targetFlags);
       updatedIds.push(imageId);

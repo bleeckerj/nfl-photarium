@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { getExtrasStorage } from '@/server/extrasStorage';
 import type { InstagramSourceRecord } from '@/server/instagramSource';
 
@@ -389,11 +390,15 @@ interface FolderOverrideCacheState {
   map: FolderOverrideMap;
   loadedAt: number;
   inflight: Promise<FolderOverrideMap> | null;
-  // Monotonically increasing version bumped on every successful load and on
-  // every applyFolderOverrideUpdate. Downstream caches (e.g. galleryQuery
-  // memoization) use this in their scope keys so they invalidate as soon as
-  // the folder data they snapshotted has changed.
+  // Monotonically increasing version bumped on every applyFolderOverrideUpdate
+  // and on every refresh that observed a change. Downstream caches (galleryQuery
+  // memoization, the gallery ETag) use this in their scope keys so they
+  // invalidate as soon as the extras data they snapshotted has changed.
   version: number;
+  // Storage-side revision token observed at the last full load. Every extras
+  // write stores a fresh token; an unchanged token lets the periodic refresh
+  // skip the full SCAN+MGET *and* the version bump.
+  lastRevisionToken: string | null;
 }
 
 const FOLDER_OVERRIDE_CACHE_KEY = Symbol.for('photarium.imageExtras.folderOverrides');
@@ -407,6 +412,7 @@ const folderOverrideState: FolderOverrideCacheState =
     loadedAt: 0,
     inflight: null,
     version: 0,
+    lastRevisionToken: null,
   };
 
 if (!folderOverrideGlobal[FOLDER_OVERRIDE_CACHE_KEY]) {
@@ -428,6 +434,41 @@ function extractExtrasFolder(record: ImageExtrasRecord | null): FolderOverrideEx
   const folder = typeof record.folder === 'string' ? record.folder : undefined;
   return { present: true, folder };
 }
+
+// Revision token stored alongside the extras records ("image-extras-meta:"
+// deliberately does not match the "image-extras:" record prefix). Every extras
+// write stores a fresh random token; the periodic refresh compares it to skip
+// the full-keyspace SCAN+MGET when nothing was written.
+const EXTRAS_REVISION_KEY = 'image-extras-meta:revision';
+
+async function readExtrasRevisionToken(): Promise<string | null> {
+  try {
+    const stored = await getExtrasStorage().get<{ rev?: string }>(EXTRAS_REVISION_KEY);
+    return typeof stored?.rev === 'string' ? stored.rev : null;
+  } catch {
+    return null;
+  }
+}
+
+async function bumpExtrasRevisionToken(): Promise<void> {
+  const rev = randomUUID();
+  try {
+    await getExtrasStorage().set(EXTRAS_REVISION_KEY, { rev });
+    // Remember our own token so the next TTL probe doesn't treat this write
+    // as cross-process drift (the in-memory map was updated write-through).
+    folderOverrideState.lastRevisionToken = rev;
+  } catch (error) {
+    console.warn('[ImageExtras] Failed to bump extras revision token', error);
+  }
+}
+
+const folderOverrideMapsEqual = (left: FolderOverrideMap, right: FolderOverrideMap) => {
+  if (left.size !== right.size) return false;
+  for (const [key, value] of left) {
+    if (!right.has(key) || right.get(key) !== value) return false;
+  }
+  return true;
+};
 
 async function refreshFolderOverridesFromStorage(): Promise<FolderOverrideMap> {
   const allIds = await listImageExtrasImageIds();
@@ -458,16 +499,37 @@ export async function getImageFolderOverrides(): Promise<FolderOverrideMap> {
   if (folderOverrideState.inflight) {
     return folderOverrideState.inflight;
   }
-  const inflight = refreshFolderOverridesFromStorage()
-    .then((map) => {
-      folderOverrideState.map = map;
-      folderOverrideState.loadedAt = Date.now();
+  const inflight = (async () => {
+    // Cheap staleness probe first: an unchanged revision token means no
+    // extras write happened anywhere since the last full load, so the
+    // SCAN+MGET and the version bump can both be skipped. (Bumping on every
+    // periodic reload used to invalidate all gallery memos every 5 minutes.)
+    if (folderOverrideState.loadedAt > 0 && folderOverrideState.lastRevisionToken) {
+      const currentToken = await readExtrasRevisionToken();
+      if (currentToken && currentToken === folderOverrideState.lastRevisionToken) {
+        folderOverrideState.loadedAt = Date.now();
+        return folderOverrideState.map;
+      }
+    }
+    const [map, token] = await Promise.all([
+      refreshFolderOverridesFromStorage(),
+      readExtrasRevisionToken(),
+    ]);
+    const tokenChanged = token !== folderOverrideState.lastRevisionToken;
+    const mapChanged = !folderOverrideMapsEqual(folderOverrideState.map, map);
+    folderOverrideState.map = map;
+    folderOverrideState.loadedAt = Date.now();
+    folderOverrideState.lastRevisionToken = token;
+    // A changed token signals extras writes (possibly to non-folder fields
+    // that feed includeExtras responses), so it bumps even when the folder
+    // map itself is identical.
+    if (tokenChanged || mapChanged) {
       folderOverrideState.version += 1;
-      return map;
-    })
-    .finally(() => {
-      folderOverrideState.inflight = null;
-    });
+    }
+    return map;
+  })().finally(() => {
+    folderOverrideState.inflight = null;
+  });
   folderOverrideState.inflight = inflight;
   return inflight;
 }
@@ -506,6 +568,7 @@ export function invalidateImageFolderOverridesCache(): void {
   folderOverrideState.map = new Map();
   folderOverrideState.loadedAt = 0;
   folderOverrideState.inflight = null;
+  folderOverrideState.lastRevisionToken = null;
   folderOverrideState.version += 1;
 }
 
@@ -514,6 +577,7 @@ export async function setImageExtrasRecord(record: ImageExtrasRecord): Promise<v
   const sanitized = sanitizeImageExtrasRecord(record) ?? record;
   await storage.set(getImageExtrasKey(record.imageId), sanitized);
   applyFolderOverrideUpdate(record.imageId, sanitized);
+  await bumpExtrasRevisionToken();
   void import('@/server/metadataSearchIndex')
     .then(({ syncMetadataImageById }) => syncMetadataImageById(record.imageId, sanitized))
     .catch((error) => console.warn('[ImageExtras] Metadata search index sync failed', { imageId: record.imageId, error }));
@@ -523,6 +587,7 @@ export async function deleteImageExtrasRecord(imageId: string): Promise<void> {
   const storage = getExtrasStorage();
   await storage.delete(getImageExtrasKey(imageId));
   applyFolderOverrideUpdate(imageId, null);
+  await bumpExtrasRevisionToken();
   void import('@/server/metadataSearchIndex')
     .then(({ removeMetadataImage }) => removeMetadataImage(imageId))
     .catch((error) => console.warn('[ImageExtras] Metadata search index removal failed', { imageId, error }));

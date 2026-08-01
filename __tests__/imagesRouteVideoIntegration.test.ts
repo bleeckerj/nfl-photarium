@@ -44,6 +44,7 @@ vi.mock('@/server/aspectMetadataHydration', () => ({
 
 vi.mock('@/server/videoCatalogStorage', () => ({
   listVideoAssetRecordsWithSync: listVideoAssetRecordsWithSyncMock,
+  getVideoAssetCatalogVersion: () => 0,
 }));
 
 vi.mock('@/server/imageExtras', () => ({
@@ -125,6 +126,33 @@ describe('GET /api/images video integration', () => {
         }),
       ])
     );
+  });
+
+  it('answers 304 for an unchanged If-None-Match tag and 200 after a version bump', async () => {
+    const url = 'http://localhost/api/images?page=1&pageSize=30';
+    const first = await GET(new NextRequest(url));
+    const etag = first.headers.get('ETag');
+    expect(first.status).toBe(200);
+    expect(etag).toBeTruthy();
+    expect(first.headers.get('Cache-Control')).toContain('no-cache');
+
+    const second = await GET(new NextRequest(url, {
+      headers: { 'if-none-match': etag as string },
+    }));
+    expect(second.status).toBe(304);
+    expect(second.headers.get('ETag')).toBe(etag);
+
+    getCacheStatsMock.mockReturnValue({ lastFetched: Date.now(), contentVersion: 42 });
+    const third = await GET(new NextRequest(url, {
+      headers: { 'if-none-match': etag as string },
+    }));
+    expect(third.status).toBe(200);
+  });
+
+  it('never issues an ETag for requests that consume unversioned metadata', async () => {
+    const response = await GET(new NextRequest('http://localhost/api/images?includeVectorMeta=1'));
+    expect(response.status).toBe(200);
+    expect(response.headers.get('ETag')).toBeNull();
   });
 
   it('marks existing animated WebP derivatives as Comfy when their source video is Comfy', async () => {

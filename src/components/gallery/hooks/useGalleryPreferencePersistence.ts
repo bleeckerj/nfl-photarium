@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { GALLERY_PREFERENCES_VERSION } from '../constants';
 import type {
   AspectRatioClass,
   BulkFolderMode,
@@ -62,6 +63,7 @@ export function useGalleryPreferencePersistence({
     if (typeof window === 'undefined') return;
     try {
       window.localStorage.setItem('galleryPreferences', JSON.stringify({
+        prefsVersion: GALLERY_PREFERENCES_VERSION,
         onlyCanonical,
         respectAspectRatio,
         variant: selectedVariant,

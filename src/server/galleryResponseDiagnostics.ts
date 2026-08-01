@@ -1,3 +1,26 @@
+import { createHash, randomUUID } from 'node:crypto';
+
+// The version counters behind gallery ETags (catalog contentVersion, folder
+// override version, video catalog version) are per-process and reset to
+// arbitrary values on restart, so a tag is only comparable against tags issued
+// by the same process. Folding a per-process id into the tag makes any
+// cross-process or cross-restart validation a guaranteed miss (a full 200),
+// which errs toward freshness.
+const SERVER_INSTANCE_ID = randomUUID().slice(0, 8);
+
+export const buildGalleryCollectionEtag = (
+  prefix: string,
+  parts: Array<string | number>
+): string => {
+  const suffix = createHash('sha1').update(parts.join('|')).digest('hex').slice(0, 16);
+  return `W/"${prefix}-${SERVER_INSTANCE_ID}-${suffix}"`;
+};
+
+// "Store but always revalidate": the browser keeps the body and sends
+// If-None-Match, so an unchanged dataset costs a 304 instead of a re-download,
+// with zero staleness window.
+export const GALLERY_REVALIDATE_CACHE_CONTROL = 'private, no-cache, must-revalidate';
+
 type CacheDiagnostics = {
   count: number;
   contentVersion: number;
@@ -26,12 +49,16 @@ export const finalizeGalleryResponseDiagnostics = (
     diagnostics: Record<string, number | boolean | string | null>;
     cache: CacheDiagnostics;
     query: GalleryQueryDiagnostics;
+    etag?: string;
   }
 ) => {
-  const { requestId, timings, diagnostics, cache, query } = options;
+  const { requestId, timings, diagnostics, cache, query, etag } = options;
   const ageMs =
     cache.lastReconciledAt > 0 ? Math.max(0, Date.now() - cache.lastReconciledAt) : 0;
-  response.headers.set('Cache-Control', 'no-store, no-cache, max-age=0, must-revalidate');
+  response.headers.set('Cache-Control', GALLERY_REVALIDATE_CACHE_CONTROL);
+  if (etag) {
+    response.headers.set('ETag', etag);
+  }
   response.headers.set(
     'Server-Timing',
     Object.entries(timings).map(([name, duration]) => `${name};dur=${duration}`).join(', ')

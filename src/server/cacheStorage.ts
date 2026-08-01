@@ -22,6 +22,8 @@ export interface CacheData<T> {
 
 export interface ICacheStorage {
   get<T>(key: string): Promise<CacheData<T> | null>;
+  // Optional batch read; callers must fall back to per-key get() when absent.
+  getMany?<T>(keys: string[]): Promise<Array<CacheData<T> | null>>;
   set<T>(key: string, data: T, timestamp?: number): Promise<void>;
   delete(key: string): Promise<void>;
   exists(key: string): Promise<boolean>;
@@ -168,6 +170,7 @@ class FileCacheStorage implements ICacheStorage {
 // Redis client type (loosely typed to avoid requiring ioredis as a dependency)
 interface RedisClient {
   get(key: string): Promise<string | null>;
+  mget(...keys: string[]): Promise<Array<string | null>>;
   set(key: string, value: string): Promise<unknown>;
   del(key: string): Promise<number>;
   exists(key: string): Promise<number>;
@@ -251,6 +254,30 @@ class RedisCacheStorage implements ICacheStorage {
     }
   }
 
+  async getMany<T>(keys: string[]): Promise<Array<CacheData<T> | null>> {
+    if (keys.length === 0) return [];
+    try {
+      const client = await this.getClient();
+      const values = await client.mget(...keys.map((key) => `${this.keyPrefix}${key}`));
+      return values.map((data, index) => {
+        if (!data) return null;
+        try {
+          const parsed = JSON.parse(data) as CacheData<T>;
+          if (parsed.version !== CACHE_VERSION) {
+            console.log(`[Redis] Cache version mismatch for ${keys[index]}: expected ${CACHE_VERSION}, got ${parsed.version}`);
+            return null;
+          }
+          return parsed;
+        } catch {
+          return null;
+        }
+      });
+    } catch (error) {
+      console.warn('[Redis] Failed to mget keys:', error);
+      return keys.map(() => null);
+    }
+  }
+
   async set<T>(key: string, data: T, timestamp?: number): Promise<void> {
     try {
       const client = await this.getClient();
@@ -259,7 +286,7 @@ class RedisCacheStorage implements ICacheStorage {
         timestamp: timestamp ?? Date.now(),
         version: CACHE_VERSION
       };
-      
+
       await client.set(`${this.keyPrefix}${key}`, JSON.stringify(cacheData));
     } catch (error) {
       console.warn(`[Redis] Failed to set key ${key}:`, error);

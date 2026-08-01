@@ -11,7 +11,9 @@ type ColorMetadataMap = Record<string, { dominantColors?: string[]; averageColor
 type UseGalleryMetadataEffectsOptions = {
   colorSearchHex: string | null;
   enableColorMetadata: boolean;
-  images: CloudflareImage[];
+  // Accepted for call-site compatibility; prompt/color enrichment is scoped to
+  // pageImages.
+  images?: CloudflareImage[];
   namespace?: string;
   pageImages: CloudflareImage[];
   promptThisMapRef: MutableRefObject<Record<string, string | null>>;
@@ -29,7 +31,6 @@ type UseGalleryMetadataEffectsOptions = {
 export function useGalleryMetadataEffects({
   colorSearchHex,
   enableColorMetadata,
-  images,
   namespace,
   pageImages,
   promptThisMapRef,
@@ -122,47 +123,58 @@ export function useGalleryMetadataEffects({
           requestedColorIdsRef.current.set(id, Date.now());
         }
 
+        // Fetch chunks concurrently and merge into a single state update:
+        // per-chunk setImages calls each re-created the array and re-rendered
+        // every visible card.
         const chunkSize = 60;
+        const chunks: string[][] = [];
         for (let i = 0; i < idsToFetch.length; i += chunkSize) {
-          const chunk = idsToFetch.slice(i, i + chunkSize);
+          chunks.push(idsToFetch.slice(i, i + chunkSize));
+        }
+        const chunkResults = await Promise.all(chunks.map(async (chunk) => {
           const response = await fetch(`/api/images/colors?ids=${encodeURIComponent(chunk.join(','))}`);
-          if (!response.ok) continue;
+          if (!response.ok) return null;
           const data = await response.json();
           const colors = data?.colors;
-          if (!colors || typeof colors !== 'object') continue;
+          return colors && typeof colors === 'object' ? (colors as ColorMetadataMap) : null;
+        }));
+        const mergedColors: ColorMetadataMap = {};
+        for (const colors of chunkResults) {
+          if (colors) Object.assign(mergedColors, colors);
+        }
+        if (Object.keys(mergedColors).length === 0) return;
 
-          setImages((prev) =>
-            prev.map((img) => {
-              const meta = colors[img.id] as
-                | {
-                    dominantColors?: string[];
-                    averageColor?: string;
-                    hasClipEmbedding?: boolean;
-                    hasColorEmbedding?: boolean;
-                  }
-                | undefined;
-              if (!meta) return img;
-              const hasRedisMetadata =
-                Array.isArray(meta.dominantColors) ||
-                typeof meta.averageColor === 'string' ||
-                Boolean(meta.hasClipEmbedding) ||
-                Boolean(meta.hasColorEmbedding);
-              if (!hasRedisMetadata) {
-                return img;
-              }
-              return {
-                ...img,
-                hasClipEmbedding: img.hasClipEmbedding || Boolean(meta.hasClipEmbedding),
-                hasColorEmbedding: img.hasColorEmbedding || Boolean(meta.hasColorEmbedding),
-                dominantColors: meta.dominantColors ?? img.dominantColors,
-                averageColor: meta.averageColor ?? img.averageColor,
-              };
-            })
-          );
+        setImages((prev) =>
+          prev.map((img) => {
+            const meta = mergedColors[img.id] as
+              | {
+                  dominantColors?: string[];
+                  averageColor?: string;
+                  hasClipEmbedding?: boolean;
+                  hasColorEmbedding?: boolean;
+                }
+              | undefined;
+            if (!meta) return img;
+            const hasRedisMetadata =
+              Array.isArray(meta.dominantColors) ||
+              typeof meta.averageColor === 'string' ||
+              Boolean(meta.hasClipEmbedding) ||
+              Boolean(meta.hasColorEmbedding);
+            if (!hasRedisMetadata) {
+              return img;
+            }
+            return {
+              ...img,
+              hasClipEmbedding: img.hasClipEmbedding || Boolean(meta.hasClipEmbedding),
+              hasColorEmbedding: img.hasColorEmbedding || Boolean(meta.hasColorEmbedding),
+              dominantColors: meta.dominantColors ?? img.dominantColors,
+              averageColor: meta.averageColor ?? img.averageColor,
+            };
+          })
+        );
 
-          if (enableColorMetadata) {
-            setColorMetadataMap((prev) => ({ ...prev, ...colors }));
-          }
+        if (enableColorMetadata) {
+          setColorMetadataMap((prev) => ({ ...prev, ...mergedColors }));
         }
       } catch (error) {
         console.warn('Failed to fetch visible page metadata:', error);
@@ -176,13 +188,15 @@ export function useGalleryMetadataEffects({
   // Prompt This records live outside Cloudflare metadata, so we batch-load them on demand.
   useEffect(() => {
     if (!searchTerm.trim()) return;
-    if (images.length === 0) return;
+    if (pageImages.length === 0) return;
 
     let cancelled = false;
 
     const fetchPrompts = async () => {
       try {
-        const idsToFetch = images
+        // Scope to the visible page (not every loaded image) and fetch the
+        // chunks concurrently with a single merged state update.
+        const idsToFetch = pageImages
           .map((img) => img.id)
           .filter((id) => {
             if (Object.prototype.hasOwnProperty.call(promptThisMapRef.current, id)) return false;
@@ -194,16 +208,25 @@ export function useGalleryMetadataEffects({
         idsToFetch.forEach((id) => requestedPromptIdsRef.current.set(id, Date.now()));
 
         const chunkSize = 50;
+        const chunks: string[][] = [];
         for (let i = 0; i < idsToFetch.length; i += chunkSize) {
-          if (cancelled) return;
-          const chunk = idsToFetch.slice(i, i + chunkSize);
+          chunks.push(idsToFetch.slice(i, i + chunkSize));
+        }
+        const chunkResults = await Promise.all(chunks.map(async (chunk) => {
           const response = await fetch(`/api/images/prompts?ids=${encodeURIComponent(chunk.join(','))}`);
-          if (!response.ok) continue;
+          if (!response.ok) return null;
           const data = await response.json();
-          if (cancelled) return;
-          if (data?.prompts && typeof data.prompts === 'object') {
-            setPromptThisMap((prev) => ({ ...prev, ...data.prompts }));
-          }
+          return data?.prompts && typeof data.prompts === 'object'
+            ? (data.prompts as Record<string, string | null>)
+            : null;
+        }));
+        if (cancelled) return;
+        const mergedPrompts: Record<string, string | null> = {};
+        for (const prompts of chunkResults) {
+          if (prompts) Object.assign(mergedPrompts, prompts);
+        }
+        if (Object.keys(mergedPrompts).length > 0) {
+          setPromptThisMap((prev) => ({ ...prev, ...mergedPrompts }));
         }
       } catch (error) {
         console.warn('Failed to fetch Prompt This text:', error);
@@ -215,5 +238,5 @@ export function useGalleryMetadataEffects({
     return () => {
       cancelled = true;
     };
-  }, [images, promptThisMapRef, requestedPromptIdsRef, searchTerm, setPromptThisMap]);
+  }, [pageImages, promptThisMapRef, requestedPromptIdsRef, searchTerm, setPromptThisMap]);
 }

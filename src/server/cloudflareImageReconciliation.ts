@@ -36,6 +36,37 @@ export const mutationIsReflectedRemotely = (
   );
 };
 
+const valuesEqual = (left: unknown, right: unknown): boolean => {
+  if (left === right) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+    return left.every((value, index) => valuesEqual(value, right[index]));
+  }
+  if (left && right && typeof left === 'object' && typeof right === 'object') {
+    const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+    for (const key of keys) {
+      if (!valuesEqual(
+        (left as Record<string, unknown>)[key],
+        (right as Record<string, unknown>)[key]
+      )) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
+};
+
+// Deep comparison over every field (including future ones) so that a missed
+// field can only cause a spurious version bump, never a suppressed real change.
+export const cachedImageRecordsEqual = (
+  existing: CachedCloudflareImage | undefined,
+  merged: CachedCloudflareImage
+): boolean => {
+  if (!existing) return false;
+  return valuesEqual(existing, merged);
+};
+
 const arraysEqual = (left?: string[], right?: string[]) => {
   if (left === right) return true;
   if ((left?.length ?? 0) !== (right?.length ?? 0)) return false;

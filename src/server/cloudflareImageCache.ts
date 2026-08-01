@@ -16,10 +16,12 @@ import {
   type CloudflareImageMutation,
 } from './cloudflareImageMutationJournal';
 import {
+  cachedImageRecordsEqual,
   catalogContentsEqual,
   mergeCachedImageRecord,
   mutationIsReflectedRemotely,
 } from './cloudflareImageReconciliation';
+import { fetchAllCloudflareImagePages } from './cloudflareImageListFetcher';
 
 export type {
   CachedCloudflareImage,
@@ -93,14 +95,6 @@ const DEV_BACKGROUND_REFRESH_MIN_MS = Number(
 const devDisableEnv = process.env.CLOUDFLARE_DEV_BACKGROUND_REFRESH_DISABLED;
 const DEV_BACKGROUND_REFRESH_DISABLED =
   devDisableEnv === 'true' || devDisableEnv === '1';
-const PAGE_SIZE = Math.min(
-  100,
-  Math.max(10, Number(process.env.CLOUDFLARE_CACHE_PAGE_SIZE ?? 100))
-);
-const MAX_PAGES = (() => {
-  const value = Number(process.env.CLOUDFLARE_CACHE_MAX_PAGES);
-  return Number.isFinite(value) && value > 0 ? value : undefined;
-})();
 const SIZE_BACKFILL_ENABLED = process.env.CLOUDFLARE_SIZE_BACKFILL_DISABLED !== 'true';
 const SIZE_BACKFILL_MAX_PER_RUN = Math.max(
   1,
@@ -209,62 +203,8 @@ const scheduleMetadataOverridesSave = (): void => {
   }, METADATA_OVERRIDES_SAVE_DEBOUNCE_MS);
 };
 
-const fetchPage = async (
-  accountId: string,
-  apiToken: string,
-  page: number
-): Promise<CloudflareImageApiResponse[]> => {
-  const params = new URLSearchParams({
-    per_page: String(PAGE_SIZE),
-    page: String(page)
-  });
-
-  const response = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1?${params.toString()}`,
-    {
-      headers: {
-        Authorization: `Bearer ${apiToken}`
-      },
-      cache: 'no-store'
-    }
-  );
-
-  const json = await response.json();
-  if (!response.ok) {
-    const errorMessage =
-      json?.errors?.[0]?.message || 'Failed to fetch Cloudflare Images page.';
-    throw new Error(errorMessage);
-  }
-
-  return Array.isArray(json?.result?.images) ? json.result.images : [];
-};
-
 const fetchAllImages = async (): Promise<CachedCloudflareImage[]> => {
-  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-  const apiToken = process.env.CLOUDFLARE_API_TOKEN;
-
-  if (!accountId || !apiToken) {
-    throw new Error('Cloudflare credentials not configured');
-  }
-
-  const collected: CloudflareImageApiResponse[] = [];
-  let page = 1;
-
-  while (true) {
-    const images = await fetchPage(accountId, apiToken, page);
-    collected.push(...images);
-    if (images.length < PAGE_SIZE) {
-      break;
-    }
-    page += 1;
-    if (MAX_PAGES && page > MAX_PAGES) {
-      console.warn(
-        `Reached CLOUDFLARE_CACHE_MAX_PAGES (${MAX_PAGES}). Results may be incomplete.`
-      );
-      break;
-    }
-  }
-
+  const collected = await fetchAllCloudflareImagePages();
   return collected.map((image) => transformImage(image, metadataOverrides.get(image.id)));
 };
 
@@ -866,6 +806,17 @@ export const upsertCachedImage = (image: CachedCloudflareImage): Promise<void> =
     Boolean(existing?.parentId) &&
     Object.prototype.hasOwnProperty.call(image, 'parentId') &&
     image.parentId === undefined;
+
+  // No-op writes (e.g. read-path enrichment re-persisting identical data) must
+  // not bump contentVersion: that key invalidates every gallery memo and the
+  // client's warm caches, which is what made return-from-detail slow.
+  if (
+    !shouldPersistClearedFolder &&
+    !shouldPersistClearedParent &&
+    cachedImageRecordsEqual(existing, mergedImage)
+  ) {
+    return Promise.resolve();
+  }
 
   cacheState.map.set(mergedImage.id, mergedImage);
   const index = cacheState.images.findIndex(item => item.id === image.id);

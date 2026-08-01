@@ -190,6 +190,88 @@ describe('cloudflareImageCache parent overrides', () => {
     expect(transformed.folder).toBeUndefined();
   });
 
+  it('does not bump contentVersion when re-upserting an identical record', async () => {
+    const {
+      clearAllCaches,
+      getCacheStats,
+      upsertCachedImage,
+    } = await import('@/server/cloudflareImageCache');
+
+    await clearAllCaches();
+
+    const record = {
+      id: 'stable',
+      filename: 'stable.jpg',
+      uploaded: '2026-03-01T00:00:00.000Z',
+      variants: ['https://example.com/stable/public'],
+      tags: ['keep'],
+      size: 1234,
+      dominantColors: ['#aabbcc'],
+      dimensions: { width: 640, height: 480 },
+    };
+
+    await upsertCachedImage({ ...record, tags: [...record.tags] });
+    const versionAfterInsert = getCacheStats().contentVersion;
+
+    await upsertCachedImage({
+      ...record,
+      tags: [...record.tags],
+      dominantColors: [...record.dominantColors],
+      dimensions: { ...record.dimensions },
+    });
+
+    expect(getCacheStats().contentVersion).toBe(versionAfterInsert);
+  });
+
+  it('bumps contentVersion when a field actually changes', async () => {
+    const {
+      clearAllCaches,
+      getCacheStats,
+      upsertCachedImage,
+    } = await import('@/server/cloudflareImageCache');
+
+    await clearAllCaches();
+
+    const record = {
+      id: 'changing',
+      filename: 'before.jpg',
+      uploaded: '2026-03-01T00:00:00.000Z',
+      variants: [],
+      tags: [],
+    };
+
+    await upsertCachedImage(record);
+    const versionAfterInsert = getCacheStats().contentVersion;
+
+    await upsertCachedImage({ ...record, filename: 'after.jpg' });
+    expect(getCacheStats().contentVersion).toBe(versionAfterInsert + 1);
+  });
+
+  it('bumps contentVersion when enrichment discovers a new field', async () => {
+    const {
+      clearAllCaches,
+      getCacheStats,
+      upsertCachedImage,
+    } = await import('@/server/cloudflareImageCache');
+
+    await clearAllCaches();
+
+    const record = {
+      id: 'enriched',
+      filename: 'enriched.jpg',
+      uploaded: '2026-03-01T00:00:00.000Z',
+      variants: [],
+      tags: [],
+      size: 4321,
+    };
+
+    await upsertCachedImage(record);
+    const versionAfterInsert = getCacheStats().contentVersion;
+
+    await upsertCachedImage({ ...record, dominantColors: ['#001122'] });
+    expect(getCacheStats().contentVersion).toBe(versionAfterInsert + 1);
+  });
+
   it('serves a resident snapshot while stale reconciliation is still running', async () => {
     process.env.CLOUDFLARE_ACCOUNT_ID = 'account';
     process.env.CLOUDFLARE_API_TOKEN = 'token';

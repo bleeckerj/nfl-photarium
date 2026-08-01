@@ -184,10 +184,14 @@ export const loadPreferences = (): GalleryPreferences => {
       : DEFAULT_PAGE_SIZE;
     
     // Normalize variant (legacy migration)
-    const storedVariant = typeof parsed.variant === 'string' ? parsed.variant : 'full';
-    const normalizedVariant = storedVariant === 'public' || storedVariant === 'original'
+    const storedVariant = typeof parsed.variant === 'string' ? parsed.variant : DEFAULT_PREFERENCES.variant;
+    const legacyVariant = storedVariant === 'public' || storedVariant === 'original'
       ? 'full'
       : storedVariant;
+    const storedPrefsVersion = typeof parsed.prefsVersion === 'number' ? parsed.prefsVersion : 1;
+    const normalizedVariant = storedPrefsVersion < 2 && legacyVariant === 'full'
+      ? DEFAULT_PREFERENCES.variant
+      : legacyVariant;
     
     const normalizedDateFilter = normalizeDateFilterValue(parsed.dateFilter);
     

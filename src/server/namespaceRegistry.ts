@@ -106,6 +106,12 @@ const writeRegistry = async (payload: NamespaceRegistryPayload) => {
   await fs.writeFile(REGISTRY_PATH, JSON.stringify(nextPayload, null, 2) + '\n', 'utf8');
 };
 
+// Last-write timestamp of the registry file, for cache validators.
+export const getRegistryUpdatedAt = async () => {
+  const payload = await readRegistry();
+  return payload.updatedAt;
+};
+
 // Returns the current list for UI options.
 export const listRegistryNamespaces = async () => {
   const payload = await readRegistry();

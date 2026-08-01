@@ -58,6 +58,32 @@ Example shape:
 }
 ```
 
+## Revision token and the folder-override cache
+
+Gallery requests need each image's extras-stored `folder`. Reading the whole
+extras keyspace per request (a `SCAN` + `MGET` over ~18k keys) was the largest
+steady-state cost of `/api/images`, so the folder values are held in a
+write-through in-memory map with a periodic refresh
+([src/server/imageExtras.ts](../src/server/imageExtras.ts)).
+
+Two keys support this:
+
+- `image-extras:<imageId>` — the record itself.
+- `image-extras-meta:revision` — a random token rewritten on **every** extras
+  write. Note the distinct `image-extras-meta:` prefix: it must not match the
+  `image-extras:` record prefix, or record enumeration would pick it up.
+
+The refresh reads the token first. If it is unchanged since the last full load,
+the `SCAN` + `MGET` is skipped *and* the map's version counter is left alone.
+That version counter keys the gallery's memo caches and HTTP ETags, so bumping it
+on every periodic reload would have invalidated every gallery cache every five
+minutes. See [Gallery Performance And Cache Invariants](./gallery-performance.md).
+
+`setImageExtrasRecord` and `deleteImageExtrasRecord` both update the in-memory
+map, bump the version, and rewrite the token. **Any new extras write path must go
+through them** (or replicate all three steps), otherwise the gallery can serve
+stale folder data behind a `304`.
+
 ## Backwards compatibility
 
 Earlier versions stored Prompt This under a legacy key `prompt-this:<imageId>`.

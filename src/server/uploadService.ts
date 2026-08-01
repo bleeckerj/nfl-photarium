@@ -446,33 +446,37 @@ export async function uploadImageBuffer({
     size: imageData.size,
     meta: baseMeta
   });
-  await upsertCachedImage(primaryCached);
-
-  await patchImageExtrasRecord(imageData.id, {
-    ...(description ? { description } : {}),
-    ...extrasMetadata,
-  });
-
-  try {
-    await ingestComfyWorkflowForImage({
-      imageId: imageData.id,
-      comfyExtraction,
-      imageDescription: {
-        description,
-      },
-      embeddingModel: 'clip-ViT-B-32',
-      embeddingVersion: 'v1',
+  // These stores are independent of each other, so write them concurrently.
+  // Exception: the comfy ingest patches the same extras record as
+  // patchImageExtrasRecord (read-modify-write), so those two stay chained.
+  const extrasChain = (async () => {
+    await patchImageExtrasRecord(imageData.id, {
+      ...(description ? { description } : {}),
+      ...extrasMetadata,
     });
-  } catch (error) {
-    console.warn('[upload] Failed to ingest comfy workflow extras', {
-      imageId: imageData.id,
-      error,
-    });
-  }
-
-  await persistAspectMetadataFromBuffer(imageData.id, finalBuffer, bufferedAspectMetadata);
-
-  const autoEmbeddings = await queueAutoEmbeddingsForImage(primaryCached);
+    try {
+      await ingestComfyWorkflowForImage({
+        imageId: imageData.id,
+        comfyExtraction,
+        imageDescription: {
+          description,
+        },
+        embeddingModel: 'clip-ViT-B-32',
+        embeddingVersion: 'v1',
+      });
+    } catch (error) {
+      console.warn('[upload] Failed to ingest comfy workflow extras', {
+        imageId: imageData.id,
+        error,
+      });
+    }
+  })();
+  const [, , , autoEmbeddings] = await Promise.all([
+    upsertCachedImage(primaryCached),
+    extrasChain,
+    persistAspectMetadataFromBuffer(imageData.id, finalBuffer, bufferedAspectMetadata),
+    queueAutoEmbeddingsForImage(primaryCached),
+  ]);
 
   let webpVariantId: string | undefined;
   if (workingFileType === 'image/svg+xml') {

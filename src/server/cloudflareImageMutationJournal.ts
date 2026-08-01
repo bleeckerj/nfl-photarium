@@ -19,6 +19,10 @@ type MutationJournalState = {
   loaded: boolean;
   loadPromise: Promise<void> | null;
   writePromise: Promise<void>;
+  // A queued-but-not-yet-started persist. Mutations recorded while it is
+  // queued are already in `entries` when it serializes, so they share it
+  // instead of each chaining another full-journal write.
+  pendingFlush: Promise<void> | null;
 };
 
 const MUTATION_JOURNAL_KEY = 'cloudflare-image-mutation-journal';
@@ -32,6 +36,7 @@ const journalState: MutationJournalState = globalObject[GLOBAL_JOURNAL_KEY] ?? {
   loaded: false,
   loadPromise: null,
   writePromise: Promise.resolve(),
+  pendingFlush: null,
 };
 
 if (!globalObject[GLOBAL_JOURNAL_KEY]) {
@@ -84,11 +89,19 @@ export const recordCloudflareImageMutation = (
   mutation: CloudflareImageMutation
 ): Promise<void> => {
   mergeMutation(mutation);
-  const write = journalState.writePromise
+  if (journalState.pendingFlush) {
+    return journalState.pendingFlush;
+  }
+  const flush = journalState.writePromise
     .catch(() => undefined)
-    .then(persistJournal);
-  journalState.writePromise = write;
-  return write;
+    .then(() => {
+      // Mutations recorded from here on need their own flush.
+      journalState.pendingFlush = null;
+      return persistJournal();
+    });
+  journalState.pendingFlush = flush;
+  journalState.writePromise = flush;
+  return flush;
 };
 
 export const getCloudflareImageMutations = async (): Promise<CloudflareImageMutation[]> => {
@@ -157,5 +170,6 @@ export const clearCloudflareImageMutationJournal = async (): Promise<void> => {
   journalState.loaded = true;
   journalState.loadPromise = null;
   journalState.writePromise = Promise.resolve();
+  journalState.pendingFlush = null;
   await getCacheStorage().delete(MUTATION_JOURNAL_KEY);
 };

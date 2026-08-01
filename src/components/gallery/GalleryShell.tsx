@@ -1,14 +1,22 @@
 'use client';
 
 import type { ComponentProps, RefObject } from 'react';
+import dynamic from 'next/dynamic';
 import HoverPreview from '@/components/HoverPreview';
 import { GalleryCompactHeader } from './GalleryCompactHeader';
 import GalleryControlsPanel from './GalleryControlsPanel';
 import GalleryNoticeStack from './GalleryNoticeStack';
 import { GalleryPagerStrip } from './GalleryPagerStrip';
 import GalleryUtilityRail from './GalleryUtilityRail';
-import { GalleryModals } from './GalleryModals';
+import type { GalleryModals as GalleryModalsComponent } from './GalleryModals';
 import GalleryResultsRegion from './GalleryResultsRegion';
+
+// The modal stack (copy/edit/bulk-edit/namespace/delete) is interaction-only;
+// splitting it keeps it out of the initial gallery bundle.
+const GalleryModals = dynamic(
+  () => import('./GalleryModals').then((mod) => ({ default: mod.GalleryModals })),
+  { ssr: false }
+);
 
 type GalleryShellProps = {
   galleryTopRef: RefObject<HTMLDivElement | null>;
@@ -18,7 +26,7 @@ type GalleryShellProps = {
   controlsPanelProps: ComponentProps<typeof GalleryControlsPanel>;
   utilityRailProps: ComponentProps<typeof GalleryUtilityRail>;
   resultsRegionProps: ComponentProps<typeof GalleryResultsRegion>;
-  modalsProps: ComponentProps<typeof GalleryModals>;
+  modalsProps: ComponentProps<typeof GalleryModalsComponent>;
   hoverPreviewProps: ComponentProps<typeof HoverPreview> | null;
 };
 

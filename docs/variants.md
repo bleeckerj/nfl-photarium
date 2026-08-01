@@ -13,6 +13,32 @@ Usage guidance:
 - Website: use `responsive` `srcset` for images and serve `Medium`/`Large` depending on layout; `X-Large` for full-width hero images.
 - Thumbnails: use `thumbnail` preset when available.
 
+## Gallery Grid Default
+
+The gallery grid requests `Medium` (`w=600`) by default — roughly 2x DPR for the
+tile sizes the grid renders. The default lives in `DEFAULT_GALLERY_VARIANT`
+([src/components/gallery/constants.ts](../src/components/gallery/constants.ts)).
+
+The grid previously defaulted to `Full (No Resize)`, so a 30-tile page downloaded
+30 full-resolution originals into ~300px boxes. `next/image` runs with
+`unoptimized: true` (Cloudflare does the resizing), so it emits no `srcset` and
+the requested variant is exactly what the browser downloads.
+
+`Full` remains available in the **Image Size** selector and is unchanged on the
+image detail page.
+
+### Stored preference migration
+
+Gallery preferences carry a `prefsVersion` field
+([src/components/gallery/storedPreferences.ts](../src/components/gallery/storedPreferences.ts)).
+On read, a pre-v2 blob holding `full` is rewritten to the new default and stamped
+`prefsVersion: 2`. A `Full` selected *after* that stamp is a deliberate choice and
+is preserved.
+
+When changing the grid default again, bump `GALLERY_PREFERENCES_VERSION` and add
+the corresponding migration branch — otherwise existing users keep the old value
+forever.
+
 Example (copyable):
 
 - Small: `https://imagedelivery.net/{ACCOUNT_HASH}/{IMAGE_ID}/w=300`

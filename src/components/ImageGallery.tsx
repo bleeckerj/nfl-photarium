@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect, forwardRef, useMemo, useRef, useCallback, useLayoutEffect } from 'react';
+import { useState, useEffect, forwardRef, useMemo, useRef, useCallback } from 'react';
 import { type CloudflareImage, type GalleryFamilySummary, type GridSize, type ImageGalleryProps, type ImageGalleryRef } from './gallery/types';
 import { setDragPayloadForImage } from '@/utils/imageDrag';
 import { copyToClipboard, formatCopyPayload } from '@/utils/clipboard';
 import { useToast } from './Toast';
 import { downloadImageToFile, formatDownloadFileName } from '@/utils/downloadUtils';
+import { useGalleryReturnNavigation } from './gallery/hooks/useGalleryReturnNavigation';
 import { useGallerySelection } from './gallery/hooks/useGallerySelection';
 import { useGalleryControlsVisibility } from './gallery/hooks/useGalleryControlsVisibility';
 import { useGalleryFilters } from './gallery/hooks/useGalleryFilters';
@@ -37,7 +38,6 @@ import { toDateKey } from './gallery/dateFilter';
 import { collectFacetFolders, collectImageFolders, mergeFolderNames } from './gallery/folderOptions';
 import { loadHiddenNamespaces } from './gallery/storage';
 import { getKnownNamespaces } from './gallery/namespaceVisibility';
-import { clearGalleryReturnState, GALLERY_RETURN_SNAPSHOT_KEY } from './gallery/returnState';
 import { useSearchParams } from 'next/navigation';
 import { isLikelySourceSearchTerm } from '@/utils/galleryFilter';
 import { getUserVisibleTags } from '@/utils/systemTags';
@@ -164,42 +164,12 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   // currentPage to match serverFocus.page, there's no reason to refetch.
   const focusReconcileSkipRef = useRef(false);
 
-  // Restore scroll position when returning from a detail page.
-  // Page is restored during initial state hydration to avoid a visible jump.
-  useLayoutEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (didRestoreReturnStateRef.current) return;
-    if (loading) return;
-    const parsed = initialGalleryReturnStateRef.current;
-    if (!parsed) return;
-    const activeNamespace = namespace ?? '';
-    if (parsed.namespace !== activeNamespace) return;
-
-    didRestoreReturnStateRef.current = true;
-    clearGalleryReturnState();
-    window.sessionStorage.removeItem(GALLERY_RETURN_SNAPSHOT_KEY);
-
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        window.scrollTo({ top: parsed.scrollY, behavior: 'auto' });
-      });
-    });
-  }, [initialGalleryReturnStateRef, loading, namespace]);
-
-  // If we arrived via `/?gpage=...&gns=...`, clean up the URL once mounted.
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const url = new URL(window.location.href);
-      if (!url.searchParams.has('gpage') && !url.searchParams.has('gns') && !url.searchParams.has('gcolor')) return;
-      url.searchParams.delete('gpage');
-      url.searchParams.delete('gns');
-      url.searchParams.delete('gcolor');
-      window.history.replaceState(window.history.state, '', url.toString());
-    } catch {
-      // ignore
-    }
-  }, []);
+  useGalleryReturnNavigation({
+    initialGalleryReturnStateRef,
+    didRestoreReturnStateRef,
+    loading,
+    namespace,
+  });
 
   const [editingImage, setEditingImage] = useState<string | null>(null);
   const [editTags, setEditTags] = useState<string>('');
@@ -287,7 +257,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         serverQuery: effectiveServerQuery,
         focusAssetId,
       });
-      const response = await fetch(url, { signal: controller.signal, cache: 'no-store' });
+      // 'no-cache' (not 'no-store') lets the browser revalidate with
+      // If-None-Match; the server answers 304 when nothing changed and the
+      // cached body is served transparently.
+      const response = await fetch(url, { signal: controller.signal, cache: 'no-cache' });
       const data = await response.json();
       if (response.ok) {
         const uniqueImages = dedupeGalleryImages(data.images || []);
@@ -314,7 +287,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           );
         }
         if (syncNamespaces || forceRefresh) {
-          void fetchNamespaces('no-store');
+          void fetchNamespaces('no-cache');
         }
       }
     } catch (error) {
@@ -803,8 +776,11 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   );
 
   useEffect(() => {
+    // A pending return-from-detail restore owns the scroll position; the smooth
+    // scroll-to-top here would race the scrollY restore above and win.
+    if (initialGalleryReturnStateRef.current && !didRestoreReturnStateRef.current) return;
     scrollGalleryToTop();
-  }, [scrollGalleryToTop]);
+  }, [initialGalleryReturnStateRef, scrollGalleryToTop]);
 
   const viewFilters = useGalleryViewFilters({
     activeColorSearchHex: colorSearchHex,
@@ -840,7 +816,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     serverPagination,
   });
 
-  if (loading) {
+  // Only blank to the skeleton when there is nothing to show; a hydrated grid
+  // stays visible while a fetch is in flight (stale-while-revalidate).
+  if (loading && images.length === 0) {
     return <GalleryLoadingState />;
   }
 

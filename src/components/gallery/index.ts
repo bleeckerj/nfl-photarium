@@ -36,5 +36,4 @@ export { GridSizeToggle } from './GridSizeToggle';
 export * from './modals';
 
 // Main component
-export { default as ImageGallery, ImageGallery as ImageGalleryComponent } from './ImageGallery';
 export type { ImageGalleryRef } from './types';

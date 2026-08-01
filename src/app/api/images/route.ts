@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCachedImages, getCacheStats } from '@/server/cloudflareImageCache';
-import { listVideoAssetRecordsWithSync } from '@/server/videoCatalogStorage';
+import { getVideoAssetCatalogVersion, listVideoAssetRecordsWithSync } from '@/server/videoCatalogStorage';
 import {
   getImageExtrasRecords,
   getImageFolderOverrides,
@@ -8,26 +8,21 @@ import {
 } from '@/server/imageExtras';
 import { queryGalleryAssets, sortGalleryAssetsByUploadedDesc, type GalleryQueryAsset } from '@/server/galleryQuery';
 import {
-  applyFolderOverridesToAssets,
-  collectDirectFamilyAssets,
-  matchesMediaFilter,
-  matchesNamespace,
-  mergeUniqueAssets,
   parseAspectClasses,
   parseBooleanParam,
   parseCsvParam,
   parseEmbeddingFilter,
   toListableImage,
-  type ScopedAsset,
 } from '@/server/galleryQueryRoute';
-import {
-  applyVideoAnimatedWebpComfyProvenance,
-  buildVideoAnimatedWebpComfyProvenanceMap,
-} from '@/server/videoAnimatedWebpComfyProvenance';
+import { getScopedAssetAssembly } from '@/server/galleryScopeAssembly';
 import { matchesAspectRatioClass, normalizeAspectRatioClass } from '@/utils/aspectRatioClass';
 import { loadGalleryOptionalMetadata } from '@/server/galleryOptionalMetadata';
 import { analyzeGalleryDuplicates } from '@/server/galleryDuplicateAnalysis';
-import { finalizeGalleryResponseDiagnostics } from '@/server/galleryResponseDiagnostics';
+import {
+  buildGalleryCollectionEtag,
+  finalizeGalleryResponseDiagnostics,
+  GALLERY_REVALIDATE_CACHE_CONTROL,
+} from '@/server/galleryResponseDiagnostics';
 import { randomUUID } from 'node:crypto';
 
 export async function GET(request: NextRequest) {
@@ -121,83 +116,127 @@ export async function GET(request: NextRequest) {
 
     const images = await cachePromise;
     const allVideos = await videosPromise;
-    const animatedWebpComfyProvenance = buildVideoAnimatedWebpComfyProvenanceMap(allVideos);
-    const imagesWithVideoProvenance = applyVideoAnimatedWebpComfyProvenance(images, animatedWebpComfyProvenance);
-    diagnostics.animated_webp_comfy_provenance_count = animatedWebpComfyProvenance.size;
-    const filteredImages = await markStage('namespace_filter', () =>
-      imagesWithVideoProvenance.filter((image) => matchesNamespace(image.namespace, namespace))
-    );
-    diagnostics.filtered_image_count = filteredImages.length;
 
-    const mappedVideos = allVideos.map((video) => ({
-      id: video.id,
-      assetType: 'video' as const,
-      generatedBy: typeof video.generatedBy === 'string' ? video.generatedBy : undefined,
-      comfyMetadataDetected: Boolean(video.comfyMetadataDetected),
-      comfyMetadataSource: typeof video.comfyMetadataSource === 'string' ? video.comfyMetadataSource : undefined,
-      filename: video.filename,
-      displayName: video.displayName || video.filename,
-      uploaded: video.uploaded,
-      variants: [
-        video.animatedWebpUrl,
-        video.thumbnailUrl,
-        video.playbackUrl,
-        video.hlsUrl,
-      ].filter(Boolean),
-      folder: video.folder,
-      tags: video.tags,
-      description: video.description,
-      originalUrl: video.originalUrl,
-      sourceUrl: video.sourceUrl,
-      namespace: video.namespace,
-      parentId: video.parentId,
-      variationSort: video.variationSort,
-      videoStatus: video.videoStatus,
-      videoDurationSeconds: video.durationSeconds,
-      videoPlaybackUrl: video.playbackUrl,
-      videoHlsUrl: video.hlsUrl,
-      videoThumbnailUrl: video.thumbnailUrl,
-      videoPreviewUrl: video.previewUrl,
-      videoAnimatedWebpUrl: video.animatedWebpUrl,
-      hasClipEmbedding: video.hasClipEmbedding,
-      dimensions: video.width && video.height
-        ? { width: video.width, height: video.height }
-        : undefined,
-      aspectRatio: video.aspectRatio,
-    }));
-    const scopedVideos = mappedVideos.filter((video) => matchesNamespace(video.namespace, namespace));
-    const limitedVideos = scopedVideos.slice(0, videoLimit);
-    diagnostics.video_scoped_count = scopedVideos.length;
-    diagnostics.video_returned_count = limitedVideos.length;
+    // Everything in the response body normally derives from three versioned
+    // inputs: the image catalog, the folder-override map, and the video
+    // catalog. With all three loads settled (and their background refresh
+    // triggers fired, exactly as on a full response), an unchanged version
+    // triple means a byte-identical response — answer 304 and skip assembly
+    // entirely. Exception: requests that merge Redis-side color/aspect/
+    // embedding metadata consume data with no version counter (background
+    // embedding jobs mutate it), so they always get a full response.
+    const consumesUnversionedMetadata =
+      includeVectorMeta ||
+      embedding !== 'none' ||
+      aspectRatioClasses.length > 0 ||
+      Boolean(normalizedAspectRatioClass || aspectRatio);
+    await folderOverridesPromise.catch(() => null);
+    const requestEtag = consumesUnversionedMetadata
+      ? undefined
+      : buildGalleryCollectionEtag('g1', [
+          getCacheStats().contentVersion ?? 0,
+          getImageFolderOverridesVersion(),
+          getVideoAssetCatalogVersion(),
+          request.nextUrl.search,
+        ]);
+    if (requestEtag && !forceRefresh && request.headers.get('if-none-match') === requestEtag) {
+      timings.total = mark(performance.now() - startedAt);
+      return new NextResponse(null, {
+        status: 304,
+        headers: {
+          'Cache-Control': GALLERY_REVALIDATE_CACHE_CONTROL,
+          ETag: requestEtag,
+          'X-Photarium-Request-ID': requestId,
+          'Server-Timing': `total;dur=${timings.total}`,
+        },
+      });
+    }
+
+    const parsedPage = pageParam ? Number(pageParam) : NaN;
+    const parsedPageSize = pageSizeParam ? Number(pageSizeParam) : NaN;
+    const hasPagination = Number.isFinite(parsedPage) || Number.isFinite(parsedPageSize);
+    const page = Number.isFinite(parsedPage) && parsedPage > 0 ? Math.floor(parsedPage) : 1;
+    const pageSize = Number.isFinite(parsedPageSize) && parsedPageSize > 0
+      ? Math.min(500, Math.floor(parsedPageSize))
+      : 60;
+    const hasGalleryQueryParams = Boolean(
+      search ||
+      folder ||
+      tag ||
+      onlyCanonical ||
+      onlyWithVariants ||
+      favorites ||
+      duplicates ||
+      includeDuplicateSummary ||
+      comfy ||
+      embedding !== 'none' ||
+      aspectRatioClasses.length > 0 ||
+      dateStart ||
+      dateEnd ||
+      dateTimeZone ||
+      hiddenFolders.length > 0 ||
+      hiddenTags.length > 0 ||
+      hiddenNamespaces.length > 0
+    );
+    const hasFocusQuery = Boolean(focusAssetId);
+    // Folder filtering, hidden-folder filtering, and folder facets all need the
+    // extras-stored folder for each image; the write-through in-memory map was
+    // already awaited above for the ETag.
+    const needsFolderOverrides = hasPagination || hasGalleryQueryParams || hasFocusQuery;
+    const folderOverrides = needsFolderOverrides ? await folderOverridesPromise : null;
+    diagnostics.query_extras_image_count = folderOverrides ? folderOverrides.size : 0;
+
+    const cacheStats = getCacheStats();
+    const catalogVersion = cacheStats.contentVersion ?? cacheStats.lastFetched ?? 0;
+    const catalogSource = cacheStats.source ?? (cacheStats.initialized ? 'memory' : 'empty');
+    const lastReconciledAt = cacheStats.lastReconciledAt ?? cacheStats.lastFetched ?? 0;
+    const scopeVersions = [
+      catalogVersion,
+      getImageFolderOverridesVersion(),
+      getVideoAssetCatalogVersion(),
+      namespace ?? '__all__',
+      mediaFilter ?? '__none__',
+      includeFamilyFor || '__none__',
+      videoLimit,
+      videoAssetsEnabled ? 'v1' : 'v0',
+    ].join('|');
+    const assembly = await markStage('scope_assembly', () =>
+      getScopedAssetAssembly({
+        cacheKey: `${scopeVersions}|overrides:${folderOverrides ? '1' : '0'}`,
+        images,
+        allVideos,
+        namespace,
+        mediaFilter,
+        includeFamilyFor,
+        videoLimit,
+        folderOverrides,
+      })
+    );
+    diagnostics.animated_webp_comfy_provenance_count = assembly.provenanceCount;
+    diagnostics.filtered_image_count = assembly.filteredImageCount;
+    diagnostics.video_scoped_count = assembly.videoScopedCount;
+    diagnostics.video_returned_count = assembly.videoReturnedCount;
     const videoMeta = {
       enabled: videoAssetsEnabled,
       limit: videoLimit,
-      returned: limitedVideos.length,
-      totalScoped: scopedVideos.length,
-      truncated: scopedVideos.length > limitedVideos.length,
+      returned: assembly.videoReturnedCount,
+      totalScoped: assembly.videoScopedCount,
+      truncated: assembly.videoScopedCount > assembly.videoReturnedCount,
     };
-    const familyAssets = includeFamilyFor
-      ? await markStage('family_collect', () => collectDirectFamilyAssets([...imagesWithVideoProvenance, ...mappedVideos], includeFamilyFor))
-      : [];
-    const mergedScopedAssets = mergeUniqueAssets(
-      [...filteredImages, ...limitedVideos],
-      familyAssets
-    );
-    const scopedAssets = mergedScopedAssets.filter((asset) => matchesMediaFilter(asset as ScopedAsset, mediaFilter));
-    diagnostics.family_asset_count = familyAssets.length;
+    diagnostics.family_asset_count = assembly.familyAssetCount;
     diagnostics.media_filter = mediaFilter;
-    diagnostics.scoped_asset_count = scopedAssets.length;
-    diagnostics.scoped_asset_count_before_media_filter = mergedScopedAssets.length;
-    const scopedImageIds = new Set(
-      scopedAssets
-        .filter((asset) => !('assetType' in asset) || asset.assetType !== 'video')
-        .map((asset) => asset.id)
-    );
+    diagnostics.scoped_asset_count = assembly.scopedAssets.length;
+    diagnostics.scoped_asset_count_before_media_filter = assembly.mergedScopedCount;
+    const scopedImageIds = assembly.scopedImageIds;
     diagnostics.scoped_image_count = scopedImageIds.size;
-    
+
     // Optional: merge embedding status from Redis.
     // Keep this off by default so gallery can render immediately and enrich asynchronously.
-    let imagesWithEmbeddings = imagesWithVideoProvenance.filter((image) => scopedImageIds.has(image.id));
+    // Note the scoped assets already carry folder overrides, so enrichment
+    // spreads preserve them.
+    let imagesWithEmbeddings = assembly.scopedAssets.filter(
+      (asset) => asset.assetType !== 'video'
+    ) as unknown as typeof images;
     const needsColorMetadata = includeVectorMeta || embedding !== 'none';
     const needsAspectMetadata =
       includeVectorMeta ||
@@ -250,57 +289,13 @@ export async function GET(request: NextRequest) {
     }
 
     const enrichedImageMap = new Map(imagesWithEmbeddings.map((image) => [image.id, image]));
-    const finalAssetsBeforeQuery = scopedAssets.map((asset) => {
-      if ('assetType' in asset && asset.assetType === 'video') {
+    const finalAssetsBeforeQuery = assembly.scopedAssets.map((asset) => {
+      if (asset.assetType === 'video') {
         return asset;
       }
-      return enrichedImageMap.get(asset.id) ?? asset;
+      return (enrichedImageMap.get(asset.id) as GalleryQueryAsset | undefined) ?? asset;
     });
-    let finalImages: GalleryQueryAsset[] = finalAssetsBeforeQuery as GalleryQueryAsset[];
-    const parsedPage = pageParam ? Number(pageParam) : NaN;
-    const parsedPageSize = pageSizeParam ? Number(pageSizeParam) : NaN;
-    const hasPagination = Number.isFinite(parsedPage) || Number.isFinite(parsedPageSize);
-    const page = Number.isFinite(parsedPage) && parsedPage > 0 ? Math.floor(parsedPage) : 1;
-    const pageSize = Number.isFinite(parsedPageSize) && parsedPageSize > 0
-      ? Math.min(500, Math.floor(parsedPageSize))
-      : 60;
-    const hasGalleryQueryParams = Boolean(
-      search ||
-      folder ||
-      tag ||
-      onlyCanonical ||
-      onlyWithVariants ||
-      favorites ||
-      duplicates ||
-      includeDuplicateSummary ||
-      comfy ||
-      embedding !== 'none' ||
-      aspectRatioClasses.length > 0 ||
-      dateStart ||
-      dateEnd ||
-      dateTimeZone ||
-      hiddenFolders.length > 0 ||
-      hiddenTags.length > 0 ||
-      hiddenNamespaces.length > 0
-    );
-    const hasFocusQuery = Boolean(focusAssetId);
-    // Folder filtering, hidden-folder filtering, and folder facets all need the
-    // extras-stored folder for each image. We used to MGET the entire extras
-    // dataset (~18k keys, ~270ms) on every request to do this merge -- now we
-    // consult a write-through in-memory map that is populated once on first
-    // request and updated synchronously after every extras mutation. The
-    // populate was kicked off in parallel above, so on warm requests this
-    // await is effectively free.
-    const needsFolderOverrides = hasPagination || hasGalleryQueryParams || hasFocusQuery;
-    const folderOverrides = needsFolderOverrides
-      ? await markStage('query_extras_load', () => folderOverridesPromise)
-      : null;
-    diagnostics.query_extras_image_count = folderOverrides ? folderOverrides.size : 0;
-    if (folderOverrides && folderOverrides.size > 0) {
-      finalImages = await markStage('query_extras_folder_merge', () =>
-        applyFolderOverridesToAssets(finalImages, folderOverrides)
-      );
-    }
+    let finalImages: GalleryQueryAsset[] = finalAssetsBeforeQuery;
     if ((aspectRatioClass || aspectRatio) && aspectRatioClasses.length === 0) {
       finalImages = finalImages.filter((image) => {
         const entry = image as GalleryQueryAsset;
@@ -317,26 +312,10 @@ export async function GET(request: NextRequest) {
     }
 
     diagnostics.pre_pagination_count = finalImages.length;
-    // Build a stable scope key that uniquely identifies the dataset+scope
-    // passed into queryGalleryAssets. As long as this key is unchanged
-    // between requests, the family/facet/hidden-filter intermediates can be
-    // safely reused. The key intentionally excludes per-request filters
-    // (search, folder, tag, page, etc.) because those are applied AFTER
-    // the memoized stage.
-    const cacheStats = getCacheStats();
-    const catalogVersion = cacheStats.contentVersion ?? cacheStats.lastFetched ?? 0;
-    const catalogSource = cacheStats.source ?? (cacheStats.initialized ? 'memory' : 'empty');
-    const lastReconciledAt = cacheStats.lastReconciledAt ?? cacheStats.lastFetched ?? 0;
-    const scopeKey = [
-      'v2',
-      catalogVersion,
-      getImageFolderOverridesVersion(),
-      namespace ?? '__all__',
-      mediaFilter ?? '__none__',
-      includeFamilyFor || '__none__',
-      videoLimit,
-      videoAssetsEnabled ? 'v1' : 'v0',
-    ].join('|');
+    // Stable scope key for queryGalleryAssets' family/facet/projection memos.
+    // Same version-counted inputs as the assembly memo; per-request filters
+    // (search, folder, tag, page, etc.) are applied AFTER the memoized stage.
+    const scopeKey = `v3|${scopeVersions}`;
     const queryFilters = {
       search,
       folder,
@@ -477,9 +456,13 @@ export async function GET(request: NextRequest) {
           }
         : null,
     };
-    const payloadBytes = Buffer.byteLength(JSON.stringify(responseBody));
-    diagnostics.payload_kb = mark(payloadBytes / 1024);
-    const response = NextResponse.json(responseBody);
+    // Serialize once: the same string feeds both the payload-size diagnostic
+    // and the response body.
+    const serializedBody = JSON.stringify(responseBody);
+    diagnostics.payload_kb = mark(Buffer.byteLength(serializedBody) / 1024);
+    const response = new NextResponse(serializedBody, {
+      headers: { 'content-type': 'application/json' },
+    });
     finalizeGalleryResponseDiagnostics(response, {
       requestId, timings, diagnostics,
       cache: { ...cache, contentVersion: catalogVersion, source: catalogSource, lastReconciledAt },
@@ -487,6 +470,10 @@ export async function GET(request: NextRequest) {
         includeVectorMeta, includeDuplicateSummary, forceRefresh,
         namespace: namespace ?? null, mediaFilter, videoLimit, includeFamilyFor,
       },
+      // The tag computed before assembly, not current counters: if a version
+      // bumped mid-request the stale tag just forces the next conditional
+      // request to a full 200, which errs toward freshness.
+      etag: requestEtag,
     });
     return response;
   } catch (error) {
