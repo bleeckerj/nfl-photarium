@@ -26,7 +26,7 @@ const getRequest = (request: ImageToolRequest) => {
 const manifest: ImageToolAdapter['manifest'] = {
   id: 'aspect-ratio-expand',
   label: 'Generative aspect-ratio expansion',
-  description: 'Extend an image into a new aspect ratio with OpenAI image edits or a configured ComfyUI workflow.',
+  description: 'Extend an image into a new aspect ratio while keeping the main subject dominant and reasonably close to the camera, using OpenAI image edits or a configured ComfyUI workflow.',
   adapterKind: 'aspect-ratio-provider',
   inputAssetTypes: ['image'],
   outputModes: ['still'],
@@ -34,7 +34,7 @@ const manifest: ImageToolAdapter['manifest'] = {
   resultKinds: ['image'],
   presentation: {
     thumbnailUrl: '/image-tools/grainrad-preview.svg',
-    shortDescription: 'Preserve the source image while generating the added canvas area.',
+    shortDescription: 'Preserve the source image and keep its main subject visually dominant while generating the added canvas area.',
   },
   controls: [
     {
@@ -73,6 +73,7 @@ const manifest: ImageToolAdapter['manifest'] = {
     {
       id: 'params.instructions',
       label: 'Expansion instructions',
+      helpText: 'Describe scene continuity while keeping the main subject prominent and reasonably close to the camera. The plugin protects subject dominance when the target ratio could diminish it.',
       type: 'textarea',
       defaultValue: '',
       group: 'general',

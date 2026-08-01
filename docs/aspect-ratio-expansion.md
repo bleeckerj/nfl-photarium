@@ -1,6 +1,6 @@
 # Generative aspect-ratio expansion
 
-Photarium’s image detail page supports deterministic crops and generative expansion. Expand preserves the full source image and generates only the added canvas area, then shows a preview before saving the result as a child variant.
+Photarium’s image detail page supports deterministic crops and generative expansion. Expand preserves the full source image and generates only the added canvas area, then shows a preview before saving the result as a child variant. The expansion prompt keeps the main subject dominant, visually featured, and reasonably close to the camera; when a target ratio could diminish that prominence, the generated composition favors a closer framing or supporting context around the subject.
 
 ## Providers
 

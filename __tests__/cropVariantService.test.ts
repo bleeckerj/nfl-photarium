@@ -5,6 +5,7 @@ import {
   computeOutpaintCanvas,
   computeWidthPreservingCrop,
   cropImageToWebp,
+  buildOutpaintPrompt,
   outpaintImageToWebp,
   prepareOutpaintEditImage,
 } from '../src/server/cropVariantService';
@@ -188,6 +189,24 @@ describe('cropVariantService', () => {
     expect(prepared.canvas).toMatchObject({ targetWidth: 1280, targetHeight: 1280, x: 128, y: 0 });
     expect(leftCanvasAlpha).toBe(0);
     expect(sourceAlpha).toBe(255);
+  });
+
+  it('keeps the main subject dominant in the OpenAI expansion prompt', () => {
+    const prompt = buildOutpaintPrompt({
+      sourceWidth: 1024,
+      sourceHeight: 1280,
+      targetWidth: 1280,
+      targetHeight: 1280,
+      aspectRatio: '1:1',
+      placement: 'center',
+      x: 128,
+      y: 0,
+      padding: { top: 0, right: 128, bottom: 0, left: 128 },
+    });
+
+    expect(prompt).toContain('Keep the main subject dominant');
+    expect(prompt).toContain('reasonable close-to-camera presence');
+    expect(prompt).toContain('prevents that diminishment');
   });
 
   it('requires an OpenAI API key for outpaint generation', async () => {

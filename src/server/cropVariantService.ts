@@ -1,4 +1,6 @@
 import sharp from 'sharp';
+
+import { ASPECT_RATIO_SUBJECT_PRESERVATION_INSTRUCTION } from '@/server/image-tools/aspectRatioSubjectPrompt';
 import { fetchCloudflareImage, getCloudflareCredentials } from '@/server/cloudflareClient';
 import { fetchOriginalImageBlob } from '@/server/animatedWebpService';
 import { uploadImageBuffer } from '@/server/uploadService';
@@ -275,11 +277,12 @@ export function computeOutpaintCanvas(input: {
   };
 }
 
-function buildOutpaintPrompt(canvas: OutpaintCanvasGeometry, additionalPrompt?: string) {
+export function buildOutpaintPrompt(canvas: OutpaintCanvasGeometry, additionalPrompt?: string) {
   return [
     'Expand this image to fill the transparent canvas while preserving the original image exactly.',
     'Only generate visual content in the transparent outer area.',
     'Continue the scene naturally with matching lighting, perspective, texture, color, depth of field, and photographic style.',
+    ASPECT_RATIO_SUBJECT_PRESERVATION_INSTRUCTION,
     `Target aspect ratio: ${canvas.aspectRatio}. Original image placement: ${canvas.placement}.`,
     ...(additionalPrompt?.trim() ? [`Additional instructions: ${additionalPrompt.trim()}`] : []),
   ].join(' ');

@@ -80,9 +80,14 @@ describe('GET /api/image-tools', () => {
       id: 'aspect-ratio-expand',
       adapterKind: 'aspect-ratio-provider',
       supportsAsync: true,
+      description: expect.stringContaining('main subject dominant'),
       controls: expect.arrayContaining([
         expect.objectContaining({ id: 'params.provider', type: 'select' }),
         expect.objectContaining({ id: 'params.aspectRatio', type: 'text' }),
+        expect.objectContaining({
+          id: 'params.instructions',
+          helpText: expect.stringContaining('main subject'),
+        }),
       ]),
     }));
   });

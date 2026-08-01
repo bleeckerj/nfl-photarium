@@ -38,6 +38,9 @@ describe('ComfyUI aspect-ratio workflow overrides', () => {
       custom_aspect_ratio: '3:2',
     });
     expect(workflow.positive.inputs?.prompt).toContain('Continue the street scene.');
+    expect(workflow.positive.inputs?.prompt).toContain('Keep the main subject dominant');
+    expect(workflow.positive.inputs?.prompt).toContain('reasonable close-to-camera presence');
+    expect(workflow.positive.inputs?.prompt).toContain('prevents that diminishment');
     expect(workflow.positive.inputs?.prompt).toContain('positioned right');
     expect(workflow.negative.inputs?.prompt).toBe('No text.');
     expect(workflow.seed.inputs?.seed).toBe(42);

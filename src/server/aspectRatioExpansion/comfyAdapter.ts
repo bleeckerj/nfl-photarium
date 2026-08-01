@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
 
+import { ASPECT_RATIO_SUBJECT_PRESERVATION_INSTRUCTION } from '@/server/image-tools/aspectRatioSubjectPrompt';
 import type {
   AspectRatioExpansionAdapter,
   AspectRatioExpansionProviderStatus,
@@ -145,6 +146,7 @@ export function applyComfyWorkflowOverrides(params: {
   if ('custom_aspect_ratio' in aspectInputs) aspectInputs.custom_aspect_ratio = request.aspectRatio;
   const positivePrompt = [
     request.instructions,
+    ASPECT_RATIO_SUBJECT_PRESERVATION_INSTRUCTION,
     `Preserve the complete source image while extending to ${request.aspectRatio}; keep the source positioned ${request.placement}.`,
   ].filter(Boolean).join(' ');
   setNodeInput(workflow, params.positiveNode, 'prompt', positivePrompt);
