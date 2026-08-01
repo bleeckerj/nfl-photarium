@@ -5,10 +5,13 @@
  * Search for similar images by various methods
  * 
  * Request body:
- *   - type: 'text' | 'image' | 'color' | 'upload'
+ *   - type: 'text' | 'image' | 'color'
  *   - query: string (for text search or hex color)
  *   - imageId: string (for image-based search)
  *   - limit: number (default: 48, max: 100)
+ *
+ * To search by an uploaded reference image, use POST /api/images/search/upload
+ * (multipart/form-data) instead.
  * 
  * Examples:
  *   POST { "type": "text", "query": "sunset on beach" }

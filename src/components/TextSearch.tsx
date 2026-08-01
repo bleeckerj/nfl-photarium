@@ -15,15 +15,22 @@
 
 import { useState, useCallback, useRef, useEffect, forwardRef, useImperativeHandle, type ReactNode } from 'react';
 import Image from 'next/image';
-import { Search, X, Loader2, Sparkles, History, Palette } from 'lucide-react';
+import { Search, X, Loader2, Sparkles, History, Palette, ImageUp } from 'lucide-react';
 import { getCloudflareImageUrl } from '@/utils/imageUtils';
 import ColorWheel from './ColorWheel';
+import ReferenceImageDropzone from './ReferenceImageDropzone';
+import {
+  buildReferenceSearchFormData,
+  formatWarningMessage,
+  type ReferenceSearchResponse,
+} from './referenceImageSearch';
 
 interface SearchResult {
   imageId: string;
   score?: number;
   filename?: string;
   folder?: string;
+  matchType?: string;
   assetType?: 'image' | 'video';
   videoThumbnailUrl?: string;
   videoPlaybackUrl?: string;
@@ -81,16 +88,34 @@ const TextSearch = forwardRef<TextSearchRef, TextSearchProps>(function TextSearc
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
   const [showPresets, setShowPresets] = useState(false);
   const [hoverPreview, setHoverPreview] = useState<HoverPreview | null>(null);
-  const [searchType, setSearchType] = useState<'text' | 'color'>('text');
+  const [searchType, setSearchType] = useState<'text' | 'color' | 'image'>('text');
   const [searchAllNamespaces, setSearchAllNamespaces] = useState(false);
+  const [referenceFile, setReferenceFile] = useState<File | null>(null);
+  const [exactMatches, setExactMatches] = useState<SearchResult[]>([]);
+  const [coverage, setCoverage] = useState<ReferenceSearchResponse['coverage'] | null>(null);
+  const [searchWarnings, setSearchWarnings] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const clearReferenceSearchState = useCallback(() => {
+    setReferenceFile(null);
+    setExactMatches([]);
+    setCoverage(null);
+    setSearchWarnings([]);
+  }, []);
+
+  const switchSearchType = useCallback((next: 'text' | 'color' | 'image') => {
+    setSearchType(next);
+    if (next !== 'image') {
+      clearReferenceSearchState();
+    }
+  }, [clearReferenceSearchState]);
+
   const focusTextInput = useCallback(() => {
-    setSearchType('text');
+    switchSearchType('text');
     setShowPresets(true);
 
     inputRef.current?.focus();
-  }, []);
+  }, [switchSearchType]);
 
   useImperativeHandle(ref, () => ({
     focusInput: () => focusTextInput(),
@@ -188,6 +213,49 @@ const TextSearch = forwardRef<TextSearchRef, TextSearchProps>(function TextSearc
     }
   }, [query, searchType, addToHistory, effectiveNamespaceFilter]);
 
+  const searchByImage = useCallback(async (file: File, trigger: string = 'reference-selected') => {
+    setLoading(true);
+    setError(null);
+    setResults([]);
+    setExactMatches([]);
+    setCoverage(null);
+    setSearchWarnings([]);
+    setVisibleCount(PAGE_SIZE);
+
+    try {
+      const response = await fetch('/api/images/search/upload', {
+        method: 'POST',
+        headers: {
+          'x-photarium-component': 'TextSearch',
+          'x-photarium-trigger': trigger,
+          'x-photarium-source': 'ui',
+        },
+        body: buildReferenceSearchFormData(file, SEARCH_LIMIT, effectiveNamespaceFilter),
+      });
+
+      const data = await response.json() as ReferenceSearchResponse & { error?: string };
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Search failed');
+      }
+
+      setResults(data.results || []);
+      setExactMatches(data.exactMatches || []);
+      setCoverage(data.coverage ?? null);
+      setSearchWarnings(data.warnings || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Search failed');
+    } finally {
+      setLoading(false);
+    }
+  }, [effectiveNamespaceFilter]);
+
+  const handleReferenceSelected = useCallback((file: File) => {
+    setReferenceFile(file);
+    setError(null);
+    searchByImage(file);
+  }, [searchByImage]);
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -200,8 +268,9 @@ const TextSearch = forwardRef<TextSearchRef, TextSearchProps>(function TextSearc
     setResults([]);
     setVisibleCount(PAGE_SIZE);
     setError(null);
+    clearReferenceSearchState();
     inputRef.current?.focus();
-  }, []);
+  }, [clearReferenceSearchState]);
 
   const getScoreLabel = (score: number): string => {
     if (score < 0.20) return 'Perfect match';
@@ -258,7 +327,7 @@ const TextSearch = forwardRef<TextSearchRef, TextSearchProps>(function TextSearc
       {/* Search type toggle */}
       <div className="flex gap-2 mb-3">
         <button
-          onClick={() => setSearchType('text')}
+          onClick={() => switchSearchType('text')}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-medium transition-colors ${
             searchType === 'text'
               ? 'bg-purple-600 text-white'
@@ -269,7 +338,7 @@ const TextSearch = forwardRef<TextSearchRef, TextSearchProps>(function TextSearc
           Text
         </button>
         <button
-          onClick={() => setSearchType('color')}
+          onClick={() => switchSearchType('color')}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-medium transition-colors ${
             searchType === 'color'
               ? 'bg-purple-600 text-white'
@@ -278,6 +347,17 @@ const TextSearch = forwardRef<TextSearchRef, TextSearchProps>(function TextSearc
         >
           <Palette className="w-3 h-3" />
           Color
+        </button>
+        <button
+          onClick={() => switchSearchType('image')}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-medium transition-colors ${
+            searchType === 'image'
+              ? 'bg-purple-600 text-white'
+              : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+          }`}
+        >
+          <ImageUp className="w-3 h-3" />
+          Image
         </button>
       </div>
 
@@ -317,10 +397,33 @@ const TextSearch = forwardRef<TextSearchRef, TextSearchProps>(function TextSearc
         </div>
       )}
 
+      {/* Reference image dropzone - Image mode */}
+      {searchType === 'image' && (
+        <div className="mb-3">
+          <ReferenceImageDropzone
+            file={referenceFile}
+            onFileSelected={handleReferenceSelected}
+            onClear={() => {
+              clearReferenceSearchState();
+              setResults([]);
+              setError(null);
+            }}
+            onInvalidFile={(reason) => setError(reason)}
+            disabled={loading}
+          />
+        </div>
+      )}
+
       {/* Search button */}
       <button
-        onClick={() => search(undefined, 'button')}
-        disabled={loading || !query.trim()}
+        onClick={() => {
+          if (searchType === 'image') {
+            if (referenceFile) searchByImage(referenceFile, 'button');
+          } else {
+            search(undefined, 'button');
+          }
+        }}
+        disabled={loading || (searchType === 'image' ? !referenceFile : !query.trim())}
         className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-700 disabled:cursor-not-allowed text-white rounded-lg py-2 text-[12px] font-medium transition-colors flex items-center justify-center gap-2"
       >
         {loading ? (
@@ -388,6 +491,58 @@ const TextSearch = forwardRef<TextSearchRef, TextSearchProps>(function TextSearc
         <div className="mt-3 p-2 bg-red-900/30 border border-red-800 rounded-lg">
           <p className="text-red-400 text-xs">{error}</p>
         </div>
+      )}
+
+      {/* Reference-search warnings */}
+      {searchType === 'image' && searchWarnings.length > 0 && (
+        <div className="mt-3 p-2 bg-amber-900/30 border border-amber-800 rounded-lg space-y-1">
+          {searchWarnings.map((warning) => {
+            const message = formatWarningMessage(warning);
+            return message ? (
+              <p key={warning} className="text-amber-300 text-[11px]">{message}</p>
+            ) : null;
+          })}
+        </div>
+      )}
+
+      {/* Exact matches - reference image found in catalog */}
+      {searchType === 'image' && exactMatches.length > 0 && (
+        <div className="mt-4">
+          <p className="text-xs text-emerald-400 font-medium mb-2">
+            Found in your catalog — {exactMatches.length === 1 ? 'exact match' : `${exactMatches.length} exact matches`}
+          </p>
+          <div className="grid grid-cols-4 gap-2">
+            {exactMatches.map((result) => (
+              <div
+                key={result.imageId}
+                className="relative aspect-square rounded-lg overflow-hidden bg-gray-800 border-2 border-emerald-500 cursor-pointer hover:scale-105 transition-all duration-150"
+                style={{ minWidth: '70px', minHeight: '70px' }}
+                onClick={() => onImageClick?.(result)}
+                onMouseEnter={(e) => handleMouseEnter(e, result)}
+                onMouseLeave={handleMouseLeave}
+                title={`${result.filename || result.imageId}\nExact match`}
+              >
+                <Image
+                  src={result.assetType === 'video' && result.videoThumbnailUrl
+                    ? result.videoThumbnailUrl
+                    : getCloudflareImageUrl(result.imageId, 'medium')}
+                  alt={result.filename || 'Exact match'}
+                  fill
+                  className="object-cover"
+                  sizes="100px"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Empty reference-search result */}
+      {searchType === 'image' && referenceFile && !loading && !error &&
+        results.length === 0 && exactMatches.length === 0 && (
+        <p className="mt-3 text-[11px] text-gray-400 text-center">
+          No matches found for this reference image.
+        </p>
       )}
 
       {/* Results */}
@@ -467,6 +622,13 @@ const TextSearch = forwardRef<TextSearchRef, TextSearchProps>(function TextSearc
         </div>
       )}
 
+      {/* Embedding coverage hint */}
+      {searchType === 'image' && coverage && coverage.notIndexed > 0 && (
+        <p className="mt-2 text-[10px] text-gray-500 text-center">
+          {coverage.notIndexed} of {coverage.totalImages} images not yet indexed for visual search
+        </p>
+      )}
+
       {/* Hover preview tooltip */}
       {hoverPreview && (
         <div
@@ -481,7 +643,7 @@ const TextSearch = forwardRef<TextSearchRef, TextSearchProps>(function TextSearc
             <div className="relative w-48 h-48">
               <Image
                 src={(() => {
-                  const result = results.find((entry) => entry.imageId === hoverPreview.imageId);
+                  const result = [...exactMatches, ...results].find((entry) => entry.imageId === hoverPreview.imageId);
                   if (result?.assetType === 'video' && result.videoThumbnailUrl) {
                     return result.videoThumbnailUrl;
                   }

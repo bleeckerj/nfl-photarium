@@ -38,8 +38,40 @@ This document describes Photarium's search capabilities, including semantic simi
 | Backfill script | ✅ Implemented | `backfill-embeddings.mjs` |
 | UI: Semantic Cluster | ✅ Implemented | Image detail page |
 | UI: Antipode Search | ✅ Implemented | Image detail page |
+| Reference-image search | ✅ Implemented | Upload/paste an image to find lookalikes |
 | Combined filters | 🔄 Partial | Basic filtering available |
 | Bulk similarity grouping | ❌ Not started | Find near-duplicates |
+
+### Reference-Image Search
+
+`POST /api/images/search/upload` (multipart/form-data) searches the catalog with an
+ephemeral reference image — the file is never added to the catalog.
+
+Fields: `file` (required, max 25MB), `limit` (default 48, max 100), `namespace`.
+
+Response:
+
+```json
+{
+  "type": "upload",
+  "exactMatches": [{ "imageId": "…", "score": 1, "matchType": "exact" }],
+  "results": [{ "imageId": "…", "score": 0.18 }],
+  "count": 48,
+  "coverage": { "totalImages": 19012, "withClip": 18400, "notIndexed": 612 },
+  "warnings": []
+}
+```
+
+- `exactMatches`: catalog images whose `contentHash` matches the reference bytes
+  (raw or prepared form) — byte-identical files only; not namespace-scoped.
+- `results`: CLIP nearest neighbors (honors `x-clip`/`x-search` exclusion tags and
+  the `namespace` scope). A screenshot or re-export won't hash-match, but the
+  original usually ranks near the top here.
+- Degradation: embedding provider down → 200 with `warnings: ["clip-unavailable"]`;
+  Redis down → 503 unless exact matches were found.
+
+UI: the gallery Semantic Search panel has an **Image** mode (drag-drop, paste, or
+file picker) implemented in `ReferenceImageDropzone.tsx` / `TextSearch.tsx`.
 
 ---
 
