@@ -36,8 +36,8 @@ describe('image uploader helpers', () => {
   });
 
   it('builds the uploader gallery summary URL for namespace states', () => {
-    expect(buildUploaderGallerySummaryUrl('__all__')).toBe('/api/images?page=1&pageSize=500&namespace=__all__');
-    expect(buildUploaderGallerySummaryUrl('studio')).toBe('/api/images?page=1&pageSize=500&namespace=studio');
+    expect(buildUploaderGallerySummaryUrl('__all__')).toBe('/api/images?page=1&pageSize=1&namespace=__all__');
+    expect(buildUploaderGallerySummaryUrl('studio')).toBe('/api/images?page=1&pageSize=1&namespace=studio');
   });
 
   it('extracts AVIF images from archives with the correct MIME type', async () => {

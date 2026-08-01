@@ -38,7 +38,20 @@ export function getAllCachedDimensions(): Map<string, { width: number; height: n
  * @param shouldCalculate - Whether to calculate the aspect ratio (default: true)
  * @returns Object with aspect ratio, dimensions, loading state, and error
  */
-export function useImageAspectRatio(imageId: string, shouldCalculate: boolean = true): AspectRatioResult {
+export function useImageAspectRatio(
+  imageId: string,
+  shouldCalculate: boolean = true,
+  options?: {
+    /**
+     * Cloudflare variant to probe. Defaults to 'thumbnail' (w=150): resizing
+     * preserves the aspect ratio at a fraction of the bytes of the full-res
+     * original. Pass 'public' only when the caller needs true pixel
+     * dimensions, not just the ratio.
+     */
+    probeVariant?: string;
+  }
+): AspectRatioResult {
+  const probeVariant = options?.probeVariant ?? 'thumbnail';
   // Initialize from cache synchronously to prevent flickering
   const cached = imageId ? aspectRatioCache.get(imageId) : undefined;
   
@@ -82,8 +95,7 @@ export function useImageAspectRatio(imageId: string, shouldCalculate: boolean = 
       setError(null);
 
       try {
-        // Use the original/public variant to get true dimensions
-        const imageUrl = getCloudflareImageUrl(imageId, 'public');
+        const imageUrl = getCloudflareImageUrl(imageId, probeVariant);
         
         // Check if still should proceed
         if (abortController.signal.aborted) {
@@ -138,7 +150,7 @@ export function useImageAspectRatio(imageId: string, shouldCalculate: boolean = 
       clearTimeout(timeoutId);
       abortController.abort();
     };
-  }, [imageId, shouldCalculate]);
+  }, [imageId, shouldCalculate, probeVariant]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -206,7 +218,7 @@ export function useBatchAspectRatio(imageIds: string[], maxConcurrent: number = 
         
         const promises = batch.map(async (imageId) => {
           try {
-            const imageUrl = getCloudflareImageUrl(imageId, 'public');
+            const imageUrl = getCloudflareImageUrl(imageId, 'thumbnail');
             const imageDimensions = await getImageDimensions(imageUrl);
             const ratioResult = calculateAspectRatio(imageDimensions.width, imageDimensions.height);
 

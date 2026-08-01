@@ -57,6 +57,11 @@ export interface AdoptVariationSectionProps {
   adoptPageStart: number;
   adoptPageEnd: number;
   assignmentCandidatesLoading?: boolean;
+  /**
+   * When set, the empty state offers a "Browse all assets" button that loads
+   * the full candidate pool on demand (it is no longer prefetched).
+   */
+  onLoadAllCandidates?: () => void;
 
   onHandleThumbMouseMove: (url: string, label: string, evt: React.MouseEvent) => void;
   onHandleThumbLeave: () => void;
@@ -100,6 +105,7 @@ export function AdoptVariationSection(props: AdoptVariationSectionProps) {
     adoptPageStart,
     adoptPageEnd,
     assignmentCandidatesLoading = false,
+    onLoadAllCandidates,
     onHandleThumbMouseMove,
     onHandleThumbLeave,
     onHandleImageDragStart,
@@ -275,7 +281,22 @@ export function AdoptVariationSection(props: AdoptVariationSectionProps) {
       )}
 
       {filteredAssignmentCandidates.length === 0 && !assignmentCandidatesLoading ? (
-        <p className="text-xs text-gray-500">No assignment candidates found.</p>
+        onLoadAllCandidates ? (
+          <div className="flex flex-col items-start gap-2">
+            <p className="text-xs text-gray-500">
+              Search or filter above to find assets, or load the full list.
+            </p>
+            <button
+              type="button"
+              onClick={onLoadAllCandidates}
+              className="px-3 py-1 text-xs border rounded-md bg-white hover:bg-gray-100 text-gray-700"
+            >
+              Browse all assets
+            </button>
+          </div>
+        ) : (
+          <p className="text-xs text-gray-500">No assignment candidates found.</p>
+        )
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {pagedAssignmentCandidates.map((candidateRow) => {

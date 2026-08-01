@@ -1,10 +1,5 @@
 import { IMAGE_VARIANTS } from '@/utils/imageUtils';
 
-type AssignmentCandidate<T> = {
-  asset?: T;
-  parentAsset?: T;
-};
-
 export type BulkUpdateFailure = {
   id: string;
   name: string;
@@ -29,24 +24,6 @@ type AnimatedImage = {
 
 const VARIANT_DIMENSIONS = new Map(IMAGE_VARIANTS.map(variant => [variant.name, variant.width]));
 const MAX_CLOUDFLARE_TEXT_MIRROR_CHARS = 160;
-
-export const extractAssignmentCandidateAssets = <T extends { id: string }>(data: unknown): T[] => {
-  const payload = data as { assignmentCandidates?: Array<AssignmentCandidate<T>> } | null;
-  if (!Array.isArray(payload?.assignmentCandidates)) {
-    return [];
-  }
-
-  const assets: T[] = [];
-  payload.assignmentCandidates.forEach((candidate) => {
-    if (candidate.asset?.id) {
-      assets.push(candidate.asset);
-    }
-    if (candidate.parentAsset?.id) {
-      assets.push(candidate.parentAsset);
-    }
-  });
-  return assets;
-};
 
 export const ensureWebpFormat = (inputUrl: string) => {
   const parts = inputUrl.split('?');

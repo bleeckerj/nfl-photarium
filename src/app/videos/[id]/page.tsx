@@ -28,7 +28,6 @@ import { buildVariantAssignmentCandidates } from '@/utils/variantAssignmentCandi
 import {
   PRESET_MAP,
   createVariationDraft,
-  extractAssignmentCandidateAssets,
   formatBytes,
   formatDuration,
   getNow,
@@ -283,8 +282,7 @@ export default function VideoDetailPage() {
     const candidateAssets = includeCandidates && Array.isArray(payload.candidateAssets)
       ? payload.candidateAssets
       : [];
-    const assignmentCandidateAssets = includeCandidates ? extractAssignmentCandidateAssets(payload) : [];
-    const assets = [...familyAssets, ...candidateAssets, ...assignmentCandidateAssets];
+    const assets = [...familyAssets, ...candidateAssets];
     setAllAssets((prev) => mergeUniqueAssetsById(prev, assets));
     if (includeCandidates) {
       setCandidateAssetsLoaded(true);
@@ -359,20 +357,6 @@ export default function VideoDetailPage() {
   }, [fetchVideo]);
 
   useEffect(() => {
-    if (candidateAssetsLoaded || candidateAssetsRequested) return;
-    if (!adoptSearch.trim() && !adoptFolderFilter && adoptScope === 'current' && !adoptAssetTypeFilter) return;
-    void fetchCandidateAssets();
-  }, [
-    adoptAssetTypeFilter,
-    adoptFolderFilter,
-    adoptScope,
-    adoptSearch,
-    candidateAssetsLoaded,
-    candidateAssetsRequested,
-    fetchCandidateAssets,
-  ]);
-
-  useEffect(() => {
     if (!autoRefreshStream) return;
     if (!id) return;
     if (video?.videoStatus !== 'pending') return;
@@ -430,6 +414,28 @@ export default function VideoDetailPage() {
     setAdoptScope(getDefaultAdoptVariationScope(adoptCurrentNamespace));
     adoptScopeDefaultedForIdRef.current = id;
   }, [adoptCurrentNamespace, id, parentImage, video]);
+
+  // A scope that merely defaulted to 'all' (namespace-less asset) is not a
+  // user interaction and must not auto-load the candidate pool. The scope
+  // value carries no signal until the per-id default has been applied.
+  const adoptScopeIsDefault = adoptScope === getDefaultAdoptVariationScope(adoptCurrentNamespace);
+
+  useEffect(() => {
+    if (candidateAssetsLoaded || candidateAssetsRequested) return;
+    const scopeSettled = adoptScopeDefaultedForIdRef.current === id;
+    const scopeInteracted = scopeSettled && !adoptScopeIsDefault;
+    if (!adoptSearch.trim() && !adoptFolderFilter && !scopeInteracted && !adoptAssetTypeFilter) return;
+    void fetchCandidateAssets();
+  }, [
+    adoptAssetTypeFilter,
+    adoptFolderFilter,
+    adoptScopeIsDefault,
+    adoptSearch,
+    candidateAssetsLoaded,
+    candidateAssetsRequested,
+    fetchCandidateAssets,
+    id,
+  ]);
 
   const adoptScopeOptions = useMemo(
     () => [
@@ -1461,7 +1467,8 @@ export default function VideoDetailPage() {
               adoptPageSize={ADOPT_PAGE_SIZE}
               adoptPageStart={adoptPageStart}
               adoptPageEnd={adoptPageEnd}
-              assignmentCandidatesLoading={candidateAssetsLoading || (!candidateAssetsLoaded && Boolean(adoptSearch.trim() || adoptFolderFilter || adoptScope === 'all' || adoptAssetTypeFilter))}
+              assignmentCandidatesLoading={candidateAssetsLoading || (!candidateAssetsLoaded && Boolean(adoptSearch.trim() || adoptFolderFilter || !adoptScopeIsDefault || adoptAssetTypeFilter))}
+              onLoadAllCandidates={candidateAssetsLoaded || candidateAssetsLoading ? undefined : () => { void fetchCandidateAssets(); }}
               onHandleThumbMouseMove={handleThumbMouseMove}
               onHandleThumbLeave={handleThumbLeave}
               onHandleImageDragStart={handleAssetDragStart}

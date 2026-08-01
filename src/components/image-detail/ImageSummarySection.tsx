@@ -118,7 +118,7 @@ export const ImageSummarySection = ({
         Copy
       </button>
     </div>
-    <AspectRatioDisplay imageId={image.id} />
+    <AspectRatioDisplay imageId={image.id} aspectRatio={image.aspectRatio} />
 
     {image.hasClipEmbedding && (
       <div className="mt-4 pt-4 border-t border-gray-200">

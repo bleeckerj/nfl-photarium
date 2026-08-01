@@ -1,5 +1,4 @@
 import { cleanString } from '@/utils/cloudflareMetadata';
-import type { VariantAssignmentCandidate } from '@/utils/variantAssignmentCandidates';
 
 export type VideoRecord = {
   id: string;
@@ -99,7 +98,6 @@ export type AssetRecord = {
 export type FamilyContextResponse = {
   familyAssets?: AssetRecord[];
   candidateAssets?: AssetRecord[];
-  assignmentCandidates?: VariantAssignmentCandidate<AssetRecord>[];
   timings?: Record<string, number>;
   diagnostics?: Record<string, unknown>;
 };
@@ -183,15 +181,6 @@ export const PRESET_MAP = {
   balanced: { maxWidth: '960', maxOutputMb: '6', fps: '12' },
   quality: { maxWidth: '1280', maxOutputMb: '10', fps: '15' },
 } as const;
-
-export const extractAssignmentCandidateAssets = (payload: FamilyContextResponse): AssetRecord[] => {
-  if (!Array.isArray(payload.assignmentCandidates)) {
-    return [];
-  }
-  return payload.assignmentCandidates.flatMap((candidate) =>
-    [candidate.asset, candidate.parentAsset].filter((asset): asset is AssetRecord => Boolean(asset?.id))
-  );
-};
 
 export const mergeUniqueAssetsById = (base: AssetRecord[], incoming: AssetRecord[]) => {
   const merged = new Map<string, AssetRecord>();

@@ -103,7 +103,7 @@ export interface VariationsSectionProps {
   swapParentAssetCount: number;
   onSwapParent: (childId: string) => void | Promise<void>;
 
-  AspectRatioDisplay: React.ComponentType<{ imageId: string; className?: string }>;
+  AspectRatioDisplay: React.ComponentType<{ imageId: string; aspectRatio?: string; className?: string }>;
 
   variationPage: number;
   setVariationPage: React.Dispatch<React.SetStateAction<number>>;
@@ -511,7 +511,7 @@ export function VariationsSection(props: VariationsSectionProps) {
                       Copy
                     </button>
                   </div>
-                  <AspectRatioDisplay imageId={child.id} />
+                  <AspectRatioDisplay imageId={child.id} aspectRatio={child.aspectRatio} />
                   <div className="text-[11px] text-gray-500 break-words">ALT: {child.altTag || '—'}</div>
                   {!videoAsset && (
                     <button

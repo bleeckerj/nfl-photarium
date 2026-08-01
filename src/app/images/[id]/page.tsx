@@ -52,7 +52,6 @@ import { usePromptThisEditor } from '@/components/image-detail/usePromptThisEdit
 import { parseUserTagsInput, type ImageMetadataSaveResponse } from '@/components/image-detail/imageMetadataDraft';
 import {
   ensureWebpFormat,
-  extractAssignmentCandidateAssets,
   formatEntriesAsYaml,
   formatFailureNames,
   getVariantWidthLabel,
@@ -194,7 +193,6 @@ export default function ImageDetailPage() {
   const [swappingParentId, setSwappingParentId] = useState<string | null>(null);
   const [candidatePoolLoading, setCandidatePoolLoading] = useState(false);
   const [candidatePoolLoaded, setCandidatePoolLoaded] = useState(false);
-  const [candidatePoolFailed, setCandidatePoolFailed] = useState(false);
   const [adoptSearch, setAdoptSearch] = useState('');
   const [adoptFolderFilter, setAdoptFolderFilter] = useState('');
   const [adoptScope, setAdoptScope] = useState<'current' | 'all'>('current');
@@ -380,7 +378,6 @@ export default function ImageDetailPage() {
     candidatePoolRequestedRef.current = false;
     setCandidatePoolLoaded(false);
     setCandidatePoolLoading(false);
-    setCandidatePoolFailed(false);
     adoptScopeDefaultedForIdRef.current = null;
     if (seed) {
       logDetailPerf('seed:loaded', detailNavigationStartedAtRef.current, {
@@ -554,9 +551,13 @@ export default function ImageDetailPage() {
     }
     const startedAt = getNow();
     try {
+      // Family-only refresh: the candidate pool (if previously loaded) stays
+      // merged in allImages — mergeFamilyContextImages only prunes family
+      // members — and re-downloading the full pool after every mutation was
+      // the 95 MB-per-edit failure mode.
       const [imageResponse, familyResponse] = await Promise.all([
         fetchDetailImageResponse(id),
-        fetch(buildFamilyContextUrl({ includeCandidates: candidatePoolLoadedRef.current })),
+        fetch(buildFamilyContextUrl()),
       ]);
       const [imageData, familyData] = await Promise.all([
         imageResponse.json(),
@@ -570,16 +571,10 @@ export default function ImageDetailPage() {
       if (familyResponse.ok) {
         const incoming = [
           ...(Array.isArray(familyData?.familyAssets) ? familyData.familyAssets : []),
-          ...(Array.isArray(familyData?.candidateAssets) ? familyData.candidateAssets : []),
-          ...extractAssignmentCandidateAssets(familyData),
         ] as CloudflareImage[];
         const familyRootId =
           typeof familyData?.familyRootId === 'string' ? familyData.familyRootId : undefined;
         mergeContextImages(incoming, familyRootId);
-        if (familyData?.diagnostics?.include_candidates === true) {
-          candidatePoolLoadedRef.current = true;
-          setCandidatePoolLoaded(true);
-        }
       }
       setFamilyLoaded(true);
       logDetailPerf('refreshImageList:fetch', startedAt, {
@@ -711,7 +706,6 @@ export default function ImageDetailPage() {
 
     candidatePoolRequestedRef.current = true;
     setCandidatePoolLoading(true);
-    setCandidatePoolFailed(false);
     const startedAt = getNow();
     try {
       const response = await fetch(buildFamilyContextUrl({ includeCandidates: true }));
@@ -723,7 +717,6 @@ export default function ImageDetailPage() {
       const incoming = [
         ...(Array.isArray(data?.familyAssets) ? data.familyAssets : []),
         ...(Array.isArray(data?.candidateAssets) ? data.candidateAssets : []),
-        ...extractAssignmentCandidateAssets(data),
       ] as CloudflareImage[];
       const familyRootId = typeof data?.familyRootId === 'string' ? data.familyRootId : undefined;
       mergeContextImages(incoming, familyRootId);
@@ -736,8 +729,9 @@ export default function ImageDetailPage() {
         candidateCount: Array.isArray(data?.candidateAssets) ? data.candidateAssets.length : 0,
       });
     } catch (error) {
+      // Resetting the ref lets the Browse-all button (or a filter change)
+      // retry the pool fetch after a failure.
       candidatePoolRequestedRef.current = false;
-      setCandidatePoolFailed(true);
       console.warn('Failed to fetch adoptable candidates', error);
     } finally {
       setCandidatePoolLoading(false);
@@ -952,32 +946,22 @@ export default function ImageDetailPage() {
     adoptScopeDefaultedForIdRef.current = id;
   }, [adoptCurrentNamespace, id, image, resolvedParentImage]);
 
+  // The candidate pool loads only on a real adopt-panel interaction (or the
+  // Browse-all button). A scope that merely *defaulted* to 'all' for a
+  // namespace-less asset is not an interaction — comparing against the
+  // default keeps that case from auto-fetching the pool. Until the per-id
+  // default has been applied, the scope value carries no signal at all
+  // (comparing the initial 'current' against a blank-namespace default of
+  // 'all' would read as an interaction and refire the old auto-fetch).
+  const adoptScopeIsDefault = adoptScope === getDefaultAdoptVariationScope(adoptCurrentNamespace);
+
   useEffect(() => {
     if (!familyLoaded) return;
-    if (!adoptSearch.trim() && !adoptFolderFilter && adoptScope === 'current' && !adoptAssetTypeFilter) return;
+    const scopeSettled = adoptScopeDefaultedForIdRef.current === id;
+    const scopeInteracted = scopeSettled && !adoptScopeIsDefault;
+    if (!adoptSearch.trim() && !adoptFolderFilter && !scopeInteracted && !adoptAssetTypeFilter) return;
     void fetchCandidatePool();
-  }, [adoptAssetTypeFilter, adoptFolderFilter, adoptScope, adoptSearch, familyLoaded, fetchCandidatePool]);
-
-  useEffect(() => {
-    if (!familyLoaded) return;
-    if (candidatePoolLoadedRef.current || candidatePoolRequestedRef.current) return;
-
-    const loadCandidates = () => {
-      void fetchCandidatePool();
-    };
-
-    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-      const idleId = window.requestIdleCallback(loadCandidates, { timeout: 1500 });
-      return () => {
-        if ('cancelIdleCallback' in window) {
-          window.cancelIdleCallback(idleId);
-        }
-      };
-    }
-
-    const timeoutId = globalThis.setTimeout(loadCandidates, 750);
-    return () => globalThis.clearTimeout(timeoutId);
-  }, [familyLoaded, fetchCandidatePool, id]);
+  }, [adoptAssetTypeFilter, adoptFolderFilter, adoptScopeIsDefault, adoptSearch, familyLoaded, fetchCandidatePool, id]);
 
   useEffect(() => {
     const parentId = image?.parentId;
@@ -2214,7 +2198,10 @@ export default function ImageDetailPage() {
     aspectRatio: computedDetailAspect,
     dimensions: computedDetailDimensions,
     loading: detailAspectLoading,
-  } = useImageAspectRatio(image?.id ?? '', shouldCalculateDetailAspect);
+    // This caller displays real pixel dimensions, so it must probe the
+    // original; every other consumer only needs the ratio and uses the
+    // default w=150 probe.
+  } = useImageAspectRatio(image?.id ?? '', shouldCalculateDetailAspect, { probeVariant: 'public' });
   const detailAspectRatio = image?.aspectRatio ?? computedDetailAspect;
   const detailDimensions = image?.dimensions ?? computedDetailDimensions;
   const detailFileSizeBytes = image?.size ?? image?.fileSizeBytes ?? null;
@@ -2429,7 +2416,8 @@ export default function ImageDetailPage() {
                     adoptPageSize={ADOPT_PAGE_SIZE}
                     adoptPageStart={adoptPageStart}
                     adoptPageEnd={adoptPageEnd}
-                    assignmentCandidatesLoading={candidatePoolLoading || (!candidatePoolLoaded && !candidatePoolFailed)}
+                    assignmentCandidatesLoading={candidatePoolLoading || (!candidatePoolLoaded && Boolean(adoptSearch.trim() || adoptFolderFilter || !adoptScopeIsDefault || adoptAssetTypeFilter))}
+                    onLoadAllCandidates={candidatePoolLoaded || candidatePoolLoading ? undefined : () => { void fetchCandidatePool(); }}
                     onHandleThumbMouseMove={handleThumbMouseMove}
                     onHandleThumbLeave={handleThumbLeave}
                     onHandleImageDragStart={handleImageDragStart}

@@ -2,10 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCachedImages } from '@/server/cloudflareImageCache';
 import { getImageExtrasRecords } from '@/server/imageExtras';
 import { listVideoAssetRecordsWithSync } from '@/server/videoCatalogStorage';
-import {
-  buildVariantAssignmentCandidates,
-  listAvailableVariantAssignmentAssets,
-} from '@/utils/variantAssignmentCandidates';
+import { getFamilyCandidatePool } from '@/server/familyCandidatePool';
 
 type FamilyAsset = {
   id: string;
@@ -181,27 +178,40 @@ export async function GET(
       : [];
     timings.videos_load = mark(performance.now() - videosStartedAt);
 
-    const allAssets = await applyExtrasSearchMetadata([
-      ...images.map((image) => toFamilyAsset(image as unknown as Record<string, unknown>)),
-      ...mappedVideos.map((video) => toFamilyAsset(video as unknown as Record<string, unknown>)),
-    ]);
-    const target = allAssets.find((asset) => asset.id === id) ?? null;
-    if (!target) {
+    // Resolve the target and its family from the raw records, then run the
+    // FamilyAsset projection and the extras merge over only those few
+    // records. Mapping the full ~19k-asset catalog here (the previous shape)
+    // cost seconds per request; the candidate pool below covers the
+    // full-catalog case behind a version-keyed memo.
+    const rawRecords: Record<string, unknown>[] = [
+      ...(images as unknown as Record<string, unknown>[]),
+      ...(mappedVideos as unknown as Record<string, unknown>[]),
+    ];
+    const rawTarget = rawRecords.find((record) => record.id === id) ?? null;
+    if (!rawTarget) {
       return NextResponse.json({ error: 'Image not found' }, { status: 404 });
     }
 
-    const namespace = target.namespace ?? '';
     const familyStartedAt = performance.now();
-    const familyRootId = target.parentId || target.id;
-    const familyAssets = uniqueById(
-      allAssets.filter((asset) => {
-        if (asset.id === target.id) return true;
-        if (asset.id === familyRootId) return true;
-        return asset.parentId === familyRootId;
-      })
+    const rawParentId = typeof rawTarget.parentId === 'string' && rawTarget.parentId
+      ? rawTarget.parentId
+      : undefined;
+    const familyRootId = rawParentId || String(rawTarget.id);
+    const familyAssets = await applyExtrasSearchMetadata(
+      uniqueById(
+        rawRecords
+          .filter((record) => {
+            if (record.id === rawTarget.id) return true;
+            if (record.id === familyRootId) return true;
+            return record.parentId === familyRootId;
+          })
+          .map((record) => toFamilyAsset(record))
+      )
     );
     timings.family_collect = mark(performance.now() - familyStartedAt);
 
+    const target = familyAssets.find((asset) => asset.id === id)!;
+    const namespace = target.namespace ?? '';
     const parentAsset = familyAssets.find((asset) => asset.id === familyRootId) ?? null;
     const children = familyAssets.filter((asset) => asset.parentId === familyRootId);
     const siblings = target.parentId
@@ -209,26 +219,21 @@ export async function GET(
       : [];
 
     const candidatesStartedAt = performance.now();
-    const assignmentCandidates = includeCandidates
-      ? buildVariantAssignmentCandidates({
-          assets: allAssets,
-          currentAssetId: target.id,
-          familyRootId,
-          namespace,
-          includeCrossNamespaceOrphans: true,
+    const candidateAssets = includeCandidates
+      ? await getFamilyCandidatePool({
+          images: images as unknown as Record<string, unknown>[],
+          mappedVideos: mappedVideos as unknown as Record<string, unknown>[],
+          videoAssetsEnabled,
         })
       : [];
-    const candidateAssets = listAvailableVariantAssignmentAssets(assignmentCandidates);
     if (includeCandidates) {
-      timings.candidates_collect = mark(performance.now() - candidatesStartedAt);
+      timings.candidate_pool = mark(performance.now() - candidatesStartedAt);
     }
 
     diagnostics.family_count = familyAssets.length;
     diagnostics.children_count = children.length;
     diagnostics.siblings_count = siblings.length;
     diagnostics.candidates_count = candidateAssets.length;
-    diagnostics.assignment_candidates_count = assignmentCandidates.length;
-    diagnostics.unavailable_candidates_count = assignmentCandidates.length - candidateAssets.length;
     diagnostics.include_candidates = includeCandidates;
 
     timings.total = mark(performance.now() - startedAt);
@@ -241,7 +246,6 @@ export async function GET(
       children,
       familyAssets,
       candidateAssets,
-      assignmentCandidates,
       timings,
       diagnostics,
     });

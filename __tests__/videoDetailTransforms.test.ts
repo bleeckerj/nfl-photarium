@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   createVariationDraft,
-  extractAssignmentCandidateAssets,
   formatBytes,
   formatDuration,
   formatFrameTime,
@@ -14,18 +13,6 @@ import {
 } from '@/components/video-detail/videoTransforms';
 
 describe('video detail transforms', () => {
-  it('extracts assignment candidate assets', () => {
-    expect(extractAssignmentCandidateAssets({
-      assignmentCandidates: [
-        { asset: { id: 'child', filename: 'child.png', uploaded: '2026-01-02T00:00:00Z' } },
-        {
-          asset: { id: 'variant', filename: 'variant.png', uploaded: '2026-01-03T00:00:00Z' },
-          parentAsset: { id: 'parent', filename: 'parent.png', uploaded: '2026-01-01T00:00:00Z' },
-        },
-      ],
-    }).map((asset) => asset.id)).toEqual(['child', 'variant', 'parent']);
-  });
-
   it('merges assets by id and creates video records from seeds', () => {
     expect(mergeUniqueAssetsById(
       [{ id: 'a', filename: 'old.mp4', uploaded: '2026-01-01T00:00:00Z' }],

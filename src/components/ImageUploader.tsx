@@ -61,6 +61,14 @@ interface ImageUploaderProps {
 
 type QueuedFile = UploaderQueueItem;
 
+// Shared across mounts so StrictMode's doubled effect (and any concurrent
+// uploader instances) issue a single folder-summary request per URL.
+type UploaderSummaryPayload = {
+  images?: unknown;
+  facets?: { folders?: Array<{ value?: unknown }> };
+};
+const uploaderSummaryInflight = new Map<string, Promise<{ ok: boolean; data: UploaderSummaryPayload }>>();
+
 export default function ImageUploader({ onImageUploaded, namespace, onNamespaceChange }: ImageUploaderProps) {
   const {
     uploadedImages,
@@ -407,12 +415,24 @@ export default function ImageUploader({ onImageUploaded, namespace, onNamespaceC
     }
   }, [queuedFiles.length, showAllQueuedItems]);
 
-  // Fetch existing folders from images endpoint and merge with local presets
+  // Fetch existing folders from images endpoint and merge with local presets.
+  // The summary fetch is deduped module-wide (see uploaderSummaryInflight) so
+  // StrictMode's double-mounted effect issues one network request, not two.
   const fetchFolders = useCallback(async () => {
     try {
-      const resp = await fetch(buildUploaderGallerySummaryUrl(namespace));
-      const data = await resp.json();
-      if (resp.ok && Array.isArray(data.images)) {
+      const url = buildUploaderGallerySummaryUrl(namespace);
+      let inflight = uploaderSummaryInflight.get(url);
+      if (!inflight) {
+        inflight = fetch(url).then(async (resp) => ({ ok: resp.ok, data: await resp.json() }));
+        uploaderSummaryInflight.set(url, inflight);
+        inflight.catch(() => uploaderSummaryInflight.delete(url));
+        // Let a later remount (e.g. after uploads change folders) refetch.
+        inflight.finally(() => {
+          setTimeout(() => uploaderSummaryInflight.delete(url), 5_000);
+        });
+      }
+      const { ok, data } = await inflight;
+      if (ok && Array.isArray(data.images)) {
         const facetFolders = Array.isArray(data?.facets?.folders)
           ? data.facets.folders
               .map((entry: { value?: unknown }) => (typeof entry.value === 'string' ? entry.value.trim() : ''))

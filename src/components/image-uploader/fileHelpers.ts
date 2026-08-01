@@ -70,9 +70,12 @@ export const resolveTagInput = (globalTags: string, itemTags?: string): string =
 };
 
 export const buildUploaderGallerySummaryUrl = (namespace?: string) => {
+  // The uploader only needs the folder facet list, which /api/images computes
+  // over the full scope regardless of pagination — so request the smallest
+  // possible page instead of shipping 500 records.
   const params = new URLSearchParams({
     page: '1',
-    pageSize: '500',
+    pageSize: '1',
   });
   if (namespace === '') {
     params.set('namespace', process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || 'cf-default');

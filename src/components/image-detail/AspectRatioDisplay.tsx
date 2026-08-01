@@ -35,14 +35,25 @@ const OrientationIcon = ({ aspectRatio }: { aspectRatio: string }) => {
   );
 };
 
-export const AspectRatioDisplay = ({ imageId, className }: { imageId: string; className?: string }) => {
-  const { aspectRatio, loading, error } = useImageAspectRatio(imageId, Boolean(imageId));
+export const AspectRatioDisplay = ({
+  imageId,
+  aspectRatio: presetAspectRatio,
+  className,
+}: {
+  imageId: string;
+  /** When the record already carries a ratio, pass it — the probe download is skipped. */
+  aspectRatio?: string;
+  className?: string;
+}) => {
+  const shouldCalculate = Boolean(imageId) && !presetAspectRatio;
+  const { aspectRatio: computedAspectRatio, loading, error } = useImageAspectRatio(imageId, shouldCalculate);
+  const aspectRatio = presetAspectRatio || computedAspectRatio;
 
   if (!imageId) {
     return null;
   }
 
-  if (loading) {
+  if (loading && !aspectRatio) {
     return (
       <p className={`text-[11px] font-mono text-gray-400 ${className ?? ''}`}>
         <span className="inline-block w-8 h-2 bg-gray-200 rounded animate-pulse" />
@@ -50,7 +61,7 @@ export const AspectRatioDisplay = ({ imageId, className }: { imageId: string; cl
     );
   }
 
-  if (error || !aspectRatio) {
+  if (!aspectRatio || (error && !aspectRatio)) {
     return <p className={`text-[11px] font-mono text-gray-400 ${className ?? ''}`}>--</p>;
   }
 

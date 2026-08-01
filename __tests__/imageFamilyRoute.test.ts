@@ -3,33 +3,53 @@ import { NextRequest } from 'next/server';
 
 const {
   getCachedImagesMock,
+  getCacheStatsMock,
   listVideoAssetRecordsWithSyncMock,
+  getVideoAssetCatalogVersionMock,
   getImageExtrasRecordsMock,
+  getImageFolderOverridesMock,
+  getImageFolderOverridesVersionMock,
 } = vi.hoisted(() => ({
   getCachedImagesMock: vi.fn(),
+  getCacheStatsMock: vi.fn(),
   listVideoAssetRecordsWithSyncMock: vi.fn(),
+  getVideoAssetCatalogVersionMock: vi.fn(),
   getImageExtrasRecordsMock: vi.fn(),
+  getImageFolderOverridesMock: vi.fn(),
+  getImageFolderOverridesVersionMock: vi.fn(),
 }));
 
 vi.mock('@/server/cloudflareImageCache', () => ({
   getCachedImages: getCachedImagesMock,
+  getCacheStats: getCacheStatsMock,
 }));
 
 vi.mock('@/server/videoCatalogStorage', () => ({
   listVideoAssetRecordsWithSync: listVideoAssetRecordsWithSyncMock,
+  getVideoAssetCatalogVersion: getVideoAssetCatalogVersionMock,
 }));
 
 vi.mock('@/server/imageExtras', () => ({
   getImageExtrasRecords: getImageExtrasRecordsMock,
+  getImageFolderOverrides: getImageFolderOverridesMock,
+  getImageFolderOverridesVersion: getImageFolderOverridesVersionMock,
 }));
 
 import { GET } from '@/app/api/images/[id]/family/route';
+import { clearFamilyCandidatePoolMemo } from '@/server/familyCandidatePool';
 
 describe('GET /api/images/:id/family', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // The candidate-pool memo keys on these version counters; with constant
+    // mocked versions the key never changes, so clear it between tests.
+    clearFamilyCandidatePoolMemo();
     process.env.ENABLE_VIDEO_ASSETS = '1';
     getImageExtrasRecordsMock.mockResolvedValue({});
+    getCacheStatsMock.mockReturnValue({ contentVersion: 1 });
+    getVideoAssetCatalogVersionMock.mockReturnValue(1);
+    getImageFolderOverridesMock.mockResolvedValue(new Map());
+    getImageFolderOverridesVersionMock.mockReturnValue(1);
   });
 
   it('returns only the target family by default', async () => {
@@ -167,16 +187,23 @@ describe('GET /api/images/:id/family', () => {
     );
     const payload = await response.json();
     const candidateIds = payload.candidateAssets.map((entry: { id: string }) => entry.id);
-    const assignmentCandidates = payload.assignmentCandidates as Array<{
-      asset: { id: string };
-      availability: string;
-      unavailableReason?: string;
-      parentAsset?: { id: string };
-    }>;
 
     expect(response.status).toBe(200);
-    expect(candidateIds).toEqual(['candidate-a', 'candidate-b']);
-    expect(payload.candidateAssets[0]).toEqual(
+    // The pool is the full slim catalog; availability classification happens
+    // client-side (parentReassignmentUtils), so the wrapper array is gone.
+    expect(payload.assignmentCandidates).toBeUndefined();
+    expect(candidateIds).toEqual([
+      'parent',
+      'child-a',
+      'candidate-a',
+      'other-parent',
+      'assigned-elsewhere',
+      'candidate-b',
+    ]);
+    const candidateA = payload.candidateAssets.find(
+      (entry: { id: string }) => entry.id === 'candidate-a'
+    );
+    expect(candidateA).toEqual(
       expect.objectContaining({
         id: 'candidate-a',
         folder: 'extras-folder',
@@ -184,32 +211,12 @@ describe('GET /api/images/:id/family', () => {
         altText: 'Candidate alt text',
       })
     );
-    expect(assignmentCandidates).toEqual([
-      expect.objectContaining({
-        asset: expect.objectContaining({
-          id: 'candidate-a',
-          folder: 'extras-folder',
-          description: 'Detailed candidate description',
-          altText: 'Candidate alt text',
-        }),
-        availability: 'available',
-      }),
-      expect.objectContaining({
-        asset: expect.objectContaining({ id: 'other-parent' }),
-        availability: 'unavailable',
-        unavailableReason: 'has-variants',
-      }),
-      expect.objectContaining({
-        asset: expect.objectContaining({ id: 'assigned-elsewhere' }),
-        availability: 'unavailable',
-        unavailableReason: 'already-assigned',
-        parentAsset: expect.objectContaining({ id: 'other-parent' }),
-      }),
-      expect.objectContaining({
-        asset: expect.objectContaining({ id: 'candidate-b' }),
-        availability: 'available',
-      }),
-    ]);
+    // Slim projection: image entries carry no variants array (only videos
+    // do) and none of the heavy detail-only fields.
+    expect(candidateA).not.toHaveProperty('variants');
+    expect(candidateA).not.toHaveProperty('promptThis');
+    expect(candidateA).not.toHaveProperty('dimensions');
+    expect(candidateA).not.toHaveProperty('size');
   });
 
   it('excludes a detached former child from the old parent family', async () => {
