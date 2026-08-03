@@ -6,7 +6,7 @@ Every actual Codex-generated image must be uploaded to Photarium and verified be
 
 ### Photarium Upload Namespace
 
-Photarium uploads default to the `cf-default` namespace. Never infer, inherit, or propagate a source image's namespace. Use another namespace only when the operator explicitly provides it.
+Photarium uploads default to the `cf-default` namespace unless the active workflow explicitly specifies another namespace. Never infer, inherit, or propagate a source image's namespace.
 
 ## Reasonable Commenting
 
