@@ -3,7 +3,8 @@ import path from 'node:path';
 
 const INSTAGRAM_HOST_PATTERN = /(^|\.)instagram\.com$/i;
 const SUPPORTED_MEDIA_KINDS = new Set(['p', 'reel', 'reels', 'tv']);
-export const TELEGRAM_INGEST_NAMESPACE = 'cf-instagram';
+export const TELEGRAM_INGEST_NAMESPACE = 'cf-default';
+export const INSTAGRAM_INGEST_NAMESPACE = 'cf-instagram';
 
 export function extractInstagramMediaUrl(message) {
   const text = [message?.text, message?.caption]
@@ -28,7 +29,16 @@ export function extractInstagramMediaUrl(message) {
 
 export function runInstagramIngest({ instagramUrl, apiBase, cwd = process.cwd(), spawnImpl = spawn }) {
   const scriptPath = path.resolve(cwd, 'scripts/instagram-ingest.mjs');
-  const args = [scriptPath, 'single-url', '--url', instagramUrl, '--api-base', apiBase];
+  const args = [
+    scriptPath,
+    'single-url',
+    '--url',
+    instagramUrl,
+    '--api-base',
+    apiBase,
+    '--namespace',
+    INSTAGRAM_INGEST_NAMESPACE,
+  ];
 
   return new Promise((resolve, reject) => {
     const child = spawnImpl(process.execPath, args, {

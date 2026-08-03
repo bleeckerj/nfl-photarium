@@ -3,13 +3,15 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   extractInstagramMediaUrl,
+  INSTAGRAM_INGEST_NAMESPACE,
   runInstagramIngest,
   TELEGRAM_INGEST_NAMESPACE,
 } from '../scripts/telegram-listener/instagram-ingest.mjs';
 
 describe('Telegram Instagram ingestion', () => {
-  it('uses the cf-instagram namespace for every Telegram ingestion path', () => {
-    expect(TELEGRAM_INGEST_NAMESPACE).toBe('cf-instagram');
+  it('uses cf-default for direct Telegram media and cf-instagram for Instagram URLs', () => {
+    expect(TELEGRAM_INGEST_NAMESPACE).toBe('cf-default');
+    expect(INSTAGRAM_INGEST_NAMESPACE).toBe('cf-instagram');
   });
 
   it('extracts and canonicalizes Instagram post and reel URLs from message text or captions', () => {
@@ -50,6 +52,8 @@ describe('Telegram Instagram ingestion', () => {
         'https://www.instagram.com/reel/ABC123/',
         '--api-base',
         'http://localhost:3000',
+        '--namespace',
+        'cf-instagram',
       ],
       expect.objectContaining({ cwd: '/repo', stdio: 'inherit' }),
     );
