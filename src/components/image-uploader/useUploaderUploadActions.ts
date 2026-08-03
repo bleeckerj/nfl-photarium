@@ -1,11 +1,13 @@
 import { useCallback, type Dispatch, type SetStateAction } from 'react';
 
+import { useToast } from '@/components/Toast';
 import type { UploaderQueueItem } from '@/features/page-import/types';
 import { runWithConcurrency } from '@/components/image-uploader/concurrency';
 import { NAMESPACE_REQUIRED_UPLOAD_ERROR } from '@/components/image-uploader/constants';
 import { inferAssetTypeFromFile, resolveTagInput } from '@/components/image-uploader/fileHelpers';
 import type { UploadedImage } from '@/components/image-uploader/types';
 import { uploadFormDataWithRetry } from '@/services/uploadRequestService';
+import type { SemanticTagJob } from '@/types/semanticTagging';
 import { inferAssetTypeFromUrl } from '@/utils/mediaAssetType';
 
 type QueuedFile = UploaderQueueItem;
@@ -13,12 +15,14 @@ type QueuedFile = UploaderQueueItem;
 interface UploadResult {
   clientId: string;
   id?: string;
+  filename?: string;
   url?: string;
   folder?: string;
   tags?: string[];
   description?: string;
   originalUrl?: string;
   sourceUrl?: string;
+  semanticTagging?: SemanticTagJob;
 }
 
 interface UploadFailure {
@@ -58,6 +62,50 @@ const VIDEO_REMOTE_UPLOAD_CONCURRENCY = 2;
 // Debounced inside notifyGalleryUploaded so a burst of quick uploads coalesces
 // into a single refresh.
 const GALLERY_PROGRESSIVE_REFRESH_DELAY_MS = 600;
+const SEMANTIC_TAG_POLL_INTERVAL_MS = 1500;
+const SEMANTIC_TAG_MAX_POLLS = 80;
+
+type SemanticTagObservation = {
+  job: SemanticTagJob;
+  filename?: string;
+};
+
+const observeSemanticTagJob = async (
+  observation: SemanticTagObservation,
+  onFailure: (message: string) => void
+) => {
+  const label = observation.filename || observation.job.imageId;
+  let currentState = observation.job.state;
+
+  if (currentState === 'failed') {
+    onFailure(`Semantic tagging failed for ${label}; the upload completed.`);
+    return;
+  }
+  if (currentState === 'succeeded' || currentState === 'disabled') return;
+
+  for (let poll = 0; poll < SEMANTIC_TAG_MAX_POLLS; poll += 1) {
+    await new Promise((resolve) => setTimeout(resolve, SEMANTIC_TAG_POLL_INTERVAL_MS));
+    try {
+      const response = await fetch(`/api/images/tag-enrichment/${observation.job.jobId}`);
+      if (!response.ok) {
+        onFailure(`Semantic tagging status was unavailable for ${label}; the upload completed.`);
+        return;
+      }
+      const job = (await response.json()) as SemanticTagJob;
+      currentState = job.state;
+      if (currentState === 'succeeded' || currentState === 'disabled') return;
+      if (currentState === 'failed') {
+        onFailure(`Semantic tagging failed for ${label}; the upload completed.`);
+        return;
+      }
+    } catch {
+      onFailure(`Semantic tagging status was unavailable for ${label}; the upload completed.`);
+      return;
+    }
+  }
+
+  onFailure(`Semantic tagging did not finish for ${label}; the upload completed.`);
+};
 
 const formatUploadErrorMessage = (response: Response, payload: unknown) => {
   if (response.status === 409 && payload && typeof payload === 'object' && 'duplicates' in payload) {
@@ -110,6 +158,20 @@ export const useUploaderUploadActions = ({
   setUploadedImages,
   resetUploadForm,
 }: UseUploaderUploadActionsOptions) => {
+  const toast = useToast();
+
+  const observeSemanticTagJobs = useCallback((observations: SemanticTagObservation[]) => {
+    const activeJobs = observations.filter(({ job }) => job.state !== 'disabled' && job.state !== 'succeeded');
+    if (activeJobs.length === 0) return;
+
+    toast.push(
+      `Upload complete; semantic tagging queued for ${activeJobs.length} image${activeJobs.length === 1 ? '' : 's'}.`
+    );
+    activeJobs.forEach((observation) => {
+      void observeSemanticTagJob(observation, (message) => toast.push(message));
+    });
+  }, [toast]);
+
   const markNamespaceUploadFailures = useCallback((items: QueuedFile[]) => {
     const failures: UploadedImage[] = items.map((item) => ({
       id: item.id,
@@ -291,6 +353,7 @@ export const useUploaderUploadActions = ({
                   description?: string;
                   originalUrl?: string;
                   sourceUrl?: string;
+                  semanticTagging?: SemanticTagJob;
                 }>;
                 failures?: Array<{ filename: string; error: string }>;
                 skipped?: Array<{ filename: string; reason: string }>;
@@ -334,6 +397,11 @@ export const useUploaderUploadActions = ({
               if (shouldEmbedAnything) {
                 successEntries.forEach((entry) => enqueueEmbedding(entry.id, shouldEmbedClip, shouldEmbedColor));
               }
+              observeSemanticTagJobs(
+                zipResult.results
+                  .filter((item) => item.semanticTagging)
+                  .map((item) => ({ job: item.semanticTagging as SemanticTagJob, filename: item.filename }))
+              );
               if (successEntries.length > 0) {
                 uploadedAny = true;
                 notifyGalleryUploaded(GALLERY_PROGRESSIVE_REFRESH_DELAY_MS);
@@ -341,10 +409,12 @@ export const useUploaderUploadActions = ({
             } else {
               const typedResult = result as {
                 id?: string;
+                filename?: string;
                 url?: string;
                 playbackUrl?: string;
                 hlsUrl?: string;
                 thumbnailUrl?: string;
+                semanticTagging?: SemanticTagJob;
               };
               const serverId =
                 typedResult && typeof typedResult === 'object' && 'id' in typedResult && typeof typedResult.id === 'string'
@@ -380,6 +450,9 @@ export const useUploaderUploadActions = ({
               );
               if (effectiveAssetType === 'image' && shouldEmbedAnything) {
                 enqueueEmbedding(serverId, shouldEmbedClip, shouldEmbedColor);
+              }
+              if (typedResult.semanticTagging) {
+                observeSemanticTagJobs([{ job: typedResult.semanticTagging, filename: typedResult.filename || file?.name }]);
               }
               uploadedAny = true;
               notifyGalleryUploaded(GALLERY_PROGRESSIVE_REFRESH_DELAY_MS);
@@ -422,6 +495,7 @@ export const useUploaderUploadActions = ({
       fetchFolders,
       markNamespaceUploadFailures,
       notifyGalleryUploaded,
+      observeSemanticTagJobs,
       omitOriginalUrl,
       originalUrl,
       resetUploadForm,
@@ -691,6 +765,11 @@ export const useUploaderUploadActions = ({
         }
 
         if (resultList.length > 0) notifyGalleryUploaded();
+        observeSemanticTagJobs(
+          resultList
+            .filter((item) => item.semanticTagging)
+            .map((item) => ({ job: item.semanticTagging as SemanticTagJob, filename: item.filename || item.id }))
+        );
       } catch (error) {
         console.error('Remote upload error:', error);
         setUploadedImages((prev) =>
@@ -718,6 +797,7 @@ export const useUploaderUploadActions = ({
       fetchFolders,
       markNamespaceUploadFailures,
       notifyGalleryUploaded,
+      observeSemanticTagJobs,
       omitOriginalUrl,
       originalUrl,
       pageImportAllowInsecure,

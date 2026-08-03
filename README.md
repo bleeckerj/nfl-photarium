@@ -265,6 +265,10 @@ OPENAI_TAGS_MODEL=gpt-4.1-nano
 OPENAI_HAIKU_MODEL=gpt-4.1-nano
 ```
 
+Upload-time semantic tags run through a low-priority background queue. Set
+`AUTO_TAGS_ON_UPLOAD=false` to disable that enrichment while leaving uploads
+available.
+
 All image metadata generators default to `gpt-4.1-nano` unless a shared or per-generator override is set.
 
 AI-assisted routes can generate or refine:

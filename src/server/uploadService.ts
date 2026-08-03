@@ -25,6 +25,8 @@ import { extractComfyWorkflowMetadata } from '@/utils/comfyMetadata';
 import { ingestComfyWorkflowForImage } from '@/server/comfy/workflowIngestion';
 import { patchImageExtrasRecord } from '@/server/imageExtras';
 import { validateParentForNewChild } from '@/server/parentValidation';
+import { enqueueSemanticTagJob } from '@/server/semanticTagQueue';
+import type { SemanticTagJob } from '@/types/semanticTagging';
 
 // Re-export for backward compatibility
 export { sanitizeFilename, MAX_FILENAME_LENGTH } from '@/utils/filename';
@@ -88,6 +90,7 @@ export type UploadSuccess = {
   parentId?: string;
   linkedAssetId?: string;
   webpVariantId?: string;
+  semanticTagging?: SemanticTagJob;
   autoEmbeddings?: AutoEmbeddingsStatus;
   uploadNormalization?: UploadNormalizationMetadata;
   duplicateHandling?: DuplicateFamilySelection;
@@ -582,6 +585,8 @@ export async function uploadImageBuffer({
     }
   }
 
+  const semanticTagging = enqueueSemanticTagJob(webpVariantId || imageData.id);
+
   return {
     ok: true,
     data: {
@@ -599,6 +604,7 @@ export async function uploadImageBuffer({
       parentId: resolvedParentId,
       linkedAssetId: webpVariantId,
       webpVariantId,
+      semanticTagging,
       autoEmbeddings,
       uploadNormalization: prepared.data.uploadNormalization,
       duplicateHandling: deduplication.duplicateFamilySelection,
