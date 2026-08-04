@@ -3,6 +3,7 @@ import { getPromptThisRecord, setPromptThisRecord, type PromptThisRecord } from 
 import type { ComfyWorkflowExtraction } from '@/utils/comfyMetadata';
 import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { parseOptionalInstagramSource } from '@/server/instagramSource';
+import { UnknownFolderError, parseCreateFolderFlag, requireFilableFolder } from '@/server/folderCreationPolicy';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -49,6 +50,8 @@ export type ExternalUploadFormFields = {
   duplicateAction: FormDataEntryValue | null;
   promptField: ReturnType<typeof parseOptionalPromptField>;
   workflowJsonField: ReturnType<typeof parseOptionalWorkflowJson>;
+  generateSemanticTags?: boolean;
+  semanticTagCount?: number;
 };
 
 export function withCors(response: NextResponse) {
@@ -87,6 +90,17 @@ const cleanOptionalText = (value: FormDataEntryValue | null): string | undefined
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed && trimmed !== 'undefined' ? trimmed : undefined;
+};
+
+const parseOptionalBoolean = (value: FormDataEntryValue | null): boolean | undefined => {
+  if (value === null || typeof value !== 'string') return undefined;
+  return !['0', 'false', 'no', 'off'].includes(value.trim().toLowerCase());
+};
+
+const parseOptionalNumber = (value: FormDataEntryValue | null): number | undefined => {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 };
 
 export function parseExternalUploadFormFields(
@@ -128,6 +142,8 @@ export function parseExternalUploadFormFields(
       duplicateAction: formData.get('duplicateAction'),
       promptField: parseOptionalPromptField(formData.get('prompt')),
       workflowJsonField: parseOptionalWorkflowJson(formData.get('comfyWorkflowJson')),
+      generateSemanticTags: parseOptionalBoolean(formData.get('generateSemanticTags')),
+      semanticTagCount: parseOptionalNumber(formData.get('semanticTagCount')),
     },
   };
 }
@@ -284,4 +300,31 @@ export async function persistUploadPrompt(
     imageIds: uniqueIds,
     errors: errors.length ? errors : undefined,
   };
+}
+
+/**
+ * Normalizes the requested folder and confirms the upload is allowed to file
+ * into it. Returns the name to store, or a route-ready error. Lives here rather
+ * than inline in the route so the route stays under the size budget.
+ */
+export async function resolveExternalUploadFolder(
+  rawFolder: string | undefined,
+  namespace: string,
+  formData: FormData
+): Promise<{ ok: true; folder?: string } | { ok: false; error: string; status: number }> {
+  if (!rawFolder) return { ok: true, folder: undefined };
+  try {
+    const folder = await requireFilableFolder(
+      rawFolder,
+      namespace,
+      parseCreateFolderFlag(formData.get('createFolder'))
+    );
+    return { ok: true, folder };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : 'Invalid folder name',
+      status: error instanceof UnknownFolderError ? error.status : 400,
+    };
+  }
 }

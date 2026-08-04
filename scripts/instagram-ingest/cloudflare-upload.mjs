@@ -276,7 +276,7 @@ export async function pushImageToCloudflare({
   if (description) form.append("description", description);
   if (instagramSource) form.append("instagramSource", JSON.stringify(instagramSource));
 
-  const endpoint = `${apiBase}/api/upload/external`;
+  const endpoint = `${apiBase}/api/upload`;
   log.trace(`cloudflare_push_start endpoint=${endpoint} file=${fileName} namespace=${uploadNamespace}`);
   const res = await fetch(endpoint, { method: "POST", body: form });
   const bodyText = await res.text();

@@ -2,105 +2,220 @@ import { randomUUID } from 'crypto';
 
 import { generateAndPersistSemanticTags } from '@/server/semanticTagService';
 import type { SemanticTagJob } from '@/types/semanticTagging';
+import { getSemanticTagQueueStore } from '@/server/semanticTagQueueStore';
 
-const MAX_PENDING_JOBS = 100;
-const JOB_RETENTION_MS = 15 * 60 * 1000;
-const pendingJobs: SemanticTagJob[] = [];
-const jobs = new Map<string, SemanticTagJob>();
-let activeWorkers = 0;
-let drainScheduled = false;
+const MAX_ATTEMPTS = 5;
+const LEASE_MS = 5 * 60 * 1000;
+const BASE_RETRY_DELAY_MS = 10 * 1000;
+const WORKER_POLL_MS = 1_000;
 
-const isDisabled = () => {
-  const value = process.env.AUTO_TAGS_ON_UPLOAD?.trim().toLowerCase();
-  return value === '0' || value === 'false' || value === 'no' || value === 'off';
+const maxAttempts = () => {
+  const configured = Number.parseInt(process.env.SEMANTIC_TAG_QUEUE_MAX_ATTEMPTS ?? '', 10);
+  return Number.isFinite(configured) && configured > 0 ? configured : MAX_ATTEMPTS;
 };
 
 const now = () => new Date().toISOString();
+const isDisabled = () => ['0', 'false', 'no', 'off'].includes(process.env.AUTO_TAGS_ON_UPLOAD?.trim().toLowerCase() ?? '');
 
-const pruneJobs = () => {
-  const cutoff = Date.now() - JOB_RETENTION_MS;
-  for (const [jobId, job] of jobs) {
-    if (Date.parse(job.updatedAt) < cutoff && job.state !== 'queued' && job.state !== 'running') {
-      jobs.delete(jobId);
-    }
-  }
+const fallbackJobs = new Map<string, SemanticTagJob>();
+let memoryDrainScheduled = false;
+
+export type EnqueueSemanticTagOptions = {
+  enabled?: boolean;
+  count?: number;
 };
 
-const scheduleDrain = () => {
-  if (drainScheduled) return;
-  drainScheduled = true;
-  setTimeout(() => {
-    drainScheduled = false;
-    drainQueue();
-  }, 0);
+export const isSemanticTaggingEnabledForUpload = (options: EnqueueSemanticTagOptions = {}) => {
+  if (options.enabled === false) return false;
+  return !isDisabled();
 };
 
-const runJob = async (job: SemanticTagJob) => {
-  job.state = 'running';
-  job.updatedAt = now();
-  try {
-    const result = await generateAndPersistSemanticTags({ imageId: job.imageId });
-    job.state = 'succeeded';
-    job.generatedTags = result.tags;
-    job.appendedTags = result.appendedTags;
-    job.updatedAt = now();
-  } catch (error) {
-    job.state = 'failed';
-    job.error = error instanceof Error ? error.message : String(error);
-    job.updatedAt = now();
-    console.warn('[semanticTagQueue] Semantic tag generation failed', {
-      jobId: job.jobId,
-      imageId: job.imageId,
-      error: job.error,
-    });
-  }
-};
+const createJob = (imageId: string, state: SemanticTagJob['state'], count?: number): SemanticTagJob => ({
+  jobId: randomUUID(),
+  imageId,
+  state,
+  createdAt: now(),
+  updatedAt: now(),
+  attempts: 0,
+  maxAttempts: maxAttempts(),
+  ...(count === undefined ? {} : { requestedCount: count }),
+  ...(state === 'disabled' ? { retryable: false } : {}),
+});
 
-const drainQueue = () => {
-  while (activeWorkers < 1 && pendingJobs.length > 0) {
-    const job = pendingJobs.shift();
-    if (!job) return;
-    activeWorkers += 1;
-    void runJob(job).finally(() => {
-      activeWorkers = Math.max(0, activeWorkers - 1);
-      pruneJobs();
-      if (pendingJobs.length > 0) scheduleDrain();
-    });
-  }
-};
-
-export const isSemanticTaggingEnabledForUpload = () => !isDisabled();
-
-export const enqueueSemanticTagJob = (imageId: string): SemanticTagJob => {
-  pruneJobs();
-  const timestamp = now();
+const saveFallbackFailure = (imageId: string, error: unknown): SemanticTagJob => {
   const job: SemanticTagJob = {
-    jobId: randomUUID(),
-    imageId,
-    state: isDisabled() ? 'disabled' : 'queued',
-    createdAt: timestamp,
-    updatedAt: timestamp,
+    ...createJob(imageId, 'failed'),
+    error: error instanceof Error ? error.message : String(error),
+    retryable: true,
   };
-
-  if (job.state === 'disabled') {
-    jobs.set(job.jobId, job);
-    return job;
-  }
-
-  if (pendingJobs.length >= MAX_PENDING_JOBS) {
-    job.state = 'failed';
-    job.error = 'Semantic tag queue is full';
-    jobs.set(job.jobId, job);
-    return job;
-  }
-
-  jobs.set(job.jobId, job);
-  pendingJobs.push(job);
-  scheduleDrain();
+  fallbackJobs.set(job.jobId, job);
   return job;
 };
 
-export const getSemanticTagJob = (jobId: string): SemanticTagJob | undefined => {
-  pruneJobs();
-  return jobs.get(jobId);
-};
+async function processJob(jobId: string): Promise<SemanticTagJob | undefined> {
+  const store = getSemanticTagQueueStore();
+  const job = await store.getJob(jobId);
+  if (!job || job.state !== 'queued') return job;
+
+  const attempts = (job.attempts ?? 0) + 1;
+  const running: SemanticTagJob = {
+    ...job,
+    state: 'running',
+    attempts,
+    leaseUntil: new Date(Date.now() + LEASE_MS).toISOString(),
+    updatedAt: now(),
+  };
+  await store.saveJob(running);
+  await store.addLease(jobId, Date.now() + LEASE_MS);
+
+  try {
+    const result = await generateAndPersistSemanticTags({
+      imageId: job.imageId,
+      count: job.requestedCount,
+    });
+    const succeeded: SemanticTagJob = {
+      ...running,
+      state: 'succeeded',
+      generatedTags: result.tags,
+      appendedTags: result.appendedTags,
+      retryable: false,
+      leaseUntil: undefined,
+      verifiedAt: now(),
+      updatedAt: now(),
+    };
+    await store.removeLease(jobId);
+    await store.saveJob(succeeded);
+    return succeeded;
+  } catch (error) {
+    await store.removeLease(jobId);
+    const message = error instanceof Error ? error.message : String(error);
+    const retryable = attempts < (job.maxAttempts ?? MAX_ATTEMPTS);
+    const failed: SemanticTagJob = {
+      ...running,
+      state: retryable ? 'queued' : 'failed',
+      error: message,
+      retryable,
+      leaseUntil: undefined,
+      nextAttemptAt: retryable
+        ? new Date(Date.now() + BASE_RETRY_DELAY_MS * 2 ** Math.max(0, attempts - 1)).toISOString()
+        : undefined,
+      updatedAt: now(),
+    };
+    await store.saveJob(failed);
+    if (retryable) await store.enqueueDelayed(jobId, Date.parse(failed.nextAttemptAt!));
+    console.warn('[semanticTagQueue] Semantic tag generation failed', {
+      jobId,
+      imageId: job.imageId,
+      attempts,
+      retryable,
+      error: message,
+    });
+    return failed;
+  }
+}
+
+async function recoverExpiredJobs(): Promise<void> {
+  const store = getSemanticTagQueueStore();
+  for (const jobId of await store.takeExpiredLeases(Date.now())) {
+    const job = await store.getJob(jobId);
+    if (!job || job.state !== 'running') continue;
+    const recovered: SemanticTagJob = {
+      ...job,
+      state: 'queued',
+      leaseUntil: undefined,
+      error: 'Worker lease expired; job returned to the queue.',
+      retryable: true,
+      updatedAt: now(),
+    };
+    await store.saveJob(recovered);
+    await store.enqueue(jobId);
+  }
+}
+
+async function moveReadyDelayedJobs(): Promise<void> {
+  const store = getSemanticTagQueueStore();
+  await store.takeReadyDelayed(Date.now());
+}
+
+export async function enqueueSemanticTagJob(
+  imageId: string,
+  options: EnqueueSemanticTagOptions = {},
+): Promise<SemanticTagJob> {
+  const disabled = !isSemanticTaggingEnabledForUpload(options);
+  const job = createJob(imageId, disabled ? 'disabled' : 'queued', options.count);
+  try {
+    const persisted = await getSemanticTagQueueStore().createOrGetJob(job);
+    if (persisted.state === 'queued' && process.env.NODE_ENV === 'test') scheduleMemoryDrain();
+    return persisted;
+  } catch (error) {
+    const failed = saveFallbackFailure(imageId, error);
+    console.error('[semanticTagQueue] Could not enqueue semantic tag job', {
+      imageId,
+      jobId: failed.jobId,
+      error: failed.error,
+    });
+    return failed;
+  }
+}
+
+export async function getSemanticTagJob(jobId: string): Promise<SemanticTagJob | undefined> {
+  const fallback = fallbackJobs.get(jobId);
+  if (fallback) return fallback;
+  try {
+    return await getSemanticTagQueueStore().getJob(jobId);
+  } catch (error) {
+    console.warn('[semanticTagQueue] Could not read semantic tag job', {
+      jobId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return undefined;
+  }
+}
+
+export async function retrySemanticTagJob(jobId: string): Promise<SemanticTagJob | undefined> {
+  const fallback = fallbackJobs.get(jobId);
+  if (fallback) {
+    fallbackJobs.delete(jobId);
+    return enqueueSemanticTagJob(fallback.imageId, {
+      count: fallback.requestedCount,
+    });
+  }
+  const store = getSemanticTagQueueStore();
+  const job = await store.getJob(jobId);
+  if (!job || job.state === 'succeeded' || job.state === 'disabled') return job;
+  const retried: SemanticTagJob = {
+    ...job,
+    state: 'queued',
+    error: undefined,
+    retryable: true,
+    nextAttemptAt: undefined,
+    updatedAt: now(),
+  };
+  await store.saveJob(retried);
+  await store.enqueue(jobId);
+  return retried;
+}
+
+export async function runSemanticTagWorker(options: { once?: boolean; signal?: AbortSignal } = {}): Promise<void> {
+  do {
+    await recoverExpiredJobs();
+    await moveReadyDelayedJobs();
+    const jobId = await getSemanticTagQueueStore().dequeue();
+    if (jobId) {
+      await processJob(jobId);
+      if (options.once) return;
+      continue;
+    }
+    if (options.once || options.signal?.aborted) return;
+    await new Promise((resolve) => setTimeout(resolve, WORKER_POLL_MS));
+  } while (!options.signal?.aborted);
+}
+
+function scheduleMemoryDrain(): void {
+  if (memoryDrainScheduled) return;
+  memoryDrainScheduled = true;
+  setTimeout(() => {
+    memoryDrainScheduled = false;
+    void runSemanticTagWorker({ once: true });
+  }, 0);
+}

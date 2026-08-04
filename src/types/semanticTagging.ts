@@ -6,7 +6,14 @@ export type SemanticTagJob = {
   state: SemanticTagJobState;
   createdAt: string;
   updatedAt: string;
+  attempts?: number;
+  maxAttempts?: number;
+  requestedCount?: number;
+  nextAttemptAt?: string;
+  leaseUntil?: string;
+  retryable?: boolean;
   generatedTags?: string[];
   appendedTags?: string[];
   error?: string;
+  verifiedAt?: string;
 };

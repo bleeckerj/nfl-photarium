@@ -66,7 +66,7 @@ async function readEnvFile(filePath) {
 
 async function waitForPhotariumReady(baseUrl, { timeoutMs }) {
   const start = Date.now();
-  const url = `${baseUrl.replace(/\/+$/, '')}/api/upload/external`;
+  const url = `${baseUrl.replace(/\/+$/, '')}/api/upload`;
 
   while (Date.now() - start < timeoutMs) {
     try {
@@ -156,4 +156,3 @@ main().catch((error) => {
   console.error('[startup] fatal', error);
   process.exit(1);
 });
-

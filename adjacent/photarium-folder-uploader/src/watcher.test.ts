@@ -26,16 +26,18 @@ function fakeClient(): PhotariumClient & { calls: string[] } {
   return {
     calls,
     async connect() {},
-    async uploadFromPath(_filePath, _namespace, tags) {
+    async uploadFromPath(_filePath, _namespace, tags, semanticTagCount) {
       assert.deepEqual(tags, ['screenshot']);
+      assert.equal(semanticTagCount, 8);
       calls.push('upload');
-      return { imageId: 'image-789' };
+      return { imageId: 'image-789', semanticTagging: { jobId: 'job-789', state: 'queued' } };
     },
     async generateDescription() {
       calls.push('description');
     },
-    async generateTags() {
+    async getSemanticTagStatus() {
       calls.push('tags');
+      return { state: 'succeeded' };
     },
     async close() {},
   };
@@ -69,11 +71,11 @@ test('keeps an uploaded image checkpoint when tag generation fails', async () =>
   let tagAttempts = 0;
   const client: PhotariumClient = {
     async connect() {},
-    async uploadFromPath() { return { imageId: 'image-partial' }; },
+    async uploadFromPath() { return { imageId: 'image-partial', semanticTagging: { jobId: 'job-partial', state: 'queued' } }; },
     async generateDescription() {},
-    async generateTags() {
+    async getSemanticTagStatus() {
       tagAttempts += 1;
-      throw new Error('tag service unavailable');
+      return { state: 'failed', error: 'tag service unavailable' };
     },
     async close() {},
   };

@@ -118,6 +118,7 @@ async function suggestAiMetadata({
   filePath,
   filename,
   folder,
+  createFolder,
   existingTags,
   wantDisplayName,
   wantTags,
@@ -130,6 +131,7 @@ async function suggestAiMetadata({
   form.append("file", new Blob([bytes], { type: mime }), filename);
   form.append("filename", filename);
   if (folder) form.append("folder", folder);
+  if (createFolder) form.append("createFolder", "true");
   if (existingTags.length > 0) form.append("tags", existingTags.join(","));
   if (wantTags) {
     form.append("includeTags", "true");
@@ -160,12 +162,15 @@ export async function uploadImage({
   filePath,
   namespace,
   folder,
+  createFolder,
   tags,
   description,
   displayName,
   sourcePath,
   originalUrl,
   duplicateAction,
+  generateSemanticTags = true,
+  semanticTagCount,
 }) {
   const filename = path.basename(filePath);
   const ext = path.extname(filePath).toLowerCase();
@@ -175,14 +180,17 @@ export async function uploadImage({
   form.append("file", new Blob([bytes], { type: mime }), filename);
   form.append("namespace", namespace);
   if (folder) form.append("folder", folder);
+  if (createFolder) form.append("createFolder", "true");
   if (tags.length > 0) form.append("tags", tags.join(","));
   if (description) form.append("description", description);
   if (displayName) form.append("displayName", displayName);
   form.append("sourceUrl", sourcePath);
   if (originalUrl) form.append("originalUrl", originalUrl);
   if (duplicateAction === "family") form.append("duplicateAction", duplicateAction);
+  if (generateSemanticTags === false) form.append("generateSemanticTags", "false");
+  if (semanticTagCount !== undefined) form.append("semanticTagCount", String(semanticTagCount));
 
-  const res = await fetch(`${apiBase}/api/upload/external`, {
+  const res = await fetch(`${apiBase}/api/upload`, {
     method: "POST",
     body: form,
   });
@@ -198,6 +206,7 @@ async function uploadVideo({
   filePath,
   namespace,
   folder,
+  createFolder,
   tags,
   description,
   sourcePath,
@@ -211,6 +220,7 @@ async function uploadVideo({
   form.append("file", new Blob([bytes], { type: mime }), filename);
   form.append("namespace", namespace);
   if (folder) form.append("folder", folder);
+  if (createFolder) form.append("createFolder", "true");
   if (tags.length > 0) form.append("tags", tags.join(","));
   if (description) form.append("description", description);
   form.append("sourceUrl", sourcePath);
@@ -851,18 +861,22 @@ async function main() {
           filePath,
           namespace: opts.namespace,
           folder: folder || undefined,
+          createFolder: opts.createFolder,
           tags: finalTags,
           description,
           displayName,
           sourcePath,
           originalUrl,
           duplicateAction: opts.onDuplicate,
+          generateSemanticTags: opts.generateSemanticTags,
+          semanticTagCount: opts.tagCount,
         })
       : await uploadVideo({
           apiBase: opts.apiBase,
           filePath,
           namespace: opts.namespace,
           folder: folder || undefined,
+          createFolder: opts.createFolder,
           tags: finalTags,
           description,
           sourcePath,

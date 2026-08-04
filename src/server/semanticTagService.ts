@@ -164,6 +164,7 @@ export async function generateAndPersistSemanticTags(params: {
   imageId: string;
   count?: number;
 }): Promise<PersistedSemanticTags> {
+  const credentials = getCloudflareCredentials();
   const generated = await generateSemanticTags(params);
   let appendedTags: string[] = [];
 
@@ -179,6 +180,18 @@ export async function generateAndPersistSemanticTags(params: {
     };
   }, { requiredKeys: ['tags'] });
   await syncMetadataImageById(params.imageId);
+
+  const verifiedImage = await fetchCloudflareImage(params.imageId, credentials);
+  const verifiedMeta = parseCloudflareMetadata(verifiedImage.meta);
+  const persistedTags = new Set(
+    (Array.isArray(verifiedMeta.tags) ? verifiedMeta.tags : [])
+      .filter((tag): tag is string => typeof tag === 'string')
+      .map((tag) => tag.trim().toLocaleLowerCase()),
+  );
+  const missingTags = generated.tags.filter((tag) => !persistedTags.has(tag.toLocaleLowerCase()));
+  if (missingTags.length > 0) {
+    throw new SemanticTagGenerationError(`Semantic tags were not verified after persistence: ${missingTags.join(', ')}`);
+  }
 
   return {
     ...generated,

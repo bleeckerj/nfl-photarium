@@ -265,9 +265,22 @@ OPENAI_TAGS_MODEL=gpt-4.1-nano
 OPENAI_HAIKU_MODEL=gpt-4.1-nano
 ```
 
-Upload-time semantic tags run through a low-priority background queue. Set
-`AUTO_TAGS_ON_UPLOAD=false` to disable that enrichment while leaving uploads
-available.
+Upload-time semantic tags run through a Redis-backed durable worker queue. Start
+the worker with:
+
+```bash
+npm run semantic-tags:worker
+```
+
+Uploads use the shared `/api/upload` service by default. `/api/upload/external`
+remains a compatibility adapter and reaches the same service. Semantic tagging
+is enabled by default for every upload; callers must explicitly send
+`generateSemanticTags=false` to opt out. `AUTO_TAGS_ON_UPLOAD=false` is an
+emergency global disable switch that leaves uploads available and reports the
+disabled enrichment state.
+
+The status endpoint is `/api/images/tag-enrichment/<jobId>`. Failed jobs can be
+retried with `POST /api/images/tag-enrichment/<jobId>/retry`.
 
 All image metadata generators default to `gpt-4.1-nano` unless a shared or per-generator override is set.
 

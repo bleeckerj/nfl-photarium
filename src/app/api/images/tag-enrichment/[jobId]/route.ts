@@ -7,7 +7,7 @@ export async function GET(
   { params }: { params: Promise<{ jobId: string }> }
 ) {
   const { jobId } = await params;
-  const job = getSemanticTagJob(jobId);
+  const job = await getSemanticTagJob(jobId);
   if (!job) {
     return NextResponse.json({ error: 'Semantic tag job not found' }, { status: 404 });
   }

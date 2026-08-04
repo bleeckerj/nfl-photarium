@@ -17,6 +17,10 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         ],
         "type": "string",
       },
+      "createFolder": {
+        "description": "Operator authorization to create the folder if it does not exist. Defaults to false; do not set on your own initiative — reuse an existing folder or ask the operator.",
+        "type": "boolean",
+      },
       "description": {
         "description": "Description to store on the generated variant.",
         "type": "string",
@@ -34,7 +38,7 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "type": "string",
       },
       "folder": {
-        "description": "Photarium folder for the generated variant.",
+        "description": "Existing Photarium folder for the generated variant. Rejected unless it exists or createFolder is set.",
         "type": "string",
       },
       "imageId": {
@@ -125,6 +129,10 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "description": "Target aspect ratio such as 4:5, 1:1, or 9:16. Default: 4:5.",
         "type": "string",
       },
+      "createFolder": {
+        "description": "Operator authorization to create the folder if missing. Defaults to false; do not set on your own initiative.",
+        "type": "boolean",
+      },
       "description": {
         "description": "Description to store with the cropped variant.",
         "type": "string",
@@ -134,7 +142,7 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "type": "string",
       },
       "folder": {
-        "description": "Folder to organize the cropped variant in.",
+        "description": "Existing folder to file the cropped variant in. Rejected unless it exists or createFolder is set.",
         "type": "string",
       },
       "imageId": {
@@ -220,6 +228,10 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "description": "Parallel upload concurrency (default: 2)",
         "type": "number",
       },
+      "createFolder": {
+        "description": "Operator authorization to create the folder if missing. Defaults to false; do not set on your own initiative.",
+        "type": "boolean",
+      },
       "descriptionPrefix": {
         "description": "Optional prefix prepended to generated descriptions",
         "type": "string",
@@ -229,8 +241,12 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "type": "boolean",
       },
       "folder": {
-        "description": "Optional folder value applied to all uploads",
+        "description": "Optional existing folder applied to all uploads. Rejected unless it exists or createFolder is set.",
         "type": "string",
+      },
+      "generateSemanticTags": {
+        "description": "Enable upload-time semantic tagging. Defaults to true; set false only for an explicit opt-out.",
+        "type": "boolean",
       },
       "includeFilename": {
         "description": "Include filename in generated description",
@@ -289,6 +305,10 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         ],
         "type": "string",
       },
+      "createFolder": {
+        "description": "Operator authorization to create the folder if it does not exist. Defaults to false; do not set on your own initiative — reuse an existing folder or ask the operator.",
+        "type": "boolean",
+      },
       "description": {
         "description": "Description to store on the generated image.",
         "type": "string",
@@ -306,7 +326,7 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "type": "string",
       },
       "folder": {
-        "description": "Photarium folder for the generated image.",
+        "description": "Existing Photarium folder for the generated image. Rejected unless it exists or createFolder is set.",
         "type": "string",
       },
       "model": {
@@ -820,6 +840,10 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         ],
         "type": "string",
       },
+      "createFolder": {
+        "description": "Operator authorization to create the folder if it does not exist. Defaults to false; do not set on your own initiative — reuse an existing folder or ask the operator.",
+        "type": "boolean",
+      },
       "description": {
         "description": "Description to store on the generated image.",
         "type": "string",
@@ -837,7 +861,7 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "type": "string",
       },
       "folder": {
-        "description": "Photarium folder for the generated image.",
+        "description": "Existing Photarium folder for the generated image. Rejected unless it exists or createFolder is set.",
         "type": "string",
       },
       "mergeBrief": {
@@ -923,6 +947,10 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
   },
   "photarium_upload_from_path": {
     "properties": {
+      "createFolder": {
+        "description": "Operator authorization to create the folder named in \`folder\` when it does not already exist. Defaults to false. Do not set this on your own initiative: if an upload is rejected for an unknown folder, file into one of the existing folders the error suggests, or ask the operator whether a new folder is warranted.",
+        "type": "boolean",
+      },
       "description": {
         "description": "Description to store with the image",
         "type": "string",
@@ -936,8 +964,12 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "type": "string",
       },
       "folder": {
-        "description": "Folder to organize the image in",
+        "description": "Existing folder to file the image in. Normalized to lowercase kebab-case. Filing into a folder that does not exist is rejected unless createFolder is set.",
         "type": "string",
+      },
+      "generateSemanticTags": {
+        "description": "Enable semantic tagging after upload. Defaults to true; set false only for an explicit opt-out.",
+        "type": "boolean",
       },
       "namespace": {
         "description": "Namespace to store the image in",
@@ -954,6 +986,10 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
       "prompt": {
         "description": "Optional manual prompt text to save to the image PromptThis record after upload",
         "type": "string",
+      },
+      "semanticTagCount": {
+        "description": "Requested number of generated semantic tags. Uses the server default when omitted.",
+        "type": "number",
       },
       "sourceUrl": {
         "description": "Source page URL for provenance",
@@ -974,6 +1010,10 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
   },
   "photarium_upload_url": {
     "properties": {
+      "createFolder": {
+        "description": "Operator authorization to create the folder named in \`folder\` when it does not already exist. Defaults to false. Do not set this on your own initiative: if an upload is rejected for an unknown folder, file into one of the existing folders the error suggests, or ask the operator whether a new folder is warranted.",
+        "type": "boolean",
+      },
       "description": {
         "description": "Optional description for the image",
         "type": "string",
@@ -983,8 +1023,12 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "type": "string",
       },
       "folder": {
-        "description": "Folder to organize the image in",
+        "description": "Existing folder to file the image in. Normalized to lowercase kebab-case. Filing into a folder that does not exist is rejected unless createFolder is set.",
         "type": "string",
+      },
+      "generateSemanticTags": {
+        "description": "Enable semantic tagging after upload. Defaults to true; set false only for an explicit opt-out.",
+        "type": "boolean",
       },
       "namespace": {
         "description": "Namespace to store the image in",
@@ -1001,6 +1045,10 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
       "prompt": {
         "description": "Optional manual prompt text to save to the image PromptThis record after upload",
         "type": "string",
+      },
+      "semanticTagCount": {
+        "description": "Requested number of generated semantic tags. Uses the server default when omitted.",
+        "type": "number",
       },
       "sourceUrl": {
         "description": "Source page URL for provenance",

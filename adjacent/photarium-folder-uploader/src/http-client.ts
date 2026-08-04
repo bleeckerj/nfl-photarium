@@ -51,17 +51,27 @@ export class HttpPhotariumClient implements PhotariumClient {
     // HTTP has no persistent session to initialize.
   }
 
-  async uploadFromPath(filePath: string, namespace: string, tags: string[]): Promise<PhotariumUploadResult> {
+  async uploadFromPath(filePath: string, namespace: string, tags: string[], semanticTagCount?: number): Promise<PhotariumUploadResult> {
     const bytes = await (await import('node:fs/promises')).readFile(filePath);
     const form = new FormData();
     form.append('file', new Blob([bytes], { type: mimeForPath(filePath) }), path.basename(filePath));
     form.append('namespace', namespace);
     if (tags.length > 0) form.append('tags', tags.join(','));
-    const payload = await readResponse(await this.fetchImpl(`${this.baseUrl}/api/upload/external`, {
+    if (semanticTagCount !== undefined) form.append('semanticTagCount', String(semanticTagCount));
+    const payload = await readResponse(await this.fetchImpl(`${this.baseUrl}/api/upload`, {
       method: 'POST',
       body: form,
     }));
-    return { imageId: extractImageId(payload) };
+    const record = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+    const tagging = record.semanticTagging && typeof record.semanticTagging === 'object'
+      ? record.semanticTagging as { jobId?: unknown; state?: unknown; error?: unknown }
+      : undefined;
+    return {
+      imageId: extractImageId(payload),
+      ...(tagging && typeof tagging.jobId === 'string' && typeof tagging.state === 'string'
+        ? { semanticTagging: { jobId: tagging.jobId, state: tagging.state, ...(typeof tagging.error === 'string' ? { error: tagging.error } : {}) } }
+        : {}),
+    };
   }
 
   async generateDescription(imageId: string): Promise<void> {
@@ -72,12 +82,15 @@ export class HttpPhotariumClient implements PhotariumClient {
     }));
   }
 
-  async generateTags(imageId: string, count: number): Promise<void> {
-    await readResponse(await this.fetchImpl(`${this.baseUrl}/api/images/${encodeURIComponent(imageId)}/tags`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ count }),
+  async getSemanticTagStatus(jobId: string): Promise<{ state: string; error?: string }> {
+    const payload = await readResponse(await this.fetchImpl(`${this.baseUrl}/api/images/tag-enrichment/${encodeURIComponent(jobId)}`, {
+      method: 'GET',
     }));
+    const record = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+    return {
+      state: typeof record.state === 'string' ? record.state : 'unknown',
+      ...(typeof record.error === 'string' ? { error: record.error } : {}),
+    };
   }
 
   async close(): Promise<void> {

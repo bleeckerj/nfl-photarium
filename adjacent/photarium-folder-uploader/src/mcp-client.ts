@@ -51,7 +51,7 @@ export class McpPhotariumClient implements PhotariumClient {
     await created.session.connect(created.transport);
     const tools = await created.session.listTools();
     const available = new Set((tools.tools ?? []).map((tool) => tool.name).filter((name): name is string => Boolean(name)));
-    const required = ['photarium_upload_from_path', 'photarium_generate_description', 'photarium_generate_tags'];
+    const required = ['photarium_upload_from_path', 'photarium_generate_description', 'photarium_tag_enrichment_status'];
     const missing = required.filter((name) => !available.has(name));
     if (missing.length > 0) {
       await created.session.close().catch(() => undefined);
@@ -65,13 +65,23 @@ export class McpPhotariumClient implements PhotariumClient {
     return this.session;
   }
 
-  async uploadFromPath(filePath: string, namespace: string, tags: string[]): Promise<PhotariumUploadResult> {
+  async uploadFromPath(filePath: string, namespace: string, tags: string[], semanticTagCount?: number): Promise<PhotariumUploadResult> {
     const result = await this.connectedSession.callTool({
       name: 'photarium_upload_from_path',
-      arguments: { filePath, namespace, tags },
+      arguments: { filePath, namespace, tags, ...(semanticTagCount === undefined ? {} : { semanticTagCount }) },
     });
     assertToolSucceeded(result);
-    return { imageId: extractImageId(result) };
+    const parsed = extractJsonFromToolResult(result);
+    const record = parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
+    const tagging = record.semanticTagging && typeof record.semanticTagging === 'object'
+      ? record.semanticTagging as { jobId?: unknown; state?: unknown; error?: unknown }
+      : undefined;
+    return {
+      imageId: extractImageId(result),
+      ...(tagging && typeof tagging.jobId === 'string' && typeof tagging.state === 'string'
+        ? { semanticTagging: { jobId: tagging.jobId, state: tagging.state, ...(typeof tagging.error === 'string' ? { error: tagging.error } : {}) } }
+        : {}),
+    };
   }
 
   async generateDescription(imageId: string): Promise<void> {
@@ -83,13 +93,18 @@ export class McpPhotariumClient implements PhotariumClient {
     extractJsonFromToolResult(result);
   }
 
-  async generateTags(imageId: string, count: number): Promise<void> {
+  async getSemanticTagStatus(jobId: string): Promise<{ state: string; error?: string }> {
     const result = await this.connectedSession.callTool({
-      name: 'photarium_generate_tags',
-      arguments: { imageId, count },
+      name: 'photarium_tag_enrichment_status',
+      arguments: { jobId },
     });
     assertToolSucceeded(result);
-    extractJsonFromToolResult(result);
+    const parsed = extractJsonFromToolResult(result);
+    const record = parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
+    return {
+      state: typeof record.state === 'string' ? record.state : 'unknown',
+      ...(typeof record.error === 'string' ? { error: record.error } : {}),
+    };
   }
 
   async close(): Promise<void> {

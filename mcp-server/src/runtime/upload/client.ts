@@ -43,6 +43,7 @@ export async function uploadFromUrl(
   options: {
     displayName?: string;
     folder?: string;
+    createFolder?: boolean;
     tags?: string[];
     namespace?: string;
     description?: string;
@@ -50,6 +51,8 @@ export async function uploadFromUrl(
     sourceUrl?: string;
     parentId?: string;
     prompt?: string;
+    generateSemanticTags?: boolean;
+    semanticTagCount?: number;
   } = {}
 ): Promise<{ success: boolean; imageId?: string; error?: string; promptSave?: Record<string, unknown> }> {
   try {
@@ -95,6 +98,7 @@ export async function uploadFromUrl(
     formData.append('file', new Blob([new Uint8Array(imageBytes)], { type: inferredMime }), filename);
     formData.append('displayName', semanticDisplayName || filename.replace(/\.[^.]+$/, ''));
     if (options.folder) formData.append('folder', options.folder);
+    if (options.createFolder) formData.append('createFolder', 'true');
     if (options.tags) formData.append('tags', options.tags.join(','));
     if (options.namespace) formData.append('namespace', options.namespace);
     if (options.description) formData.append('description', options.description);
@@ -103,6 +107,8 @@ export async function uploadFromUrl(
     formData.append('originalUrl', options.originalUrl || url);
     if (options.sourceUrl) formData.append('sourceUrl', options.sourceUrl);
     if (options.parentId) formData.append('parentId', options.parentId);
+    if (options.generateSemanticTags === false) formData.append('generateSemanticTags', 'false');
+    if (options.semanticTagCount !== undefined) formData.append('semanticTagCount', String(options.semanticTagCount));
 
     // Prefer the same upload endpoint used by the web UI / file uploads.
     // This avoids relying on the "external" upload route, which has (in some deployments)
@@ -201,6 +207,7 @@ export async function uploadFileBase64(
     filename: string;
     contentType?: string;
     folder?: string;
+    createFolder?: boolean;
     tags?: string[];
     description?: string;
     originalUrl?: string;
@@ -209,6 +216,8 @@ export async function uploadFileBase64(
     namespace?: string;
     parentId?: string;
     prompt?: string;
+    generateSemanticTags?: boolean;
+    semanticTagCount?: number;
   }
 ): Promise<Record<string, unknown>> {
   const { buffer, mimeType } = decodeBase64(payload.base64);
@@ -216,6 +225,7 @@ export async function uploadFileBase64(
   const formData = new FormData();
   formData.append('file', new Blob([new Uint8Array(buffer)], { type: contentType }), payload.filename);
   if (payload.folder) formData.append('folder', payload.folder);
+  if (payload.createFolder) formData.append('createFolder', 'true');
   if (payload.tags?.length) formData.append('tags', payload.tags.join(','));
   if (payload.description) formData.append('description', payload.description);
   const prompt = normalizeManualPrompt(payload.prompt);
@@ -225,6 +235,8 @@ export async function uploadFileBase64(
   if (payload.sourcePath) formData.append('sourcePath', payload.sourcePath);
   if (payload.namespace) formData.append('namespace', payload.namespace);
   if (payload.parentId) formData.append('parentId', payload.parentId);
+  if (payload.generateSemanticTags === false) formData.append('generateSemanticTags', 'false');
+  if (payload.semanticTagCount !== undefined) formData.append('semanticTagCount', String(payload.semanticTagCount));
 
   const response = await fetch(`${BASE_URL}${endpoint}`, {
     method: 'POST',
@@ -243,6 +255,7 @@ export async function createAnimation(options: {
   fps?: number;
   loop?: boolean;
   folder?: string;
+  createFolder?: boolean;
   tags?: string[];
   description?: string;
   originalUrl?: string;
@@ -271,6 +284,7 @@ export async function createAnimation(options: {
   if (options.fps !== undefined) formData.append('fps', String(options.fps));
   if (options.loop !== undefined) formData.append('loop', options.loop ? 'true' : 'false');
   if (options.folder) formData.append('folder', options.folder);
+  if (options.createFolder) formData.append('createFolder', 'true');
   if (options.tags?.length) formData.append('tags', options.tags.join(','));
   if (options.description) formData.append('description', options.description);
   if (options.originalUrl) formData.append('originalUrl', options.originalUrl);

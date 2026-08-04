@@ -27,6 +27,7 @@ import { patchImageExtrasRecord } from '@/server/imageExtras';
 import { validateParentForNewChild } from '@/server/parentValidation';
 import { enqueueSemanticTagJob } from '@/server/semanticTagQueue';
 import type { SemanticTagJob } from '@/types/semanticTagging';
+import type { InstagramSourceRecord } from '@/server/instagramSource';
 
 // Re-export for backward compatibility
 export { sanitizeFilename, MAX_FILENAME_LENGTH } from '@/utils/filename';
@@ -62,6 +63,7 @@ export type UploadContext = {
   description?: string;
   originalUrl?: string;
   sourceUrl?: string;
+  instagramSource?: InstagramSourceRecord;
   sourcePath?: string;
   namespace?: string;
   parentId?: string;
@@ -73,6 +75,9 @@ export type UploadContext = {
   rotatedAt?: string;
   rotationDegrees?: number;
   isAnimated?: boolean;
+  generateSemanticTags?: boolean;
+  semanticTagCount?: number;
+  comfyWorkflowJson?: unknown;
 };
 
 export type UploadSuccess = {
@@ -102,6 +107,18 @@ export type UploadFailure = {
   error: string;
   reason?: 'invalid-type' | 'too-large' | 'duplicate' | 'upload' | 'unsupported';
   duplicates?: ReturnType<typeof toDuplicateSummary>[];
+};
+
+type CloudflareUploadResponse = {
+  result?: {
+    id?: string;
+    filename?: string;
+    uploaded?: string;
+    variants?: string[];
+    size?: number;
+    meta?: Record<string, unknown>;
+  };
+  errors?: Array<{ message?: string }>;
 };
 
 const logIssue = (message: string, details?: Record<string, unknown>) => {
@@ -184,6 +201,7 @@ export async function uploadImageBuffer({
     description,
     originalUrl,
     sourceUrl,
+    instagramSource,
     sourcePath,
     namespace,
     parentId,
@@ -195,6 +213,9 @@ export async function uploadImageBuffer({
     rotatedAt,
     rotationDegrees,
     isAnimated,
+    generateSemanticTags,
+    semanticTagCount,
+    comfyWorkflowJson,
   } = context;
   const isSnagx = fileName.toLowerCase().endsWith('.snagx');
   const normalizedNamespace = typeof namespace === 'string' && namespace.trim()
@@ -312,7 +333,17 @@ export async function uploadImageBuffer({
   const resolvedParentId = deduplication.duplicateFamilySelection?.canonicalParentId ?? canonicalParentId;
 
   const exifSummary = await extractExifSummary(workingOriginalBuffer);
-  const comfyExtraction = await extractComfyWorkflowMetadata(workingOriginalBuffer, { mimeType: workingFileType });
+  const extractedComfyMetadata = await extractComfyWorkflowMetadata(workingOriginalBuffer, { mimeType: workingFileType });
+  const comfyExtraction = comfyWorkflowJson === undefined
+    ? extractedComfyMetadata
+    : {
+        ...extractedComfyMetadata,
+        detected: true,
+        source: 'request:comfyWorkflowJson',
+        sources: Array.from(new Set([...(extractedComfyMetadata.sources ?? []), 'request:comfyWorkflowJson'])),
+        workflowJson: comfyWorkflowJson,
+        workflowSourceKey: 'request:comfyWorkflowJson',
+      };
   const effectiveGeneratedBy = comfyExtraction.detected ? 'comfyui' : generatedBy;
   const effectiveComfyMetadataDetected = comfyExtraction.detected ? true : comfyMetadataDetected;
   const effectiveComfyMetadataSource = comfyExtraction.source ?? comfyMetadataSource;
@@ -369,6 +400,7 @@ export async function uploadImageBuffer({
     originalUrlNormalized: normalizedOriginalUrl,
     sourceUrl: sourceUrl || undefined,
     sourceUrlNormalized: normalizedSourceUrl,
+    instagramSource: instagramSource || undefined,
     exif: exifSummary,
   };
   const cachedMetadataPayload = {
@@ -393,38 +425,31 @@ export async function uploadImageBuffer({
     }
   );
 
-  // Handle non-JSON responses (rate limits, timeouts, HTML error pages)
+  // Cloudflare occasionally returns JSON with a text/plain content type.
   const contentType = cloudflareResponse.headers.get('content-type') || '';
-  if (!contentType.includes('application/json')) {
+  let result: CloudflareUploadResponse = {};
+  if (contentType.includes('application/json')) {
+    result = await cloudflareResponse.json() as CloudflareUploadResponse;
+  } else {
     const textBody = await cloudflareResponse.text();
-    console.error('Cloudflare returned non-JSON response:', {
-      status: cloudflareResponse.status,
-      statusText: cloudflareResponse.statusText,
-      contentType,
-      bodyPreview: textBody.slice(0, 500)
-    });
-    
-    // Detect specific error conditions
-    let errorMessage = 'Cloudflare returned an unexpected response';
-    if (cloudflareResponse.status === 429) {
-      errorMessage = 'Rate limited by Cloudflare. Please wait and try again.';
-    } else if (cloudflareResponse.status === 503 || cloudflareResponse.status === 502) {
-      errorMessage = 'Cloudflare service temporarily unavailable. Please retry.';
-    } else if (cloudflareResponse.status === 408 || textBody.includes('timeout')) {
-      errorMessage = 'Request timed out. The file may be too large or the connection is slow.';
-    } else if (cloudflareResponse.status >= 500) {
-      errorMessage = `Cloudflare server error (${cloudflareResponse.status}). Please retry.`;
+    try {
+      const parsed = JSON.parse(textBody) as unknown;
+      if (parsed && typeof parsed === 'object') result = parsed as CloudflareUploadResponse;
+    } catch {
+      console.error('Cloudflare returned non-JSON response:', {
+        status: cloudflareResponse.status,
+        statusText: cloudflareResponse.statusText,
+        contentType,
+        bodyPreview: textBody.slice(0, 500),
+      });
+      let errorMessage = 'Cloudflare returned an unexpected response';
+      if (cloudflareResponse.status === 429) errorMessage = 'Rate limited by Cloudflare. Please wait and try again.';
+      else if (cloudflareResponse.status === 503 || cloudflareResponse.status === 502) errorMessage = 'Cloudflare service temporarily unavailable. Please retry.';
+      else if (cloudflareResponse.status === 408 || textBody.includes('timeout')) errorMessage = 'Request timed out. The file may be too large or the connection is slow.';
+      else if (cloudflareResponse.status >= 500) errorMessage = `Cloudflare server error (${cloudflareResponse.status}). Please retry.`;
+      return { ok: false, error: errorMessage, status: cloudflareResponse.status, reason: 'upload' };
     }
-    
-    return {
-      ok: false,
-      error: errorMessage,
-      status: cloudflareResponse.status,
-      reason: 'upload'
-    };
   }
-
-  const result = await cloudflareResponse.json();
 
   if (!cloudflareResponse.ok) {
     console.error('Cloudflare API error:', result);
@@ -437,6 +462,10 @@ export async function uploadImageBuffer({
   }
 
   const imageData = result.result;
+  if (!imageData?.id || !imageData.variants?.length || !imageData.uploaded) {
+    return { ok: false, error: 'Cloudflare response missing image metadata.', status: 502, reason: 'upload' };
+  }
+  const primaryImageId = imageData.id;
   const serverMeta = imageData.meta && typeof imageData.meta === 'object'
     ? (imageData.meta as Record<string, unknown>)
     : undefined;
@@ -453,13 +482,13 @@ export async function uploadImageBuffer({
   // Exception: the comfy ingest patches the same extras record as
   // patchImageExtrasRecord (read-modify-write), so those two stay chained.
   const extrasChain = (async () => {
-    await patchImageExtrasRecord(imageData.id, {
+    await patchImageExtrasRecord(primaryImageId, {
       ...(description ? { description } : {}),
       ...extrasMetadata,
     });
     try {
       await ingestComfyWorkflowForImage({
-        imageId: imageData.id,
+        imageId: primaryImageId,
         comfyExtraction,
         imageDescription: {
           description,
@@ -474,11 +503,20 @@ export async function uploadImageBuffer({
       });
     }
   })();
+  // An SVG is indexed through its rasterized companion (the family head), so it is
+  // not queued here — two near-identical vectors would return the pair twice.
+  const isSvgUpload = workingFileType === 'image/svg+xml';
   const [, , , autoEmbeddings] = await Promise.all([
     upsertCachedImage(primaryCached),
     extrasChain,
     persistAspectMetadataFromBuffer(imageData.id, finalBuffer, bufferedAspectMetadata),
-    queueAutoEmbeddingsForImage(primaryCached),
+    isSvgUpload
+      ? Promise.resolve<AutoEmbeddingsStatus>({
+          enabled: true,
+          queued: false,
+          reason: 'deferred-to-raster-companion',
+        })
+      : queueAutoEmbeddingsForImage(primaryCached),
   ]);
 
   let webpVariantId: string | undefined;
@@ -492,6 +530,10 @@ export async function uploadImageBuffer({
         ...metadataPayload,
         filename: webpName,
         displayName: webpName,
+        // These describe the WebP itself. Spreading metadataPayload would otherwise
+        // leave the companion claiming image/svg+xml and the SVG's byte length.
+        type: 'image/webp',
+        size: webpBuffer.byteLength,
         variationParentId: resolvedParentId,
         linkedAssetId: imageData.id,
       };
@@ -542,9 +584,17 @@ export async function uploadImageBuffer({
   }
 
   if (webpVariantId) {
+    // The rasterized WebP is the family head and the SVG is its variant: the head is
+    // natively raster, so search, vision and transforms all work on it, and the pair
+    // collapses to one canonical gallery entry.
+    //
+    // Families are flat (see imageFamily.ts) — when this upload already targets a
+    // parent, both records stay siblings under that root rather than forming a chain.
+    const svgParentId = resolvedParentId || webpVariantId;
     const updatedMetadata = {
       ...metadataPayload,
       linkedAssetId: webpVariantId,
+      variationParentId: svgParentId,
       updatedAt: new Date().toISOString(),
     };
     const { metadata: limitedUpdatedMetadata, dropped, size, limitBytes } = enforceCloudflareMetadataLimit(updatedMetadata);
@@ -585,7 +635,10 @@ export async function uploadImageBuffer({
     }
   }
 
-  const semanticTagging = enqueueSemanticTagJob(webpVariantId || imageData.id);
+  const semanticTagging = await enqueueSemanticTagJob(webpVariantId || imageData.id, {
+    enabled: generateSemanticTags !== false,
+    count: semanticTagCount,
+  });
 
   return {
     ok: true,
@@ -601,7 +654,8 @@ export async function uploadImageBuffer({
       originalUrl: originalUrl,
       sourceUrl: sourceUrl,
       namespace: effectiveNamespace,
-      parentId: resolvedParentId,
+      // An SVG with no requested parent is now a variant of its rasterized companion.
+      parentId: resolvedParentId || webpVariantId,
       linkedAssetId: webpVariantId,
       webpVariantId,
       semanticTagging,

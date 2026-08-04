@@ -12,20 +12,21 @@ test('HTTP client uploads to the configured namespace and enriches the returned 
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const fetchMock: typeof fetch = async (input, init) => {
     calls.push({ url: String(input), init });
-    if (calls.length === 1) return new Response(JSON.stringify({ id: 'image-123' }), { status: 200 });
-    return new Response(JSON.stringify({ saved: true }), { status: 200 });
+    if (calls.length === 1) return new Response(JSON.stringify({ id: 'image-123', semanticTagging: { jobId: 'job-123', state: 'queued' } }), { status: 200 });
+    if (calls.length === 2) return new Response(JSON.stringify({ saved: true }), { status: 200 });
+    return new Response(JSON.stringify({ state: 'succeeded' }), { status: 200 });
   };
 
   const client = new HttpPhotariumClient('http://localhost:3000/', fetchMock);
   const uploaded = await client.uploadFromPath(filePath, 'studio', ['screenshot', 'reference']);
   await client.generateDescription(uploaded.imageId);
-  await client.generateTags(uploaded.imageId, 8);
+  const status = await client.getSemanticTagStatus('job-123');
 
   assert.equal(uploaded.imageId, 'image-123');
-  assert.equal(calls[0].url, 'http://localhost:3000/api/upload/external');
+  assert.equal(calls[0].url, 'http://localhost:3000/api/upload');
   assert.equal((calls[0].init?.body as FormData).get('namespace'), 'studio');
   assert.equal((calls[0].init?.body as FormData).get('tags'), 'screenshot,reference');
   assert.equal(calls[1].url, 'http://localhost:3000/api/images/image-123/description');
-  assert.equal(calls[2].url, 'http://localhost:3000/api/images/image-123/tags');
-  assert.equal(JSON.parse(String(calls[2].init?.body)).count, 8);
+  assert.equal(calls[2].url, 'http://localhost:3000/api/images/tag-enrichment/job-123');
+  assert.equal(status.state, 'succeeded');
 });

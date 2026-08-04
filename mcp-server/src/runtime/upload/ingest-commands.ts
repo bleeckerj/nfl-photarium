@@ -8,6 +8,7 @@ export async function runFilesystemIngest(options: {
   namespace: string;
   apiBase?: string;
   folder?: string;
+  createFolder?: boolean;
   tags?: string[];
   descriptionPrefix?: string;
   includeFilename?: boolean;
@@ -15,6 +16,7 @@ export async function runFilesystemIngest(options: {
   aiMetadata?: boolean;
   aiDisplayName?: boolean;
   aiTags?: boolean;
+  generateSemanticTags?: boolean;
   tagCount?: number;
   concurrency?: number;
   throttleMs?: number;
@@ -33,6 +35,7 @@ export async function runFilesystemIngest(options: {
 
   if (options.apiBase) args.push('--api-base', options.apiBase);
   if (options.folder) args.push('--folder', options.folder);
+  if (options.createFolder) args.push('--create-folder');
   if (options.tags && options.tags.length > 0) args.push('--tags', options.tags.join(','));
   if (options.descriptionPrefix) args.push('--description-prefix', options.descriptionPrefix);
   if (options.includeFilename) args.push('--include-filename');
@@ -40,6 +43,7 @@ export async function runFilesystemIngest(options: {
   if (options.aiMetadata) args.push('--ai-metadata');
   if (options.aiDisplayName) args.push('--ai-display-name');
   if (options.aiTags) args.push('--ai-tags');
+  if (options.generateSemanticTags === false) args.push('--no-semantic-tags');
   if (typeof options.tagCount === 'number') args.push('--tag-count', String(options.tagCount));
   if (typeof options.concurrency === 'number') args.push('--concurrency', String(options.concurrency));
   if (typeof options.throttleMs === 'number') args.push('--throttle-ms', String(options.throttleMs));

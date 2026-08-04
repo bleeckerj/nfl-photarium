@@ -302,7 +302,7 @@ async function uploadImageBuffer({
   if (originalFileUrl) form.append("originalUrl", originalFileUrl);
   if (duplicateAction) form.append("duplicateAction", duplicateAction);
 
-  const res = await fetch(`${apiBase}/api/upload/external`, {
+  const res = await fetch(`${apiBase}/api/upload`, {
     method: "POST",
     body: form,
   });

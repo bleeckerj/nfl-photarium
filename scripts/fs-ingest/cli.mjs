@@ -14,7 +14,8 @@ Required:
 Options:
   --api-base <url>            API base URL (default: http://localhost:3000)
   --checkpoint-file <path>    Override checkpoint file path (share cache across roots)
-  --folder <name>             Optional folder value for uploaded assets
+  --folder <name>             Optional existing folder for uploaded assets
+  --create-folder             Authorize creating --folder if it does not exist
   --tags <csv>                Base tags to apply to every file
   --append-image-tag <tag>    Optional tag appended to image tags (after AI tags)
   --hash-cache-backfill-only  Compute/write content-hash cache entries only (no uploads)
@@ -27,6 +28,7 @@ Options:
   --ai-display-name           For images: generate displayName only
   --ai-tags                   For images: generate tags only
   --tag-count <n>             AI tag count target (default: 4)
+  --no-semantic-tags          Explicitly skip upload-time semantic tagging
   --concurrency <n>           Parallel uploads (default: 2)
   --throttle-ms <n>          Minimum delay between upload requests (global, default: 0)
   --on-duplicate <mode>      Duplicate handling for image uploads: reject|family (default: reject)
@@ -86,6 +88,7 @@ export function parseArgs(argv) {
     aiMetadata: false,
     aiDisplayName: false,
     aiTags: false,
+    generateSemanticTags: true,
     tagCount: 4,
     concurrency: 2,
     throttleMs: 0,
@@ -97,6 +100,7 @@ export function parseArgs(argv) {
     sidecarMode: "none",
     sidecarRequired: false,
     folderFromAlbum: true,
+    createFolder: false,
     albumTags: false,
     reportSidecars: false,
     allowZipsInRoot: false,
@@ -139,6 +143,8 @@ export function parseArgs(argv) {
       if (!requireValue(arg, next)) continue;
       opts.checkpointFile = path.resolve(expandHome(next));
       i += 1;
+    } else if (arg === "--create-folder") {
+      opts.createFolder = true;
     } else if (arg === "--folder") {
       if (!requireValue(arg, next)) continue;
       opts.folder = next.trim();
@@ -191,6 +197,8 @@ export function parseArgs(argv) {
       opts.aiDisplayName = true;
     } else if (arg === "--ai-tags") {
       opts.aiTags = true;
+    } else if (arg === "--no-semantic-tags") {
+      opts.generateSemanticTags = false;
     } else if (arg === "--dry-run") {
       opts.dryRun = true;
     } else if (arg === "--verbose") {

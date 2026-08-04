@@ -9,10 +9,11 @@ vi.mock('@/server/semanticTagService', () => ({
 }));
 
 import { enqueueSemanticTagJob, getSemanticTagJob } from '@/server/semanticTagQueue';
+import { resetSemanticTagQueueStoreForTests } from '@/server/semanticTagQueueStore';
 
 const waitForTerminalState = async (jobId: string) => {
   for (let attempt = 0; attempt < 20; attempt += 1) {
-    const job = getSemanticTagJob(jobId);
+    const job = await getSemanticTagJob(jobId);
     if (job?.state === 'succeeded' || job?.state === 'failed') return job;
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
@@ -23,6 +24,8 @@ describe('semantic tag queue', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     delete process.env.AUTO_TAGS_ON_UPLOAD;
+    process.env.SEMANTIC_TAG_QUEUE_MAX_ATTEMPTS = '1';
+    resetSemanticTagQueueStoreForTests();
   });
 
   it('returns immediately and records a successful background result', async () => {
@@ -33,7 +36,7 @@ describe('semantic tag queue', () => {
       saved: true,
     });
 
-    const queued = enqueueSemanticTagJob('img-queued');
+    const queued = await enqueueSemanticTagJob('img-queued');
     expect(queued.state).toBe('queued');
 
     const completed = await waitForTerminalState(queued.jobId);
@@ -45,7 +48,7 @@ describe('semantic tag queue', () => {
   it('records a failure without throwing into the upload request', async () => {
     generateAndPersistSemanticTagsMock.mockRejectedValue(new Error('OpenAI unavailable'));
 
-    const queued = enqueueSemanticTagJob('img-failing');
+    const queued = await enqueueSemanticTagJob('img-failing');
     const initialState = queued.state;
     const completed = await waitForTerminalState(queued.jobId);
 
@@ -54,10 +57,10 @@ describe('semantic tag queue', () => {
     expect(completed?.error).toBe('OpenAI unavailable');
   });
 
-  it('supports an immediate feature-flag back-out without affecting uploads', () => {
+  it('supports an immediate feature-flag back-out without affecting uploads', async () => {
     process.env.AUTO_TAGS_ON_UPLOAD = 'false';
 
-    const job = enqueueSemanticTagJob('img-disabled');
+    const job = await enqueueSemanticTagJob('img-disabled');
 
     expect(job.state).toBe('disabled');
     expect(generateAndPersistSemanticTagsMock).not.toHaveBeenCalled();

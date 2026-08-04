@@ -122,7 +122,7 @@ function getConfig() {
     generateDisplayName: envBool('TELEGRAM_GENERATE_DISPLAY_NAME', true),
     once: process.argv.includes('--once'),
     photariumBaseUrl,
-    externalUploadUrl: env('PHOTARIUM_EXTERNAL_UPLOAD_URL', `${photariumBaseUrl}/api/upload/external`),
+    externalUploadUrl: env('PHOTARIUM_EXTERNAL_UPLOAD_URL', `${photariumBaseUrl}/api/upload`),
     displayNameSuggestUrl: env('PHOTARIUM_DISPLAY_NAME_SUGGEST_URL', `${photariumBaseUrl}/api/display-name/suggest`),
     namespace: TELEGRAM_INGEST_NAMESPACE,
     folder: env('PHOTARIUM_FOLDER'),

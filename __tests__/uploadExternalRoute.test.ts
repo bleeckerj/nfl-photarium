@@ -110,10 +110,14 @@ describe('POST /api/upload/external', () => {
     process.env.CLOUDFLARE_ACCOUNT_ID = 'acct';
     process.env.CLOUDFLARE_API_TOKEN = 'token';
 
+    let uploadCount = 0;
     let callCount = 0;
-    const mockFetch = vi.spyOn(globalThis, 'fetch').mockImplementation(() => {
+    const mockFetch = vi.spyOn(globalThis, 'fetch').mockImplementation((url, init) => {
       callCount++;
-      if (callCount === 1) {
+      const isCloudflareUpload = typeof url === 'string'
+        && url.endsWith('/images/v1')
+        && init?.method === 'POST';
+      if (isCloudflareUpload && uploadCount++ === 0) {
         // First call: upload SVG
         return Promise.resolve(new Response(
           JSON.stringify({
@@ -126,7 +130,7 @@ describe('POST /api/upload/external', () => {
           }),
           { status: 200 }
         ));
-      } else if (callCount === 2) {
+      } else if (isCloudflareUpload && uploadCount === 2) {
         // Second call: upload WebP variant
         return Promise.resolve(new Response(
           JSON.stringify({
@@ -139,7 +143,7 @@ describe('POST /api/upload/external', () => {
           }),
           { status: 200 }
         ));
-      } else if (callCount === 3) {
+      } else if (typeof url === 'string' && url.endsWith('/images/v1/svg123') && init?.method === 'PATCH') {
         // Third call: PATCH to link assets
         return Promise.resolve(new Response(null, { status: 200 }));
       } else {

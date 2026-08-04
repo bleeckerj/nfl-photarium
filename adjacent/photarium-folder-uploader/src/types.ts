@@ -51,6 +51,7 @@ export interface CheckpointEntry {
   contentHash: string;
   lastPath: string;
   imageId?: string;
+  semanticTagJobId?: string;
   completed: MetadataStage[];
   attempts: number;
   lastError?: string;
@@ -64,12 +65,17 @@ export interface Checkpoint {
 
 export interface PhotariumUploadResult {
   imageId: string;
+  semanticTagging?: {
+    jobId: string;
+    state: string;
+    error?: string;
+  };
 }
 
 export interface PhotariumClient {
   connect(): Promise<void>;
-  uploadFromPath(filePath: string, namespace: string, tags: string[]): Promise<PhotariumUploadResult>;
+  uploadFromPath(filePath: string, namespace: string, tags: string[], semanticTagCount?: number): Promise<PhotariumUploadResult>;
   generateDescription(imageId: string): Promise<void>;
-  generateTags(imageId: string, count: number): Promise<void>;
+  getSemanticTagStatus(jobId: string): Promise<{ state: string; error?: string }>;
   close(): Promise<void>;
 }

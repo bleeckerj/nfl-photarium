@@ -312,7 +312,7 @@ async function pushImageToCloudflare({ apiBase, imageUrl, uploadTags, shortcode,
   form.append('description', permalink);
   if (duplicateAction) form.append('duplicateAction', duplicateAction);
 
-  const endpoint = `${apiBase}/api/upload/external`;
+  const endpoint = `${apiBase}/api/upload`;
   const res = await fetch(endpoint, { method: 'POST', body: form });
   const bodyText = await res.text();
 

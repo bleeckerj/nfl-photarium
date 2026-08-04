@@ -362,7 +362,7 @@ export async function uploadImageFile({
   form.append('originalUrl', sourcePath.fileUrl);
   if (duplicateAction) form.append('duplicateAction', duplicateAction);
 
-  const response = await fetch(`${apiBase}/api/upload/external`, {
+  const response = await fetch(`${apiBase}/api/upload`, {
     method: 'POST',
     body: form,
   });

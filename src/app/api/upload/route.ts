@@ -4,6 +4,7 @@ import { toDuplicateSummary } from '@/server/duplicateDetector';
 import { upsertRegistryNamespace } from '@/server/namespaceRegistry';
 import { validateParentForNewChild } from '@/server/parentValidation';
 import { requireValidFolderName } from '@/server/folderPolicy';
+import { UnknownFolderError, parseCreateFolderFlag, requireFilableFolder } from '@/server/folderCreationPolicy';
 import { getPromptThisRecord, setPromptThisRecord, type PromptThisRecord } from '@/server/promptThis';
 import { resolveUploadNamespace, SPECIFIC_NAMESPACE_REQUIRED_ERROR } from '@/server/uploadNamespace';
 import { SUPPORTED_IMAGE_TYPES, uploadImageBuffer } from '@/server/uploadService';
@@ -34,6 +35,17 @@ const isArchiveFile = (file: File) => isZipFile(file) || isKeynoteFile(file);
 
 const normalizeDuplicateAction = (value: unknown): UploadDuplicateAction | undefined =>
   value === 'reject' || value === 'family' || value === 'override' ? value : undefined;
+
+const parseOptionalBoolean = (value: FormDataEntryValue | null): boolean | undefined => {
+  if (value === null || typeof value !== 'string') return undefined;
+  return !['0', 'false', 'no', 'off'].includes(value.trim().toLowerCase());
+};
+
+const parseOptionalNumber = (value: FormDataEntryValue | null): number | undefined => {
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
 
 const getMimeTypeFromFilename = (filename: string) => {
   const lower = filename.toLowerCase();
@@ -181,6 +193,9 @@ export async function POST(request: NextRequest) {
     const namespace = formData.get('namespace') as string;
     const parentIdRaw = formData.get('parentId');
     const duplicateActionRaw = formData.get('duplicateAction');
+    const generateSemanticTags = parseOptionalBoolean(formData.get('generateSemanticTags'));
+    const semanticTagCount = parseOptionalNumber(formData.get('semanticTagCount'));
+    const createFolderRequested = parseCreateFolderFlag(formData.get('createFolder'));
 
     if (!promptField.ok) {
       return NextResponse.json(
@@ -191,10 +206,13 @@ export async function POST(request: NextRequest) {
     const cleanPrompt = promptField.prompt;
     
     // Clean up values - handle empty strings and "undefined" strings
-    const cleanFolder = folder && folder.trim() && folder !== 'undefined' ? folder.trim() : undefined;
-    if (cleanFolder) {
+    const rawFolder = folder && folder.trim() && folder !== 'undefined' ? folder.trim() : undefined;
+    // Store the normalized name the policy returns, not the caller's raw string —
+    // otherwise "Inca Trail" passes validation and lands as an invalid folder.
+    let cleanFolder: string | undefined;
+    if (rawFolder) {
       try {
-        requireValidFolderName(cleanFolder);
+        cleanFolder = requireValidFolderName(rawFolder);
       } catch (error) {
         return NextResponse.json(
           { error: error instanceof Error ? error.message : 'Invalid folder name' },
@@ -229,6 +247,18 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    // Existence check runs once the namespace is resolved: folders are scoped per
+    // namespace, so "does this folder exist" is only answerable here.
+    if (cleanFolder) {
+      try {
+        cleanFolder = await requireFilableFolder(cleanFolder, effectiveNamespace, createFolderRequested);
+      } catch (error) {
+        return NextResponse.json(
+          { error: error instanceof Error ? error.message : 'Invalid folder name' },
+          { status: error instanceof UnknownFolderError ? error.status : 500 }
+        );
+      }
+    }
     const resolvedParentId = parentValidation.canonicalParentId;
 
     const keynoteSource = isKeynoteSourcePath(cleanSourcePath);
@@ -250,6 +280,8 @@ export async function POST(request: NextRequest) {
       namespace: effectiveNamespace,
       parentId: resolvedParentId,
       duplicateAction: normalizeDuplicateAction(duplicateActionRaw),
+      generateSemanticTags,
+      semanticTagCount,
     };
 
     if (isArchiveFile(file)) {

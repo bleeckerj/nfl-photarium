@@ -161,8 +161,12 @@ export class FolderWatcher {
       this.log(`[${timestamp()}] processing ${relativePath}`);
 
       if (!entry.completed.includes('uploaded')) {
-        const uploaded = await this.client.uploadFromPath(filePath, this.config.namespace, this.config.tags);
-        entry = { ...entry, imageId: uploaded.imageId };
+        const uploaded = await this.client.uploadFromPath(filePath, this.config.namespace, this.config.tags, this.config.tagCount);
+        entry = {
+          ...entry,
+          imageId: uploaded.imageId,
+          ...(uploaded.semanticTagging?.jobId ? { semanticTagJobId: uploaded.semanticTagging.jobId } : {}),
+        };
         entry = markStage(entry, 'uploaded');
         this.checkpoint.entries[key] = entry;
         await this.persist();
@@ -178,7 +182,9 @@ export class FolderWatcher {
         this.log(`[${timestamp()}] description generated for ${imageId}`);
       }
       if (!entry.completed.includes('tags')) {
-        await this.client.generateTags(imageId, this.config.tagCount);
+        const jobId = entry.semanticTagJobId;
+        if (!jobId) throw new Error('Upload did not return a semantic tag job ID.');
+        await this.waitForSemanticTags(jobId, imageId);
         entry = markStage(entry, 'tags');
         this.checkpoint.entries[key] = entry;
         await this.persist();
@@ -216,5 +222,20 @@ export class FolderWatcher {
         this.retryTimers.add(timer);
       }
     }
+  }
+
+  private async waitForSemanticTags(jobId: string, imageId: string): Promise<void> {
+    for (let attempt = 0; attempt < 180; attempt += 1) {
+      const status = await this.client.getSemanticTagStatus(jobId);
+      if (status.state === 'succeeded') {
+        this.log(`[${timestamp()}] semantic tags verified for ${imageId}`);
+        return;
+      }
+      if (status.state === 'failed' || status.state === 'disabled') {
+        throw new Error(status.error || `Semantic tag job ${jobId} ended in ${status.state} state.`);
+      }
+      await delay(1000);
+    }
+    throw new Error(`Timed out waiting for semantic tag job ${jobId}.`);
   }
 }

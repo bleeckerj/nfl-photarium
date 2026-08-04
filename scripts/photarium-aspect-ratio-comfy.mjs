@@ -170,7 +170,7 @@ const uploadToPhotarium = async (baseUrl, buffer, filename, contentType, folder,
   }
   let resp;
   try {
-    resp = await fetch(`${baseUrl}/api/upload/external`, { method: 'POST', body: formData });
+    resp = await fetch(`${baseUrl}/api/upload`, { method: 'POST', body: formData });
   } catch (error) {
     throw new Error(`Photarium upload failed: ${error instanceof Error ? error.message : String(error)}`);
   }

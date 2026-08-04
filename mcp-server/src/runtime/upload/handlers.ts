@@ -1,4 +1,5 @@
 import { BASE_URL } from '../shared/config.js';
+import { apiRequest } from '../shared/api-client.js';
 import { normalizeManualPrompt } from '../shared/prompts.js';
 import type { RuntimeToolHandler } from '../types.js';
 import {
@@ -25,10 +26,19 @@ import {
 } from './ingest-commands.js';
 
 export const uploadHandlers: Record<string, RuntimeToolHandler> = {
+  'photarium_tag_enrichment_status': async (args: Record<string, unknown>) => {
+    const { jobId } = args as { jobId: string };
+    const result = await apiRequest(`/api/images/tag-enrichment/${encodeURIComponent(jobId)}`);
+    return {
+      content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+    };
+  },
+
   'photarium_upload_url': async (args: Record<string, unknown>) => {
-    const { url, folder, tags, namespace, description, prompt, displayName, originalUrl, sourceUrl, parentId } = args as {
+    const { url, folder, createFolder, tags, namespace, description, prompt, displayName, originalUrl, sourceUrl, parentId, generateSemanticTags, semanticTagCount } = args as {
       url: string;
       folder?: string;
+      createFolder?: boolean;
       tags?: string[];
       namespace?: string;
       description?: string;
@@ -37,8 +47,10 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
       originalUrl?: string;
       sourceUrl?: string;
       parentId?: string;
+      generateSemanticTags?: boolean;
+      semanticTagCount?: number;
     };
-    const result = await uploadFromUrl(url, { folder, tags, namespace, description, prompt, displayName, originalUrl, sourceUrl, parentId });
+    const result = await uploadFromUrl(url, { folder, createFolder, tags, namespace, description, prompt, displayName, originalUrl, sourceUrl, parentId, generateSemanticTags, semanticTagCount });
     return {
       content: [
         {
@@ -71,11 +83,12 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
   },
 
   'photarium_upload_file': async (args: Record<string, unknown>) => {
-    const { base64, filename, contentType, folder, tags, description, prompt, originalUrl, sourceUrl, sourcePath, namespace, parentId } = args as {
+    const { base64, filename, contentType, folder, createFolder, tags, description, prompt, originalUrl, sourceUrl, sourcePath, namespace, parentId, generateSemanticTags, semanticTagCount } = args as {
       base64: string;
       filename: string;
       contentType?: string;
       folder?: string;
+      createFolder?: boolean;
       tags?: string[];
       description?: string;
       prompt?: string;
@@ -84,12 +97,15 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
       sourcePath?: string;
       namespace?: string;
       parentId?: string;
+      generateSemanticTags?: boolean;
+      semanticTagCount?: number;
     };
     const result = await uploadFileBase64('/api/upload', {
       base64,
       filename,
       contentType,
       folder,
+      createFolder,
       tags,
       description,
       prompt,
@@ -98,6 +114,8 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
       sourcePath,
       namespace,
       parentId,
+      generateSemanticTags,
+      semanticTagCount,
     });
     return {
       content: [
@@ -110,11 +128,12 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
   },
 
   'photarium_upload_image': async (args: Record<string, unknown>) => {
-    const { base64, filename, contentType, folder, tags, description, prompt, originalUrl, sourceUrl, namespace, parentId, useExternalApi } = args as {
+    const { base64, filename, contentType, folder, createFolder, tags, description, prompt, originalUrl, sourceUrl, namespace, parentId, useExternalApi, generateSemanticTags, semanticTagCount } = args as {
       base64: string;
       filename: string;
       contentType?: string;
       folder?: string;
+      createFolder?: boolean;
       tags?: string[];
       description?: string;
       prompt?: string;
@@ -122,14 +141,17 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
       sourceUrl?: string;
       namespace?: string;
       parentId?: string;
+      generateSemanticTags?: boolean;
+      semanticTagCount?: number;
       useExternalApi?: boolean;
     };
-    const endpoint = useExternalApi === false ? '/api/upload' : '/api/upload/external';
+    const endpoint = useExternalApi === true ? '/api/upload/external' : '/api/upload';
     const result = await uploadFileBase64(endpoint, {
       base64,
       filename,
       contentType,
       folder,
+      createFolder,
       tags,
       description,
       prompt,
@@ -137,6 +159,8 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
       sourceUrl,
       namespace,
       parentId,
+      generateSemanticTags,
+      semanticTagCount,
     });
     return {
       content: [
@@ -149,11 +173,12 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
   },
 
   'photarium_upload_external_file': async (args: Record<string, unknown>) => {
-    const { base64, filename, contentType, folder, tags, description, prompt, originalUrl, sourceUrl, namespace, parentId } = args as {
+    const { base64, filename, contentType, folder, createFolder, tags, description, prompt, originalUrl, sourceUrl, namespace, parentId, generateSemanticTags, semanticTagCount } = args as {
       base64: string;
       filename: string;
       contentType?: string;
       folder?: string;
+      createFolder?: boolean;
       tags?: string[];
       description?: string;
       prompt?: string;
@@ -161,12 +186,15 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
       sourceUrl?: string;
       namespace?: string;
       parentId?: string;
+      generateSemanticTags?: boolean;
+      semanticTagCount?: number;
     };
     const result = await uploadFileBase64('/api/upload/external', {
       base64,
       filename,
       contentType,
       folder,
+      createFolder,
       tags,
       description,
       prompt,
@@ -174,6 +202,8 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
       sourceUrl,
       namespace,
       parentId,
+      generateSemanticTags,
+      semanticTagCount,
     });
     return {
       content: [
@@ -186,10 +216,11 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
   },
 
   'photarium_upload_from_path': async (args: Record<string, unknown>) => {
-    const { filePath, filename, folder, tags, description, prompt, originalUrl, sourceUrl, namespace, parentId } = args as {
+    const { filePath, filename, folder, createFolder, tags, description, prompt, originalUrl, sourceUrl, namespace, parentId, generateSemanticTags, semanticTagCount } = args as {
       filePath: string;
       filename?: string;
       folder?: string;
+      createFolder?: boolean;
       tags?: string[];
       description?: string;
       prompt?: string;
@@ -197,6 +228,8 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
       sourceUrl?: string;
       namespace?: string;
       parentId?: string;
+      generateSemanticTags?: boolean;
+      semanticTagCount?: number;
     };
 
     try {
@@ -227,6 +260,7 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
       form.append('file', new Blob([new Uint8Array(fileBuffer)], { type: mimeType }), finalFilename);
       form.append('displayName', displayName);
       if (folder) form.append('folder', folder);
+      if (createFolder) form.append('createFolder', 'true');
       if (description) form.append('description', description);
       const cleanedPrompt = normalizeManualPrompt(prompt);
       if (cleanedPrompt) form.append('prompt', cleanedPrompt);
@@ -234,6 +268,8 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
       if (sourceUrl) form.append('sourceUrl', sourceUrl);
       if (namespace) form.append('namespace', namespace);
       if (parentId) form.append('parentId', parentId);
+      if (generateSemanticTags === false) form.append('generateSemanticTags', 'false');
+      if (semanticTagCount !== undefined) form.append('semanticTagCount', String(semanticTagCount));
       if (tags && tags.length > 0) {
         form.append('tags', tags.join(','));
       }
@@ -311,6 +347,7 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
       fps?: number;
       loop?: boolean;
       folder?: string;
+      createFolder?: boolean;
       tags?: string[];
       description?: string;
       originalUrl?: string;
@@ -331,13 +368,14 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
   },
 
   'photarium_crop_variant': async (args: Record<string, unknown>) => {
-    const { imageId, aspectRatio, anchor, quality, filename, folder, tags, description, prompt, originalUrl, sourceUrl, namespace, parentId } = args as {
+    const { imageId, aspectRatio, anchor, quality, filename, folder, createFolder, tags, description, prompt, originalUrl, sourceUrl, namespace, parentId } = args as {
       imageId: string;
       aspectRatio?: string;
       anchor?: CropVariantAnchor;
       quality?: number;
       filename?: string;
       folder?: string;
+      createFolder?: boolean;
       tags?: string[];
       description?: string;
       prompt?: string;
@@ -353,6 +391,7 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
       quality,
       filename,
       folder,
+      createFolder,
       tags,
       description,
       prompt,
@@ -403,6 +442,7 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
       namespace,
       apiBase,
       folder,
+      createFolder,
       tags,
       descriptionPrefix,
       includeFilename,
@@ -410,6 +450,7 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
       aiMetadata,
       aiDisplayName,
       aiTags,
+      generateSemanticTags,
       tagCount,
       concurrency,
       throttleMs,
@@ -421,6 +462,7 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
       namespace: string;
       apiBase?: string;
       folder?: string;
+      createFolder?: boolean;
       tags?: string[];
       descriptionPrefix?: string;
       includeFilename?: boolean;
@@ -428,6 +470,7 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
       aiMetadata?: boolean;
       aiDisplayName?: boolean;
       aiTags?: boolean;
+      generateSemanticTags?: boolean;
       tagCount?: number;
       concurrency?: number;
       throttleMs?: number;
@@ -441,6 +484,7 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
       namespace,
       apiBase: apiBase || BASE_URL,
       folder,
+      createFolder,
       tags,
       descriptionPrefix,
       includeFilename,
@@ -448,6 +492,7 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
       aiMetadata,
       aiDisplayName,
       aiTags,
+      generateSemanticTags,
       tagCount,
       concurrency,
       throttleMs,

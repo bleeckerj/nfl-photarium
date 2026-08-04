@@ -1,6 +1,6 @@
 # Photarium Folder Uploader
 
-A standalone local folder watcher for Photarium. It uploads newly detected images to a configured namespace, applies configured fixed tags at upload time, then asks Photarium to generate a detailed description and semantic tags describing the image content.
+A standalone local folder watcher for Photarium. It uploads newly detected images to a configured namespace, applies configured fixed tags at upload time, and waits for Photarium's durable background enrichment jobs to verify their results.
 
 Operational metadata stays in the local checkpoint. The utility does not add filenames, paths, namespaces, provider names, workflow names, or watcher labels as image tags.
 
@@ -18,7 +18,7 @@ Edit `photarium-folder-uploader.json`, then run:
 npm start -- --config ./photarium-folder-uploader.json
 ```
 
-The watcher only processes image files placed directly in `watchPath`. It leaves source files in place and uses a content-hash checkpoint to avoid re-uploading renamed or copied files in the same namespace. The `tags` array is sent directly to `photarium_upload_from_path`; the upload-path workflow also queues Photarium's semantic tag generation.
+The watcher only processes image files placed directly in `watchPath`. It leaves source files in place and uses a content-hash checkpoint to avoid re-uploading renamed or copied files in the same namespace. The `tags` array is sent directly to the canonical upload workflow, which queues semantic tag generation by default.
 
 ## CleanShotX listener
 
@@ -71,9 +71,19 @@ MCP uses the Photarium MCP server over stdio:
 
 The MCP server process inherits the utility's environment, including the Photarium server configuration. Keep credentials in the environment or approved secret storage rather than in this JSON file.
 
+Start the Photarium semantic-tag worker separately from the repository root:
+
+```bash
+npm run semantic-tags:worker
+```
+
+Redis must be running first (`npm run redis:start` or as part of the full development startup). The worker reads the same durable queue used by web uploads, MCP uploads, and ingestion scripts.
+
 ## Failure and retry behavior
 
-Upload, description generation, and tag generation are checkpointed separately. If enrichment fails after upload, the next attempt resumes from the missing stage and does not upload the image again. A bounded retry is scheduled while the watcher is running; unfinished entries are retried on a later restart.
+Upload and description generation are checkpointed separately. Semantic tagging is owned by Photarium's durable queue: the watcher stores the returned job ID, polls its status, and marks the tags stage complete only after the worker verifies persistence. If enrichment fails after upload, the next attempt resumes from the missing stage and does not upload the image again.
+
+Semantic tagging is enabled for uploads by default. An individual workflow can explicitly send `generateSemanticTags=false`; `AUTO_TAGS_ON_UPLOAD=false` remains an emergency global disable switch. When Redis is unavailable, the image upload still succeeds and returns a visible retryable semantic-tag error.
 
 Useful commands:
 

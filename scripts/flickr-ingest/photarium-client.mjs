@@ -24,7 +24,7 @@ export async function uploadImageToPhotarium({
   if (metadata.originalUrl) form.append('originalUrl', metadata.originalUrl);
   if (metadata.duplicateAction) form.append('duplicateAction', metadata.duplicateAction);
 
-  const response = await fetch(`${apiBase}/api/upload/external`, {
+  const response = await fetch(`${apiBase}/api/upload`, {
     method: 'POST',
     body: form,
   });

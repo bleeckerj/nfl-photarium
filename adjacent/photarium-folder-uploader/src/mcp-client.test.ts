@@ -12,13 +12,18 @@ test('MCP client validates required tools and calls the shared workflow tools', 
         tools: [
           { name: 'photarium_upload_from_path' },
           { name: 'photarium_generate_description' },
-          { name: 'photarium_generate_tags' },
+          { name: 'photarium_tag_enrichment_status' },
         ],
       };
     },
     async callTool(params) {
       calls.push(params);
-      return { content: [{ type: 'text', text: JSON.stringify({ id: 'image-456', saved: true }) }] };
+      const payload = params.name === 'photarium_upload_from_path'
+        ? { id: 'image-456', saved: true, semanticTagging: { jobId: 'job-456', state: 'queued' } }
+        : params.name === 'photarium_tag_enrichment_status'
+          ? { state: 'succeeded' }
+          : { id: 'image-456', saved: true };
+      return { content: [{ type: 'text', text: JSON.stringify(payload) }] };
     },
     async close() {},
   };
@@ -27,9 +32,9 @@ test('MCP client validates required tools and calls the shared workflow tools', 
   const factory: SessionFactory = () => ({ session, transport });
   const client = new McpPhotariumClient(config, factory);
   await client.connect();
-  const uploaded = await client.uploadFromPath('/tmp/scene.png', 'studio', ['screenshot']);
+  const uploaded = await client.uploadFromPath('/tmp/scene.png', 'studio', ['screenshot'], 8);
   await client.generateDescription(uploaded.imageId);
-  await client.generateTags(uploaded.imageId, 6);
+  const status = await client.getSemanticTagStatus('job-456');
   await client.close();
 
   assert.equal(uploaded.imageId, 'image-456');
@@ -37,11 +42,12 @@ test('MCP client validates required tools and calls the shared workflow tools', 
     filePath: '/tmp/scene.png',
     namespace: 'studio',
     tags: ['screenshot'],
+    semanticTagCount: 8,
   });
   assert.deepEqual(calls.map((call) => call.name), [
     'photarium_upload_from_path',
     'photarium_generate_description',
-    'photarium_generate_tags',
+    'photarium_tag_enrichment_status',
   ]);
-  assert.deepEqual(calls[2].arguments, { imageId: 'image-456', count: 6 });
+  assert.equal(status.state, 'succeeded');
 });
