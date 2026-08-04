@@ -1,0 +1,25 @@
+{
+  "watchPath": "/Users/julian/OMATA Dropbox/Julian Bleecker/CleanShotX/",
+  "namespace": "cf-cleanshot",
+  "stateFile": "~/.photarium-folder-uploader/state.json",
+  "tags": ["screenshot"],
+  "connection": {
+    "mode": "mcp",
+    "command": "/Users/julian/Code/cloud-flare-image-handler/run_photarium_mcp_server.sh",
+    "args": ["start"],
+    "cwd": "/Users/julian/Code/cloud-flare-image-handler",
+    "env": {
+      "PHOTARIUM_HTTP_ENABLED": "false"
+    }
+  },
+  "tagCount": 8,
+  "stability": {
+    "pollMs": 500,
+    "checks": 2
+  },
+  "retry": {
+    "maxAttempts": 3,
+    "delayMs": 5000
+  },
+  "concurrency": 1
+}

@@ -161,7 +161,7 @@ export class FolderWatcher {
       this.log(`[${timestamp()}] processing ${relativePath}`);
 
       if (!entry.completed.includes('uploaded')) {
-        const uploaded = await this.client.uploadFromPath(filePath, this.config.namespace);
+        const uploaded = await this.client.uploadFromPath(filePath, this.config.namespace, this.config.tags);
         entry = { ...entry, imageId: uploaded.imageId };
         entry = markStage(entry, 'uploaded');
         this.checkpoint.entries[key] = entry;

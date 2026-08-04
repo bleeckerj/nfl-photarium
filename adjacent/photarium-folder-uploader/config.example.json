@@ -2,6 +2,7 @@
   "watchPath": "~/Pictures/photarium-drop",
   "namespace": "studio-archive",
   "stateFile": "~/.photarium-folder-uploader/state.json",
+  "tags": [],
   "connection": {
     "mode": "http",
     "baseUrl": "http://localhost:3000"

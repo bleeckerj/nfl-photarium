@@ -29,6 +29,7 @@ export interface UploaderConfig {
   watchPath: string;
   namespace: string;
   stateFile: string;
+  tags: string[];
   connection: ConnectionConfig;
   extensions: string[];
   tagCount: number;
@@ -67,7 +68,7 @@ export interface PhotariumUploadResult {
 
 export interface PhotariumClient {
   connect(): Promise<void>;
-  uploadFromPath(filePath: string, namespace: string): Promise<PhotariumUploadResult>;
+  uploadFromPath(filePath: string, namespace: string, tags: string[]): Promise<PhotariumUploadResult>;
   generateDescription(imageId: string): Promise<void>;
   generateTags(imageId: string, count: number): Promise<void>;
   close(): Promise<void>;

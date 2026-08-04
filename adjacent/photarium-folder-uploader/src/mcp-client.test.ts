@@ -27,12 +27,17 @@ test('MCP client validates required tools and calls the shared workflow tools', 
   const factory: SessionFactory = () => ({ session, transport });
   const client = new McpPhotariumClient(config, factory);
   await client.connect();
-  const uploaded = await client.uploadFromPath('/tmp/scene.png', 'studio');
+  const uploaded = await client.uploadFromPath('/tmp/scene.png', 'studio', ['screenshot']);
   await client.generateDescription(uploaded.imageId);
   await client.generateTags(uploaded.imageId, 6);
   await client.close();
 
   assert.equal(uploaded.imageId, 'image-456');
+  assert.deepEqual(calls[0].arguments, {
+    filePath: '/tmp/scene.png',
+    namespace: 'studio',
+    tags: ['screenshot'],
+  });
   assert.deepEqual(calls.map((call) => call.name), [
     'photarium_upload_from_path',
     'photarium_generate_description',

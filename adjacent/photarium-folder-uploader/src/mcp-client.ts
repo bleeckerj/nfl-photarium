@@ -65,10 +65,10 @@ export class McpPhotariumClient implements PhotariumClient {
     return this.session;
   }
 
-  async uploadFromPath(filePath: string, namespace: string): Promise<PhotariumUploadResult> {
+  async uploadFromPath(filePath: string, namespace: string, tags: string[]): Promise<PhotariumUploadResult> {
     const result = await this.connectedSession.callTool({
       name: 'photarium_upload_from_path',
-      arguments: { filePath, namespace },
+      arguments: { filePath, namespace, tags },
     });
     assertToolSucceeded(result);
     return { imageId: extractImageId(result) };

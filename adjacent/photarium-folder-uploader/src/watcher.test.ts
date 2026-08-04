@@ -11,6 +11,7 @@ function config(directory: string): UploaderConfig {
     watchPath: directory,
     namespace: 'studio',
     stateFile: path.join(directory, 'state', 'checkpoint.json'),
+    tags: ['screenshot'],
     connection: { mode: 'http', baseUrl: 'http://localhost:3000' },
     extensions: ['.png'],
     tagCount: 8,
@@ -25,7 +26,8 @@ function fakeClient(): PhotariumClient & { calls: string[] } {
   return {
     calls,
     async connect() {},
-    async uploadFromPath() {
+    async uploadFromPath(_filePath, _namespace, tags) {
+      assert.deepEqual(tags, ['screenshot']);
       calls.push('upload');
       return { imageId: 'image-789' };
     },

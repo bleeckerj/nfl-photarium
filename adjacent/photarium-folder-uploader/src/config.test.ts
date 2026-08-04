@@ -14,6 +14,7 @@ test('loads JSON configuration and applies CLI overrides', async () => {
     stateFile: './state.json',
     connection: { mode: 'http', baseUrl: 'http://photarium' },
     extensions: ['png'],
+    tags: [' screenshot ', 'screenshot', 'reference'],
     tagCount: 4,
   }));
 
@@ -22,6 +23,7 @@ test('loads JSON configuration and applies CLI overrides', async () => {
   assert.equal(config.namespace, 'from-cli');
   assert.equal(config.tagCount, 6);
   assert.equal(config.extensions[0], '.png');
+  assert.deepEqual(config.tags, ['screenshot', 'reference']);
   assert.equal(config.connection.mode, 'http');
   assert.equal(config.watchPath, path.join(directory, 'drop'));
 });

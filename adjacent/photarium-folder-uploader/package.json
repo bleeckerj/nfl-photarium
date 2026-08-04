@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "listen:cleanshot": "npm run build && npm start -- --config ./photarium-folder-uploader.cleanshot.json",
     "start": "node dist/cli.js",
     "test": "node --import tsx --test src/**/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"

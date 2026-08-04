@@ -51,11 +51,12 @@ export class HttpPhotariumClient implements PhotariumClient {
     // HTTP has no persistent session to initialize.
   }
 
-  async uploadFromPath(filePath: string, namespace: string): Promise<PhotariumUploadResult> {
+  async uploadFromPath(filePath: string, namespace: string, tags: string[]): Promise<PhotariumUploadResult> {
     const bytes = await (await import('node:fs/promises')).readFile(filePath);
     const form = new FormData();
     form.append('file', new Blob([bytes], { type: mimeForPath(filePath) }), path.basename(filePath));
     form.append('namespace', namespace);
+    if (tags.length > 0) form.append('tags', tags.join(','));
     const payload = await readResponse(await this.fetchImpl(`${this.baseUrl}/api/upload/external`, {
       method: 'POST',
       body: form,

@@ -47,6 +47,18 @@ function normalizeExtensions(value: unknown): string[] {
   );
 }
 
+function normalizeTags(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(
+    new Set(
+      value
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
 function resolveConfiguredPath(value: string, configPath: string): string {
   const expanded = expandHome(value);
   return path.isAbsolute(expanded) ? expanded : path.resolve(path.dirname(configPath), expanded);
@@ -160,6 +172,7 @@ export async function loadConfig(options: CliOptions): Promise<UploaderConfig> {
     watchPath: resolveConfiguredPath(watchPath, configPath),
     namespace: namespace.trim(),
     stateFile: resolveConfiguredPath(stateValue, configPath),
+    tags: normalizeTags(raw.tags),
     connection: overriddenConnection,
     extensions: normalizeExtensions(raw.extensions),
     tagCount: options.tagCount ?? positiveNumber(raw.tagCount, 8),

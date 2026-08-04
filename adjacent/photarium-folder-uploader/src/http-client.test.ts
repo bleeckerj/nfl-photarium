@@ -17,13 +17,14 @@ test('HTTP client uploads to the configured namespace and enriches the returned 
   };
 
   const client = new HttpPhotariumClient('http://localhost:3000/', fetchMock);
-  const uploaded = await client.uploadFromPath(filePath, 'studio');
+  const uploaded = await client.uploadFromPath(filePath, 'studio', ['screenshot', 'reference']);
   await client.generateDescription(uploaded.imageId);
   await client.generateTags(uploaded.imageId, 8);
 
   assert.equal(uploaded.imageId, 'image-123');
   assert.equal(calls[0].url, 'http://localhost:3000/api/upload/external');
   assert.equal((calls[0].init?.body as FormData).get('namespace'), 'studio');
+  assert.equal((calls[0].init?.body as FormData).get('tags'), 'screenshot,reference');
   assert.equal(calls[1].url, 'http://localhost:3000/api/images/image-123/description');
   assert.equal(calls[2].url, 'http://localhost:3000/api/images/image-123/tags');
   assert.equal(JSON.parse(String(calls[2].init?.body)).count, 8);
