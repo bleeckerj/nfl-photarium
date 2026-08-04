@@ -48,7 +48,7 @@ export const clearGalleryScopeAssemblyMemo = () => {
   assemblyMemoCache.clear();
 };
 
-const mapVideoToGalleryAsset = (video: VideoAssetRecord) => ({
+export const mapVideoToGalleryAsset = (video: VideoAssetRecord) => ({
   id: video.id,
   assetType: 'video' as const,
   generatedBy: typeof video.generatedBy === 'string' ? video.generatedBy : undefined,

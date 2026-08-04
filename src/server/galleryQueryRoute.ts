@@ -28,6 +28,11 @@ export type ListableImage = {
   sourceUrl?: string;
   sourceUrlNormalized?: string;
   promptThis?: string;
+  /**
+   * Normalized extras search blob (description / alt text / prompt text), sent
+   * only while a search is active so the client filter sees what matched.
+   */
+  searchText?: string;
   namespace?: string;
   generatedBy?: string;
   comfyMetadataDetected?: boolean;
@@ -211,6 +216,7 @@ export function toListableImage(image: Record<string, unknown>): ListableImage {
     sourceUrl: typeof image.sourceUrl === 'string' ? image.sourceUrl : undefined,
     sourceUrlNormalized: typeof image.sourceUrlNormalized === 'string' ? image.sourceUrlNormalized : undefined,
     promptThis: typeof image.promptThis === 'string' ? image.promptThis : undefined,
+    searchText: typeof image.searchText === 'string' ? image.searchText : undefined,
     namespace: typeof image.namespace === 'string' ? image.namespace : undefined,
     generatedBy: typeof image.generatedBy === 'string' ? image.generatedBy : undefined,
     comfyMetadataDetected: Boolean(image.comfyMetadataDetected),

@@ -8,6 +8,8 @@ export async function runFilesystemIngest(options) {
         args.push('--api-base', options.apiBase);
     if (options.folder)
         args.push('--folder', options.folder);
+    if (options.createFolder)
+        args.push('--create-folder');
     if (options.tags && options.tags.length > 0)
         args.push('--tags', options.tags.join(','));
     if (options.descriptionPrefix)
@@ -22,6 +24,8 @@ export async function runFilesystemIngest(options) {
         args.push('--ai-display-name');
     if (options.aiTags)
         args.push('--ai-tags');
+    if (options.generateSemanticTags === false)
+        args.push('--no-semantic-tags');
     if (typeof options.tagCount === 'number')
         args.push('--tag-count', String(options.tagCount));
     if (typeof options.concurrency === 'number')

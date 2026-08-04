@@ -16,7 +16,8 @@ const makeImage = (overrides: Partial<GalleryImage> = {}): GalleryImage => ({
   parentId: overrides.parentId,
   namespace: overrides.namespace,
   originalUrl: overrides.originalUrl,
-  promptThis: overrides.promptThis
+  promptThis: overrides.promptThis,
+  searchText: overrides.searchText
 });
 
 describe('filterImagesForGallery', () => {
@@ -129,6 +130,27 @@ describe('filterImagesForGallery', () => {
     });
 
     expect(result.map((img) => img.id)).toContain('6');
+  });
+
+  it('matches search against the extras search blob sent while searching', () => {
+    const extendedImages = [
+      ...images,
+      makeImage({
+        id: '7',
+        filename: 'blob-image.png',
+        folder: 'internal',
+        searchText: 'a weathered fishing boat at low tide\nmoody overcast light, 35mm',
+      })
+    ];
+
+    const result = filterImagesForGallery(extendedImages, {
+      selectedFolder: 'all',
+      selectedTag: '',
+      searchTerm: 'Fishing Boat',
+      onlyCanonical: false
+    });
+
+    expect(result.map((img) => img.id)).toContain('7');
   });
 
   it('filters hidden namespaces from the result set', () => {

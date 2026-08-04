@@ -137,7 +137,7 @@ export const GalleryFilters: React.FC<GalleryFiltersProps> = ({
             type="text"
             value={searchTerm}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search by filename, alt text, or tags..."
+            placeholder="Search filename, tags, alt text, description, prompt..."
             className="w-full px-3 py-1.5 pr-8 text-[0.7em] font-mono border rounded focus:outline-none focus:ring-2 focus:ring-blue-300"
           />
           {searchTerm && (

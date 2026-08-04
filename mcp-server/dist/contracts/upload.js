@@ -1,5 +1,6 @@
 import { createRuntimeToolContract } from './runtime-support.js';
 const UPLOAD_TOOL_NAMES = [
+    'photarium_tag_enrichment_status',
     'photarium_upload_url',
     'photarium_import_url',
     'photarium_upload_file',

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { transformApiImageToCached, upsertCachedImage } from '@/server/cloudflareImageCache';
 import { getOpenAiAltModel, OPENAI_CHAT_COMPLETIONS_URL } from '@/server/openAiGeneratorModels';
+import { resolveVisionImageUrl } from '@/server/visionImageSource';
 import { pickCloudflareMetadata } from '@/utils/cloudflareMetadata';
 
 type CloudflareMetadata = Record<string, unknown>;
@@ -111,7 +112,8 @@ export async function POST(
     }
 
     const image = imageResult.result;
-    const imageUrl: string | undefined = image.variants?.find((variant: string) => variant.includes('public')) || image.variants?.[0];
+    // SVG assets resolve to their rasterized companion; vision cannot decode SVG.
+    const imageUrl: string | undefined = await resolveVisionImageUrl(image);
 
     if (!imageUrl) {
       return NextResponse.json({ error: 'No accessible image variant found' }, { status: 422 });

@@ -24,11 +24,13 @@ import {
   applyVideoAnimatedWebpComfyProvenance,
   buildVideoAnimatedWebpComfyProvenanceMap,
 } from '@/server/videoAnimatedWebpComfyProvenance';
+import { mapVideoToGalleryAsset } from '@/server/galleryScopeAssembly';
 import { detachAssetChildren, ParentAssignmentError } from '@/server/assetParentService';
 import {
   CloudflareImageDeleteError,
   deleteCloudflareImageAsset,
 } from '@/server/cloudflareImageDeletion';
+import { resolveSvgOriginalAssetId } from '@/utils/assetUrls';
 
 const pickVariantUrl = (variants: string[] | undefined): string | undefined => {
   if (!Array.isArray(variants) || variants.length === 0) return undefined;
@@ -103,6 +105,24 @@ const enrichImageSize = async (image: CachedCloudflareImage): Promise<CachedClou
   const discoveredSize = await fetchSizeFromVariant(variantUrl);
   if (discoveredSize === undefined) return image;
   return { ...image, size: discoveredSize };
+};
+
+const originalDownloadUrlFor = (imageId: string) =>
+  `/api/images/${encodeURIComponent(imageId)}/download?variant=original`;
+
+/**
+ * Expose the true uploaded bytes so API and MCP consumers can retrieve a vector
+ * original without knowing the SVG↔WebP pairing convention. Resolution is shared
+ * with the client via `resolveSvgOriginalAssetId`, and needs no extra lookup — which
+ * keeps this detail route on its existing fast path.
+ */
+const buildOriginalDownloadUrls = (image: CachedCloudflareImage) => {
+  const svgAssetId = resolveSvgOriginalAssetId(image);
+  return {
+    originalDownloadUrl: originalDownloadUrlFor(image.id),
+    svgAssetId,
+    svgOriginalDownloadUrl: svgAssetId ? originalDownloadUrlFor(svgAssetId) : undefined,
+  };
 };
 
 const hasAnimatedTag = (tags: string[] | undefined) =>
@@ -365,6 +385,32 @@ export async function GET(
     }
 
     if (!baseImage || forceRefresh) {
+      // Video assets live in the video catalog under randomUUID() ids that the
+      // Cloudflare Images API has never heard of; asking it would throw and
+      // turn a catalog-resident record into a 500.
+      const videoLookupStartedAt = performance.now();
+      const videoRecord = await getVideoAssetRecord(imageId);
+      timings.video_catalog_lookup = mark(performance.now() - videoLookupStartedAt);
+      if (videoRecord) {
+        diagnostics.source = 'video-catalog';
+        timings.total = mark(performance.now() - startedAt);
+        const response = NextResponse.json({
+          image: {
+            ...mapVideoToGalleryAsset(videoRecord),
+            fileSizeBytes: videoRecord.fileSizeBytes ?? null,
+          },
+          timings,
+          diagnostics,
+        });
+        response.headers.set(
+          'Server-Timing',
+          Object.entries(timings)
+            .map(([name, duration]) => `${name};dur=${duration}`)
+            .join(', ')
+        );
+        return response;
+      }
+
       const cloudflareStartedAt = performance.now();
       try {
         const image = await fetchCloudflareImage(imageId);
@@ -447,7 +493,11 @@ export async function GET(
 
     timings.total = mark(performance.now() - startedAt);
     const response = NextResponse.json({
-      image: { ...responseImageWithExtras, fileSizeBytes: responseImageWithExtras.size ?? null },
+      image: {
+        ...responseImageWithExtras,
+        fileSizeBytes: responseImageWithExtras.size ?? null,
+        ...buildOriginalDownloadUrls(responseImageWithExtras),
+      },
       timings,
       diagnostics,
     });

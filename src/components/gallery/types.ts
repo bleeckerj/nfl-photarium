@@ -25,6 +25,8 @@ export interface CloudflareImage {
   dimensions?: { width: number; height: number };
   altTag?: string;
   altText?: string;
+  /** Normalized extras search blob sent by /api/images while searching. */
+  searchText?: string;
   parentId?: string;
   linkedAssetId?: string;
   originalUrl?: string;

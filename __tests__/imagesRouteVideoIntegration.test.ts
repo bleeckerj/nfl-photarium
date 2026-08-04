@@ -10,6 +10,7 @@ const {
   getImageExtrasRecordsMock,
   getImageFolderOverridesMock,
   getImageFolderOverridesVersionMock,
+  getImageExtrasSearchTextMock,
   batchGetAspectMetadataMock,
   batchGetColorMetadataMock,
   isVectorSearchAvailableMock,
@@ -21,6 +22,7 @@ const {
   getImageExtrasRecordsMock: vi.fn(),
   getImageFolderOverridesMock: vi.fn<[], Promise<Map<string, string | undefined>>>(),
   getImageFolderOverridesVersionMock: vi.fn<[], number>(),
+  getImageExtrasSearchTextMock: vi.fn<[], Promise<Map<string, string>>>(),
   batchGetAspectMetadataMock: vi.fn(),
   batchGetColorMetadataMock: vi.fn(),
   isVectorSearchAvailableMock: vi.fn(),
@@ -53,6 +55,9 @@ vi.mock('@/server/imageExtras', () => ({
   // version on every request. Tests set these per-case via the hoisted mocks.
   getImageFolderOverrides: getImageFolderOverridesMock,
   getImageFolderOverridesVersion: getImageFolderOverridesVersionMock,
+  // Search requests consult the extras search-text projection so description /
+  // alt text / prompt text are reachable across the whole scope.
+  getImageExtrasSearchText: getImageExtrasSearchTextMock,
 }));
 
 describe('GET /api/images video integration', () => {
@@ -90,6 +95,7 @@ describe('GET /api/images video integration', () => {
     getImageExtrasRecordsMock.mockResolvedValue({});
     getImageFolderOverridesMock.mockResolvedValue(new Map<string, string | undefined>());
     getImageFolderOverridesVersionMock.mockReturnValue(0);
+    getImageExtrasSearchTextMock.mockResolvedValue(new Map<string, string>());
     batchGetAspectMetadataMock.mockResolvedValue(new Map());
     batchGetColorMetadataMock.mockResolvedValue(new Map());
     isVectorSearchAvailableMock.mockResolvedValue(false);
@@ -732,6 +738,51 @@ describe('GET /api/images video integration', () => {
         childIds: ['img-child'],
       })
     );
+  });
+
+  it('searches extras description and prompt text across the scope and echoes the match text', async () => {
+    getCachedImagesMock.mockResolvedValue([
+      {
+        id: 'img-described',
+        filename: 'DSC_0041.jpg',
+        uploaded: '2026-02-20T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/img-described/public'],
+        tags: [],
+      },
+      {
+        id: 'img-prompted',
+        filename: 'DSC_0042.jpg',
+        uploaded: '2026-02-19T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/img-prompted/public'],
+        tags: [],
+      },
+      {
+        id: 'img-unrelated',
+        filename: 'DSC_0043.jpg',
+        uploaded: '2026-02-18T00:00:00.000Z',
+        variants: ['https://imagedelivery.net/hash/img-unrelated/public'],
+        tags: [],
+      },
+    ]);
+    listVideoAssetRecordsWithSyncMock.mockResolvedValue([]);
+    getImageExtrasSearchTextMock.mockResolvedValue(new Map([
+      ['img-described', 'a red lighthouse at dawn'],
+      ['img-prompted', 'wide shot of a lighthouse, storm clouds, 35mm'],
+    ]));
+
+    const response = await GET(
+      new NextRequest('http://localhost/api/images?page=1&pageSize=60&search=lighthouse')
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.images.map((image: { id: string }) => image.id)).toEqual([
+      'img-described',
+      'img-prompted',
+    ]);
+    // The client re-filters the page with the same term, so the matched text
+    // has to travel with the asset.
+    expect(payload.images[0].searchText).toBe('a red lighthouse at dawn');
   });
 
   it('hydrates Redis aspect metadata before server-side aspect filtering', async () => {

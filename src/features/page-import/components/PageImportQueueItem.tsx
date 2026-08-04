@@ -218,7 +218,15 @@ export function PageImportQueueItem(props: PageImportQueueItemProps) {
           {item.filename.length > MAX_FILENAME_LENGTH && (
             <p className="mt-1 text-[11px] text-amber-600">Long filename ({item.filename.length} chars)</p>
           )}
-          {item.processingNote && <p className="mt-1 text-[11px] text-emerald-700">{item.processingNote}</p>}
+          {item.processingNote && (
+            <p
+              className={`mt-1 text-[11px] ${
+                item.processingNoteTone === 'error' ? 'text-red-600' : 'text-emerald-700'
+              }`}
+            >
+              {item.processingNote}
+            </p>
+          )}
           {overMaxBytes && (
             <div className="mt-1 flex flex-wrap items-center gap-2">
               <p className="text-[11px] text-amber-700">

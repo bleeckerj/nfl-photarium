@@ -19,6 +19,7 @@ export type CropVariantOptions = {
   quality?: number;
   filename?: string;
   folder?: string;
+  createFolder?: boolean;
   tags?: string[];
   description?: string;
   prompt?: string;
@@ -240,6 +241,7 @@ async function uploadCroppedBuffer(options: {
   filename: string;
   displayName: string;
   folder?: string;
+  createFolder?: boolean;
   tags?: string[];
   description?: string;
   prompt?: string;
@@ -252,6 +254,7 @@ async function uploadCroppedBuffer(options: {
   form.append('file', new Blob([new Uint8Array(options.buffer)], { type: 'image/webp' }), options.filename);
   form.append('displayName', options.displayName);
   if (options.folder) form.append('folder', options.folder);
+  if (options.createFolder) form.append('createFolder', 'true');
   if (options.tags?.length) form.append('tags', options.tags.join(','));
   if (options.description) form.append('description', options.description);
   const prompt = normalizeManualPrompt(options.prompt);
@@ -333,6 +336,7 @@ export async function cropPhotariumVariant(options: CropVariantOptions): Promise
     filename: names.filename,
     displayName: names.displayName,
     folder: options.folder,
+    createFolder: options.createFolder,
     tags: options.tags || sourceImage.tags,
     description:
       options.description

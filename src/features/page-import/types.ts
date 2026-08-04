@@ -67,6 +67,12 @@ export type UploaderQueueItem = {
   groupId?: string;
   groupIndex?: number;
   processingNote?: string;
+  /**
+   * How to present `processingNote`. Failures from a pre-upload stage (AI naming,
+   * size reduction) used to render in the same green as progress notes, so an
+   * upstream vendor error read as though the upload itself had been rejected.
+   */
+  processingNoteTone?: 'info' | 'error';
   metadata?: ImportCandidateMetadata;
   tempAssetKey?: string;
   importSessionId?: string;

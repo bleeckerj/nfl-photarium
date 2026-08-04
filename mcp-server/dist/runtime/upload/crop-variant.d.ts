@@ -6,6 +6,7 @@ export type CropVariantOptions = {
     quality?: number;
     filename?: string;
     folder?: string;
+    createFolder?: boolean;
     tags?: string[];
     description?: string;
     prompt?: string;

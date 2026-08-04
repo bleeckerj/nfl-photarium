@@ -1,4 +1,25 @@
+const semanticTagProperties = {
+    generateSemanticTags: {
+        type: 'boolean',
+        description: 'Enable semantic tagging after upload. Defaults to true; set false only for an explicit opt-out.',
+    },
+    semanticTagCount: {
+        type: 'number',
+        description: 'Requested number of generated semantic tags. Uses the server default when omitted.',
+    },
+};
 export const uploadTools = [
+    {
+        name: 'photarium_tag_enrichment_status',
+        description: 'Read the durable semantic-tag enrichment job status for an upload.',
+        inputSchema: {
+            type: 'object',
+            properties: {
+                jobId: { type: 'string', description: 'The semantic-tag job ID returned by an upload.' },
+            },
+            required: ['jobId'],
+        },
+    },
     // ===== Upload =====
     {
         name: 'photarium_upload_url',
@@ -12,7 +33,11 @@ export const uploadTools = [
                 },
                 folder: {
                     type: 'string',
-                    description: 'Folder to organize the image in',
+                    description: 'Existing folder to file the image in. Normalized to lowercase kebab-case. Filing into a folder that does not exist is rejected unless createFolder is set.',
+                },
+                createFolder: {
+                    type: 'boolean',
+                    description: 'Operator authorization to create the folder named in `folder` when it does not already exist. Defaults to false. Do not set this on your own initiative: if an upload is rejected for an unknown folder, file into one of the existing folders the error suggests, or ask the operator whether a new folder is warranted.',
                 },
                 tags: {
                     type: 'array',
@@ -47,6 +72,7 @@ export const uploadTools = [
                     type: 'string',
                     description: 'Optional parent image ID to set variant relationship',
                 },
+                ...semanticTagProperties,
             },
             required: ['url'],
         },
@@ -89,7 +115,11 @@ export const uploadTools = [
                 },
                 folder: {
                     type: 'string',
-                    description: 'Folder to organize the image in',
+                    description: 'Existing folder to file the image in. Normalized to lowercase kebab-case. Filing into a folder that does not exist is rejected unless createFolder is set.',
+                },
+                createFolder: {
+                    type: 'boolean',
+                    description: 'Operator authorization to create the folder named in `folder` when it does not already exist. Defaults to false. Do not set this on your own initiative: if an upload is rejected for an unknown folder, file into one of the existing folders the error suggests, or ask the operator whether a new folder is warranted.',
                 },
                 tags: {
                     type: 'array',
@@ -124,13 +154,14 @@ export const uploadTools = [
                     type: 'string',
                     description: 'Optional parent image ID to set variant relationship',
                 },
+                ...semanticTagProperties,
             },
             required: ['base64', 'filename'],
         },
     },
     {
         name: 'photarium_upload_image',
-        description: 'Convenience upload for base64 image data (defaults to external upload API).',
+        description: 'Convenience upload for base64 image data using the canonical upload workflow.',
         inputSchema: {
             type: 'object',
             properties: {
@@ -148,7 +179,11 @@ export const uploadTools = [
                 },
                 folder: {
                     type: 'string',
-                    description: 'Folder to organize the image in',
+                    description: 'Existing folder to file the image in. Normalized to lowercase kebab-case. Filing into a folder that does not exist is rejected unless createFolder is set.',
+                },
+                createFolder: {
+                    type: 'boolean',
+                    description: 'Operator authorization to create the folder named in `folder` when it does not already exist. Defaults to false. Do not set this on your own initiative: if an upload is rejected for an unknown folder, file into one of the existing folders the error suggests, or ask the operator whether a new folder is warranted.',
                 },
                 tags: {
                     type: 'array',
@@ -181,8 +216,9 @@ export const uploadTools = [
                 },
                 useExternalApi: {
                     type: 'boolean',
-                    description: 'If true (default), use /api/upload/external; if false, use /api/upload',
+                    description: 'Compatibility override. The canonical /api/upload route is used by default; set true only for legacy external-route callers.',
                 },
+                ...semanticTagProperties,
             },
             required: ['base64', 'filename'],
         },
@@ -207,7 +243,11 @@ export const uploadTools = [
                 },
                 folder: {
                     type: 'string',
-                    description: 'Folder to organize the image in',
+                    description: 'Existing folder to file the image in. Normalized to lowercase kebab-case. Filing into a folder that does not exist is rejected unless createFolder is set.',
+                },
+                createFolder: {
+                    type: 'boolean',
+                    description: 'Operator authorization to create the folder named in `folder` when it does not already exist. Defaults to false. Do not set this on your own initiative: if an upload is rejected for an unknown folder, file into one of the existing folders the error suggests, or ask the operator whether a new folder is warranted.',
                 },
                 tags: {
                     type: 'array',
@@ -238,6 +278,7 @@ export const uploadTools = [
                     type: 'string',
                     description: 'Optional parent image ID to set variant relationship',
                 },
+                ...semanticTagProperties,
             },
             required: ['base64', 'filename'],
         },
@@ -258,7 +299,11 @@ export const uploadTools = [
                 },
                 folder: {
                     type: 'string',
-                    description: 'Folder to organize the image in',
+                    description: 'Existing folder to file the image in. Normalized to lowercase kebab-case. Filing into a folder that does not exist is rejected unless createFolder is set.',
+                },
+                createFolder: {
+                    type: 'boolean',
+                    description: 'Operator authorization to create the folder named in `folder` when it does not already exist. Defaults to false. Do not set this on your own initiative: if an upload is rejected for an unknown folder, file into one of the existing folders the error suggests, or ask the operator whether a new folder is warranted.',
                 },
                 tags: {
                     type: 'array',
@@ -289,6 +334,7 @@ export const uploadTools = [
                     type: 'string',
                     description: 'Optional parent image ID to set variant relationship',
                 },
+                ...semanticTagProperties,
             },
             required: ['filePath'],
         },
@@ -316,7 +362,8 @@ export const uploadTools = [
                 },
                 fps: { type: 'number', description: 'Frames per second (default: 1)' },
                 loop: { type: 'boolean', description: 'Whether the animation should loop (default: true)' },
-                folder: { type: 'string', description: 'Folder to organize the image in' },
+                folder: { type: 'string', description: 'Existing folder to file the animation in. Rejected unless it exists or createFolder is set.' },
+                createFolder: { type: 'boolean', description: 'Operator authorization to create the folder if missing. Defaults to false; do not set on your own initiative.' },
                 tags: { type: 'array', items: { type: 'string' }, description: 'Tags to apply' },
                 description: { type: 'string', description: 'Description to store with the animation' },
                 originalUrl: { type: 'string', description: 'Original URL for provenance' },
@@ -357,7 +404,11 @@ export const uploadTools = [
                 },
                 folder: {
                     type: 'string',
-                    description: 'Folder to organize the cropped variant in.',
+                    description: 'Existing folder to file the cropped variant in. Rejected unless it exists or createFolder is set.',
+                },
+                createFolder: {
+                    type: 'boolean',
+                    description: 'Operator authorization to create the folder if missing. Defaults to false; do not set on your own initiative.',
                 },
                 tags: {
                     type: 'array',
@@ -424,7 +475,8 @@ export const uploadTools = [
                 rootPath: { type: 'string', description: 'Directory to scan recursively' },
                 namespace: { type: 'string', description: 'Target namespace (required, must be specific)' },
                 apiBase: { type: 'string', description: 'Photarium base URL override (default: PHOTARIUM_BASE_URL)' },
-                folder: { type: 'string', description: 'Optional folder value applied to all uploads' },
+                folder: { type: 'string', description: 'Optional existing folder applied to all uploads. Rejected unless it exists or createFolder is set.' },
+                createFolder: { type: 'boolean', description: 'Operator authorization to create the folder if missing. Defaults to false; do not set on your own initiative.' },
                 tags: { type: 'array', items: { type: 'string' }, description: 'Base tags for all files' },
                 descriptionPrefix: { type: 'string', description: 'Optional prefix prepended to generated descriptions' },
                 includeFilename: { type: 'boolean', description: 'Include filename in generated description' },
@@ -432,6 +484,7 @@ export const uploadTools = [
                 aiMetadata: { type: 'boolean', description: 'Generate both displayName and tags for images using AI' },
                 aiDisplayName: { type: 'boolean', description: 'Generate image displayName using AI' },
                 aiTags: { type: 'boolean', description: 'Generate image tags using AI' },
+                generateSemanticTags: { type: 'boolean', description: 'Enable upload-time semantic tagging. Defaults to true; set false only for an explicit opt-out.' },
                 tagCount: { type: 'number', description: 'AI tag count target (default: 4)' },
                 concurrency: { type: 'number', description: 'Parallel upload concurrency (default: 2)' },
                 throttleMs: { type: 'number', description: 'Minimum delay between upload requests in milliseconds (global throttle)' },

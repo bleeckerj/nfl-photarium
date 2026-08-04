@@ -2,6 +2,30 @@ import { NextRequest, NextResponse } from 'next/server';
 import { fallbackDisplayNameFromFilename, sanitizeSuggestedDisplayName } from '@/utils/displayName';
 import { sanitizePhraseSuggestedTags } from '@/server/aiTagParsing';
 import { getOpenAiDisplayNameModel, OPENAI_CHAT_COMPLETIONS_URL } from '@/server/openAiGeneratorModels';
+import { isSvgMime, toVisionDataUrl, VisionRasterError } from '@/server/rasterForVision';
+import { getMimeFromImageUrl, isPrivateHost } from '@/server/import-metadata/http';
+
+const MAX_REMOTE_SVG_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Fetch a remote SVG and rasterize it locally. OpenAI cannot fetch-and-decode SVG
+ * itself, so the URL cannot simply be forwarded as it is for raster formats.
+ */
+const rasterizeRemoteSvg = async (url: string): Promise<string> => {
+  const parsed = new URL(url);
+  if (isPrivateHost(parsed.hostname)) {
+    throw new VisionRasterError('Private or localhost URLs are not allowed for AI naming');
+  }
+  const response = await fetch(url, { redirect: 'follow' });
+  if (!response.ok) {
+    throw new VisionRasterError(`Could not fetch SVG for AI naming (HTTP ${response.status})`);
+  }
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.byteLength > MAX_REMOTE_SVG_BYTES) {
+    throw new VisionRasterError('SVG is too large for AI naming');
+  }
+  return await toVisionDataUrl(bytes, 'image/svg+xml', parsed.pathname);
+};
 
 const isHttpUrl = (value: string) => {
   try {
@@ -80,13 +104,25 @@ export async function POST(request: NextRequest) {
     const skipDisplayName = parseBoolField(form.get('skipDisplayName'));
     const requestedTagCount = Math.min(8, Math.max(1, parseIntField(form.get('tagCount'), 4)));
 
+    // Vision providers only decode raster formats, so SVG is rasterized here rather
+    // than handed over as-is. Queue items arrive before upload, so there is no
+    // rasterized companion to fall back on yet.
     let imageUrl: string | undefined;
-    if (inputFile instanceof File && inputFile.size > 0) {
-      const mime = inputFile.type || 'image/jpeg';
-      const bytes = Buffer.from(await inputFile.arrayBuffer());
-      imageUrl = `data:${mime};base64,${bytes.toString('base64')}`;
-    } else if (remoteUrlRaw && isHttpUrl(remoteUrlRaw)) {
-      imageUrl = remoteUrlRaw;
+    try {
+      if (inputFile instanceof File && inputFile.size > 0) {
+        const mime = inputFile.type || 'image/jpeg';
+        const bytes = Buffer.from(await inputFile.arrayBuffer());
+        imageUrl = await toVisionDataUrl(bytes, mime, inputFile.name || filename);
+      } else if (remoteUrlRaw && isHttpUrl(remoteUrlRaw)) {
+        imageUrl = isSvgMime(getMimeFromImageUrl(remoteUrlRaw))
+          ? await rasterizeRemoteSvg(remoteUrlRaw)
+          : remoteUrlRaw;
+      }
+    } catch (error) {
+      if (error instanceof VisionRasterError) {
+        return NextResponse.json({ error: error.message }, { status: 422 });
+      }
+      throw error;
     }
 
     if (!imageUrl) {

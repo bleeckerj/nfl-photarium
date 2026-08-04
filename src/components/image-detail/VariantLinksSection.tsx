@@ -13,8 +13,17 @@ export function VariantLinksSection(props: {
   ) => Promise<void>;
   imageAltTag?: string;
   imageDownloadName?: string;
+  /** Set when this asset (or its rasterized companion) has an SVG original. */
+  svgOriginalDownloadUrl?: string;
 }) {
-  const { variants, getVariantWidthLabel, onHandleCopyUrl, imageAltTag, imageDownloadName } = props;
+  const {
+    variants,
+    getVariantWidthLabel,
+    onHandleCopyUrl,
+    imageAltTag,
+    imageDownloadName,
+    svgOriginalDownloadUrl,
+  } = props;
   const toast = useToast();
   const formatOptions = [
     { label: 'PNG', format: 'png', extension: 'png' },
@@ -51,6 +60,35 @@ export function VariantLinksSection(props: {
 
   return (
     <div id="variant-links-section">
+      {/*
+        Cloudflare does not transform SVG, so the vector never appears among the
+        variants below — it is only reachable as the stored original.
+      */}
+      {svgOriginalDownloadUrl && (
+        <div className="mb-3 flex flex-col gap-2 p-2 border border-indigo-200 bg-indigo-50 rounded sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="text-xs font-mono font-semibold text-gray-900">vector original</div>
+            <div className="text-[10px] text-gray-500">Unrasterized SVG, as uploaded</div>
+          </div>
+          <div className="flex items-center gap-2">
+            <a
+              href={svgOriginalDownloadUrl}
+              className="px-2 py-1 bg-indigo-100 hover:bg-indigo-200 active:bg-indigo-300 rounded text-xs font-medium transition transform hover:scale-105 active:scale-95"
+              title="Download the original SVG"
+            >
+              Download SVG
+            </a>
+            <button
+              onClick={async (event) => {
+                await onHandleCopyUrl(event, svgOriginalDownloadUrl, 'svg original', imageAltTag);
+              }}
+              className="px-2 py-1 bg-blue-100 hover:bg-blue-200 active:bg-blue-300 rounded text-xs font-medium cursor-pointer transition transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-300"
+            >
+              Copy
+            </button>
+          </div>
+        </div>
+      )}
       <p className="text-xs font-mono font-medum text-gray-700">Available variants</p>
       <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
         {Object.entries(variants).map(([variant, url]) => {

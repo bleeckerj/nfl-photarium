@@ -53,7 +53,12 @@ export async function runInstagramProfileIngest(options) {
     appendStringArg(args, options.output, '--output');
     appendStringArg(args, options.checkpoint, '--checkpoint');
     appendStringArg(args, options.downloadDir, '--download-dir');
-    appendBooleanFlag(args, options.pushCloudflare, '--push-cloudflare');
+    if (options.pushCloudflare === false) {
+        args.push('--no-push-cloudflare');
+    }
+    else if (options.pushCloudflare === true) {
+        args.push('--push-cloudflare');
+    }
     appendBooleanFlag(args, options.aiDisplayName, '--ai-display-name');
     appendBooleanFlag(args, options.skipVideoPush, '--skip-video-push');
     appendBooleanFlag(args, options.noResume, '--no-resume');

@@ -1,3 +1,4 @@
+import { getSvgOriginalDownloadUrl } from '@/utils/assetUrls';
 import { AltTextEditor } from './AltTextEditor';
 import { CloudflareMetadataHeader } from './CloudflareMetadataHeader';
 import { ComfyWorkflowPanel, type ComfyWorkflowRecord } from './comfy';
@@ -272,6 +273,7 @@ export const ImageDetailMetadataPanel = ({
       onHandleCopyUrl={onCopyVariantUrl}
       imageAltTag={image.altTag}
       imageDownloadName={imageDownloadName}
+      svgOriginalDownloadUrl={getSvgOriginalDownloadUrl(image)}
     />
   </>
 );

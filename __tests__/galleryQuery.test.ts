@@ -67,6 +67,30 @@ describe('queryGalleryAssets', () => {
     ]);
   });
 
+  it('matches search against extras description and prompt text outside the catalog', () => {
+    const result = queryGalleryAssets(
+      [
+        asset({ id: 'described' }),
+        asset({ id: 'prompted' }),
+        asset({ id: 'unrelated' }),
+      ],
+      { search: 'Lighthouse' },
+      1,
+      60,
+      undefined,
+      undefined,
+      {
+        extrasSearchTextById: new Map([
+          ['described', 'a red lighthouse at dawn'],
+          ['prompted', 'wide shot of a lighthouse, storm clouds, 35mm'],
+        ]),
+      }
+    );
+
+    expect(result.images.map((image) => image.id).sort()).toEqual(['described', 'prompted']);
+    expect(result.total).toBe(2);
+  });
+
   it('filters hidden namespaces before pagination and facet counts', () => {
     const result = queryGalleryAssets(
       [

@@ -6,6 +6,7 @@ export declare function suggestSemanticDisplayNameFromUrl(url: string, hints?: {
 export declare function uploadFromUrl(url: string, options?: {
     displayName?: string;
     folder?: string;
+    createFolder?: boolean;
     tags?: string[];
     namespace?: string;
     description?: string;
@@ -13,6 +14,8 @@ export declare function uploadFromUrl(url: string, options?: {
     sourceUrl?: string;
     parentId?: string;
     prompt?: string;
+    generateSemanticTags?: boolean;
+    semanticTagCount?: number;
 }): Promise<{
     success: boolean;
     imageId?: string;
@@ -59,6 +62,7 @@ export declare function uploadFileBase64(endpoint: '/api/upload' | '/api/upload/
     filename: string;
     contentType?: string;
     folder?: string;
+    createFolder?: boolean;
     tags?: string[];
     description?: string;
     originalUrl?: string;
@@ -67,6 +71,8 @@ export declare function uploadFileBase64(endpoint: '/api/upload' | '/api/upload/
     namespace?: string;
     parentId?: string;
     prompt?: string;
+    generateSemanticTags?: boolean;
+    semanticTagCount?: number;
 }): Promise<Record<string, unknown>>;
 export declare function createAnimation(options: {
     frames: Array<{
@@ -81,6 +87,7 @@ export declare function createAnimation(options: {
     fps?: number;
     loop?: boolean;
     folder?: string;
+    createFolder?: boolean;
     tags?: string[];
     description?: string;
     originalUrl?: string;

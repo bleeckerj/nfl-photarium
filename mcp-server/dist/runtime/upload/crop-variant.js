@@ -151,6 +151,8 @@ async function uploadCroppedBuffer(options) {
     form.append('displayName', options.displayName);
     if (options.folder)
         form.append('folder', options.folder);
+    if (options.createFolder)
+        form.append('createFolder', 'true');
     if (options.tags?.length)
         form.append('tags', options.tags.join(','));
     if (options.description)
@@ -232,6 +234,7 @@ export async function cropPhotariumVariant(options) {
         filename: names.filename,
         displayName: names.displayName,
         folder: options.folder,
+        createFolder: options.createFolder,
         tags: options.tags || sourceImage.tags,
         description: options.description
             || `Width-preserving ${crop.aspectRatio} ${crop.anchor}-anchored crop of ${sourceImage.filename || download.filename || options.imageId}.`,

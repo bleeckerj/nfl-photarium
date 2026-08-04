@@ -5,6 +5,7 @@ import {
   sanitizeSuggestedDisplayName,
 } from '@/utils/displayName';
 import { getOpenAiDisplayNameModel, OPENAI_CHAT_COMPLETIONS_URL } from '@/server/openAiGeneratorModels';
+import { resolveVisionImageUrl } from '@/server/visionImageSource';
 
 function extractMessageText(content: unknown): string | undefined {
   if (typeof content === 'string') return content;
@@ -51,8 +52,8 @@ export async function POST(
     }
 
     const image = imageResult.result;
-    const imageUrl: string | undefined =
-      image.variants?.find((variant: string) => variant.includes('public')) || image.variants?.[0];
+    // SVG assets resolve to their rasterized companion; vision cannot decode SVG.
+    const imageUrl: string | undefined = await resolveVisionImageUrl(image);
     if (!imageUrl) {
       return NextResponse.json({ error: 'No accessible image variant found' }, { status: 422 });
     }

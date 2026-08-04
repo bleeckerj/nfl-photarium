@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import sharp from 'sharp';
+import { isSvgMime, toVisionImage } from '@/server/rasterForVision';
 
 const formatTimestamp = () => new Date().toLocaleString('en-US', { hour12: false });
 const logEmbeddingInfo = (...args: unknown[]) => console.info(`[${formatTimestamp()}]`, ...args);
@@ -184,6 +185,29 @@ const logPythonOnce = (pythonExecutable: string, repoRoot: string) => {
  * @param imageUrl - URL of the image to embed (must be publicly accessible)
  * @returns 512-dimensional embedding vector, or null if generation failed
  */
+/**
+ * CLIP providers decode raster formats only — SVG bytes fetched from a delivery URL
+ * would be rejected. Rasterize those before embedding so vector art is indexed on
+ * its own record rather than only via its companion.
+ */
+async function toEmbeddingBytes(
+  bytes: ArrayBuffer,
+  contentType?: string | null,
+  sourceUrl?: string
+): Promise<ArrayBuffer> {
+  if (!isSvgMime(contentType)) return bytes;
+  try {
+    const raster = await toVisionImage(Buffer.from(bytes), 'image/svg+xml');
+    return raster.buffer.buffer.slice(
+      raster.buffer.byteOffset,
+      raster.buffer.byteOffset + raster.buffer.byteLength
+    ) as ArrayBuffer;
+  } catch (error) {
+    logEmbeddingError(`[Embedding] Failed to rasterize SVG for embedding (${sourceUrl}):`, error);
+    return bytes;
+  }
+}
+
 export async function generateClipEmbedding(
   imageUrl: string,
   context?: EmbeddingLogContext
@@ -198,7 +222,11 @@ export async function generateClipEmbedding(
         logEmbeddingError(`[Embedding] Failed to fetch image: ${imageResponse.status}`);
         return null;
       }
-      const imageBuffer = await imageResponse.arrayBuffer();
+      const imageBuffer = await toEmbeddingBytes(
+      await imageResponse.arrayBuffer(),
+      imageResponse.headers.get('content-type'),
+      imageUrl
+    );
       const localEmbedding = await generateClipEmbeddingLocalFromBytes(imageBuffer);
       if (localEmbedding) {
         logEmbeddingInfo('[Embedding] Successfully generated CLIP embedding via local model');
@@ -225,7 +253,11 @@ export async function generateClipEmbedding(
       return null;
     }
 
-    const imageBuffer = await imageResponse.arrayBuffer();
+    const imageBuffer = await toEmbeddingBytes(
+      await imageResponse.arrayBuffer(),
+      imageResponse.headers.get('content-type'),
+      imageUrl
+    );
 
     // Call HuggingFace Inference API
     const response = await fetch(

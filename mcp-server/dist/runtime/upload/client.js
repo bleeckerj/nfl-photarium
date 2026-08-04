@@ -70,6 +70,8 @@ export async function uploadFromUrl(url, options = {}) {
         formData.append('displayName', semanticDisplayName || filename.replace(/\.[^.]+$/, ''));
         if (options.folder)
             formData.append('folder', options.folder);
+        if (options.createFolder)
+            formData.append('createFolder', 'true');
         if (options.tags)
             formData.append('tags', options.tags.join(','));
         if (options.namespace)
@@ -84,6 +86,10 @@ export async function uploadFromUrl(url, options = {}) {
             formData.append('sourceUrl', options.sourceUrl);
         if (options.parentId)
             formData.append('parentId', options.parentId);
+        if (options.generateSemanticTags === false)
+            formData.append('generateSemanticTags', 'false');
+        if (options.semanticTagCount !== undefined)
+            formData.append('semanticTagCount', String(options.semanticTagCount));
         // Prefer the same upload endpoint used by the web UI / file uploads.
         // This avoids relying on the "external" upload route, which has (in some deployments)
         // failed with upstream orchestration/vision-labeling errors.
@@ -152,6 +158,8 @@ export async function uploadFileBase64(endpoint, payload) {
     formData.append('file', new Blob([new Uint8Array(buffer)], { type: contentType }), payload.filename);
     if (payload.folder)
         formData.append('folder', payload.folder);
+    if (payload.createFolder)
+        formData.append('createFolder', 'true');
     if (payload.tags?.length)
         formData.append('tags', payload.tags.join(','));
     if (payload.description)
@@ -169,6 +177,10 @@ export async function uploadFileBase64(endpoint, payload) {
         formData.append('namespace', payload.namespace);
     if (payload.parentId)
         formData.append('parentId', payload.parentId);
+    if (payload.generateSemanticTags === false)
+        formData.append('generateSemanticTags', 'false');
+    if (payload.semanticTagCount !== undefined)
+        formData.append('semanticTagCount', String(payload.semanticTagCount));
     const response = await fetch(`${BASE_URL}${endpoint}`, {
         method: 'POST',
         body: formData,
@@ -202,6 +214,8 @@ export async function createAnimation(options) {
         formData.append('loop', options.loop ? 'true' : 'false');
     if (options.folder)
         formData.append('folder', options.folder);
+    if (options.createFolder)
+        formData.append('createFolder', 'true');
     if (options.tags?.length)
         formData.append('tags', options.tags.join(','));
     if (options.description)

@@ -386,10 +386,25 @@ export async function getImageExtrasRecords(imageIds: string[]): Promise<Record<
 // `string` (in map) means "extras specifies this folder".
 type FolderOverrideMap = Map<string, string | undefined>;
 
+// -- Extras search text projection ----------------------------------------
+// The gallery search haystack is built from the Cloudflare catalog, which does
+// not carry the durable extras fields (description, alt text, Prompt This,
+// Comfy prompts). Those are the fields with the most semantic signal, so the
+// same full-extras load that populates the folder override map also projects a
+// normalized, lowercased search blob per image. Searching consults the blob for
+// the whole scope instead of only the page slice that gets full extras merged.
+type ExtrasSearchTextMap = Map<string, string>;
+
 interface FolderOverrideCacheState {
   map: FolderOverrideMap;
+  searchText: ExtrasSearchTextMap;
+  // Shape of the projections held in this state. A state object carried over
+  // from an older module instance (dev HMR keeps it on globalThis) can hold
+  // projections this module no longer knows how to fill incrementally, so a
+  // mismatch forces a full reload instead of serving a half-built map.
+  projectionSchema: number;
   loadedAt: number;
-  inflight: Promise<FolderOverrideMap> | null;
+  inflight: Promise<ExtrasProjections> | null;
   // Monotonically increasing version bumped on every applyFolderOverrideUpdate
   // and on every refresh that observed a change. Downstream caches (galleryQuery
   // memoization, the gallery ETag) use this in their scope keys so they
@@ -406,9 +421,13 @@ const folderOverrideGlobal = globalThis as typeof globalThis & {
   [FOLDER_OVERRIDE_CACHE_KEY]?: FolderOverrideCacheState;
 };
 
+const EXTRAS_PROJECTION_SCHEMA = 2;
+
 const folderOverrideState: FolderOverrideCacheState =
   folderOverrideGlobal[FOLDER_OVERRIDE_CACHE_KEY] ?? {
     map: new Map(),
+    searchText: new Map(),
+    projectionSchema: EXTRAS_PROJECTION_SCHEMA,
     loadedAt: 0,
     inflight: null,
     version: 0,
@@ -417,6 +436,17 @@ const folderOverrideState: FolderOverrideCacheState =
 
 if (!folderOverrideGlobal[FOLDER_OVERRIDE_CACHE_KEY]) {
   folderOverrideGlobal[FOLDER_OVERRIDE_CACHE_KEY] = folderOverrideState;
+}
+if (folderOverrideState.projectionSchema !== EXTRAS_PROJECTION_SCHEMA) {
+  // Older shape: drop it so the next read rebuilds every projection. Leaving
+  // it in place would let the revision-token fast path keep serving a map that
+  // was never populated.
+  folderOverrideState.map = new Map();
+  folderOverrideState.searchText = new Map();
+  folderOverrideState.projectionSchema = EXTRAS_PROJECTION_SCHEMA;
+  folderOverrideState.loadedAt = 0;
+  folderOverrideState.lastRevisionToken = null;
+  folderOverrideState.version += 1;
 }
 
 const FOLDER_OVERRIDE_TTL_MS = (() => {
@@ -433,6 +463,57 @@ function extractExtrasFolder(record: ImageExtrasRecord | null): FolderOverrideEx
   if (!Object.prototype.hasOwnProperty.call(record, 'folder')) return { present: false };
   const folder = typeof record.folder === 'string' ? record.folder : undefined;
   return { present: true, folder };
+}
+
+// Upper bound on the projected blob per image, so the whole-catalog map stays
+// bounded (~2 bytes per char per image). Text past the cap is not searchable;
+// raise it if long descriptions/prompts start getting cut off, at the cost of
+// resident memory.
+const EXTRAS_SEARCH_TEXT_MAX_CHARS = (() => {
+  const raw = Number(process.env.IMAGE_EXTRAS_SEARCH_TEXT_MAX_CHARS);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 2000;
+})();
+
+// Comfy stores every extracted prompt-ish string, including model filenames and
+// bare numbers. Only phrase-shaped candidates carry search signal.
+const looksLikePromptPhrase = (value: string) => {
+  if (value.length < 4) return false;
+  if (!/[a-zA-Z]/.test(value)) return false;
+  return /[\s,;:()]/.test(value) || value.length >= 12;
+};
+
+/**
+ * Normalized (lowercased) search blob for the extras fields the gallery search
+ * should reach: description, alt text, Prompt This, and Comfy prompt text.
+ */
+export function buildExtrasSearchText(record: ImageExtrasRecord | null): string {
+  if (!record) return '';
+  const parts: string[] = [];
+  const push = (value: unknown) => {
+    if (typeof value !== 'string') return;
+    const trimmed = value.trim();
+    if (trimmed) parts.push(trimmed);
+  };
+
+  push(record.description);
+  push(record.altText);
+  push(record.promptThis?.prompt);
+  push(record.promptThis?.creativeBrief);
+
+  const comfy = record.comfyWorkflow;
+  if (comfy) {
+    if (Array.isArray(comfy.promptCandidates)) {
+      for (const candidate of comfy.promptCandidates) {
+        if (typeof candidate === 'string' && looksLikePromptPhrase(candidate.trim())) push(candidate);
+      }
+    }
+    push(comfy.imageDescription?.description);
+    push(comfy.imageDescription?.altText);
+    push(comfy.imageDescription?.aiCaption);
+  }
+
+  if (parts.length === 0) return '';
+  return parts.join('\n').toLowerCase().slice(0, EXTRAS_SEARCH_TEXT_MAX_CHARS);
 }
 
 // Revision token stored alongside the extras records ("image-extras-meta:"
@@ -462,7 +543,7 @@ async function bumpExtrasRevisionToken(): Promise<void> {
   }
 }
 
-const folderOverrideMapsEqual = (left: FolderOverrideMap, right: FolderOverrideMap) => {
+const projectionMapsEqual = <V>(left: Map<string, V>, right: Map<string, V>) => {
   if (left.size !== right.size) return false;
   for (const [key, value] of left) {
     if (!right.has(key) || right.get(key) !== value) return false;
@@ -470,31 +551,60 @@ const folderOverrideMapsEqual = (left: FolderOverrideMap, right: FolderOverrideM
   return true;
 };
 
-async function refreshFolderOverridesFromStorage(): Promise<FolderOverrideMap> {
+type ExtrasProjections = { map: FolderOverrideMap; searchText: ExtrasSearchTextMap };
+
+async function refreshExtrasProjectionsFromStorage(): Promise<ExtrasProjections> {
   const allIds = await listImageExtrasImageIds();
   const map: FolderOverrideMap = new Map();
-  if (allIds.length === 0) return map;
+  const searchText: ExtrasSearchTextMap = new Map();
+  if (allIds.length === 0) return { map, searchText };
   const records = await getImageExtrasRecords(allIds);
   for (const id of allIds) {
-    const extracted = extractExtrasFolder(records[id]);
+    const record = records[id];
+    const extracted = extractExtrasFolder(record);
     if (extracted.present) {
       map.set(id, extracted.folder);
     }
+    const text = buildExtrasSearchText(record);
+    if (text) searchText.set(id, text);
   }
-  return map;
+  let projectedChars = 0;
+  for (const text of searchText.values()) projectedChars += text.length;
+  console.log('[ImageExtras] Rebuilt extras projections', {
+    folderOverrides: map.size,
+    searchTextEntries: searchText.size,
+    searchTextMb: Number(((projectedChars * 2) / 1e6).toFixed(1)),
+  });
+  return { map, searchText };
 }
 
 /**
- * Returns the in-memory folder override map. Lazily loaded on first call,
- * refreshed after FOLDER_OVERRIDE_TTL_MS. Concurrent first-callers share a
- * single inflight promise.
+ * Returns the in-memory folder override map.
  */
 export async function getImageFolderOverrides(): Promise<FolderOverrideMap> {
+  return (await ensureExtrasProjectionsLoaded()).map;
+}
+
+/**
+ * Per-image normalized search blob built from the extras fields the Cloudflare
+ * catalog does not carry (description, alt text, Prompt This, Comfy prompts).
+ * Shares the folder-override load, so callers pay no extra storage round-trip.
+ */
+export async function getImageExtrasSearchText(): Promise<ExtrasSearchTextMap> {
+  return (await ensureExtrasProjectionsLoaded()).searchText;
+}
+
+/**
+ * Loads both extras projections from one pass over storage. Lazily loaded on
+ * first call, refreshed after FOLDER_OVERRIDE_TTL_MS. Concurrent first-callers
+ * share a single inflight promise.
+ */
+async function ensureExtrasProjectionsLoaded(): Promise<ExtrasProjections> {
   const now = Date.now();
   const isFresh = folderOverrideState.loadedAt > 0
     && now - folderOverrideState.loadedAt < FOLDER_OVERRIDE_TTL_MS;
   if (isFresh) {
-    return folderOverrideState.map;
+    return { map: folderOverrideState.map, searchText: folderOverrideState.searchText };
   }
   if (folderOverrideState.inflight) {
     return folderOverrideState.inflight;
@@ -508,16 +618,19 @@ export async function getImageFolderOverrides(): Promise<FolderOverrideMap> {
       const currentToken = await readExtrasRevisionToken();
       if (currentToken && currentToken === folderOverrideState.lastRevisionToken) {
         folderOverrideState.loadedAt = Date.now();
-        return folderOverrideState.map;
+        return { map: folderOverrideState.map, searchText: folderOverrideState.searchText };
       }
     }
-    const [map, token] = await Promise.all([
-      refreshFolderOverridesFromStorage(),
+    const [projections, token] = await Promise.all([
+      refreshExtrasProjectionsFromStorage(),
       readExtrasRevisionToken(),
     ]);
     const tokenChanged = token !== folderOverrideState.lastRevisionToken;
-    const mapChanged = !folderOverrideMapsEqual(folderOverrideState.map, map);
-    folderOverrideState.map = map;
+    const mapChanged =
+      !projectionMapsEqual(folderOverrideState.map, projections.map) ||
+      !projectionMapsEqual(folderOverrideState.searchText, projections.searchText);
+    folderOverrideState.map = projections.map;
+    folderOverrideState.searchText = projections.searchText;
     folderOverrideState.loadedAt = Date.now();
     folderOverrideState.lastRevisionToken = token;
     // A changed token signals extras writes (possibly to non-folder fields
@@ -526,7 +639,7 @@ export async function getImageFolderOverrides(): Promise<FolderOverrideMap> {
     if (tokenChanged || mapChanged) {
       folderOverrideState.version += 1;
     }
-    return map;
+    return projections;
   })().finally(() => {
     folderOverrideState.inflight = null;
   });
@@ -540,6 +653,14 @@ export async function getImageFolderOverrides(): Promise<FolderOverrideMap> {
  */
 export function getImageFolderOverridesSync(): FolderOverrideMap {
   return folderOverrideState.map;
+}
+
+/**
+ * Synchronous accessor for the extras search-text projection. Returns the
+ * current map without triggering a load.
+ */
+export function getImageExtrasSearchTextSync(): ExtrasSearchTextMap {
+  return folderOverrideState.searchText;
 }
 
 /**
@@ -561,11 +682,18 @@ function applyFolderOverrideUpdate(imageId: string, record: ImageExtrasRecord | 
   } else {
     folderOverrideState.map.set(imageId, extracted.folder);
   }
+  const searchText = buildExtrasSearchText(record);
+  if (searchText) {
+    folderOverrideState.searchText.set(imageId, searchText);
+  } else {
+    folderOverrideState.searchText.delete(imageId);
+  }
   folderOverrideState.version += 1;
 }
 
 export function invalidateImageFolderOverridesCache(): void {
   folderOverrideState.map = new Map();
+  folderOverrideState.searchText = new Map();
   folderOverrideState.loadedAt = 0;
   folderOverrideState.inflight = null;
   folderOverrideState.lastRevisionToken = null;

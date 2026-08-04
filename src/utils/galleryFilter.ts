@@ -13,6 +13,11 @@ export interface GalleryImage {
   description?: string;
   altTag?: string;
   altText?: string;
+  /**
+   * Normalized extras search blob (description / alt text / prompt text) sent
+   * by /api/images while a search is active. Already lowercased.
+   */
+  searchText?: string;
   generatedBy?: string;
   comfyMetadataDetected?: boolean;
   comfyMetadataSource?: string;
@@ -82,6 +87,9 @@ const matchesSearchFilter = (image: GalleryImage, searchTerm: string) => {
   const normalizedSearch = normalize(searchTerm.trim());
   const normalizedSearchNoQuery = normalizedSearch ? stripQuery(normalizedSearch) : '';
   if (!normalizedSearch) return true;
+
+  // Extras-backed description / alt text / prompt text, already lowercased.
+  if (image.searchText?.includes(normalizedSearch)) return true;
 
   const baseHaystacks = [
     normalize(image.id),

@@ -15,6 +15,7 @@ export interface ImageGenerationSettings {
     filename?: string;
     namespace?: string;
     folder?: string;
+    createFolder?: boolean;
     tags?: string[];
     description?: string;
     displayName?: string;
@@ -36,6 +37,7 @@ export interface AspectRatioVariantSettings {
     filename?: string;
     namespace?: string;
     folder?: string;
+    createFolder?: boolean;
     tags?: string[];
     description?: string;
     displayName?: string;
@@ -56,6 +58,7 @@ interface UploadPayload {
     filename: string;
     contentType?: string;
     folder?: string;
+    createFolder?: boolean;
     tags?: string[];
     description?: string;
     originalUrl?: string;
@@ -76,7 +79,7 @@ export declare function parseImageAspectRatio(value?: string): {
     width: number;
     height: number;
 };
-type ReferenceGenerationMode = 'reference_generate' | 'semantic_merge' | 'aspect_ratio_variant';
+type ReferenceGenerationMode = 'reference_generate' | 'semantic_merge' | 'aspect_ratio_variant' | 'creative_brief';
 export declare function generatePhotariumImage(deps: ImageGenerationDeps, settings: ImageGenerationSettings): Promise<Record<string, unknown>>;
 export declare function generatePhotariumImageFromReferences(deps: ImageGenerationDeps, settings: ImageGenerationSettings, references: ImageReferenceInput[], mode?: ReferenceGenerationMode): Promise<Record<string, unknown>>;
 export declare function generatePhotariumAspectRatioVariant(deps: AspectRatioVariantDeps, settings: AspectRatioVariantSettings): Promise<Record<string, unknown>>;

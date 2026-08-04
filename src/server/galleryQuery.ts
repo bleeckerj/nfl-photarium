@@ -103,10 +103,13 @@ const splitCamelCase = (value?: string) =>
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
     .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
 
-const matchesSearch = (asset: GalleryQueryAsset, search?: string) => {
+const matchesSearch = (asset: GalleryQueryAsset, search?: string, extrasSearchText?: string) => {
   const normalizedSearch = normalize(search?.trim());
   const normalizedSearchNoQuery = normalizedSearch ? stripQuery(normalizedSearch) : '';
   if (!normalizedSearch) return true;
+
+  // Extras-backed description / alt text / prompt text, already lowercased.
+  if (extrasSearchText && extrasSearchText.includes(normalizedSearch)) return true;
 
   const baseHaystacks = [
     normalize(asset.id),
@@ -398,6 +401,10 @@ export const queryGalleryAssets = <T extends GalleryQueryAsset>(
   options: {
     includeDuplicateSummary?: boolean;
     precomputedDuplicateSummary?: GalleryDuplicateSummary;
+    // Extras-backed search blobs keyed by image id (see imageExtras.ts). Kept
+    // out of `filters` so it never lands in a serialized memo key -- the
+    // caller's scopeKey already carries the extras version counter.
+    extrasSearchTextById?: ReadonlyMap<string, string>;
   } = {}
 ): GalleryQueryResult<T> => {
   const timings: Record<string, number> = {};
@@ -431,7 +438,7 @@ export const queryGalleryAssets = <T extends GalleryQueryAsset>(
       if (!matchesFolder(asset, filters.folder)) return false;
       if (!matchesTag(asset, filters.tag)) return false;
       if (filters.favorites && !hasFavoriteTag(asset.tags)) return false;
-      if (!matchesSearch(asset, filters.search)) return false;
+      if (!matchesSearch(asset, filters.search, options.extrasSearchTextById?.get(asset.id))) return false;
       if (filters.onlyCanonical && asset.parentId) return false;
       if (filters.comfy && !matchesComfy(asset)) return false;
       if (!matchesEmbedding(asset, filters.embedding)) return false;

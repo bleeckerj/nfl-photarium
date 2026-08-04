@@ -3,6 +3,7 @@ export declare function runFilesystemIngest(options: {
     namespace: string;
     apiBase?: string;
     folder?: string;
+    createFolder?: boolean;
     tags?: string[];
     descriptionPrefix?: string;
     includeFilename?: boolean;
@@ -10,6 +11,7 @@ export declare function runFilesystemIngest(options: {
     aiMetadata?: boolean;
     aiDisplayName?: boolean;
     aiTags?: boolean;
+    generateSemanticTags?: boolean;
     tagCount?: number;
     concurrency?: number;
     throttleMs?: number;

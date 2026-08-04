@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cleanString, parseCloudflareMetadata } from '@/utils/cloudflareMetadata';
 import { getPromptThisRecord, setPromptThisRecord, type PromptThisRecord } from '@/server/promptThis';
 import { getOpenAiPromptThisModel, OPENAI_CHAT_COMPLETIONS_URL } from '@/server/openAiGeneratorModels';
+import { resolveVisionImageUrl } from '@/server/visionImageSource';
 import {
   appendPromptDerivation,
   createCreativeBriefPlan,
@@ -31,11 +32,6 @@ async function parseJsonObjectBody(request: NextRequest): Promise<Record<string,
   } catch {
     return null;
   }
-}
-
-function pickPublicVariant(variants: unknown): string | undefined {
-  if (!Array.isArray(variants)) return undefined;
-  return variants.find((variant) => typeof variant === 'string' && variant.includes('public')) || variants.find((variant) => typeof variant === 'string');
 }
 
 async function fetchCloudflareImage(imageId: string) {
@@ -235,7 +231,8 @@ export async function POST(
     }
 
     const image = cfImage.payload;
-    const imageUrl = pickPublicVariant(image?.variants);
+    // SVG assets resolve to their rasterized companion; vision cannot decode SVG.
+    const imageUrl = await resolveVisionImageUrl(image ?? {});
     if (!imageUrl) {
       return NextResponse.json({ error: 'No accessible image variant found' }, { status: 422 });
     }

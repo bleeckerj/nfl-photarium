@@ -1,5 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { getAssetPreviewUrl } from '@/utils/assetUrls';
+import {
+  getAssetPreviewUrl,
+  getSvgOriginalDownloadUrl,
+  resolveSvgOriginalAssetId,
+} from '@/utils/assetUrls';
 import { getCloudflareSvgOriginalUrl } from '@/utils/imageUtils';
 
 const HASH = 'testhash';
@@ -38,5 +42,35 @@ describe('SVG URL resolution', () => {
     const url = getAssetPreviewUrl({ id: 'png-id', filename: 'photo.png' });
     expect(url).toContain('/png-id/');
     expect(url).toContain('format=webp');
+  });
+});
+
+describe('vector original retrieval', () => {
+  it('resolves the SVG id from the SVG half of a pair', () => {
+    expect(
+      resolveSvgOriginalAssetId({ id: 'svg-id', filename: 'logo.svg', linkedAssetId: 'webp-id' })
+    ).toBe('svg-id');
+  });
+
+  it('resolves the SVG id from the rasterized companion', () => {
+    // linkedAssetId is written only for the SVG pairing, so the partner is the vector.
+    expect(
+      resolveSvgOriginalAssetId({ id: 'webp-id', filename: 'logo.webp', linkedAssetId: 'svg-id' })
+    ).toBe('svg-id');
+  });
+
+  it('returns undefined for an ordinary raster asset', () => {
+    expect(resolveSvgOriginalAssetId({ id: 'png-id', filename: 'photo.png' })).toBeUndefined();
+    expect(getSvgOriginalDownloadUrl({ id: 'png-id', filename: 'photo.png' })).toBeUndefined();
+  });
+
+  it('builds a download URL for the stored original bytes, not a delivery variant', () => {
+    const url = getSvgOriginalDownloadUrl({
+      id: 'webp-id',
+      filename: 'logo.webp',
+      linkedAssetId: 'svg-id',
+    });
+    expect(url).toBe('/api/images/svg-id/download?variant=original');
+    expect(url).not.toContain('imagedelivery.net');
   });
 });

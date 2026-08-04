@@ -1,4 +1,17 @@
 import { apiRequest } from '../shared/api-client.js';
+export const SOURCE_RELATIONSHIPS = ['brief_led', 'faithful_adaptation', 'related_design', 'inspired_concept'];
+export const GENERATION_PROVIDERS = ['codex_imagegen', 'comfyui', 'photarium_openai'];
+export function aspectRatioToSize(aspectRatio) {
+    if (!aspectRatio)
+        return undefined;
+    const [width, height] = aspectRatio.split(':').map(Number);
+    const base = 1024;
+    if (width === height)
+        return `${base}x${base}`;
+    if (width < height)
+        return `${base}x${Math.max(1, Math.round(base * height / width))}`;
+    return `${Math.max(1, Math.round(base * width / height))}x${base}`;
+}
 export async function generateAlt(imageId) {
     const data = await apiRequest(`/api/images/${imageId}/alt`, {
         method: 'POST',
@@ -28,9 +41,22 @@ export async function generatePrompt(imageId, options = {}) {
         body: JSON.stringify({
             force: options.force,
             existingPrompt: options.existingPrompt,
+            creativeBrief: options.creativeBrief,
+            sourceRelationship: options.sourceRelationship,
+            aspectRatio: options.aspectRatio,
+            saveAsCurrent: options.saveAsCurrent,
         }),
     });
     return data;
+}
+export async function getPromptDerivations(imageId) {
+    return apiRequest(`/api/images/${encodeURIComponent(imageId)}/prompt/derivations`);
+}
+export async function recordPromptDerivationResult(imageId, payload) {
+    return apiRequest(`/api/images/${encodeURIComponent(imageId)}/prompt/derivations`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    });
 }
 export async function getConcepts(imageId) {
     const data = await apiRequest(`/api/images/${imageId}/concepts`, {

@@ -6,7 +6,14 @@ import { upsertCachedImage, type CachedCloudflareImage } from '@/server/cloudfla
 export type AutoEmbeddingsStatus = {
   enabled: boolean;
   queued: boolean;
-  reason?: 'disabled' | 'redis-unavailable' | 'missing-variants' | 'local-provider-disabled' | 'unknown';
+  reason?:
+    | 'disabled'
+    | 'redis-unavailable'
+    | 'missing-variants'
+    | 'local-provider-disabled'
+    /** SVG: indexed via its rasterized companion, which is the family head. */
+    | 'deferred-to-raster-companion'
+    | 'unknown';
 };
 
 const isTruthyDisabled = (value: string) => {

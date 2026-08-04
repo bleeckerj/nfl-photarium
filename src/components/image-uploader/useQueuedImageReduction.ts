@@ -51,7 +51,7 @@ export function useQueuedImageReduction({
       target.assetType ??
       (target.file ? inferAssetTypeFromFile(target.file) : inferAssetTypeFromUrl(target.remoteUrl));
     if (effectiveAssetType !== 'image') {
-      updateQueuedFile(id, { processingNote: 'Size reduction supports images only' });
+      updateQueuedFile(id, { processingNote: 'Size reduction supports images only', processingNoteTone: 'error' });
       return;
     }
 
@@ -63,7 +63,7 @@ export function useQueuedImageReduction({
 
       if (!sourceFile) {
         if (!target.remoteUrl) {
-          updateQueuedFile(id, { processingNote: 'Size reduction skipped: no image source' });
+          updateQueuedFile(id, { processingNote: 'Size reduction skipped: no image source', processingNoteTone: 'error' });
           return;
         }
         const imported = await importRemoteQueueImage(target.remoteUrl);
@@ -73,7 +73,7 @@ export function useQueuedImageReduction({
       }
 
       if (!isImageFile(sourceFile)) {
-        updateQueuedFile(id, { processingNote: 'Size reduction supports images only' });
+        updateQueuedFile(id, { processingNote: 'Size reduction supports images only', processingNoteTone: 'error' });
         return;
       }
 
@@ -88,6 +88,7 @@ export function useQueuedImageReduction({
         if (!reduced) {
           updateQueuedFile(id, {
             processingNote: 'Unable to reduce below 10MB',
+          processingNoteTone: 'error',
           });
           return;
         }
@@ -117,6 +118,7 @@ export function useQueuedImageReduction({
       console.error('Failed to reduce file size', error);
       updateQueuedFile(id, {
         processingNote: `Size reduction failed: ${message}`,
+        processingNoteTone: 'error',
       });
     } finally {
       setReducingQueueItems(clearRecordKey(id));

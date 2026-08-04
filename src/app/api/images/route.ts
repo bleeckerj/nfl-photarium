@@ -3,6 +3,7 @@ import { getCachedImages, getCacheStats } from '@/server/cloudflareImageCache';
 import { getVideoAssetCatalogVersion, listVideoAssetRecordsWithSync } from '@/server/videoCatalogStorage';
 import {
   getImageExtrasRecords,
+  getImageExtrasSearchText,
   getImageFolderOverrides,
   getImageFolderOverridesVersion,
 } from '@/server/imageExtras';
@@ -185,6 +186,12 @@ export async function GET(request: NextRequest) {
     const needsFolderOverrides = hasPagination || hasGalleryQueryParams || hasFocusQuery;
     const folderOverrides = needsFolderOverrides ? await folderOverridesPromise : null;
     diagnostics.query_extras_image_count = folderOverrides ? folderOverrides.size : 0;
+    // Description / alt text / Prompt This / Comfy prompts live in extras, not
+    // in the Cloudflare catalog, so the search haystack needs this projection
+    // to reach them for the whole scope (the page-slice extras merge below
+    // happens after filtering). Shares the folder-override load above.
+    const extrasSearchTextById = search ? await getImageExtrasSearchText() : null;
+    diagnostics.search_extras_text_count = extrasSearchTextById ? extrasSearchTextById.size : 0;
 
     const cacheStats = getCacheStats();
     const catalogVersion = cacheStats.contentVersion ?? cacheStats.lastFetched ?? 0;
@@ -342,7 +349,8 @@ export async function GET(request: NextRequest) {
             1,
             Math.max(1, finalImages.length),
             undefined,
-            scopeKey
+            scopeKey,
+            { extrasSearchTextById: extrasSearchTextById ?? undefined }
           );
           return analyzeGalleryDuplicates(duplicateScope.images, {
             catalogVersion,
@@ -364,7 +372,11 @@ export async function GET(request: NextRequest) {
             hasPagination || hasFocusQuery ? pageSize : Math.max(1, finalImages.length),
             focusAssetId,
             scopeKey,
-            { includeDuplicateSummary, precomputedDuplicateSummary }
+            {
+              includeDuplicateSummary,
+              precomputedDuplicateSummary,
+              extrasSearchTextById: extrasSearchTextById ?? undefined,
+            }
           )
         )
       : null;
@@ -425,10 +437,22 @@ export async function GET(request: NextRequest) {
         }))
       : finalImages;
 
+    // The client re-applies the same search term to the page it receives, so a
+    // hit that came from the extras projection has to travel with the asset --
+    // otherwise the client filter would drop a row the server matched. Only
+    // sent while a search is active, and only for assets that have extras text.
+    const withSearchText = extrasSearchTextById
+      ? withExtrasApplied.map((asset) => {
+          const typed = asset as Record<string, unknown> & { id: string };
+          const text = extrasSearchTextById.get(String(typed.id));
+          return text ? { ...typed, searchText: text } : asset;
+        })
+      : withExtrasApplied;
+
     const cache = cacheStats;
     timings.persistent_read = cache.source === 'persistent' ? timings.cache_load ?? 0 : 0;
     const serializedImages = await markStage('serialization', () =>
-      withExtrasApplied.map((image) => toListableImage(image as Record<string, unknown>))
+      withSearchText.map((image) => toListableImage(image as Record<string, unknown>))
     );
     diagnostics.response_image_count = serializedImages.length;
     timings.total = mark(performance.now() - startedAt);

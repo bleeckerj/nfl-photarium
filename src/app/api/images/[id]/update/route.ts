@@ -78,7 +78,7 @@ export async function PATCH(
     const variationSortProvided = Object.prototype.hasOwnProperty.call(body, 'variationSort');
     const namespaceProvided = Object.prototype.hasOwnProperty.call(body, 'namespace');
 
-    const cleanFolder = cleanString(typeof folder === 'string' ? folder : undefined);
+    const rawFolder = cleanString(typeof folder === 'string' ? folder : undefined);
     const cleanNamespace = cleanString(typeof namespace === 'string' ? namespace : undefined);
     const cleanDescription =
       typeof description === 'string'
@@ -115,9 +115,12 @@ export async function PATCH(
       return [];
     })();
 
-    if (folderProvided && cleanFolder) {
+    // Store the normalized name the policy returns, not the caller's raw string —
+    // otherwise "Inca Trail" passes validation and lands as an invalid folder.
+    let cleanFolder = rawFolder;
+    if (folderProvided && rawFolder) {
       try {
-        requireValidFolderName(cleanFolder);
+        cleanFolder = requireValidFolderName(rawFolder);
       } catch (error) {
         return NextResponse.json(
           { error: error instanceof Error ? error.message : 'Invalid folder name' },

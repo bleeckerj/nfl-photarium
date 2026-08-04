@@ -266,11 +266,12 @@ async function materializeOpenAiImageResult(result, outputContentType) {
     throw new Error('OpenAI image generation returned no materializable image');
 }
 async function uploadGeneratedImage(deps, options) {
-    return deps.uploadFileBase64('/api/upload/external', {
+    return deps.uploadFileBase64('/api/upload', {
         base64: options.base64,
         filename: buildGeneratedFilename(options.settings, normalizeImageOutputFormat(options.settings.outputFormat)),
         contentType: options.contentType,
         folder: options.settings.folder,
+        createFolder: options.settings.createFolder,
         tags: options.settings.tags,
         description: options.settings.description,
         originalUrl: options.settings.originalUrl,
@@ -295,7 +296,7 @@ export async function generatePhotariumImage(deps, settings) {
             dryRun: true,
             mode: 'text_to_image',
             request: { endpoint: '/images/generations', body: requestBody },
-            upload: { filename: buildGeneratedFilename(settings, requestSettings.outputFormat), namespace: settings.namespace, folder: settings.folder, tags: settings.tags },
+            upload: { filename: buildGeneratedFilename(settings, requestSettings.outputFormat), namespace: settings.namespace, folder: settings.folder, createFolder: settings.createFolder, tags: settings.tags },
         };
     }
     const openAiResult = await postOpenAiImageRequest('/images/generations', requestBody);
@@ -341,7 +342,7 @@ export async function generatePhotariumImageFromReferences(deps, settings, refer
             request: { endpoint: '/images/edits', body: requestBody },
             sources,
             warnings,
-            upload: { filename: buildGeneratedFilename(settings, requestSettings.outputFormat), namespace: settings.namespace, folder: settings.folder, tags: settings.tags, parentId: settings.parentId || singleParentId },
+            upload: { filename: buildGeneratedFilename(settings, requestSettings.outputFormat), namespace: settings.namespace, folder: settings.folder, createFolder: settings.createFolder, tags: settings.tags, parentId: settings.parentId || singleParentId },
         };
     }
     const openAiResult = await postOpenAiImageRequest('/images/edits', requestBody);
@@ -387,6 +388,7 @@ export async function generatePhotariumAspectRatioVariant(deps, settings) {
         filename,
         namespace: settings.namespace || sourceMetadata.namespace,
         folder: settings.folder || sourceMetadata.folder,
+        createFolder: settings.createFolder,
         tags: settings.tags || sourceMetadata.tags,
         description: settings.description
             || `Image-generated ${aspectRatio.label} aspect-ratio variant preserving the full source image without cropping or stretching.`,

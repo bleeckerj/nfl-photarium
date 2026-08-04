@@ -1,4 +1,5 @@
 import { fetchCloudflareImage, getCloudflareCredentials } from '@/server/cloudflareClient';
+import { resolveVisionImageUrl } from '@/server/visionImageSource';
 import { getImageExtrasRecord, patchImageExtrasRecord } from '@/server/imageExtras';
 import { getOpenAiDescriptionModel, OPENAI_CHAT_COMPLETIONS_URL } from '@/server/openAiGeneratorModels';
 import { cleanString, parseCloudflareMetadata } from '@/utils/cloudflareMetadata';
@@ -25,7 +26,8 @@ export async function generateAndPersistImageDescription(params: {
 }): Promise<{ description: string; persistedDescription: string }> {
   const credentials = getCloudflareCredentials();
   const image = await fetchCloudflareImage(params.imageId, credentials);
-  const imageUrl = image.variants?.find((variant) => variant.includes('public')) || image.variants?.[0];
+  // SVG assets resolve to their rasterized companion; vision cannot decode SVG.
+  const imageUrl = await resolveVisionImageUrl(image, credentials);
   if (!imageUrl) {
     throw new ImageDescriptionError('No accessible image variant found', 422);
   }

@@ -32,6 +32,32 @@ const resolveImageSourceId = (asset: AssetLike): { id: string; isRawSvg: boolean
   return { id: asset.id, isRawSvg: false };
 };
 
+/**
+ * Id of the SVG original in an SVG↔WebP pair, from either half.
+ *
+ * `linkedAssetId` is written exclusively for that pairing, so a non-SVG record
+ * carrying one is the rasterized companion and its partner is the vector.
+ * Returns undefined for ordinary raster assets.
+ */
+export const resolveSvgOriginalAssetId = (
+  asset: Pick<AssetLike, 'id' | 'filename' | 'linkedAssetId'>
+): string | undefined => {
+  if (isSvgAsset(asset)) return asset.id;
+  const linked = asset.linkedAssetId?.trim();
+  return linked || undefined;
+};
+
+/**
+ * Download URL for the stored SVG bytes. Cloudflare does not transform SVG, so the
+ * vector is never reachable through a delivery variant — only as the original.
+ */
+export const getSvgOriginalDownloadUrl = (
+  asset: Pick<AssetLike, 'id' | 'filename' | 'linkedAssetId'>
+): string | undefined => {
+  const svgId = resolveSvgOriginalAssetId(asset);
+  return svgId ? `/api/images/${encodeURIComponent(svgId)}/download?variant=original` : undefined;
+};
+
 export const getAssetDetailPath = (asset: Pick<AssetLike, 'id' | 'assetType'>) =>
   isVideoAsset(asset) ? `/videos/${asset.id}` : `/images/${asset.id}`;
 
