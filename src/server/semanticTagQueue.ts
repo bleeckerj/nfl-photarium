@@ -1,6 +1,5 @@
 import { randomUUID } from 'crypto';
 
-import { generateAndPersistSemanticTags } from '@/server/semanticTagService';
 import type { SemanticTagJob } from '@/types/semanticTagging';
 import { getSemanticTagQueueStore } from '@/server/semanticTagQueueStore';
 
@@ -71,6 +70,10 @@ async function processJob(jobId: string): Promise<SemanticTagJob | undefined> {
   await store.addLease(jobId, Date.now() + LEASE_MS);
 
   try {
+    // Keep Sharp and other vision-only dependencies out of queue initialization
+    // and Next instrumentation. They are needed only after a worker claims a
+    // job, and this import still runs in the Node worker runtime.
+    const { generateAndPersistSemanticTags } = await import('@/server/semanticTagService');
     const result = await generateAndPersistSemanticTags({
       imageId: job.imageId,
       count: job.requestedCount,

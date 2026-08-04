@@ -13,8 +13,26 @@ const nextConfig = {
   // rather than bundling them. grainrad is pure ESM and reads a sibling
   // docs/feature-map.json relative to its own module path, so it must run from
   // its on-disk location.
-  serverExternalPackages: ['nfl-grainrad-clone', 'sharp'],
-  webpack: (config, { dev }) => {
+  serverExternalPackages: ['nfl-grainrad-clone', 'sharp', 'jsdom'],
+  webpack: (config, { dev, isServer }) => {
+    if (isServer) {
+      config.externalsPresets = {
+        ...config.externalsPresets,
+        node: true,
+      };
+      // Instrumentation is compiled separately from ordinary route handlers in
+      // Next dev. Keep Sharp's native loader and its Node-only libc detector
+      // external there too, so Webpack never evaluates them as browser code.
+      const existingExternals = Array.isArray(config.externals) ? config.externals : [];
+      config.externals = [
+        ...existingExternals,
+        {
+          sharp: 'commonjs sharp',
+          'detect-libc': 'commonjs detect-libc',
+          jsdom: 'commonjs jsdom',
+        },
+      ];
+    }
     if (dev) {
       const existingIgnored = config.watchOptions?.ignored;
       const ignoredList = (Array.isArray(existingIgnored)
