@@ -8,6 +8,7 @@ const MAX_ATTEMPTS = 5;
 const LEASE_MS = 5 * 60 * 1000;
 const BASE_RETRY_DELAY_MS = 10 * 1000;
 const WORKER_POLL_MS = 1_000;
+const WORKER_ERROR_RETRY_MS = 5 * 1000;
 
 const maxAttempts = () => {
   const configured = Number.parseInt(process.env.SEMANTIC_TAG_QUEUE_MAX_ATTEMPTS ?? '', 10);
@@ -15,6 +16,7 @@ const maxAttempts = () => {
 };
 
 const now = () => new Date().toISOString();
+const wait = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 const isDisabled = () => ['0', 'false', 'no', 'off'].includes(process.env.AUTO_TAGS_ON_UPLOAD?.trim().toLowerCase() ?? '');
 
 const fallbackJobs = new Map<string, SemanticTagJob>();
@@ -198,16 +200,23 @@ export async function retrySemanticTagJob(jobId: string): Promise<SemanticTagJob
 
 export async function runSemanticTagWorker(options: { once?: boolean; signal?: AbortSignal } = {}): Promise<void> {
   do {
-    await recoverExpiredJobs();
-    await moveReadyDelayedJobs();
-    const jobId = await getSemanticTagQueueStore().dequeue();
-    if (jobId) {
-      await processJob(jobId);
-      if (options.once) return;
-      continue;
+    try {
+      await recoverExpiredJobs();
+      await moveReadyDelayedJobs();
+      const jobId = await getSemanticTagQueueStore().dequeue();
+      if (jobId) {
+        await processJob(jobId);
+        if (options.once) return;
+        continue;
+      }
+      if (options.once || options.signal?.aborted) return;
+      await wait(WORKER_POLL_MS);
+    } catch (error) {
+      console.error('[semanticTagQueue] Worker cycle failed; retrying', error);
+      if (options.once) throw error;
+      if (options.signal?.aborted) return;
+      await wait(WORKER_ERROR_RETRY_MS);
     }
-    if (options.once || options.signal?.aborted) return;
-    await new Promise((resolve) => setTimeout(resolve, WORKER_POLL_MS));
   } while (!options.signal?.aborted);
 }
 

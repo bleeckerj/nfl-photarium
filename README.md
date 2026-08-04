@@ -265,12 +265,16 @@ OPENAI_TAGS_MODEL=gpt-4.1-nano
 OPENAI_HAIKU_MODEL=gpt-4.1-nano
 ```
 
-Upload-time semantic tags run through a Redis-backed durable worker queue. Start
-the worker with:
+Upload-time semantic tags run through a Redis-backed durable worker queue. The
+Next.js Node runtime starts the worker automatically. The standalone command is
+available for a separately supervised deployment or diagnostics:
 
 ```bash
 npm run semantic-tags:worker
 ```
+
+Set `SEMANTIC_TAG_WORKER_ENABLED=false` only when another supervisor owns the
+worker process.
 
 Uploads use the shared `/api/upload` service by default. `/api/upload/external`
 remains a compatibility adapter and reaches the same service. Semantic tagging

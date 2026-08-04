@@ -71,7 +71,9 @@ MCP uses the Photarium MCP server over stdio:
 
 The MCP server process inherits the utility's environment, including the Photarium server configuration. Keep credentials in the environment or approved secret storage rather than in this JSON file.
 
-Start the Photarium semantic-tag worker separately from the repository root:
+The Photarium Node runtime starts the semantic-tag worker automatically. For a
+separately supervised deployment or diagnostics, start it from the repository
+root with:
 
 ```bash
 npm run semantic-tags:worker
