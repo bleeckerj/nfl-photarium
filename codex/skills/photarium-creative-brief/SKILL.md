@@ -30,7 +30,7 @@ Read [references/photarium-contract.md](references/photarium-contract.md) when a
 1. If the user supplied a Photarium image ID, use it as `sourceImageId`.
 2. If the user supplied a local attachment, call `photarium_upload_from_path` before preparing a plan.
 3. If the user supplied a URL, call the Photarium URL upload tool before preparing a plan.
-4. Preserve the source namespace and folder when present. For an unfiled source, use the configured Photarium namespace and `creative-brief-derivations`.
+4. Preserve the source namespace and exact folder for every source-based derivative. The child must inherit the parent image's folder verbatim. If the parent folder is null or absent, leave the child unfiled. Never invent, choose, or create a fallback folder, including `creative-brief-derivations`; if a folder choice is required and cannot be inherited, stop and ask the operator.
 5. Treat a same-content duplicate response as the existing source record and continue with that ID.
 6. Generate and save source description and alt text after registration.
 7. For source-based work, download the catalog source locally and inspect the complete image with `view_image` before generation.
@@ -45,7 +45,7 @@ For `codex_imagegen`:
 2. Call built-in imagegen with the inspected source as a reference and state the source role and preservation constraints explicitly.
 3. Include the requested aspect ratio in the prompt when one is supplied.
 4. Inspect the generated output. Make at most one focused correction pass for an obvious text, branding, crop, or source-preservation defect.
-5. Upload the selected output with `photarium_upload_from_path`, passing the source image as `parentId`, the final prompt, namespace, and folder. Do not pass tags: provider, derivation, relationship, or workflow data belongs in provenance fields, never semantic image tags.
+5. Upload the selected output with `photarium_upload_from_path`, passing the source image as `parentId`, the final prompt, the inherited namespace, and the exact inherited folder. Omit `folder` when the parent is unfiled. Do not pass tags: provider, derivation, relationship, or workflow data belongs in provenance fields, never semantic image tags.
 6. Call `photarium_record_creative_brief_result` with the prepared derivation ID, provider, generated child ID, actual dimensions, and actual aspect ratio.
 7. Verify the returned hosted URL, child ID, parentage, prompt, provider, dimensions, ratio, description, alt text, and `metadataEnrichment.status`.
 

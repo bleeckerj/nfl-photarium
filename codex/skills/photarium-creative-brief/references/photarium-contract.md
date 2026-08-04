@@ -28,10 +28,14 @@ The workflow is complete only when all of these are true:
 - Description and alt text are saved.
 - Final metadata readback succeeds.
 
+## Folder inheritance invariant
+
+Every source-based derivative inherits the parent image's folder exactly. A null or absent parent folder remains null or absent on the child. Never invent, select, or create a fallback folder, including `creative-brief-derivations`. If the upload flow cannot preserve the parent folder, stop and ask the operator rather than creating or using a different folder.
+
 ## Defaults
 
 - Provider: `codex_imagegen`.
 - Namespace: source namespace, otherwise Photarium's configured `IMAGE_NAMESPACE`.
-- Folder: source folder, otherwise `creative-brief-derivations`.
+- Folder: exact source folder; if the source is unfiled, leave the derivative unfiled.
 - Relationship: `brief_led` unless the user specifies another relationship.
 - No automatic provider fallback.
