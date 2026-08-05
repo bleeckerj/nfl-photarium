@@ -211,7 +211,7 @@
     .save { padding: 5px 10px; border: 0; border-radius: 5px; background: var(--blue); color: white; font-size: 10px; }
 
     /* Option 2: column-first layout keeps the authored order visible down columns. */
-    .option-column .pills { display: grid; grid-auto-flow: column; grid-template-rows: repeat(3, min-content); grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 7px; min-height: 122px; }
+    .option-column .pills { display: grid; grid-auto-flow: column; grid-template-rows: repeat(3, min-content); grid-template-columns: repeat(3, max-content); justify-content: start; gap: 6px 7px; min-height: 122px; }
     .option-column .pill { width: 100%; min-width: 0; border-radius: 5px; background: #f8fafc; }
     .option-column .pill-remove { margin-left: auto; }
     .sort-note { color: var(--blue); font-size: 9px; }
