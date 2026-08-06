@@ -1,6 +1,8 @@
 import { Sparkles } from 'lucide-react';
 import FolderManagerButton from '@/components/FolderManagerButton';
 import MonoSelect from '@/components/MonoSelect';
+import { parseTagDraft, serializeTagDraft, type TagCorpusEntry } from './tagEditor';
+import { TagPillEditor } from './TagPillEditor';
 
 export const FolderTagsNameEditor = ({
   folderSelect,
@@ -13,6 +15,9 @@ export const FolderTagsNameEditor = ({
   tagGenerationCount,
   tagGenerationLoading,
   parentTags,
+  tagCorpus,
+  tagCorpusLoading,
+  tagCorpusError,
   bulkTagsAppending,
   bulkTagsReplacing,
   displayNameInput,
@@ -39,6 +44,9 @@ export const FolderTagsNameEditor = ({
   tagGenerationCount: number;
   tagGenerationLoading: boolean;
   parentTags: string[];
+  tagCorpus: readonly TagCorpusEntry[];
+  tagCorpusLoading: boolean;
+  tagCorpusError: string | null;
   bulkTagsAppending: boolean;
   bulkTagsReplacing: boolean;
   displayNameInput: string;
@@ -138,19 +146,25 @@ export const FolderTagsNameEditor = ({
           )}
         </div>
       </div>
-      <input
+      <TagPillEditor
         value={tagsInput}
-        onChange={(event) => onTagsInputChange(event.target.value)}
-        className="w-full border border-gray-300 rounded-md px-3 py-2 text-xs mt-2"
-        placeholder="Comma-separated tags"
+        corpus={tagCorpus}
+        corpusLoading={tagCorpusLoading}
+        corpusError={tagCorpusError}
+        onChange={onTagsInputChange}
       />
       <div className="flex flex-wrap items-center gap-2 mt-2">
         <span className="text-[10px] text-gray-500">Exclude from:</span>
         {(['x-clip', 'x-color', 'x-search'] as const).map((tag) => {
-          const hasTag = tagsInput.split(',').map((value) => value.trim()).includes(tag);
+          const parsedTags = parseTagDraft(tagsInput);
+          const hasTag = parsedTags.controlTags.includes(tag);
           const toggleTag = () => {
-            const currentTags = tagsInput.split(',').map((value) => value.trim()).filter(Boolean);
-            onTagsInputChange(hasTag ? currentTags.filter((value) => value !== tag).join(', ') : [...currentTags, tag].join(', '));
+            onTagsInputChange(serializeTagDraft({
+              semanticTags: parsedTags.semanticTags,
+              controlTags: hasTag
+                ? parsedTags.controlTags.filter((value) => value !== tag)
+                : [...parsedTags.controlTags, tag],
+            }));
           };
           const label = tag === 'x-clip' ? 'Semantic' : tag === 'x-color' ? 'Color' : 'All Search';
           return (

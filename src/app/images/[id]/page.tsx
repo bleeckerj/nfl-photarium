@@ -71,6 +71,7 @@ import { useAltDescriptionGeneration } from '@/hooks/useAltDescriptionGeneration
 import { useDeleteImageFamily } from '@/hooks/useDeleteImageFamily';
 import { useShareLinks } from '@/hooks/useShareLinks';
 import { useImageMetadataDraft } from '@/hooks/useImageMetadataDraft';
+import { useTagCorpus } from '@/hooks/useTagCorpus';
 import { patchParentAssignment as patchParentAssignmentService } from '@/services/parentAssignmentService';
 import { usePersistentShareBaseUrl } from '@/hooks/usePersistentShareBaseUrl';
 import { requestSemanticTags } from '@/services/imageAltDescriptionService';
@@ -238,6 +239,7 @@ export default function ImageDetailPage() {
   const [embeddingPendingMap, setEmbeddingPendingMap] = useState<Record<string, EmbeddingPendingEntry>>({});
   const [uniqueFolders, setUniqueFolders] = useState<string[]>([]);
   const metadataDraft = useImageMetadataDraft<CloudflareImage>({ image, extrasRecord });
+  const tagCorpus = useTagCorpus();
   const {
     folderSelect,
     newFolderInput,
@@ -2310,6 +2312,7 @@ export default function ImageDetailPage() {
               folderEditorProps={{
                 folderSelect, newFolderInput, detailFolderOptions, hasVariations, bulkFolderApplying,
                 effectiveParentFolder, tagsInput, tagGenerationCount, tagGenerationLoading, parentTags,
+                tagCorpus: tagCorpus.entries, tagCorpusLoading: tagCorpus.loading, tagCorpusError: tagCorpus.error,
                 bulkTagsAppending, bulkTagsReplacing, displayNameInput, displayNameGenerating,
                 immutableFilename: image?.filename || 'Unknown',
                 onFolderSelectChange: setFolderSelect, onNewFolderInputChange: setNewFolderInput,

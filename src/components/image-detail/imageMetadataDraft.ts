@@ -1,5 +1,6 @@
 import { cleanString } from '@/utils/cloudflareMetadata';
 import { mergeUserTagsPreservingSystemTags, getUserVisibleTags } from '@/utils/systemTags';
+import { isControlTag, normalizeSemanticTag } from './tagEditor';
 import {
   hasDirtyTextMetadata,
   resolveInitialAltText,
@@ -59,7 +60,10 @@ export const emptyImageMetadataDraftValues = (): ImageMetadataDraftValues => ({
 export const parseUserTagsInput = (value: string) =>
   value
     .split(',')
-    .map((tag) => tag.trim())
+    .map((tag) => {
+      const trimmed = tag.trim();
+      return isControlTag(trimmed) ? trimmed.toLocaleLowerCase() : normalizeSemanticTag(trimmed);
+    })
     .filter(Boolean)
     .filter((tag) => !tag.startsWith('_'));
 
