@@ -57,3 +57,4 @@ ltm1100_mountain_04_16x9_00001.png
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+archive-catalog/dist/

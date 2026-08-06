@@ -70,6 +70,28 @@ describe('Photarium MCP runtime surface', () => {
     );
   });
 
+  it('returns an archive preview as MCP image content with asset metadata', async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url === 'http://localhost:8790/assets/archive-1') {
+        return new Response(JSON.stringify({ asset: { id: 'archive-1', filename: 'trust.jpg' } }), { status: 200 });
+      }
+      if (url === 'http://localhost:8790/assets/archive-1/preview') {
+        return new Response(Buffer.from('jpeg-fixture'), { status: 200, headers: { 'content-type': 'image/jpeg' } });
+      }
+      return new Response(JSON.stringify({ error: `Unexpected request: ${url}` }), { status: 500 });
+    }) as typeof global.fetch;
+
+    const result = await handleRuntimeToolCall('archive_get_preview', { assetId: 'archive-1' });
+    expect(result.isError).not.toBe(true);
+    expect(result.content[0]).toMatchObject({ type: 'text' });
+    expect(result.content[1]).toEqual({
+      type: 'image',
+      data: Buffer.from('jpeg-fixture').toString('base64'),
+      mimeType: 'image/jpeg',
+    });
+  });
+
   it('paginates photarium_list on the server', async () => {
     global.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;

@@ -21,6 +21,7 @@
     "redis:stop": "docker compose down",
     "redis:logs": "docker compose logs -f redis",
     "redis:status": "docker compose ps",
+    "archive:sync": "node scripts/archive-sync.mjs",
     "semantic-tags:worker": "node --import tsx scripts/semantic-tags-worker.ts",
     "embeddings:generate": "node scripts/generate-embeddings.mjs",
     "embeddings:backfill": "node scripts/backfill-embeddings.mjs",

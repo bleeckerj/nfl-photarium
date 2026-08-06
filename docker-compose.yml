@@ -16,5 +16,35 @@ services:
       retries: 5
     restart: unless-stopped
 
+  photo-archive-catalog:
+    build:
+      context: ./archive-catalog
+    container_name: photarium-photo-archive-catalog
+    ports:
+      - "8790:8790"
+    volumes:
+      - archive_catalog_data:/data
+      - archive_catalog_previews:/data/previews
+      - archive_catalog_backups:/data/backups
+      - type: bind
+        source: ${PHOTOGRAPHY_ARCHIVE_HOST_PATH:-/Volumes/Photography 1}
+        target: /sources/photography-1
+        read_only: true
+    environment:
+      - ARCHIVE_DATABASE_PATH=/data/catalog.sqlite
+      - ARCHIVE_PREVIEW_ROOT=/data/previews
+      - ARCHIVE_BACKUP_ROOT=/data/backups
+      - ARCHIVE_SOURCE_ROOT=/sources/photography-1
+      - ARCHIVE_PORT=8790
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8790/health').then(r => { if (!r.ok) process.exit(1) })"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
 volumes:
   redis_data:
+  archive_catalog_data:
+  archive_catalog_previews:
+  archive_catalog_backups:

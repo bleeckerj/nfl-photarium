@@ -4,6 +4,28 @@ MCP (Model Context Protocol) server that exposes the full Photarium API surface 
 
 ## Tools
 
+### Lightroom Archive
+
+The archive tools query the separate SQLite/FTS5 catalog service. They continue to return indexed metadata while the Photography 1 NAS is offline; thumbnails are returned when they are already cached or when the source is connected.
+
+- `archive_catalog_status`
+- `archive_list_catalogs`
+- `archive_search` (metadata, annotations, filters, and local related-term expansion)
+- `archive_get_asset`
+- `archive_get_preview` (metadata plus an image attachment)
+- `archive_list_keywords`
+- `archive_list_collections`
+- `archive_save_annotation`
+
+Start the service and perform an explicit import from the repository root:
+
+```bash
+docker compose up -d photo-archive-catalog
+npm run archive:sync
+```
+
+The service stores its SQLite database, previews, and backups in separate Docker volumes. Set `PHOTOGRAPHY_ARCHIVE_HOST_PATH` when the NAS is mounted at a different host path. Set `ARCHIVE_CATALOG_BASE_URL` in the MCP server environment when the catalog service is not available at `http://localhost:8790`.
+
 
 ### Discovery & Search
 
@@ -158,6 +180,7 @@ Set the base URL of your Photarium instance:
 
 ```bash
 export PHOTARIUM_BASE_URL=http://localhost:3000
+export ARCHIVE_CATALOG_BASE_URL=http://localhost:8790
 ```
 
 Image generation tools also require an OpenAI API key in the MCP server environment:

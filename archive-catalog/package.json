@@ -1,0 +1,23 @@
+{
+  "name": "photarium-archive-catalog",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=25"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --import tsx --test src/archive.test.ts",
+    "dev": "tsx src/server.ts",
+    "start": "node dist/server.js",
+    "sync": "tsx src/cli.ts sync"
+  },
+  "dependencies": {
+    "sharp": "^0.34.5"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.0",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.2"
+  }
+}

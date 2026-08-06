@@ -2,6 +2,8 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 
 import { aiHandlers } from './ai/handlers.js';
 import { aiTools } from './ai/tools.js';
+import { archiveHandlers } from './archive/handlers.js';
+import { archiveTools } from './archive/tools.js';
 import { discoveryHandlers } from './discovery/handlers.js';
 import { discoveryTools } from './discovery/tools.js';
 import { imageToolHandlers } from './image-tools/handlers.js';
@@ -26,6 +28,7 @@ const LIST_TOOLS_TOOL: Tool = {
 };
 
 const runtimeModules: RuntimeToolModule[] = [
+  { tools: archiveTools, handlers: archiveHandlers },
   { tools: discoveryTools, handlers: discoveryHandlers },
   { tools: organizationTools, handlers: organizationHandlers },
   { tools: uploadTools, handlers: uploadHandlers },
