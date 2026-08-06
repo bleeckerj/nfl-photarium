@@ -168,6 +168,19 @@ describe('ImageGallery motion assets helpers', () => {
     expect(prefs.showMotionAssetsOnly).toBe(true);
   });
 
+  it('restores hidden visibility rules from their dedicated localStorage keys', () => {
+    const { localStorage } = installWindow();
+    localStorage.setItem('galleryHiddenFolders', JSON.stringify([' archive ', 'ops']));
+    localStorage.setItem('galleryHiddenTags', JSON.stringify([' private ', 'internal']));
+    localStorage.setItem('galleryHiddenNamespaces', JSON.stringify([' cf-flickr ', 'studio']));
+
+    const prefs = getStoredPreferences('studio', null);
+
+    expect(prefs.hiddenFolders).toEqual(['archive', 'ops']);
+    expect(prefs.hiddenTags).toEqual(['private', 'internal']);
+    expect(prefs.hiddenNamespaces).toEqual(['cf-flickr', 'studio']);
+  });
+
   it('restores the motion-assets filter from gallery return state', () => {
     installWindow();
     saveGalleryReturnState({

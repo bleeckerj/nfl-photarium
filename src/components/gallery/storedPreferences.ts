@@ -7,6 +7,7 @@ import {
 import { normalizeDateFilterValue } from './dateFilter';
 import { normalizeColorSearchHex } from './colorSearch';
 import { normalizeGridSize } from './gridSizing';
+import { loadHiddenFolders, loadHiddenNamespaces, loadHiddenTags } from './storage';
 import type { AspectRatioClass, DateFilter, EmbeddingFilter, GridSize } from './types';
 import type { NormalizedGalleryReturnState } from './returnState';
 
@@ -83,6 +84,13 @@ export const getStoredPreferences = (
   }
 
   const next = getDefaultStoredPreferences();
+  // Hidden visibility rules live in dedicated storage keys so they can be
+  // persisted independently from the general preference blob. Hydrate them
+  // before initial gallery state is created so a browser restart preserves
+  // the same visibility rules.
+  next.hiddenFolders = loadHiddenFolders();
+  next.hiddenTags = loadHiddenTags();
+  next.hiddenNamespaces = loadHiddenNamespaces();
 
   try {
     const stored = window.localStorage.getItem('galleryPreferences');
