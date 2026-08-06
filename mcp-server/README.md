@@ -6,6 +6,8 @@ MCP (Model Context Protocol) server that exposes the full Photarium API surface 
 
 ### Lightroom Archive
 
+The full archive service and operations guide is [docs/photo-archive-catalog.md](../docs/photo-archive-catalog.md).
+
 The archive tools query the separate SQLite/FTS5 catalog service. They continue to return indexed metadata while the Photography 1 NAS is offline; thumbnails are returned when they are already cached or when the source is connected.
 
 - `archive_catalog_status`

@@ -1,5 +1,7 @@
 # Photo Archive Catalog
 
+The complete operator and developer guide is [docs/photo-archive-catalog.md](../docs/photo-archive-catalog.md).
+
 This service is the offline search index for Lightroom catalogs stored on the Photography 1 NAS. It is deliberately separate from the global Photarium catalog so a large historical archive does not add thousands of cold records to the normal image search path.
 
 ## Storage and source safety
@@ -29,3 +31,5 @@ The service exposes its internal API on port `8790`. The MCP server uses `ARCHIV
 ## Search model
 
 Search covers filenames, folder paths, Lightroom keywords, captions, copyright, collections, and separate archive annotations. The initial related-term vocabulary is local and curated; it expands terms such as `trust` toward identity, privacy, security, safety, reliability, verification, and reputation. Expanded matches are labeled in the response and never written back as Lightroom keywords.
+
+See the complete guide for the HTTP API, MCP tool contracts, offline behavior, backup/restore, troubleshooting, and rollout procedure.
