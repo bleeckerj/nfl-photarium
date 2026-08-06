@@ -153,7 +153,7 @@ npm run archive:sync
 
 The sync recursively discovers `.lrcat` files under the mounted source root. Directories ending in `.lrdata` and hidden directories are skipped during discovery.
 
-The command reports each catalog and its indexed/available asset counts. The operation is transactional: a failed catalog write rolls back the current sync transaction.
+The command starts a background sync job, polls `/status`, and reports each catalog and its indexed/available asset counts. The operation is transactional: a failed catalog write rolls back the current sync transaction. A second sync request is rejected while one is already running.
 
 ### Optional content hashes
 
@@ -288,7 +288,7 @@ The service is an internal trusted-network API. It has no user authentication la
 | `GET` | `/health` | Liveness check |
 | `GET` | `/status` | Counts, source connection state, paths, and last sync |
 | `GET` | `/catalogs` | Imported catalog summaries |
-| `POST` | `/sync` | Explicit import; accepts `hashFiles`, `allowLockedCatalog`, and optional `catalogPaths` |
+| `POST` | `/sync` | Start an explicit background import; accepts `hashFiles`, `allowLockedCatalog`, and optional `catalogPaths`; returns `202` with a job ID |
 | `POST` | `/search` | FTS search and filters |
 | `GET` | `/keywords?query=...` | Keyword counts |
 | `GET` | `/collections?query=...` | Collection counts |

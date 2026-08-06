@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { access } from 'node:fs/promises';
@@ -14,6 +15,24 @@ const backupRoot = process.env.ARCHIVE_BACKUP_ROOT ?? '/data/backups';
 const sourceRoot = process.env.ARCHIVE_SOURCE_ROOT ?? '/sources/photography-1';
 const port = Number(process.env.ARCHIVE_PORT ?? 8790);
 const database = openCatalogDatabase(databasePath);
+
+interface SyncJobState {
+  status: 'idle' | 'running' | 'complete' | 'failed';
+  jobId: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  result: Awaited<ReturnType<typeof syncArchive>> | null;
+  error: string | null;
+}
+
+let syncJob: SyncJobState = {
+  status: 'idle',
+  jobId: null,
+  startedAt: null,
+  finishedAt: null,
+  result: null,
+  error: null,
+};
 
 async function sourceConnected(): Promise<boolean> {
   try {
@@ -82,7 +101,7 @@ export function createArchiveServer() {
         return;
       }
       if (request.method === 'GET' && parts[0] === 'status') {
-        sendJson(response, 200, { ...catalogStatus(database), sourceRoot, sourceConnected: await sourceConnected(), databasePath, previewRoot, backupRoot });
+        sendJson(response, 200, { ...catalogStatus(database), sourceRoot, sourceConnected: await sourceConnected(), databasePath, previewRoot, backupRoot, sync: syncJob });
         return;
       }
       if (request.method === 'GET' && parts[0] === 'catalogs') {
@@ -94,16 +113,34 @@ export function createArchiveServer() {
           sendError(response, 409, 'The photography source is unavailable; cached catalog data was left unchanged.');
           return;
         }
+        if (syncJob.status === 'running') {
+          sendJson(response, 409, { error: 'A catalog sync is already running.', sync: syncJob });
+          return;
+        }
         const body = await requestBody(request);
         const input = body && typeof body === 'object' ? body as Record<string, unknown> : {};
-        const result = await syncArchive({
+        const jobId = randomUUID();
+        syncJob = {
+          status: 'running',
+          jobId,
+          startedAt: new Date().toISOString(),
+          finishedAt: null,
+          result: null,
+          error: null,
+        };
+        const options = {
           sourceRoot,
           database,
           hashFiles: input.hashFiles === true,
           allowLockedCatalog: input.allowLockedCatalog === true,
           catalogPaths: Array.isArray(input.catalogPaths) ? input.catalogPaths.filter((item): item is string => typeof item === 'string') : undefined
+        };
+        void syncArchive(options).then((result) => {
+          syncJob = { ...syncJob, status: 'complete', finishedAt: new Date().toISOString(), result };
+        }).catch((error: unknown) => {
+          syncJob = { ...syncJob, status: 'failed', finishedAt: new Date().toISOString(), error: error instanceof Error ? error.message : String(error) };
         });
-        sendJson(response, 200, result);
+        sendJson(response, 202, { status: 'started', jobId });
         return;
       }
       if (request.method === 'POST' && parts[0] === 'search') {
