@@ -335,9 +335,9 @@ describe('gallery toolbar components', () => {
         ToastProvider,
         null,
         React.createElement(GalleryCommandBar, {
-          hiddenFolders: [],
-          hiddenTags: [],
-          hiddenNamespaces: [],
+          hiddenFolders: ['archive'],
+          hiddenTags: ['draft', 'private'],
+          hiddenNamespaces: ['cf-hidden'],
           knownFolders: [],
           knownTags: [],
           knownNamespaces: ['cf-flickr'],
@@ -367,5 +367,6 @@ describe('gallery toolbar components', () => {
 
     expect(markup).toContain('hide namespace &lt;name&gt;');
     expect(markup).toContain('list hidden namespaces');
+    expect(markup).toContain('HIDDEN · 1 folder · 2 tags · 1 namespace');
   });
 });

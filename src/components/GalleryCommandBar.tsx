@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useMemo, useRef, useState } from 'react';
+import GalleryHiddenInventory from './gallery/GalleryHiddenInventory';
 import { useToast } from './Toast';
 
 interface GalleryCommandBarProps {
@@ -668,6 +669,15 @@ export default function GalleryCommandBar({
           Run
         </button>
       </form>
+      <GalleryHiddenInventory
+        hiddenFolders={hiddenFolders}
+        hiddenTags={hiddenTags}
+        hiddenNamespaces={hiddenNamespaces}
+        onClearHiddenFolders={onClearHidden}
+        onClearHiddenTags={onClearHiddenTags}
+        onClearHiddenNamespaces={onClearHiddenNamespaces}
+        variant="cli"
+      />
       {suggestions.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-2">
           {suggestions.map((suggestion, index) => (

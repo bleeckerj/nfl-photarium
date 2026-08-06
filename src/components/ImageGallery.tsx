@@ -902,6 +902,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       }}
       utilityRailProps={{
         expanded: utilityExpanded, filtersCollapsed, showCli, videoResultsNotice, videoMeta, selectedCount,
+        hiddenFolders, hiddenTags, hiddenNamespaces,
+        onClearHiddenFolders: clearHiddenFolders, onClearHiddenTags: clearHiddenTags,
+        onClearHiddenNamespaces: clearHiddenNamespaces,
         onExpandChange: setUtilityExpanded, onToggleFilters: () => setFiltersCollapsed((prev) => !prev),
         onToggleCli: () => setShowCli((prev) => !prev), onLoadMoreVideos: loadMoreVideos,
         onSelectPage: () => selectAllOnPage(pageImages), onOpenBulkEdit: openBulkEditModal,
