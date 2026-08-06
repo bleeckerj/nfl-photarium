@@ -3,10 +3,12 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { access } from 'node:fs/promises';
+import { Worker } from 'node:worker_threads';
+import { setTimeout as delay } from 'node:timers/promises';
 import { openCatalogDatabase } from './db.js';
 import { ensurePreview, readPreview } from './preview.js';
 import { getAsset, listCollections, listKeywords, saveAnnotation, searchAssets } from './search.js';
-import { catalogStatus, listCatalogSummaries, syncArchive } from './sync.js';
+import { catalogStatus, listCatalogSummaries, type SyncResult } from './sync.js';
 import type { SearchFilters } from './types.js';
 
 const databasePath = process.env.ARCHIVE_DATABASE_PATH ?? '/data/catalog.sqlite';
@@ -21,7 +23,7 @@ interface SyncJobState {
   jobId: string | null;
   startedAt: string | null;
   finishedAt: string | null;
-  result: Awaited<ReturnType<typeof syncArchive>> | null;
+  result: SyncResult | null;
   error: string | null;
 }
 
@@ -34,13 +36,42 @@ let syncJob: SyncJobState = {
   error: null,
 };
 
+interface SyncWorkerMessage {
+  status: 'complete' | 'failed';
+  result?: SyncResult;
+  error?: string;
+}
+
+function runSyncWorker(options: {
+  databasePath: string;
+  sourceRoot: string;
+    hashFiles: boolean;
+    allowLockedCatalog: boolean;
+    checkAvailability: boolean;
+    stageCatalogs: boolean;
+    catalogPaths?: string[];
+}): Promise<SyncResult> {
+  return new Promise((resolveResult, reject) => {
+    const worker = new Worker(new URL('./sync-worker.js', import.meta.url), { workerData: options });
+    worker.once('message', (message: SyncWorkerMessage) => {
+      if (message.status === 'complete' && message.result) {
+        resolveResult(message.result);
+      } else {
+        reject(new Error(message.error ?? 'Archive sync worker failed.'));
+      }
+    });
+    worker.once('error', reject);
+    worker.once('exit', (code) => {
+      if (code !== 0) reject(new Error(`Archive sync worker exited with code ${code}.`));
+    });
+  });
+}
+
 async function sourceConnected(): Promise<boolean> {
-  try {
-    await access(sourceRoot);
-    return true;
-  } catch {
-    return false;
-  }
+  return Promise.race([
+    access(sourceRoot).then(() => true).catch(() => false),
+    delay(2000, false),
+  ]);
 }
 
 async function requestBody(request: IncomingMessage): Promise<unknown> {
@@ -130,12 +161,13 @@ export function createArchiveServer() {
         };
         const options = {
           sourceRoot,
-          database,
           hashFiles: input.hashFiles === true,
           allowLockedCatalog: input.allowLockedCatalog === true,
+          checkAvailability: input.checkAvailability === true,
+          stageCatalogs: input.stageCatalogs !== false,
           catalogPaths: Array.isArray(input.catalogPaths) ? input.catalogPaths.filter((item): item is string => typeof item === 'string') : undefined
         };
-        void syncArchive(options).then((result) => {
+        void runSyncWorker({ ...options, databasePath }).then((result) => {
           syncJob = { ...syncJob, status: 'complete', finishedAt: new Date().toISOString(), result };
         }).catch((error: unknown) => {
           syncJob = { ...syncJob, status: 'failed', finishedAt: new Date().toISOString(), error: error instanceof Error ? error.message : String(error) };

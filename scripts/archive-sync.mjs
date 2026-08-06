@@ -4,10 +4,19 @@ const request = async (endpoint, options = {}) => fetch(`${baseUrl}${endpoint}`,
   signal: AbortSignal.timeout(10_000),
 });
 
+const knownCatalogsResponse = await request('/catalogs');
+const knownCatalogs = knownCatalogsResponse.ok ? await knownCatalogsResponse.json() : { catalogs: [] };
+const catalogPaths = Array.isArray(knownCatalogs.catalogs)
+  ? knownCatalogs.catalogs.map((catalog) => catalog.path).filter((path) => typeof path === 'string')
+  : [];
 const response = await request('/sync', {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({ hashFiles: process.argv.includes('--hash'), allowLockedCatalog: process.argv.includes('--allow-locked') }),
+  body: JSON.stringify({
+    hashFiles: process.argv.includes('--hash'),
+    allowLockedCatalog: process.argv.includes('--allow-locked'),
+    ...(catalogPaths.length ? { catalogPaths } : {}),
+  }),
 });
 
 if (!response.ok) {

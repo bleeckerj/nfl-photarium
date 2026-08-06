@@ -92,6 +92,8 @@ Use that override only after confirming Lightroom is closed and the lock file is
 
 If the NAS is unavailable, the HTTP sync endpoint returns `409` and leaves the existing database untouched. Missing individual files remain in the database with `sourceAvailable: false`; sync does not delete them.
 
+The Docker service stages each selected `.lrcat` file into its local data volume before reading it, then removes the temporary copy. This avoids slow random SQLite reads across the NAS; the catalog path and stable asset IDs continue to use the original NAS path.
+
 ## What is imported
 
 The importer reads the Lightroom tables used by the current catalog family, including:
@@ -151,9 +153,19 @@ Connect the NAS, then run:
 npm run archive:sync
 ```
 
-The sync recursively discovers `.lrcat` files under the mounted source root. Directories ending in `.lrdata` and hidden directories are skipped during discovery.
+The repository wrapper first reuses catalog paths already registered in the archive database. When the database is empty, the service recursively discovers `.lrcat` files under the mounted source root; directories ending in `.lrdata` and hidden directories are skipped during discovery.
 
-The command starts a background sync job, polls `/status`, and reports each catalog and its indexed/available asset counts. The operation is transactional: a failed catalog write rolls back the current sync transaction. A second sync request is rejected while one is already running.
+The command starts a background worker job, polls `/status`, and reports each catalog and its indexed/available asset counts. Each catalog write is transactional, so a failed catalog write rolls back that catalog while earlier completed catalogs remain available. A second sync request is rejected while one is already running.
+
+The normal Docker import indexes Lightroom metadata and paths without probing every source file on the NAS. This keeps the inventory usable when the source is remote or intermittently connected; previews check the source lazily when requested. To perform an exhaustive availability pass through the HTTP API, set `checkAvailability` to `true`:
+
+```bash
+curl -fsS -X POST http://localhost:8790/sync \
+  -H 'content-type: application/json' \
+  -d '{"checkAvailability":true}' | jq
+```
+
+When a registered catalog's size and mtime are unchanged, the normal metadata-only sync reuses its existing rows and returns immediately. Use `checkAvailability` or `hashFiles` when you intentionally want to reprocess unchanged files.
 
 ### Optional content hashes
 
@@ -288,7 +300,7 @@ The service is an internal trusted-network API. It has no user authentication la
 | `GET` | `/health` | Liveness check |
 | `GET` | `/status` | Counts, source connection state, paths, and last sync |
 | `GET` | `/catalogs` | Imported catalog summaries |
-| `POST` | `/sync` | Start an explicit background import; accepts `hashFiles`, `allowLockedCatalog`, and optional `catalogPaths`; returns `202` with a job ID |
+| `POST` | `/sync` | Start an explicit background import; accepts `hashFiles`, `checkAvailability`, `stageCatalogs`, `allowLockedCatalog`, and optional `catalogPaths`; returns `202` with a job ID |
 | `POST` | `/search` | FTS search and filters |
 | `GET` | `/keywords?query=...` | Keyword counts |
 | `GET` | `/collections?query=...` | Collection counts |

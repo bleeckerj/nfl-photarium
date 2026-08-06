@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { copyFile, mkdir, stat, unlink } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
-import { basename } from 'node:path';
-import { catalogKey, discoverCatalogs, parseLightroomCatalog, type DiscoveredCatalog } from './lightroom.js';
+import { basename, join } from 'node:path';
+import { catalogKey, discoverCatalogs, parseLightroomCatalog, type DiscoveredCatalog, type ParsedCatalog } from './lightroom.js';
 import { rebuildAssetSearchIndex } from './db.js';
 import type { CatalogSummary } from './types.js';
 
@@ -13,6 +13,8 @@ export interface SyncOptions {
   hashFiles?: boolean;
   catalogPaths?: string[];
   allowLockedCatalog?: boolean;
+  checkAvailability?: boolean;
+  stageCatalogs?: boolean;
 }
 
 export interface SyncResult {
@@ -45,8 +47,7 @@ function refreshCatalogRow(database: DatabaseSync, path: string, size: number, m
   return id;
 }
 
-async function writeCatalog(database: DatabaseSync, catalog: DiscoveredCatalog, sourceRoot: string, hashFiles: boolean): Promise<{ assets: number; availableAssets: number; warning: string | null }> {
-  const parsed = await parseLightroomCatalog(catalog, sourceRoot);
+async function writeCatalog(database: DatabaseSync, catalog: DiscoveredCatalog, parsed: ParsedCatalog, hashFiles: boolean): Promise<{ assets: number; availableAssets: number; warning: string | null }> {
   const id = refreshCatalogRow(database, catalog.path, catalog.size, catalog.mtime, parsed.warning);
   const oldAssets = database.prepare('SELECT id FROM assets WHERE catalog_id = ?').all(id) as Array<{ id: string }>;
   const oldAnnotations = database.prepare(`SELECT an.asset_id, an.note, an.tags_json, an.shortlist, an.updated_at FROM annotations an JOIN assets a ON a.id = an.asset_id WHERE a.catalog_id = ?`).all(id) as Array<{ asset_id: string; note: string | null; tags_json: string; shortlist: number; updated_at: string }>;
@@ -108,8 +109,24 @@ async function writeCatalog(database: DatabaseSync, catalog: DiscoveredCatalog, 
   for (const preview of oldPreviews) {
     if (parsedAssetIds.has(preview.asset_id)) restorePreview.run(preview.asset_id, preview.kind, preview.path, preview.mime_type, preview.width, preview.height, preview.source_mtime, preview.created_at);
   }
-  rebuildAssetSearchIndex(database);
+  rebuildAssetSearchIndex(database, parsed.records.map((asset) => asset.id));
   return { assets: parsed.records.length, availableAssets, warning: parsed.warning };
+}
+
+async function parseCatalog(catalog: DiscoveredCatalog, options: SyncOptions): Promise<ParsedCatalog> {
+  if (options.stageCatalogs !== true) {
+    return parseLightroomCatalog(catalog, options.sourceRoot, options.checkAvailability !== false);
+  }
+  const stagingRoot = process.env.ARCHIVE_STAGING_ROOT ?? '/data/staging';
+  await mkdir(stagingRoot, { recursive: true });
+  const stagedPath = join(stagingRoot, `${catalogKey(catalog.path)}-${basename(catalog.path)}`);
+  console.log(`[archive-sync] staging ${catalog.path}`);
+  await copyFile(catalog.path, stagedPath);
+  try {
+    return await parseLightroomCatalog({ ...catalog, readPath: stagedPath }, options.sourceRoot, options.checkAvailability !== false);
+  } finally {
+    await unlink(stagedPath).catch(() => undefined);
+  }
 }
 
 export async function syncArchive(options: SyncOptions): Promise<SyncResult> {
@@ -119,33 +136,49 @@ export async function syncArchive(options: SyncOptions): Promise<SyncResult> {
       return { path, size: details.size, mtime: details.mtimeMs };
     }))
     : await discoverCatalogs(options.sourceRoot);
+  console.log(`[archive-sync] selected ${selected.length} catalog(s)`);
   const warnings: string[] = [];
   let assets = 0;
   let availableAssets = 0;
-  options.database.exec('BEGIN IMMEDIATE');
-  try {
-    for (const catalog of selected) {
-      console.log(`[archive-sync] importing ${catalog.path}`);
-      if (!options.allowLockedCatalog) {
-        try {
-          await stat(`${catalog.path}.lock`);
-          warnings.push(`${catalog.path}: active Lightroom lock file detected; catalog left unchanged.`);
-          console.log(`[archive-sync] skipped locked catalog ${catalog.path}`);
-          continue;
-        } catch {
-          // No active lock file.
-        }
+  for (const catalog of selected) {
+    console.log(`[archive-sync] importing ${catalog.path}`);
+    if (!options.allowLockedCatalog) {
+      try {
+        await stat(`${catalog.path}.lock`);
+        warnings.push(`${catalog.path}: active Lightroom lock file detected; catalog left unchanged.`);
+        console.log(`[archive-sync] skipped locked catalog ${catalog.path}`);
+        continue;
+      } catch {
+        // No active lock file.
       }
-      const result = await writeCatalog(options.database, catalog, options.sourceRoot, options.hashFiles === true);
+    }
+    if (options.checkAvailability === false && options.hashFiles !== true) {
+      const existing = options.database.prepare(`
+        SELECT COUNT(*) AS assets, COALESCE(SUM(source_available), 0) AS availableAssets
+        FROM assets a JOIN catalogs c ON c.id = a.catalog_id
+        WHERE c.path = ? AND c.size = ? AND c.mtime = ?
+      `).get(catalog.path, catalog.size, catalog.mtime) as { assets: number; availableAssets: number } | undefined;
+      if (existing && Number(existing.assets) > 0) {
+        assets += Number(existing.assets);
+        availableAssets += Number(existing.availableAssets);
+        console.log(`[archive-sync] skipped unchanged catalog ${catalog.path} (${existing.assets} assets already indexed)`);
+        continue;
+      }
+    }
+    const parsed = await parseCatalog(catalog, options);
+    console.log(`[archive-sync] parsed ${parsed.records.length} assets (${parsed.records.filter((record) => record.sourceAvailable).length} source files available) from ${catalog.path}`);
+    options.database.exec('BEGIN IMMEDIATE');
+    try {
+      const result = await writeCatalog(options.database, catalog, parsed, options.hashFiles === true);
+      options.database.exec('COMMIT');
       assets += result.assets;
       availableAssets += result.availableAssets;
       if (result.warning) warnings.push(`${catalog.path}: ${result.warning}`);
       console.log(`[archive-sync] indexed ${result.assets} assets (${result.availableAssets} source files available) from ${catalog.path}`);
+    } catch (error) {
+      options.database.exec('ROLLBACK');
+      throw error;
     }
-    options.database.exec('COMMIT');
-  } catch (error) {
-    options.database.exec('ROLLBACK');
-    throw error;
   }
   return { sourceRoot: options.sourceRoot, catalogs: selected.length, assets, availableAssets, warnings };
 }

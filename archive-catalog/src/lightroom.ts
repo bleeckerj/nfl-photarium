@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { basename, extname, join, normalize, relative, resolve } from 'node:path';
 import { access, readdir, stat } from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { CatalogRecord } from './types.js';
 
 type Row = Record<string, unknown>;
@@ -10,6 +11,7 @@ export interface DiscoveredCatalog {
   path: string;
   size: number;
   mtime: number;
+  readPath?: string;
 }
 
 export interface ParsedCatalog {
@@ -90,15 +92,31 @@ function mapCatalogRootToSource(rootPath: string | null, sourceRoot: string | un
 async function checkFile(sourcePath: string | null): Promise<{ available: boolean; mtime: number | null; size: number | null }> {
   if (!sourcePath) return { available: false, mtime: null, size: null };
   try {
-    const details = await stat(sourcePath);
+    // NAS paths can leave a filesystem stat pending when a share or stale path is unavailable.
+    const details = await Promise.race([stat(sourcePath), delay(3000, null)]);
+    if (!details) return { available: false, mtime: null, size: null };
     return { available: details.isFile(), mtime: details.mtimeMs, size: details.size };
   } catch {
     return { available: false, mtime: null, size: null };
   }
 }
 
+async function mapWithConcurrency<T, R>(items: T[], concurrency: number, mapper: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  async function worker(): Promise<void> {
+    for (;;) {
+      const index = nextIndex++;
+      if (index >= items.length) return;
+      results[index] = await mapper(items[index] as T);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => worker()));
+  return results;
+}
+
 function parseKeywords(database: DatabaseSync): Map<number, string> {
-  const keywordRows = safeRows(database, 'SELECT * FROM AgLibraryKeyword');
+  const keywordRows = safeRows(database, 'SELECT id_local, name FROM AgLibraryKeyword');
   const names = new Map<number, string>();
   for (const row of keywordRows) {
     const id = numberValue(row, 'id_local', 'id');
@@ -109,7 +127,7 @@ function parseKeywords(database: DatabaseSync): Map<number, string> {
 }
 
 function parseAssetKeywords(database: DatabaseSync, keywordNames: Map<number, string>): Map<number, string[]> {
-  const rows = safeRows(database, 'SELECT * FROM AgLibraryKeywordImage');
+  const rows = safeRows(database, 'SELECT image, tag FROM AgLibraryKeywordImage');
   const result = new Map<number, string[]>();
   const imageColumn = firstColumn(new Set(rows.flatMap((row) => Object.keys(row))), ['image', 'image_id', 'imageId']);
   const keywordColumn = firstColumn(new Set(rows.flatMap((row) => Object.keys(row))), ['tag', 'keyword', 'keyword_id', 'keywordId']);
@@ -129,12 +147,12 @@ function parseAssetKeywords(database: DatabaseSync, keywordNames: Map<number, st
 
 function parseCollections(database: DatabaseSync): Map<number, string[]> {
   const names = new Map<number, string>();
-  for (const row of safeRows(database, 'SELECT * FROM AgLibraryCollection')) {
+  for (const row of safeRows(database, 'SELECT id_local, name FROM AgLibraryCollection')) {
     const id = numberValue(row, 'id_local', 'id');
     const name = stringValue(row, 'name');
     if (id !== null && name) names.set(id, name);
   }
-  const links = safeRows(database, 'SELECT * FROM AgLibraryCollectionImage');
+  const links = safeRows(database, 'SELECT image, collection FROM AgLibraryCollectionImage');
   const result = new Map<number, string[]>();
   const columns = new Set(links.flatMap((row) => Object.keys(row)));
   const imageColumn = firstColumn(columns, ['image', 'image_id', 'imageId']);
@@ -162,25 +180,34 @@ export async function discoverCatalogs(sourceRoot: string): Promise<DiscoveredCa
     } catch {
       return;
     }
+    const childDirectories: string[] = [];
+    const catalogPaths: string[] = [];
     for (const entry of entries) {
       if (entry.name.startsWith('.') || entry.name.endsWith('.lrdata')) continue;
       const entryPath = join(directory, entry.name);
       if (entry.isDirectory()) {
-        await walk(entryPath);
+        childDirectories.push(entryPath);
       } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.lrcat')) {
-        const details = await stat(entryPath);
-        discovered.push({ path: entryPath, size: details.size, mtime: details.mtimeMs });
+        catalogPaths.push(entryPath);
       }
     }
+    await Promise.all(catalogPaths.map(async (path) => {
+      const details = await stat(path);
+      discovered.push({ path, size: details.size, mtime: details.mtimeMs });
+    }));
+    await mapWithConcurrency(childDirectories, 8, async (childDirectory) => {
+      await walk(childDirectory);
+      return null;
+    });
   }
   await access(sourceRoot);
   await walk(sourceRoot);
   return discovered.sort((left, right) => left.path.localeCompare(right.path));
 }
 
-export async function parseLightroomCatalog(catalog: DiscoveredCatalog, sourceRoot?: string): Promise<ParsedCatalog> {
+export async function parseLightroomCatalog(catalog: DiscoveredCatalog, sourceRoot?: string, checkAvailability = true): Promise<ParsedCatalog> {
   // Immutable URI mode keeps SQLite from creating journals or touching Lightroom's catalog while it is open.
-  const database = new DatabaseSync(`file:${catalog.path}?mode=ro&immutable=1`);
+  const database = new DatabaseSync(`file:${catalog.readPath ?? catalog.path}?mode=ro&immutable=1`);
   const warnings: string[] = [];
   const keywordNames = parseKeywords(database);
   const assetKeywords = parseAssetKeywords(database, keywordNames);
@@ -211,24 +238,25 @@ export async function parseLightroomCatalog(catalog: DiscoveredCatalog, sourceRo
     LEFT JOIN AgLibraryRootFolder root ON root.id_local = folder.rootFolder
   `);
   if (rows.length === 0) warnings.push('No Adobe_images rows were readable from this catalog.');
-  const iptcRows = safeRows(database, 'SELECT * FROM AgLibraryIPTC');
+  const iptcRows = safeRows(database, 'SELECT image, caption, copyright FROM AgLibraryIPTC');
   const iptcByImage = new Map<number, Row>();
   for (const row of iptcRows) {
     const imageId = numberValue(row, 'image', 'image_id', 'imageId');
     if (imageId !== null) iptcByImage.set(imageId, row);
   }
-  const records: CatalogRecord[] = [];
-  for (const row of rows) {
+  const mappedRecords = await mapWithConcurrency(rows, 32, async (row): Promise<CatalogRecord | null> => {
     const imageId = numberValue(row, 'image_id');
-    if (imageId === null) continue;
+    if (imageId === null) return null;
     const filename = stringValue(row, 'filename', 'base_name') ?? `lightroom-${imageId}`;
     const folderPath = stringValue(row, 'folder_path');
     const rootPath = stringValue(row, 'root_path');
     const mappedRootPath = mapCatalogRootToSource(rootPath, sourceRoot);
     const absolutePath = buildSourcePath(mappedRootPath, folderPath, filename);
-    const fileStatus = await checkFile(absolutePath);
+    const fileStatus = checkAvailability
+      ? await checkFile(absolutePath)
+      : { available: false, mtime: null, size: null };
     const iptc = iptcByImage.get(imageId);
-    records.push({
+    return {
       id: stableId(catalog.path, imageId),
       imageId,
       fileId: numberValue(row, 'file_id'),
@@ -259,8 +287,9 @@ export async function parseLightroomCatalog(catalog: DiscoveredCatalog, sourceRo
       annotationNote: null,
       annotationTags: [],
       shortlist: false
-    });
-  }
+    };
+  });
+  const records = mappedRecords.filter((record): record is CatalogRecord => record !== null);
   database.close();
   return { ...catalog, records, warning: warnings.length ? warnings.join(' ') : null };
 }

@@ -96,7 +96,7 @@ const baseSelect = `
     (SELECT json_group_array(c.name) FROM asset_collections ac JOIN collections c ON c.id = ac.collection_id WHERE ac.asset_id = a.id) AS collection_json,
     f.rank AS fts_rank
   FROM assets a
-  LEFT JOIN assets_fts f ON f.asset_id = a.id
+  JOIN assets_fts f ON f.asset_id = a.id
   LEFT JOIN annotations an ON an.asset_id = a.id
 `;
 
@@ -164,7 +164,7 @@ function fetchRows(database: DatabaseSync, filters: SearchFilters, textQuery: st
     where.concat();
     params.unshift(textQuery);
   }
-  const textClause = textQuery ? 'a.id IN (SELECT asset_id FROM assets_fts WHERE assets_fts MATCH ?) AND ' : '';
+  const textClause = textQuery ? 'assets_fts MATCH ? AND ' : '';
   const limit = Math.min(Math.max(filters.limit ?? 50, 1), 200);
   const offset = Math.max(filters.offset ?? 0, 0);
   const sql = `${baseSelect} WHERE ${textClause}${where} ORDER BY COALESCE(f.rank, 0), a.capture_time DESC LIMIT ${limit} OFFSET ${offset}`;
