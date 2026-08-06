@@ -34,10 +34,9 @@ export function createRuntimeToolContract(name) {
         handler: async (args) => {
             const result = await handleRuntimeToolCall(name, args);
             return {
-                content: result.content.map((entry) => ({
-                    type: 'text',
-                    text: entry.text,
-                })),
+                content: result.content.map((entry) => entry.type === 'image'
+                    ? { type: 'image', data: entry.data, mimeType: entry.mimeType }
+                    : { type: 'text', text: entry.text }),
                 ...(result.isError ? { isError: true } : {}),
             };
         },
