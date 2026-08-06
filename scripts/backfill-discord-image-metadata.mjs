@@ -2,36 +2,13 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
 import process from 'node:process';
-import { createHash } from 'node:crypto';
 import { MAX_VERBOSITY, setupLogger, trace } from './lib/cliLogger.mjs';
-
-const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tif', '.tiff', '.avif']);
-let WAIT_FOR_HTTP_SLOT = async () => {};
-
-function createMinIntervalLimiter(minIntervalMs) {
-  const interval = Math.max(0, Number(minIntervalMs) || 0);
-  if (interval <= 0) {
-    return async () => {};
-  }
-
-  let chain = Promise.resolve();
-  let lastAt = 0;
-
-  return async function waitTurn() {
-    const next = chain.then(async () => {
-      const now = Date.now();
-      const waitMs = Math.max(0, lastAt + interval - now);
-      if (waitMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, waitMs));
-      }
-      lastAt = Date.now();
-    });
-    chain = next.catch(() => {});
-    await next;
-  };
-}
+import {
+  buildCheckpointIndexes, buildDefaultReportPaths, choosePreferredRecord, createMinIntervalLimiter,
+  expandHome, fetchJsonWithRetry, hashFileContent, loadJson, normalizeDiscordAttachmentUrl,
+  normalizeUrlForExtras, runWithConcurrency, setWaitForHttpSlot, walkImageFiles,
+} from './backfill-discord-image-metadata/helpers.mjs';
 
 function printUsage() {
   console.log(`Backfill Discord prompt + folder metadata onto existing images (UUID-safe).
@@ -72,68 +49,6 @@ Examples:
   node scripts/backfill-discord-image-metadata.mjs --apply
   node scripts/backfill-discord-image-metadata.mjs --apply --concurrency 2 --retries 4
 `);
-}
-
-function expandHome(inputPath) {
-  if (!inputPath) return inputPath;
-  if (inputPath === '~') return os.homedir();
-  if (inputPath.startsWith('~/')) return path.join(os.homedir(), inputPath.slice(2));
-  return inputPath;
-}
-
-function normalizeRelPath(input) {
-  return String(input || '').split(path.sep).join('/');
-}
-
-function normalizeDiscordAttachmentUrl(value) {
-  const raw = typeof value === 'string' ? value.trim() : '';
-  if (!raw) return '';
-  try {
-    const parsed = new URL(raw);
-    // Discord CDN query params are long-lived signed tokens and are not useful for lookup.
-    // Keep only canonical origin+path to reduce metadata byte pressure.
-    return `${parsed.origin}${parsed.pathname}`;
-  } catch {
-    return raw;
-  }
-}
-
-function normalizeUrlForExtras(value) {
-  const raw = typeof value === 'string' ? value.trim() : '';
-  if (!raw) return '';
-  try {
-    const parsed = new URL(raw);
-    const protocol = parsed.protocol.toLowerCase();
-    const hostname = parsed.hostname.toLowerCase();
-    let port = parsed.port;
-    if ((protocol === 'http:' && port === '80') || (protocol === 'https:' && port === '443')) {
-      port = '';
-    }
-    return `${protocol}//${hostname}${port ? `:${port}` : ''}${parsed.pathname}${parsed.search}`;
-  } catch {
-    return raw;
-  }
-}
-
-function isValidAssetId(value) {
-  const text = typeof value === 'string' ? value.trim() : '';
-  return Boolean(text) && !['n/a', 'duplicate', 'assumed-uploaded'].includes(text);
-}
-
-function parseChannelFolderName(folderName) {
-  const match = /^(.+)_([0-9]{6,})$/.exec(folderName);
-  if (!match) {
-    return {
-      channelName: folderName,
-      channelId: '',
-      channelKey: folderName,
-    };
-  }
-  return {
-    channelName: match[1],
-    channelId: match[2],
-    channelKey: `${match[1]}_${match[2]}`,
-  };
 }
 
 function parseArgs(argv) {
@@ -258,186 +173,10 @@ function parseArgs(argv) {
   return { opts, errors };
 }
 
-function buildDefaultReportPaths() {
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const baseDir = path.resolve('data', 'reports');
-  return {
-    jsonPath: path.join(baseDir, `discord-metadata-backfill-${stamp}.json`),
-    ndjsonPath: path.join(baseDir, `discord-metadata-backfill-${stamp}.ndjson`),
-  };
-}
-
-async function fetchJsonWithRetry(url, init, { retries, timeoutMs, label = 'request' }) {
-  let lastError = null;
-  for (let attempt = 1; attempt <= retries; attempt += 1) {
-    await WAIT_FOR_HTTP_SLOT();
-    trace(`🌐 ${label} attempt ${attempt}/${retries} -> ${url}`);
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(new Error('Request timed out')), timeoutMs);
-    try {
-      const response = await fetch(url, {
-        ...init,
-        signal: controller.signal,
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const message = payload?.error || payload?.message || `HTTP ${response.status}`;
-        throw new Error(message);
-      }
-      clearTimeout(timeout);
-      if (attempt > 1) {
-        console.log(`✅ ${label} succeeded on retry ${attempt}/${retries}`);
-      }
-      return payload;
-    } catch (error) {
-      clearTimeout(timeout);
-      lastError = error instanceof Error ? error : new Error(String(error));
-      console.warn(`⏳ ${label} attempt ${attempt}/${retries} failed: ${lastError.message}`);
-      if (attempt >= retries) break;
-      const message = lastError.message.toLowerCase();
-      const throttled =
-        message.includes('throttl') ||
-        message.includes('rate limit') ||
-        message.includes('429') ||
-        message.includes('please wait');
-      const baseDelay = throttled ? 2500 : 500;
-      const exp = Math.min(30_000, baseDelay * Math.pow(2, attempt - 1));
-      const jitter = Math.floor(Math.random() * 350);
-      const sleepMs = exp + jitter;
-      console.warn(`🕒 ${label} backing off for ${sleepMs}ms before retry`);
-      await new Promise((resolve) => setTimeout(resolve, sleepMs));
-    }
-  }
-  throw lastError || new Error('Request failed');
-}
-
-async function hashFileContent(filePath) {
-  const bytes = await fs.readFile(filePath);
-  return createHash('sha256').update(bytes).digest('hex');
-}
-
-async function walkImageFiles(rootDir, limit = 0) {
-  const out = [];
-  const channelDirents = await fs.readdir(rootDir, { withFileTypes: true });
-  for (const channelDirent of channelDirents) {
-    if (!channelDirent.isDirectory()) continue;
-    const channelRoot = path.join(rootDir, channelDirent.name);
-    const imagesRoot = path.join(channelRoot, 'images');
-    const jsonRoot = path.join(channelRoot, 'json');
-    const imagesStat = await fs.stat(imagesRoot).catch(() => null);
-    if (!imagesStat?.isDirectory()) continue;
-
-    const channelInfo = parseChannelFolderName(channelDirent.name);
-    const queue = [imagesRoot];
-    while (queue.length > 0) {
-      const dir = queue.shift();
-      if (!dir) continue;
-      const entries = await fs.readdir(dir, { withFileTypes: true });
-      entries.sort((a, b) => a.name.localeCompare(b.name));
-      for (const entry of entries) {
-        const abs = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          if (!entry.name.startsWith('.')) queue.push(abs);
-          continue;
-        }
-        if (!entry.isFile()) continue;
-        const ext = path.extname(entry.name).toLowerCase();
-        if (!IMAGE_EXTENSIONS.has(ext)) continue;
-
-        const relPath = normalizeRelPath(path.relative(imagesRoot, abs));
-        const sidecarRel = normalizeRelPath(path.join(path.dirname(relPath), `${path.parse(relPath).name}.json`));
-        const sidecarPath = path.join(jsonRoot, sidecarRel);
-
-        out.push({
-          absPath: abs,
-          relPath,
-          channelFolderName: channelDirent.name,
-          channelName: channelInfo.channelName,
-          channelId: channelInfo.channelId,
-          targetFolder: `discord/${channelInfo.channelKey}`,
-          sidecarPath,
-        });
-
-        if (limit > 0 && out.length >= limit) return out;
-      }
-    }
-  }
-  return out;
-}
-
-async function loadJson(filePath) {
-  const raw = await fs.readFile(filePath, 'utf8');
-  return JSON.parse(raw);
-}
-
-function buildCheckpointIndexes(checkpoint) {
-  const entries = checkpoint?.entries && typeof checkpoint.entries === 'object' ? checkpoint.entries : {};
-  const hashEntries = checkpoint?.hashEntries && typeof checkpoint.hashEntries === 'object' ? checkpoint.hashEntries : {};
-
-  const relPathToAssetIds = new Map();
-  for (const [entryKey, entryValue] of Object.entries(entries)) {
-    const entry = entryValue && typeof entryValue === 'object' ? entryValue : null;
-    if (!entry) continue;
-    if (entry.status !== 'uploaded') continue;
-    if (entry.kind !== 'image') continue;
-    if (!isValidAssetId(entry.assetId)) continue;
-
-    const key = String(entryKey);
-    const idx = key.indexOf('\n');
-    const relPath = normalizeRelPath(idx >= 0 ? key.slice(idx + 1) : key);
-    if (!relPath) continue;
-
-    const set = relPathToAssetIds.get(relPath) || new Set();
-    set.add(String(entry.assetId));
-    relPathToAssetIds.set(relPath, set);
-  }
-
-  const hashToAssetIds = new Map();
-  for (const entryValue of Object.values(hashEntries)) {
-    const entry = entryValue && typeof entryValue === 'object' ? entryValue : null;
-    if (!entry) continue;
-    if (entry.status !== 'uploaded') continue;
-    if (entry.kind !== 'image') continue;
-    if (!isValidAssetId(entry.assetId)) continue;
-    const contentHash = typeof entry.contentHash === 'string' ? entry.contentHash.trim().toLowerCase() : '';
-    if (!contentHash) continue;
-
-    const set = hashToAssetIds.get(contentHash) || new Set();
-    set.add(String(entry.assetId));
-    hashToAssetIds.set(contentHash, set);
-  }
-
-  return { relPathToAssetIds, hashToAssetIds };
-}
-
-function choosePreferredRecord(current, candidate) {
-  if (!current) return candidate;
-  const methodRank = (method) => {
-    if (method === 'checkpoint') return 2;
-    if (method === 'hash') return 1;
-    return 0;
-  };
-  if (methodRank(candidate.matchMethod) > methodRank(current.matchMethod)) return candidate;
-  return current;
-}
-
-async function runWithConcurrency(items, concurrency, worker) {
-  let nextIndex = 0;
-  async function runner() {
-    while (true) {
-      const index = nextIndex;
-      nextIndex += 1;
-      if (index >= items.length) return;
-      await worker(items[index], index);
-    }
-  }
-  await Promise.all(Array.from({ length: Math.max(1, concurrency) }, () => runner()));
-}
-
 async function main() {
   const { opts, errors } = parseArgs(process.argv.slice(2));
   setupLogger({ verbosity: opts.verbosity, color: opts.color });
-  WAIT_FOR_HTTP_SLOT = createMinIntervalLimiter(opts.requestSpacingMs);
+  setWaitForHttpSlot(createMinIntervalLimiter(opts.requestSpacingMs));
   console.log('🎛️  Logger initialized', { verbosity: opts.verbosity, color: opts.color });
   if (errors.length > 0) {
     errors.forEach((error) => console.error(`[args] ${error}`));

@@ -14,6 +14,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import Image from 'next/image';
 import { getCloudflareImageUrl } from '@/utils/imageUtils';
+import { getSemanticProximityTerm } from '@/components/semanticNeighborLabels';
 
 interface SimilarResult {
   imageId: string;
@@ -22,7 +23,7 @@ interface SimilarResult {
   folder?: string;
 }
 
-interface SemanticNeighborsProps {
+export interface SemanticNeighborsProps {
   imageId: string;
   type?: 'clip' | 'color';
   limit?: number;
@@ -283,18 +284,6 @@ export function SemanticNeighbors({
     );
   }
 
-  // Map distance to semantic vocabulary
-  const getProximityTerm = (distance: number): string => {
-    if (distance < 0.20) return 'twin';
-    if (distance < 0.24) return 'echo';
-    if (distance < 0.28) return 'kin';
-    if (distance < 0.32) return 'avuncular';
-    if (distance < 0.36) return 'acquaintance';
-    if (distance < 0.42) return 'familiar stranger';
-    if (distance < 0.50) return 'stranger';
-    return 'antipode';
-  };
-
   const renderImageGrid = (
     results: SimilarResult[],
     label: string,
@@ -369,7 +358,7 @@ export function SemanticNeighbors({
       <div className="grid grid-cols-4 gap-2">
         {visibleResults.map((result) => {
           const globalIndex = results.indexOf(result);
-          const proximityTerm = getProximityTerm(result.score);
+          const proximityTerm = getSemanticProximityTerm(result.score);
           return (
             <div
               key={result.imageId}
@@ -504,28 +493,7 @@ export function SemanticNeighbors({
 /**
  * Combined view showing both CLIP and Color neighbors
  */
-export function SemanticNeighborsDual({
-  imageId,
-  limit = 4,
-  className = '',
-  onImageClick,
-}: Omit<SemanticNeighborsProps, 'type'>) {
-  return (
-    <div className={`space-y-4 ${className}`}>
-      <SemanticNeighbors
-        imageId={imageId}
-        type="clip"
-        limit={limit}
-        onImageClick={onImageClick}
-      />
-      <SemanticNeighbors
-        imageId={imageId}
-        type="color"
-        limit={limit}
-        onImageClick={onImageClick}
-      />
-    </div>
-  );
-}
+
+export { SemanticNeighborsDual } from '@/components/SemanticNeighborsDual';
 
 export default SemanticNeighbors;

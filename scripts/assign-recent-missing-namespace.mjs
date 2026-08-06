@@ -2,7 +2,6 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-
 import {
   applyAssignmentPlan,
   ambiguousFamiliesToCsv,
@@ -19,12 +18,10 @@ import {
   parseMetadata,
   prepareNamespaceMetadataUpdate,
   selectAssignmentCandidates,
-  upsertNamespaceRegistryFile,
 } from './lib/missingNamespaceAssignment.mjs';
-
+import { formatMissingNamespaceReportText, registerTargetNamespace, registerTargetNamespaces, writeOrPrint } from './assign-recent-missing-namespace/reportHelpers.mjs';
 const DEFAULT_PAGE_SIZE = 100;
 const DEFAULT_NAMESPACE = 'cf-artifacts';
-
 const printHelp = () => {
   console.log(`
 Assign Cloudflare Images assets with missing namespace metadata.
@@ -430,72 +427,6 @@ const loadVideoEvidenceRecords = async (args) => {
   }
 
   return [];
-};
-
-const registerTargetNamespace = async (namespace) => {
-  const result = await upsertNamespaceRegistryFile({
-    namespace,
-    description: namespace === 'cf-orphan' ? 'Utility namespace for assets repaired from missing namespace metadata.' : '',
-  });
-  console.log(
-    `[assign-namespace] ${result.didChange ? 'Registered' : 'Registry already includes'} namespace=${namespace} registry=${result.path}`
-  );
-};
-
-const registerTargetNamespaces = async (namespaces) => {
-  for (const namespace of Array.from(new Set(namespaces)).sort()) {
-    if (namespace) {
-      await registerTargetNamespace(namespace);
-    }
-  }
-};
-
-const formatMissingNamespaceReportText = (report) => {
-  const lines = [
-    '[assign-namespace] Missing namespace audit (read-only)',
-    `  images scanned: ${report.imageCount}`,
-    `  videos inspected: ${report.videoCount}`,
-    `  missing images: ${report.missingImages.length}`,
-    `  missing videos: ${report.missingVideos.length}`,
-  ];
-
-  if (report.inspectedIds.length > 0) {
-    lines.push(`  requested IDs: ${report.inspectedIds.join(', ')}`);
-    lines.push(`  requested IDs with namespace: ${report.presentAssets.length}`);
-    lines.push(`  requested IDs not found: ${report.notFoundIds.length}`);
-  }
-
-  const appendAsset = (asset, status) => {
-    lines.push('');
-    lines.push(`[assign-namespace] ${status}`);
-    lines.push(`  ${asset.assetType}: ${asset.id} ${asset.filename ? `(${asset.filename})` : ''}`);
-    lines.push(`  uploaded: ${asset.uploaded || '[unknown]'}`);
-    lines.push(`  namespace: ${asset.namespace || '[missing]'}`);
-    lines.push(`  parent: ${asset.parentId || '[none]'}`);
-  };
-
-  for (const asset of report.missingImages) appendAsset(asset, 'MISSING NAMESPACE');
-  for (const asset of report.missingVideos) appendAsset(asset, 'MISSING NAMESPACE');
-  if (report.inspectedIds.length > 0) {
-    for (const asset of report.presentAssets) appendAsset(asset, 'HAS NAMESPACE');
-    for (const id of report.notFoundIds) {
-      lines.push('');
-      lines.push('[assign-namespace] NOT FOUND');
-      lines.push(`  id: ${id}`);
-    }
-  }
-
-  return `${lines.join('\n')}\n`;
-};
-
-const writeOrPrint = async ({ content, output }) => {
-  if (!output) {
-    process.stdout.write(content);
-    return;
-  }
-  await fs.mkdir(path.dirname(path.resolve(output)), { recursive: true });
-  await fs.writeFile(output, content, 'utf8');
-  console.log(`[assign-namespace] Wrote ${output}`);
 };
 
 const runListMissing = async ({ accountId, apiToken, args }) => {

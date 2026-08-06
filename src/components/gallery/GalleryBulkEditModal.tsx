@@ -9,6 +9,8 @@
 import React, { useMemo, useState } from 'react';
 import MonoSelect from '../MonoSelect';
 import { getCloudflareImageUrl } from '@/utils/imageUtils';
+import { BulkEditMetadataSections } from '@/features/gallery/BulkEditMetadataSections';
+import { BulkAnimateSection } from '@/features/gallery/BulkAnimateSection';
 
 interface SelectOption {
   value: string;
@@ -280,222 +282,33 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
             ×
           </button>
         </div>
-        <div className="space-y-3">
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={bulkApplyDescription}
-              onChange={(e) => onBulkApplyDescriptionChange(e.target.checked)}
-              className="h-3 w-3"
-            />
-            Append to description
-          </label>
-          {bulkApplyDescription && (
-            <div className="space-y-2">
-              <textarea
-                value={bulkDescriptionAppendInput}
-                onChange={(e) => onBulkDescriptionAppendInputChange(e.target.value)}
-                className="w-full border border-gray-300 rounded px-3 py-2"
-                placeholder="Text to append to each selected image description"
-                rows={3}
-              />
-              <p className="text-[0.6rem] text-gray-500">
-                Appends text to existing descriptions with a blank line separator.
-              </p>
-            </div>
-          )}
-        </div>
-        <div className="space-y-3">
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={bulkApplyFolder}
-              onChange={(e) => onBulkApplyFolderChange(e.target.checked)}
-              className="h-3 w-3"
-            />
-            Update folder
-          </label>
-          {bulkApplyFolder && (
-            <div className="space-y-2">
-              {bulkFolderMode === 'existing' ? (
-                <>
-                  <MonoSelect
-                    value={bulkFolderInput}
-                    onChange={onBulkFolderSelect}
-                    options={bulkFolderOptions}
-                    className="w-full"
-                    placeholder="[none]"
-                    size="sm"
-                  />
-                  <p className="text-[0.6rem] text-gray-500">
-                    Choose an existing folder or pick “Create new folder…” to type a new name.
-                  </p>
-                </>
-              ) : (
-                <div className="space-y-2">
-                  <input
-                    type="text"
-                    value={bulkFolderInput}
-                    onChange={(e) => onBulkFolderInputChange(e.target.value)}
-                    className="w-full border border-gray-300 rounded px-3 py-2"
-                    placeholder="Type new folder name"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => onBulkFolderSelect('')}
-                    className="text-[0.6rem] text-blue-600 underline"
-                  >
-                    ← Back to folder list
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-        <div className="space-y-3">
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={bulkApplyTags}
-              onChange={(e) => onBulkApplyTagsChange(e.target.checked)}
-              className="h-3 w-3"
-            />
-            Update tags
-          </label>
-          {bulkApplyTags && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-4 text-[0.65rem] text-gray-600">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="bulk-tags-mode"
-                    checked={bulkTagsMode === 'replace'}
-                    onChange={() => onBulkTagsModeChange('replace')}
-                    className="h-3 w-3"
-                  />
-                  Replace
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="bulk-tags-mode"
-                    checked={bulkTagsMode === 'append'}
-                    onChange={() => onBulkTagsModeChange('append')}
-                    className="h-3 w-3"
-                  />
-                  Append
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="bulk-tags-mode"
-                    checked={bulkTagsMode === 'ai'}
-                    onChange={() => onBulkTagsModeChange('ai')}
-                    className="h-3 w-3"
-                  />
-                  Append (GenAI)
-                </label>
-              </div>
-              {bulkTagsMode === 'ai' ? (
-                <label className="block text-[0.65rem] text-gray-600">
-                  Tags per image
-                  <input
-                    type="number"
-                    min="1"
-                    max="12"
-                    value={bulkTagsAiCount}
-                    onChange={(e) => onBulkTagsAiCountChange(e.target.value)}
-                    className="mt-1 w-24 border border-gray-300 rounded px-3 py-2"
-                  />
-                </label>
-              ) : (
-                <textarea
-                  value={bulkTagsInput}
-                  onChange={(e) => onBulkTagsInputChange(e.target.value)}
-                  className="w-full border border-gray-300 rounded px-3 py-2"
-                  placeholder="Comma-separated tags"
-                  rows={3}
-                />
-              )}
-              <p className="text-[0.6rem] text-gray-500">
-                {bulkTagsMode === 'replace'
-                  ? 'Replace tags with this list (empty clears tags).'
-                  : bulkTagsMode === 'append'
-                    ? 'Append tags to each image (empty keeps existing tags).'
-                    : 'Generate semantic tags for each selected image and append only new tags.'}
-              </p>
-            </div>
-          )}
-        </div>
-        <div className="space-y-3">
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={bulkApplyDisplayName}
-              onChange={(e) => onBulkApplyDisplayNameChange(e.target.checked)}
-              className="h-3 w-3"
-            />
-            Update display name
-          </label>
-          {bulkApplyDisplayName && (
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-4 text-[0.65rem] text-gray-600">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="bulk-display-name-mode"
-                    checked={bulkDisplayNameMode === 'custom'}
-                    onChange={() => onBulkDisplayNameModeChange('custom')}
-                    className="h-3 w-3"
-                  />
-                  Custom
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="bulk-display-name-mode"
-                    checked={bulkDisplayNameMode === 'auto'}
-                    onChange={() => onBulkDisplayNameModeChange('auto')}
-                    className="h-3 w-3"
-                  />
-                  Auto (trim filename)
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="bulk-display-name-mode"
-                    checked={bulkDisplayNameMode === 'ai'}
-                    onChange={() => onBulkDisplayNameModeChange('ai')}
-                    className="h-3 w-3"
-                  />
-                  AI (generate)
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="radio"
-                    name="bulk-display-name-mode"
-                    checked={bulkDisplayNameMode === 'clear'}
-                    onChange={() => onBulkDisplayNameModeChange('clear')}
-                    className="h-3 w-3"
-                  />
-                  Clear
-                </label>
-              </div>
-              {bulkDisplayNameMode === 'custom' && (
-                <input
-                  type="text"
-                  value={bulkDisplayNameInput}
-                  onChange={(e) => onBulkDisplayNameInputChange(e.target.value)}
-                  className="w-full border border-gray-300 rounded px-3 py-2"
-                  placeholder="Display name"
-                />
-              )}
-              <p className="text-[0.6rem] text-gray-500">
-                Auto mode uses the filename trimmed to 64 characters. AI mode generates a short name per image.
-              </p>
-            </div>
-          )}
-        </div>
+        <BulkEditMetadataSections
+          bulkApplyDescription={bulkApplyDescription}
+          onBulkApplyDescriptionChange={onBulkApplyDescriptionChange}
+          bulkDescriptionAppendInput={bulkDescriptionAppendInput}
+          onBulkDescriptionAppendInputChange={onBulkDescriptionAppendInputChange}
+          bulkApplyFolder={bulkApplyFolder}
+          onBulkApplyFolderChange={onBulkApplyFolderChange}
+          bulkFolderMode={bulkFolderMode}
+          bulkFolderInput={bulkFolderInput}
+          onBulkFolderInputChange={onBulkFolderInputChange}
+          bulkFolderOptions={bulkFolderOptions}
+          onBulkFolderSelect={onBulkFolderSelect}
+          bulkApplyTags={bulkApplyTags}
+          onBulkApplyTagsChange={onBulkApplyTagsChange}
+          bulkTagsMode={bulkTagsMode}
+          onBulkTagsModeChange={onBulkTagsModeChange}
+          bulkTagsInput={bulkTagsInput}
+          onBulkTagsInputChange={onBulkTagsInputChange}
+          bulkTagsAiCount={bulkTagsAiCount}
+          onBulkTagsAiCountChange={onBulkTagsAiCountChange}
+          bulkApplyDisplayName={bulkApplyDisplayName}
+          onBulkApplyDisplayNameChange={onBulkApplyDisplayNameChange}
+          bulkDisplayNameMode={bulkDisplayNameMode}
+          onBulkDisplayNameModeChange={onBulkDisplayNameModeChange}
+          bulkDisplayNameInput={bulkDisplayNameInput}
+          onBulkDisplayNameInputChange={onBulkDisplayNameInputChange}
+        />
         <div className="space-y-3">
           <label className="flex items-center gap-2">
             <input
@@ -566,132 +379,26 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
             </div>
           )}
         </div>
-        <div className="space-y-2 border-t border-gray-200 pt-3">
-          <p className="text-[0.65rem] text-gray-500 uppercase tracking-wide">Animate selection</p>
-          <div className="space-y-2">
-            <div className="inline-flex overflow-hidden rounded border border-gray-300 text-[0.65rem]">
-              <button
-                type="button"
-                onClick={() => onBulkAnimateOrderModeChange('gallery')}
-                className={`px-2 py-1 ${
-                  bulkAnimateOrderMode === 'gallery'
-                    ? 'bg-gray-900 text-white'
-                    : 'bg-white text-gray-700 hover:bg-gray-50'
-                }`}
-              >
-                Gallery order
-              </button>
-              <button
-                type="button"
-                onClick={() => onBulkAnimateOrderModeChange('reverse-gallery')}
-                className={`border-l border-gray-300 px-2 py-1 ${
-                  bulkAnimateOrderMode === 'reverse-gallery'
-                    ? 'bg-gray-900 text-white'
-                    : 'bg-white text-gray-700 hover:bg-gray-50'
-                }`}
-              >
-                Reverse gallery
-              </button>
-            </div>
-            {bulkAnimateSelectionOrderDiffers && (
-              <p className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[0.65rem] text-amber-800">
-                Manual click order differs from gallery order. This animation will follow the order shown below.
-              </p>
-            )}
-            {animationPreviewImages.length > 0 && (
-              <div className="flex gap-2 overflow-x-auto rounded border border-gray-200 bg-gray-50 p-2">
-                {animationPreviewImages.map((image, index) => {
-                  let previewUrl = '';
-                  try {
-                    previewUrl = getCloudflareImageUrl(image.id, 'w=150');
-                  } catch {
-                    previewUrl = '';
-                  }
-                  return (
-                    <div key={image.id} className="w-24 shrink-0 space-y-1">
-                      <div className="relative aspect-square overflow-hidden rounded border border-gray-200 bg-white">
-                        {previewUrl ? (
-                          <img src={previewUrl} alt="" className="h-full w-full object-cover" />
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center text-[0.6rem] text-gray-400">
-                            no preview
-                          </div>
-                        )}
-                        <span className="absolute left-1 top-1 rounded bg-black/70 px-1 py-0.5 text-[0.6rem] text-white">
-                          {index + 1}
-                        </span>
-                      </div>
-                      <p className="truncate text-[0.6rem] text-gray-700" title={image.filename}>
-                        {image.filename}
-                      </p>
-                      {(index === 0 || index === animationPreviewImages.length - 1) && (
-                        <p className="text-[0.55rem] uppercase tracking-wide text-gray-500">
-                          {index === 0 ? 'first frame' : 'last frame'}
-                        </p>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="flex items-center gap-2 text-[0.65rem] text-gray-600">
-              FPS
-              <input
-                type="number"
-                min="0.1"
-                step="0.5"
-                value={bulkAnimateFps}
-                onChange={(e) => {
-                  onBulkAnimateTouchedChange(true);
-                  onBulkAnimateFpsChange(e.target.value);
-                }}
-                className="w-20 border border-gray-300 rounded px-2 py-1"
-              />
-            </label>
-            <label className="flex items-center gap-2 text-[0.65rem] text-gray-600">
-              Loop
-              <input
-                type="checkbox"
-                checked={bulkAnimateLoop}
-                onChange={(e) => onBulkAnimateLoopChange(e.target.checked)}
-                className="h-3 w-3"
-              />
-            </label>
-            <label className="flex items-center gap-2 text-[0.65rem] text-gray-600">
-              Output namespace
-              <MonoSelect
-                value={bulkAnimateNamespaceInput}
-                onChange={onBulkAnimateNamespaceInputChange}
-                options={animationNamespaceOptions}
-                className="w-48"
-                size="sm"
-              />
-            </label>
-            <label className="flex items-center gap-2 text-[0.65rem] text-gray-600">
-              Output name
-              <input
-                type="text"
-                value={bulkAnimateFilename}
-                onChange={(e) => onBulkAnimateFilenameChange(e.target.value)}
-                placeholder="animated-webp"
-                className="w-40 border border-gray-300 rounded px-2 py-1"
-              />
-            </label>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={onCreateAnimation}
-              disabled={bulkAnimateLoading || selectedCount < 2}
-              className="px-3 py-2 bg-emerald-600 text-white rounded-md disabled:opacity-50"
-            >
-              {bulkAnimateLoading ? 'Building…' : 'Create animated WebP'}
-            </button>
-            {bulkAnimateError && <p className="text-[0.65rem] text-red-600">{bulkAnimateError}</p>}
-          </div>
-        </div>
+        <BulkAnimateSection
+          selectedCount={selectedCount}
+          animationPreviewImages={animationPreviewImages}
+          bulkAnimateOrderMode={bulkAnimateOrderMode}
+          onBulkAnimateOrderModeChange={onBulkAnimateOrderModeChange}
+          bulkAnimateSelectionOrderDiffers={bulkAnimateSelectionOrderDiffers}
+          bulkAnimateFps={bulkAnimateFps}
+          onBulkAnimateFpsChange={onBulkAnimateFpsChange}
+          onBulkAnimateTouchedChange={onBulkAnimateTouchedChange}
+          bulkAnimateLoop={bulkAnimateLoop}
+          onBulkAnimateLoopChange={onBulkAnimateLoopChange}
+          bulkAnimateNamespaceInput={bulkAnimateNamespaceInput}
+          onBulkAnimateNamespaceInputChange={onBulkAnimateNamespaceInputChange}
+          animationNamespaceOptions={animationNamespaceOptions}
+          bulkAnimateFilename={bulkAnimateFilename}
+          onBulkAnimateFilenameChange={onBulkAnimateFilenameChange}
+          bulkAnimateLoading={bulkAnimateLoading}
+          bulkAnimateError={bulkAnimateError}
+          onCreateAnimation={onCreateAnimation}
+        />
         <div className="space-y-3 border-t border-gray-200 pt-3">
           <p className="text-[0.65rem] text-gray-500 uppercase tracking-wide">Selection JSON</p>
           <label className="block text-[0.65rem] text-gray-600">

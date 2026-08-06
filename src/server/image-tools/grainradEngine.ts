@@ -22,21 +22,13 @@ import { join } from 'node:path';
 import sharp from 'sharp';
 import {
   createFrameRenderContext,
-  createEffectsApi,
   getTimelineFrameCount,
   normalizeTimeline,
-  type EffectsApi,
   type RasterImage,
 } from 'nfl-grainrad-clone';
 
 import type { ImageToolRequest } from '@/server/image-tools/types';
-
-// Single shared engine/facade instance for the process.
-let apiSingleton: EffectsApi | null = null;
-const getApi = (): EffectsApi => {
-  if (!apiSingleton) apiSingleton = createEffectsApi();
-  return apiSingleton;
-};
+import { getGrainradApi } from './grainradApi';
 
 export type GrainradArtifact = {
   buffer: Buffer;
@@ -551,7 +543,7 @@ export const renderStill = async (
     details: { width: raster.width, height: raster.height },
   });
   await yieldToEventLoop();
-  const result = getApi().renderRaster({
+  const result = getGrainradApi().renderRaster({
     source: raster,
     effect: request.effectId,
     paramPreset: request.paramPreset,
@@ -637,7 +629,7 @@ export const renderAnimated = async (
           sourceFrameIndexAtTime(animatedSource, renderContext.time ?? 0, normalizedTimeline.loop)
         ]
       : raster;
-    const result = getApi().renderRaster({
+    const result = getGrainradApi().renderRaster({
       source: sourceRaster,
       effect: request.effectId,
       paramPreset: request.paramPreset,
@@ -698,4 +690,4 @@ export const renderGrainradArtifact = async (
     ? renderAnimated(sourceBuffer, request, options)
     : renderStill(sourceBuffer, request, options);
 
-export const listGrainradEffects = () => getApi().listEffects();
+export const listGrainradEffects = () => getGrainradApi().listEffects();

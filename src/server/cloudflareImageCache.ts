@@ -22,6 +22,7 @@ import {
   mutationIsReflectedRemotely,
 } from './cloudflareImageReconciliation';
 import { fetchAllCloudflareImagePages } from './cloudflareImageListFetcher';
+import { createPersistentCacheMaintenance, createSizeBackfill } from './cloudflareImageCacheMaintenance';
 
 export type {
   CachedCloudflareImage,
@@ -115,15 +116,6 @@ const SIZE_BACKFILL_RETRY_MS = Math.max(
 
 const PERSISTENT_CACHE_KEY = 'cloudflare-images';
 const METADATA_OVERRIDE_KEY = 'cloudflare-metadata-overrides';
-let sizeBackfillInProgress = false;
-let sizeBackfillLastRun = 0;
-const sizeBackfillAttempts = new Map<string, number>();
-let persistentCacheSaveTimer: ReturnType<typeof setTimeout> | null = null;
-let persistentCacheSaveInFlight: Promise<void> | null = null;
-let persistentCacheSaveQueued = false;
-let metadataOverridesSaveTimer: ReturnType<typeof setTimeout> | null = null;
-let metadataOverridesSaveInFlight: Promise<void> | null = null;
-let metadataOverridesSaveQueued = false;
 const PERSISTENT_CACHE_SAVE_DEBOUNCE_MS = Math.max(
   50,
   Number(process.env.CLOUDFLARE_PERSISTENT_CACHE_SAVE_DEBOUNCE_MS ?? 750)
@@ -143,300 +135,48 @@ const getStorage = (): ICacheStorage => {
 };
 
 const metadataOverrides = new Map<string, CloudflareMetadata>();
-let metadataOverridesLoaded = false;
 
-const loadMetadataOverrides = async (): Promise<void> => {
-  if (CLOUDFLARE_CACHE_DISABLED) return;
-  if (metadataOverridesLoaded) return;
-  metadataOverridesLoaded = true;
-  try {
-    const cached = await getStorage().get<Record<string, CloudflareMetadata>>(METADATA_OVERRIDE_KEY);
-    if (!cached?.data) return;
-    Object.entries(cached.data).forEach(([id, meta]) => {
-      if (meta && typeof meta === 'object') {
-        if (!metadataOverrides.has(id)) {
-          metadataOverrides.set(id, meta);
-        }
-      }
-    });
-  } catch (error) {
-    console.warn('[Cache] Failed to load metadata overrides:', error);
-  }
-};
+const persistentMaintenance = createPersistentCacheMaintenance({
+  cacheState,
+  cacheDisabled: CLOUDFLARE_CACHE_DISABLED,
+  getStorage,
+  cacheKey: PERSISTENT_CACHE_KEY,
+  metadataKey: METADATA_OVERRIDE_KEY,
+  persistentTtlMs: PERSISTENT_CACHE_TTL_MS,
+  saveDebounceMs: Math.max(PERSISTENT_CACHE_SAVE_DEBOUNCE_MS, METADATA_OVERRIDES_SAVE_DEBOUNCE_MS),
+  metadataOverrides,
+  loadMutations: getCloudflareImageMutations,
+  applyMutations: applyCloudflareImageMutations,
+  compactMutations: compactCloudflareImageMutationJournal,
+});
+const {
+  flushPersistentCacheSave,
+  loadFromPersistentCache,
+  loadMetadataOverrides,
+  scheduleMetadataOverridesSave,
+} = persistentMaintenance;
 
-const saveMetadataOverrides = async (): Promise<void> => {
-  if (CLOUDFLARE_CACHE_DISABLED) return;
-  try {
-    const payload = Object.fromEntries(metadataOverrides.entries());
-    await getStorage().set(METADATA_OVERRIDE_KEY, payload);
-  } catch (error) {
-    console.warn('[Cache] Failed to save metadata overrides:', error);
-  }
-};
-
-const flushMetadataOverridesSave = async (): Promise<void> => {
-  if (CLOUDFLARE_CACHE_DISABLED) return;
-  if (metadataOverridesSaveInFlight) {
-    metadataOverridesSaveQueued = true;
-    return metadataOverridesSaveInFlight;
-  }
-
-  metadataOverridesSaveQueued = false;
-  metadataOverridesSaveInFlight = saveMetadataOverrides()
-    .finally(() => {
-      metadataOverridesSaveInFlight = null;
-      if (metadataOverridesSaveQueued) {
-        scheduleMetadataOverridesSave();
-      }
-    });
-  return metadataOverridesSaveInFlight;
-};
-
-const scheduleMetadataOverridesSave = (): void => {
-  if (CLOUDFLARE_CACHE_DISABLED) return;
-  if (metadataOverridesSaveTimer) {
-    clearTimeout(metadataOverridesSaveTimer);
-  }
-  metadataOverridesSaveTimer = setTimeout(() => {
-    metadataOverridesSaveTimer = null;
-    void flushMetadataOverridesSave();
-  }, METADATA_OVERRIDES_SAVE_DEBOUNCE_MS);
-};
+const sizeBackfill = createSizeBackfill({
+  cacheState,
+  enabled: SIZE_BACKFILL_ENABLED,
+  maxPerRun: SIZE_BACKFILL_MAX_PER_RUN,
+  concurrency: SIZE_BACKFILL_CONCURRENCY,
+  minIntervalMs: SIZE_BACKFILL_MIN_INTERVAL_MS,
+  retryMs: SIZE_BACKFILL_RETRY_MS,
+  cacheDisabled: CLOUDFLARE_CACHE_DISABLED,
+  recordMutation: recordCloudflareImageMutation,
+});
 
 const fetchAllImages = async (): Promise<CachedCloudflareImage[]> => {
   const collected = await fetchAllCloudflareImagePages();
   return collected.map((image) => transformImage(image, metadataOverrides.get(image.id)));
 };
 
-const parseSizeHeaderValue = (value: string | null): number | undefined => {
-  if (!value) return undefined;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
-};
-
-const parseContentRangeTotal = (value: string | null): number | undefined => {
-  if (!value) return undefined;
-  const match = value.match(/\/(\d+)$/);
-  if (!match) return undefined;
-  const parsed = Number(match[1]);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
-};
-
-const pickVariantUrl = (variants: string[]): string | undefined => {
-  if (!Array.isArray(variants) || variants.length === 0) return undefined;
-  return variants.find((url) => url.includes('/public')) || variants[0];
-};
-
-const fetchVariantContentSize = async (url: string): Promise<number | undefined> => {
-  try {
-    const head = await fetch(url, { method: 'HEAD', cache: 'no-store' });
-    const fromLength = parseSizeHeaderValue(head.headers.get('content-length'));
-    if (fromLength !== undefined) {
-      return fromLength;
-    }
-  } catch {
-    // Fall through to range request.
-  }
-
-  try {
-    const ranged = await fetch(url, {
-      method: 'GET',
-      headers: { Range: 'bytes=0-0' },
-      cache: 'no-store',
-    });
-    return (
-      parseContentRangeTotal(ranged.headers.get('content-range'))
-      ?? parseSizeHeaderValue(ranged.headers.get('content-length'))
-    );
-  } catch {
-    return undefined;
-  }
-};
-
-const getMissingSizeCandidates = () => {
-  const now = Date.now();
-  const candidates: Array<{ id: string; url: string }> = [];
-  for (const image of cacheState.images) {
-    if (typeof image.size === 'number' && Number.isFinite(image.size) && image.size >= 0) {
-      continue;
-    }
-    const lastAttemptAt = sizeBackfillAttempts.get(image.id) ?? 0;
-    if (now - lastAttemptAt < SIZE_BACKFILL_RETRY_MS) {
-      continue;
-    }
-    const variantUrl = pickVariantUrl(image.variants);
-    if (!variantUrl) continue;
-    candidates.push({ id: image.id, url: variantUrl });
-    if (candidates.length >= SIZE_BACKFILL_MAX_PER_RUN) {
-      break;
-    }
-  }
-  return candidates;
-};
-
-const runSizeBackfillQueue = async (): Promise<void> => {
-  if (!SIZE_BACKFILL_ENABLED || sizeBackfillInProgress) {
-    return;
-  }
-  const now = Date.now();
-  if (now - sizeBackfillLastRun < SIZE_BACKFILL_MIN_INTERVAL_MS) {
-    return;
-  }
-
-  const candidates = getMissingSizeCandidates();
-  if (candidates.length === 0) {
-    return;
-  }
-
-  sizeBackfillInProgress = true;
-  sizeBackfillLastRun = now;
-  candidates.forEach((candidate) => sizeBackfillAttempts.set(candidate.id, now));
-
-  let cursor = 0;
-  const workerCount = Math.min(SIZE_BACKFILL_CONCURRENCY, candidates.length);
-  const mutations: CloudflareImageMutation[] = [];
-  const workers = Array.from({ length: workerCount }, async () => {
-    while (true) {
-      const index = cursor;
-      cursor += 1;
-      if (index >= candidates.length) {
-        break;
-      }
-
-      const candidate = candidates[index];
-      const discoveredSize = await fetchVariantContentSize(candidate.url);
-      if (discoveredSize === undefined) {
-        continue;
-      }
-
-      const existing = cacheState.map.get(candidate.id);
-      if (!existing) {
-        continue;
-      }
-      if (typeof existing.size === 'number' && Number.isFinite(existing.size) && existing.size >= 0) {
-        continue;
-      }
-      const updated: CachedCloudflareImage = {
-        ...existing,
-        size: discoveredSize,
-      };
-      cacheState.map.set(updated.id, updated);
-      const imageIndex = cacheState.images.findIndex((image) => image.id === updated.id);
-      if (imageIndex >= 0) {
-        cacheState.images[imageIndex] = updated;
-      }
-      const mutation: CloudflareImageMutation = {
-        kind: 'upsert',
-        imageId: updated.id,
-        image: updated,
-        recordedAt: Date.now(),
-      };
-      cacheState.localMutations.set(updated.id, mutation);
-      mutations.push(mutation);
-      sizeBackfillAttempts.delete(candidate.id);
-    }
-  });
-
-  try {
-    await Promise.all(workers);
-    if (mutations.length > 0 && !CLOUDFLARE_CACHE_DISABLED) {
-      cacheState.contentVersion += 1;
-      cacheState.residentAt = Date.now();
-      cacheState.lastFetched = cacheState.residentAt;
-      await Promise.all(mutations.map((mutation) => recordCloudflareImageMutation(mutation)));
-    }
-  } finally {
-    sizeBackfillInProgress = false;
-  }
-};
-
 const triggerSizeBackfill = (): void => {
   if (!SIZE_BACKFILL_ENABLED) return;
-  void runSizeBackfillQueue().catch((error) => {
+  void sizeBackfill.run().catch((error) => {
     console.warn('[Cache] Size backfill queue failed:', error);
   });
-};
-
-/**
- * Load images from persistent storage (file/Redis)
- * Returns null if cache doesn't exist or is too old
- */
-const loadFromPersistentCache = async (): Promise<{ images: CachedCloudflareImage[]; timestamp: number } | null> => {
-  if (CLOUDFLARE_CACHE_DISABLED) return null;
-  try {
-    const [cached, mutations] = await Promise.all([
-      getStorage().get<CachedCloudflareImage[]>(PERSISTENT_CACHE_KEY),
-      getCloudflareImageMutations(),
-    ]);
-    if (!cached) {
-      console.log('[Cache] No persistent cache found');
-      return null;
-    }
-
-    const age = Date.now() - cached.timestamp;
-    const isStale = age > PERSISTENT_CACHE_TTL_MS;
-    const images = applyCloudflareImageMutations(cached.data, mutations);
-    
-    console.log(
-      `[Cache] Loaded ${images.length} images from persistent cache `
-      + `(age: ${Math.round(age / 1000)}s, stale: ${isStale}, journal: ${mutations.length})`
-    );
-    
-    // Return data even if stale - we'll refresh in background
-    return { images, timestamp: cached.timestamp };
-  } catch (error) {
-    console.warn('[Cache] Failed to load from persistent cache:', error);
-    return null;
-  }
-};
-
-/**
- * Save images to persistent storage
- */
-const saveToPersistentCache = async (images: CachedCloudflareImage[], timestamp: number): Promise<void> => {
-  if (CLOUDFLARE_CACHE_DISABLED) return;
-  await getStorage().set(PERSISTENT_CACHE_KEY, images, timestamp);
-  await compactCloudflareImageMutationJournal(timestamp);
-  for (const [imageId, mutation] of cacheState.localMutations) {
-    if (mutation.recordedAt <= timestamp) {
-      cacheState.localMutations.delete(imageId);
-    }
-  }
-  console.log(`[Cache] Saved ${images.length} images to persistent cache`);
-};
-
-const flushPersistentCacheSave = async (): Promise<void> => {
-  if (CLOUDFLARE_CACHE_DISABLED) return;
-  if (persistentCacheSaveInFlight) {
-    persistentCacheSaveQueued = true;
-    return persistentCacheSaveInFlight;
-  }
-
-  persistentCacheSaveQueued = false;
-  const images = cacheState.images.slice();
-  const timestamp = Date.now();
-  persistentCacheSaveInFlight = saveToPersistentCache(images, timestamp)
-    .catch((error) => {
-      console.warn('[Cache] Failed to save persistent cache:', error);
-    })
-    .finally(() => {
-      persistentCacheSaveInFlight = null;
-      if (persistentCacheSaveQueued) {
-        schedulePersistentCacheSave();
-      }
-    });
-  return persistentCacheSaveInFlight;
-};
-
-const schedulePersistentCacheSave = (): void => {
-  if (CLOUDFLARE_CACHE_DISABLED) return;
-  if (persistentCacheSaveTimer) {
-    clearTimeout(persistentCacheSaveTimer);
-  }
-  persistentCacheSaveTimer = setTimeout(() => {
-    persistentCacheSaveTimer = null;
-    void flushPersistentCacheSave();
-  }, PERSISTENT_CACHE_SAVE_DEBOUNCE_MS);
 };
 
 const hasResidentMemorySnapshot = () => {
@@ -923,7 +663,6 @@ export const clearAllCaches = async () => {
   cacheState.initialized = false;
   cacheState.localMutations = new Map();
   metadataOverrides.clear();
-  metadataOverridesLoaded = false;
   
   try {
     await getStorage().delete(PERSISTENT_CACHE_KEY);

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import puppeteer from 'puppeteer';
+import { buildUploadTags, contentTypeToExt, parseThreadsPostUrl, reduceVideoUrlsForUpload } from './threads-ingest/mediaHelpers.mjs';
 
 const DEFAULT_PROFILE_DIR = path.resolve('.cache/instagram-profile');
 const DEFAULT_DATA_DIR = path.resolve('data/threads');
@@ -166,109 +167,6 @@ async function ensureParentDir(filePath) {
 
 async function ensureDir(dirPath) {
   await fs.mkdir(dirPath, { recursive: true });
-}
-
-function parseThreadsPostUrl(url) {
-  try {
-    const parsed = new URL(url);
-    if (parsed.hostname !== 'www.threads.com' && parsed.hostname !== 'threads.com') return null;
-    const parts = parsed.pathname.split('/').filter(Boolean);
-    if (parts.length < 3) return null;
-    const atUser = parts[0]?.startsWith('@') ? parts[0].slice(1) : null;
-    const kind = (parts[1] || '').toLowerCase();
-    if (kind !== 'post') return null;
-    const shortcode = parts[2] || null;
-    if (!shortcode) return null;
-    return {
-      usernameFromPath: atUser,
-      shortcode,
-      canonicalUrl: `https://www.threads.com/@${atUser}/post/${shortcode}`,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function contentTypeToExt(contentType) {
-  const ct = (contentType || '').toLowerCase();
-  if (ct.includes('jpeg') || ct.includes('jpg')) return '.jpg';
-  if (ct.includes('png')) return '.png';
-  if (ct.includes('webp')) return '.webp';
-  if (ct.includes('gif')) return '.gif';
-  if (ct.includes('mp4')) return '.mp4';
-  if (ct.includes('webm')) return '.webm';
-  if (ct.includes('quicktime')) return '.mov';
-  return '.bin';
-}
-
-function normalizeMediaUrlKey(url) {
-  try {
-    const parsed = new URL(url);
-    parsed.hash = '';
-    parsed.searchParams.delete('bytestart');
-    parsed.searchParams.delete('byteend');
-    parsed.searchParams.delete('range');
-    parsed.searchParams.sort();
-    return `${parsed.origin}${parsed.pathname}?${parsed.searchParams.toString()}`;
-  } catch {
-    return url;
-  }
-}
-
-function scoreVideoUrl(url) {
-  try {
-    const parsed = new URL(url);
-    const pathname = parsed.pathname.toLowerCase();
-    const hasVideoExt = /\.(mp4|webm|mov|m4v|m3u8)(\?|$)/.test(pathname);
-    const hasByteRangeHint =
-      parsed.searchParams.has('bytestart') ||
-      parsed.searchParams.has('byteend') ||
-      parsed.searchParams.has('range');
-
-    let score = 0;
-    if (hasVideoExt) score += 20;
-    if (!hasByteRangeHint) score += 60;
-    if (hasByteRangeHint) score -= 40;
-    if (parsed.searchParams.get('bytestart') === '0') score += 5;
-    score += Math.min(10, pathname.length / 50);
-    return score;
-  } catch {
-    return -100;
-  }
-}
-
-function reduceVideoUrlsForUpload(videoUrls) {
-  if (!Array.isArray(videoUrls) || videoUrls.length <= 1) {
-    return Array.isArray(videoUrls) ? videoUrls : [];
-  }
-
-  const bestByKey = new Map();
-  for (const videoUrl of videoUrls) {
-    if (typeof videoUrl !== 'string' || !videoUrl.startsWith('http')) continue;
-    const key = normalizeMediaUrlKey(videoUrl);
-    const score = scoreVideoUrl(videoUrl);
-    const current = bestByKey.get(key);
-    if (!current || score > current.score) {
-      bestByKey.set(key, { videoUrl, score });
-    }
-  }
-
-  const reduced = [...bestByKey.values()]
-    .sort((a, b) => b.score - a.score)
-    .map((entry) => entry.videoUrl);
-
-  const preferred = reduced.filter((videoUrl) => scoreVideoUrl(videoUrl) >= 0);
-  return preferred.length > 0 ? preferred : reduced;
-}
-
-function buildUploadTags(ownerUsername) {
-  const tags = ['threads'];
-  const cleanOwner = typeof ownerUsername === 'string' ? ownerUsername.trim() : '';
-  if (cleanOwner) {
-    tags.push(cleanOwner);
-    tags.push(`threads_profile:${cleanOwner}`);
-  }
-  return [...new Set(tags)];
 }
 
 async function launchBrowser(profileDir, headless) {

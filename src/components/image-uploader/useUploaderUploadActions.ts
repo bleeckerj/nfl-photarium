@@ -1,36 +1,26 @@
 import { useCallback, type Dispatch, type SetStateAction } from 'react';
-
 import { useToast } from '@/components/Toast';
 import type { UploaderQueueItem } from '@/features/page-import/types';
 import { runWithConcurrency } from '@/components/image-uploader/concurrency';
-import { NAMESPACE_REQUIRED_UPLOAD_ERROR } from '@/components/image-uploader/constants';
 import { inferAssetTypeFromFile, resolveTagInput } from '@/components/image-uploader/fileHelpers';
 import type { UploadedImage } from '@/components/image-uploader/types';
 import { uploadFormDataWithRetry } from '@/services/uploadRequestService';
 import type { SemanticTagJob } from '@/types/semanticTagging';
 import { inferAssetTypeFromUrl } from '@/utils/mediaAssetType';
+import {
+  formatUploadErrorMessage,
+  applyNamespaceUploadFailures,
+  buildInitialUploadImages,
+  GALLERY_PROGRESSIVE_REFRESH_DELAY_MS,
+  isDuplicateUploadFailure,
+  observeSemanticTagJob,
+  type SemanticTagObservation,
+  type UploadFailure,
+  type UploadResult,
+  VIDEO_REMOTE_UPLOAD_CONCURRENCY,
+} from './uploadActionHelpers';
 
 type QueuedFile = UploaderQueueItem;
-
-interface UploadResult {
-  clientId: string;
-  id?: string;
-  filename?: string;
-  url?: string;
-  folder?: string;
-  tags?: string[];
-  description?: string;
-  originalUrl?: string;
-  sourceUrl?: string;
-  semanticTagging?: SemanticTagJob;
-}
-
-interface UploadFailure {
-  clientId: string;
-  error?: string;
-  reason?: string;
-  duplicates?: unknown[];
-}
 
 interface UseUploaderUploadActionsOptions {
   uploadNamespace: string | null;
@@ -54,87 +44,6 @@ interface UseUploaderUploadActionsOptions {
   setUploadedImages: Dispatch<SetStateAction<UploadedImage[]>>;
   resetUploadForm: () => void;
 }
-
-const VIDEO_REMOTE_UPLOAD_CONCURRENCY = 2;
-
-// While a multi-file batch is uploading, refresh the gallery progressively so
-// assets appear as they finish instead of only after the whole batch completes.
-// Debounced inside notifyGalleryUploaded so a burst of quick uploads coalesces
-// into a single refresh.
-const GALLERY_PROGRESSIVE_REFRESH_DELAY_MS = 600;
-const SEMANTIC_TAG_POLL_INTERVAL_MS = 1500;
-const SEMANTIC_TAG_MAX_POLLS = 80;
-
-type SemanticTagObservation = {
-  job: SemanticTagJob;
-  filename?: string;
-};
-
-const observeSemanticTagJob = async (
-  observation: SemanticTagObservation,
-  onFailure: (message: string) => void
-) => {
-  const label = observation.filename || observation.job.imageId;
-  let currentState = observation.job.state;
-
-  if (currentState === 'failed') {
-    onFailure(`Semantic tagging failed for ${label}; the upload completed.`);
-    return;
-  }
-  if (currentState === 'succeeded' || currentState === 'disabled') return;
-
-  for (let poll = 0; poll < SEMANTIC_TAG_MAX_POLLS; poll += 1) {
-    await new Promise((resolve) => setTimeout(resolve, SEMANTIC_TAG_POLL_INTERVAL_MS));
-    try {
-      const response = await fetch(`/api/images/tag-enrichment/${observation.job.jobId}`);
-      if (!response.ok) {
-        onFailure(`Semantic tagging status was unavailable for ${label}; the upload completed.`);
-        return;
-      }
-      const job = (await response.json()) as SemanticTagJob;
-      currentState = job.state;
-      if (currentState === 'succeeded' || currentState === 'disabled') return;
-      if (currentState === 'failed') {
-        onFailure(`Semantic tagging failed for ${label}; the upload completed.`);
-        return;
-      }
-    } catch {
-      onFailure(`Semantic tagging status was unavailable for ${label}; the upload completed.`);
-      return;
-    }
-  }
-
-  onFailure(`Semantic tagging did not finish for ${label}; the upload completed.`);
-};
-
-const formatUploadErrorMessage = (response: Response, payload: unknown) => {
-  if (response.status === 409 && payload && typeof payload === 'object' && 'duplicates' in payload) {
-    const data = payload as { error?: string; duplicates?: Array<{ id?: string; filename?: string; folder?: string }> };
-    if (Array.isArray(data.duplicates) && data.duplicates.length > 0) {
-      const summary = data.duplicates
-        .map((dup) => {
-          const label = dup.filename || 'Untitled';
-          const location = dup.folder ? `${label} (${dup.folder})` : label;
-          return dup.id ? `${location} [${dup.id}]` : location;
-        })
-        .slice(0, 3)
-        .join(', ');
-      const extra = data.duplicates.length > 3 ? '…' : '';
-      return `${data.error || 'Duplicate detected.'} Existing: ${summary}${extra}`;
-    }
-  }
-  if (payload && typeof payload === 'object' && 'error' in payload && typeof (payload as { error?: string }).error === 'string') {
-    return (payload as { error?: string }).error as string;
-  }
-  return 'Upload failed';
-};
-
-const isDuplicateUploadFailure = (response: Response, payload: unknown) => {
-  if (response.status === 409) return true;
-  if (!payload || typeof payload !== 'object') return false;
-  const data = payload as { reason?: unknown; duplicates?: unknown };
-  return data.reason === 'duplicate' || (Array.isArray(data.duplicates) && data.duplicates.length > 0);
-};
 
 export const useUploaderUploadActions = ({
   uploadNamespace,
@@ -173,22 +82,8 @@ export const useUploaderUploadActions = ({
   }, [toast]);
 
   const markNamespaceUploadFailures = useCallback((items: QueuedFile[]) => {
-    const failures: UploadedImage[] = items.map((item) => ({
-      id: item.id,
-      assetType: item.assetType ?? (item.file ? inferAssetTypeFromFile(item.file) : inferAssetTypeFromUrl(item.remoteUrl)),
-      url: '',
-      filename: item.filename,
-      status: 'error',
-      error: NAMESPACE_REQUIRED_UPLOAD_ERROR,
-      file: item.file,
-      remoteUrl: item.remoteUrl,
-    }));
-    setUploadedImages((prev) => {
-      const ids = new Set(failures.map((entry) => entry.id));
-      return [...prev.filter((entry) => !ids.has(entry.id)), ...failures];
-    });
+    applyNamespaceUploadFailures(items, setUploadedImages);
   }, [setUploadedImages]);
-
   const uploadFiles = useCallback(
     async (filesToUpload: QueuedFile[]) => {
       if (!uploadNamespace) {
@@ -226,31 +121,14 @@ export const useUploaderUploadActions = ({
           rateLimitDelayMs,
         });
 
-      const initialImages: UploadedImage[] = filesToUpload.map((entry) => {
-        const originalUrlToSend = omitOriginalUrl
-          ? ''
-          : entry.originalUrl !== undefined
-            ? entry.originalUrl
-            : originalUrl.trim() || '';
-        const sourceUrlToSend = entry.sourceUrl !== undefined ? entry.sourceUrl : sourceUrl.trim() || '';
-        const folderToSend = entry.folder !== undefined ? entry.folder : folderToUse;
-        const tagsToSend = resolveTagInput(tags, entry.tags);
-        const descriptionToSend = entry.description !== undefined ? entry.description : description;
-
-        return {
-          id: entry.id,
-          assetType: entry.assetType ?? (entry.file ? inferAssetTypeFromFile(entry.file) : 'image'),
-          url: '',
-          filename: entry.filename,
-          status: 'uploading' as const,
-          file: entry.file,
-          folderInput: folderToSend,
-          tagsInput: tagsToSend,
-          descriptionInput: descriptionToSend,
-          originalUrlInput: originalUrlToSend || undefined,
-          sourceUrlInput: sourceUrlToSend || undefined,
-          parentId: entry.groupId ? undefined : selectedParentId || undefined,
-        };
+      const initialImages = buildInitialUploadImages(filesToUpload, {
+        omitOriginalUrl,
+        originalUrl,
+        sourceUrl,
+        tags,
+        description,
+        folder: folderToUse,
+        selectedParentId,
       });
 
       setUploadedImages((prev) => {
