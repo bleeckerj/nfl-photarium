@@ -17,7 +17,10 @@ import {
 } from '@/server/galleryQueryRoute';
 import { getScopedAssetAssembly } from '@/server/galleryScopeAssembly';
 import { matchesAspectRatioClass, normalizeAspectRatioClass } from '@/utils/aspectRatioClass';
-import { loadGalleryOptionalMetadata } from '@/server/galleryOptionalMetadata';
+import {
+  applyGalleryOptionalMetadata,
+  loadGalleryOptionalMetadata,
+} from '@/server/galleryOptionalMetadata';
 import { analyzeGalleryDuplicates } from '@/server/galleryDuplicateAnalysis';
 import {
   buildGalleryCollectionEtag,
@@ -257,38 +260,7 @@ export async function GET(request: NextRequest) {
     Object.assign(timings, optionalMetadata.timings);
     Object.assign(diagnostics, optionalMetadata.diagnostics);
 
-    if (optionalMetadata.redisAvailable && imagesWithEmbeddings.length > 0) {
-      imagesWithEmbeddings = imagesWithEmbeddings.map(img => {
-        const meta = optionalMetadata.colorMetadata.get(img.id);
-        const aspect = optionalMetadata.aspectMetadata.get(img.id);
-        const aspectRatioClass = normalizeAspectRatioClass(aspect?.aspectRatioClass);
-        if (meta) {
-          return {
-            ...img,
-            hasClipEmbedding: meta.hasClipEmbedding,
-            hasColorEmbedding: meta.hasColorEmbedding,
-            dominantColors: meta.dominantColors ?? img.dominantColors,
-            averageColor: meta.averageColor ?? img.averageColor,
-            aspectRatio: aspect?.aspectRatio ?? img.aspectRatio,
-            aspectRatioClass: aspectRatioClass ?? img.aspectRatioClass,
-            dimensions: aspect?.width && aspect?.height
-              ? { width: aspect.width, height: aspect.height }
-              : img.dimensions,
-          };
-        }
-        if (aspect) {
-          return {
-            ...img,
-            aspectRatio: aspect.aspectRatio ?? img.aspectRatio,
-            aspectRatioClass: aspectRatioClass ?? img.aspectRatioClass,
-            dimensions: aspect.width && aspect.height
-              ? { width: aspect.width, height: aspect.height }
-              : img.dimensions,
-          };
-        }
-        return img;
-      });
-    }
+    imagesWithEmbeddings = applyGalleryOptionalMetadata(imagesWithEmbeddings, optionalMetadata);
 
     if (aspectRatioClasses.length > 0 || normalizedAspectRatioClass || aspectRatio) {
       const { hydrateMissingAspectMetadata } = await import('@/server/aspectMetadataHydration');

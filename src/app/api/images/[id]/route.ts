@@ -9,11 +9,7 @@ import { fetchCloudflareImage } from '@/server/cloudflareClient';
 import { probeAnimatedImageFromOriginalBlob } from '@/server/animatedImageProbe';
 import { cleanupImageArtifacts } from '@/server/imageArtifactCleanup';
 import { deleteStreamVideo } from '@/server/cloudflareStreamClient';
-import {
-  batchGetAspectMetadata,
-  batchGetColorMetadata,
-  isVectorSearchAvailable,
-} from '@/server/vectorSearch';
+import { enrichImageWithVectorMetadata } from '@/server/imageDetailMetadata';
 import {
   deleteVideoAssetRecord,
   getVideoAssetRecord,
@@ -165,38 +161,6 @@ const enrichAnimatedState = async (image: CachedCloudflareImage): Promise<Cached
 };
 
 const mark = (value: number) => Number(value.toFixed(1));
-
-const enrichWithVectorMetadata = async (
-  image: CachedCloudflareImage
-): Promise<CachedCloudflareImage> => {
-  const redisAvailable = await isVectorSearchAvailable();
-  if (!redisAvailable) {
-    return image;
-  }
-
-  const [colorMetadata, aspectMetadata] = await Promise.all([
-    batchGetColorMetadata([image.id]),
-    batchGetAspectMetadata([image.id]),
-  ]);
-
-  const color = colorMetadata.get(image.id);
-  const aspect = aspectMetadata.get(image.id);
-  if (!color && !aspect) {
-    return image;
-  }
-
-  return {
-    ...image,
-    hasClipEmbedding: color?.hasClipEmbedding ?? image.hasClipEmbedding,
-    hasColorEmbedding: color?.hasColorEmbedding ?? image.hasColorEmbedding,
-    dominantColors: color?.dominantColors ?? image.dominantColors,
-    averageColor: color?.averageColor ?? image.averageColor,
-    aspectRatio: aspect?.aspectRatio ?? image.aspectRatio,
-    dimensions: aspect?.width && aspect?.height
-      ? { width: aspect.width, height: aspect.height }
-      : image.dimensions,
-  };
-};
 
 const enrichWithVideoAnimatedWebpComfyProvenance = async (
   image: CachedCloudflareImage
@@ -457,7 +421,7 @@ export async function GET(
       try {
         const vectorStartedAt = performance.now();
         const beforeVector = responseImage;
-        responseImage = await enrichWithVectorMetadata(responseImage);
+        responseImage = await enrichImageWithVectorMetadata(responseImage);
         timings.vector_enrich = mark(performance.now() - vectorStartedAt);
         if (responseImage !== beforeVector) {
           shouldPersistResponseImage = true;

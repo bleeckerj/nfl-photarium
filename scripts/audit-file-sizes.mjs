@@ -8,6 +8,7 @@ const IGNORED_DIRS = new Set([
   '.next',
   '.tmp',
   '.venv',
+  '.claude',
   'adjacent',
   'build',
   'dist',

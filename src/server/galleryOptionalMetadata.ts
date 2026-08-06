@@ -1,4 +1,5 @@
 import type { ImageAspectRatioMetadata, ImageColorMetadata } from '@/server/vectorSearch';
+import { normalizeAspectRatioClass } from '@/utils/aspectRatioClass';
 
 export type GalleryOptionalMetadataResult = {
   colorMetadata: Map<string, ImageColorMetadata>;
@@ -75,4 +76,59 @@ export async function loadGalleryOptionalMetadata(options: {
     console.warn('[ImagesAPI] Redis unavailable for embedding status:', error);
     return emptyResult();
   }
+}
+
+type GalleryOptionalMetadataAsset = {
+  id: string;
+  hasClipEmbedding?: boolean;
+  hasColorEmbedding?: boolean;
+  dominantColors?: string[];
+  averageColor?: string;
+  aspectRatio?: string;
+  aspectRatioClass?: unknown;
+  dimensions?: { width: number; height: number };
+};
+
+export function applyGalleryOptionalMetadata<T extends { id: string }>(
+  images: readonly T[],
+  optionalMetadata: GalleryOptionalMetadataResult,
+): T[] {
+  if (!optionalMetadata.redisAvailable || images.length === 0) {
+    return [...images];
+  }
+
+  return images.map((image) => {
+    const current = image as T & GalleryOptionalMetadataAsset;
+    const color = optionalMetadata.colorMetadata.get(image.id);
+    const aspect = optionalMetadata.aspectMetadata.get(image.id);
+    const aspectRatioClass = normalizeAspectRatioClass(aspect?.aspectRatioClass);
+
+    if (color) {
+      return {
+        ...image,
+        hasClipEmbedding: color.hasClipEmbedding,
+        hasColorEmbedding: color.hasColorEmbedding,
+        dominantColors: color.dominantColors ?? current.dominantColors,
+        averageColor: color.averageColor ?? current.averageColor,
+        aspectRatio: aspect?.aspectRatio ?? current.aspectRatio,
+        aspectRatioClass: aspectRatioClass ?? current.aspectRatioClass,
+        dimensions: aspect?.width && aspect?.height
+          ? { width: aspect.width, height: aspect.height }
+          : current.dimensions,
+      } as T;
+    }
+
+    if (aspect) {
+      return {
+        ...image,
+        aspectRatio: aspect.aspectRatio ?? current.aspectRatio,
+        aspectRatioClass: aspectRatioClass ?? current.aspectRatioClass,
+        dimensions: aspect.width && aspect.height
+          ? { width: aspect.width, height: aspect.height }
+          : current.dimensions,
+      } as T;
+    }
+
+    return image;
+  });
 }
