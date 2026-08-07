@@ -26,6 +26,7 @@ export function useImageMetadataDraft<TImage extends ImageMetadataDraftAsset>({
   const [values, setValues] = useState<ImageMetadataDraftValues>(() => emptyImageMetadataDraftValues());
   const imageRef = useRef<TImage | null>(image);
   const extrasRecordRef = useRef<ImageMetadataDraftExtras>(extrasRecord);
+  const hasUserChangesRef = useRef(false);
 
   useEffect(() => {
     imageRef.current = image;
@@ -43,42 +44,64 @@ export function useImageMetadataDraft<TImage extends ImageMetadataDraftAsset>({
     nextImage: TImage | null | undefined = imageRef.current,
     nextExtras: ImageMetadataDraftExtras = extrasRecordRef.current
   ) => {
+    hasUserChangesRef.current = false;
     setValues(resolveImageMetadataDraftValues(nextImage, nextExtras));
   }, []);
 
   const applyDraft = useCallback((draft: Partial<ImageMetadataDraftValues>) => {
+    hasUserChangesRef.current = true;
     setValues((prev) => ({ ...prev, ...draft }));
   }, []);
 
+  // Extras load independently from the image. Rebase a pristine draft when the
+  // pair becomes available, but never overwrite values an operator has touched.
+  const hydratePersistedValues = useCallback((
+    nextImage: TImage | null | undefined = imageRef.current,
+    nextExtras: ImageMetadataDraftExtras = extrasRecordRef.current
+  ) => {
+    if (hasUserChangesRef.current) {
+      return;
+    }
+    setValues(resolveImageMetadataDraftValues(nextImage, nextExtras));
+  }, []);
+
   const setFolderSelect = useCallback((folderSelect: SetStateAction<string>) => {
+    hasUserChangesRef.current = true;
     setValues((prev) => ({ ...prev, folderSelect: resolveStateAction(prev.folderSelect, folderSelect) }));
   }, [resolveStateAction]);
 
   const setNewFolderInput = useCallback((newFolderInput: SetStateAction<string>) => {
+    hasUserChangesRef.current = true;
     setValues((prev) => ({ ...prev, newFolderInput: resolveStateAction(prev.newFolderInput, newFolderInput) }));
   }, [resolveStateAction]);
 
   const setTagsInput = useCallback((tagsInput: SetStateAction<string>) => {
+    hasUserChangesRef.current = true;
     setValues((prev) => ({ ...prev, tagsInput: resolveStateAction(prev.tagsInput, tagsInput) }));
   }, [resolveStateAction]);
 
   const setDescriptionInput = useCallback((descriptionInput: SetStateAction<string>) => {
+    hasUserChangesRef.current = true;
     setValues((prev) => ({ ...prev, descriptionInput: resolveStateAction(prev.descriptionInput, descriptionInput) }));
   }, [resolveStateAction]);
 
   const setAltTextInput = useCallback((altTextInput: SetStateAction<string>) => {
+    hasUserChangesRef.current = true;
     setValues((prev) => ({ ...prev, altTextInput: resolveStateAction(prev.altTextInput, altTextInput) }));
   }, [resolveStateAction]);
 
   const setOriginalUrlInput = useCallback((originalUrlInput: SetStateAction<string>) => {
+    hasUserChangesRef.current = true;
     setValues((prev) => ({ ...prev, originalUrlInput: resolveStateAction(prev.originalUrlInput, originalUrlInput) }));
   }, [resolveStateAction]);
 
   const setSourceUrlInput = useCallback((sourceUrlInput: SetStateAction<string>) => {
+    hasUserChangesRef.current = true;
     setValues((prev) => ({ ...prev, sourceUrlInput: resolveStateAction(prev.sourceUrlInput, sourceUrlInput) }));
   }, [resolveStateAction]);
 
   const setDisplayNameInput = useCallback((displayNameInput: SetStateAction<string>) => {
+    hasUserChangesRef.current = true;
     setValues((prev) => ({ ...prev, displayNameInput: resolveStateAction(prev.displayNameInput, displayNameInput) }));
   }, [resolveStateAction]);
 
@@ -99,6 +122,7 @@ export function useImageMetadataDraft<TImage extends ImageMetadataDraftAsset>({
   ), [values]);
 
   const markSaved = useCallback((savedImage: TImage) => {
+    hasUserChangesRef.current = false;
     setValues(resolveImageMetadataDraftValuesAfterSave(savedImage, values));
   }, [values]);
 
@@ -122,6 +146,7 @@ export function useImageMetadataDraft<TImage extends ImageMetadataDraftAsset>({
     setDisplayNameInput,
     applyDraft,
     resetFromImage,
+    hydratePersistedValues,
     isDirty,
     buildSavePayload,
     applySavedResponse,

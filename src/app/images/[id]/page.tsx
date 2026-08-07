@@ -259,6 +259,7 @@ export default function ImageDetailPage() {
     setDisplayNameInput,
     applyDraft: applyMetadataDraft,
     resetFromImage: resetMetadataDraftFromImage,
+    hydratePersistedValues,
     buildSavePayload: buildMetadataSavePayload,
     applySavedResponse: applyMetadataSavedResponse,
     markSaved: markMetadataSaved,
@@ -288,6 +289,13 @@ export default function ImageDetailPage() {
   useEffect(() => {
     extrasRecordRef.current = extrasRecord;
   }, [extrasRecord]);
+
+  useEffect(() => {
+    if (!image || extrasRecord?.imageId !== image.id) {
+      return;
+    }
+    hydratePersistedValues(image, extrasRecord);
+  }, [extrasRecord, hydratePersistedValues, image]);
 
   const [semanticSearchAllNamespaces, setSemanticSearchAllNamespaces] = useState(false);
 
@@ -890,17 +898,6 @@ export default function ImageDetailPage() {
         const jsonElapsedMs = Math.round(getNow() - jsonStartedAt);
         if (!mounted) return;
         setExtrasRecord(data.record ? { ...data.record, imageId: id } : null);
-        // Apply extras values, including intentional empty strings from legacy records.
-        const nextDraft: Parameters<typeof applyMetadataDraft>[0] = {};
-        if (data.record && Object.prototype.hasOwnProperty.call(data.record, 'description')) {
-          nextDraft.descriptionInput = data.record.description ?? '';
-        }
-        if (data.record && Object.prototype.hasOwnProperty.call(data.record, 'altText')) {
-          nextDraft.altTextInput = data.record.altText ?? '';
-        }
-        if (Object.keys(nextDraft).length > 0) {
-          applyMetadataDraft(nextDraft);
-        }
         logDetailPerf('extrasFetch:total', startedAt, {
           jsonParseMs: jsonElapsedMs,
           hasRecord: Boolean(data.record),
@@ -914,7 +911,7 @@ export default function ImageDetailPage() {
     return () => {
       mounted = false;
     };
-  }, [applyMetadataDraft, id]);
+  }, [id]);
 
   const variationChildren = useMemo(
     () => (id ? allImages.filter((img) => img.parentId === id) : []),
