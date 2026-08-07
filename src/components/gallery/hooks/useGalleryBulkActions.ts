@@ -58,16 +58,24 @@ const resolveGalleryNamespaceScope = (namespace?: string): string | null => {
 export const resolveBulkAnimationIds = (
   images: Pick<CloudflareImage, 'id'>[],
   selectedImageIds: Set<string>,
-  orderMode: 'gallery' | 'reverse-gallery'
+  orderMode: 'gallery' | 'reverse-gallery',
+  additionalImages: Pick<CloudflareImage, 'id'>[] = [],
 ) => {
-  const selectedIds = images
+  const seenIds = new Set<string>();
+  const selectedIds = [...images, ...additionalImages]
     .filter((image) => selectedImageIds.has(image.id))
-    .map((image) => image.id);
+    .map((image) => image.id)
+    .filter((id) => {
+      if (seenIds.has(id)) return false;
+      seenIds.add(id);
+      return true;
+    });
   return orderMode === 'reverse-gallery' ? [...selectedIds].reverse() : selectedIds;
 };
 
 interface UseGalleryBulkActionsOptions {
   images: CloudflareImage[];
+  selectedImages: CloudflareImage[];
   setImages: React.Dispatch<React.SetStateAction<CloudflareImage[]>>;
   toastPush: (message: string) => void;
   selectedCount: number;
@@ -111,6 +119,7 @@ interface UseGalleryBulkActionsOptions {
 
 export const useGalleryBulkActions = ({
   images,
+  selectedImages,
   setImages,
   toastPush,
   selectedCount,
@@ -206,7 +215,10 @@ export const useGalleryBulkActions = ({
       let aiTagSuccessCount = 0;
       let aiTagFailureCount = 0;
       let aiTagNoopCount = 0;
-      const imageById = new Map(images.map((image) => [image.id, image]));
+      const imageById = new Map([
+        ...selectedImages.map((image) => [image.id, image] as const),
+        ...images.map((image) => [image.id, image] as const),
+      ]);
       const selectedIds = Array.from(selectedImageIds);
       const settled = await runWithConcurrency<string, BulkUpdateResult>(
         selectedIds,
@@ -454,6 +466,7 @@ export const useGalleryBulkActions = ({
     images,
     namespace,
     selectedCount,
+    selectedImages,
     selectedImageIds,
     setBulkEditOpen,
     setBulkSelectionMode,
@@ -476,7 +489,7 @@ export const useGalleryBulkActions = ({
     setBulkAnimateLoading(true);
     setBulkAnimateError(null);
     try {
-      const orderedIds = resolveBulkAnimationIds(images, selectedImageIds, bulkAnimateOrderMode);
+      const orderedIds = resolveBulkAnimationIds(images, selectedImageIds, bulkAnimateOrderMode, selectedImages);
       const response = await fetch('/api/animate/selection', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -519,6 +532,7 @@ export const useGalleryBulkActions = ({
     namespace,
     selectedCount,
     selectedImageIds,
+    selectedImages,
     setBulkAnimateFilename,
     setBulkAnimateFps,
     setBulkAnimateLoop,

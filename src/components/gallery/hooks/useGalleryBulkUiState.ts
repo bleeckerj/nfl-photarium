@@ -6,9 +6,8 @@ type UseGalleryBulkUiStateOptions = {
   bulkAnimateOrderMode: BulkState['bulkAnimateOrderMode'];
   bulkAnimateTouched: boolean;
   dispatchBulk: Dispatch<BulkAction>;
-  images: CloudflareImage[];
+  selectedImages: CloudflareImage[];
   selectedCount: number;
-  selectedImageIds: Set<string>;
   setBulkAnimateFps: (value: string) => void;
   setBulkEditOpen: (value: boolean) => void;
   setBulkFolderInput: (value: string) => void;
@@ -21,9 +20,8 @@ export function useGalleryBulkUiState({
   bulkAnimateOrderMode,
   bulkAnimateTouched,
   dispatchBulk,
-  images,
+  selectedImages,
   selectedCount,
-  selectedImageIds,
   setBulkAnimateFps,
   setBulkEditOpen,
   setBulkFolderInput,
@@ -76,16 +74,13 @@ export function useGalleryBulkUiState({
   );
 
   const selectedImagesForPayload = useMemo(
-    () =>
-      images
-        .filter((image) => selectedImageIds.has(image.id))
-        .map((image) => ({
-          id: image.id,
-          filename: image.filename || image.displayName || image.id,
-          altText: image.altText,
-          altTag: image.altTag,
-        })),
-    [images, selectedImageIds]
+    () => selectedImages.map((image) => ({
+      id: image.id,
+      filename: image.filename || image.displayName || image.id,
+      altText: image.altText,
+      altTag: image.altTag,
+    })),
+    [selectedImages]
   );
 
   const selectedGalleryOrderIds = useMemo(
@@ -94,8 +89,8 @@ export function useGalleryBulkUiState({
   );
 
   const selectedInsertionOrderIds = useMemo(
-    () => Array.from(selectedImageIds),
-    [selectedImageIds]
+    () => selectedImages.map((image) => image.id),
+    [selectedImages]
   );
 
   const selectedAnimationPreview = useMemo(

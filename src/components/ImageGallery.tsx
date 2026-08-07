@@ -652,7 +652,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   });
 
   const {
-    selectedImageIds, selectedCount, toggleSelection, clearSelection, selectAllOnPage,
+    selectedImageIds, selectedImages, selectedCount, toggleSelection, clearSelection, selectAllOnPage,
     selectDuplicateImages: selectDuplicateImagesBase, selectDuplicatesKeepSingle: selectDuplicatesKeepSingleBase,
   } = useGallerySelection({
     images, duplicateGroups, duplicateIds, serverDuplicateIds: serverDuplicateSummary?.allDuplicateIds,
@@ -701,7 +701,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const {
     applyBulkUpdates, createBulkAnimation, deleteSelectedImages, generateEmbeddingsForSelected,
   } = useGalleryBulkActions({
-    images, setImages, toastPush: toast.push, selectedCount, selectedImageIds, clearSelection,
+    images, selectedImages, setImages, toastPush: toast.push, selectedCount, selectedImageIds, clearSelection,
     setBulkSelectionMode, setBulkEditOpen, setBulkAnimateFilename, setBulkAnimateFps,
     setBulkAnimateLoop, setBulkAnimateOrderMode, setBulkAnimateTouched, bulkApplyFolder,
     bulkApplyTags, bulkFolderInput, bulkTagsInput, bulkTagsAiCount, bulkTagsMode,
@@ -716,7 +716,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     bulkAnimateSelectionOrderDiffers, bulkFolderOptions, closeBulkEditModal, handleBulkFolderSelect,
     handleCopySelectionPayload, openBulkEditModal, selectedAnimationPreview, selectedImagesForPayload,
   } = useGalleryBulkUiState({
-    bulkAnimateOrderMode, bulkAnimateTouched, dispatchBulk, images, selectedCount, selectedImageIds,
+    bulkAnimateOrderMode, bulkAnimateTouched, dispatchBulk, selectedImages, selectedCount,
     setBulkAnimateFps, setBulkEditOpen, setBulkFolderInput, setBulkFolderMode, toastPush: toast.push, uniqueFolders,
   });
 
