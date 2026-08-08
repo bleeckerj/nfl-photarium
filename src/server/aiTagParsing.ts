@@ -25,16 +25,6 @@ const splitCandidates = (value: unknown): string[] => {
     .filter(Boolean);
 };
 
-const expandCollapsedSingleWordList = (candidates: string[]) => {
-  if (candidates.length !== 1) return candidates;
-  const [entry] = candidates;
-  const collapsed = entry
-    .split(/[\s-]+/g)
-    .map((part) => part.trim())
-    .filter(Boolean);
-  return collapsed.length > 1 ? collapsed : candidates;
-};
-
 const expandCollapsedPhraseList = (candidates: string[], maxCount: number) => {
   if (candidates.length !== 1) return candidates;
   const [entry] = candidates;
@@ -45,20 +35,11 @@ const expandCollapsedPhraseList = (candidates: string[], maxCount: number) => {
   return collapsed.length >= Math.max(4, maxCount) ? collapsed : candidates;
 };
 
-const normalizeSingleWordTag = (value: string) =>
+const normalizeGeneratedSemanticTag = (value: string) =>
   value
     .toLowerCase()
     .replace(/[`'".,;:!?()[\]{}]/g, ' ')
-    .replace(/[_/]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/\s+/g, '-');
-
-const normalizePhraseTag = (value: string) =>
-  value
-    .toLowerCase()
-    .replace(/[_/]+/g, ' ')
-    .replace(/[^\w\s-]+/g, ' ')
+    .replace(/[_/\-]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -74,12 +55,7 @@ const dedupeAndLimit = (values: string[], maxCount: number) => {
   return out;
 };
 
-export const sanitizeSingleWordSuggestedTags = (value: unknown, maxCount: number): string[] => {
-  const candidates = expandCollapsedSingleWordList(splitCandidates(value));
-  return dedupeAndLimit(candidates.map(normalizeSingleWordTag).filter(Boolean), maxCount);
-};
-
-export const sanitizePhraseSuggestedTags = (value: unknown, maxCount: number): string[] => {
+export const sanitizeGeneratedSemanticTags = (value: unknown, maxCount: number): string[] => {
   const candidates = expandCollapsedPhraseList(splitCandidates(value), maxCount);
-  return dedupeAndLimit(candidates.map(normalizePhraseTag).filter(Boolean), maxCount);
+  return dedupeAndLimit(candidates.map(normalizeGeneratedSemanticTag).filter(Boolean), maxCount);
 };

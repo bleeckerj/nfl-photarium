@@ -93,6 +93,29 @@ describe('POST /api/display-name/suggest', () => {
     expect(payload.tags).toEqual(['one', 'two', 'three', 'four', 'five', 'six']);
   });
 
+  it('normalizes generated hyphenated phrases before returning them to the uploader', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: '{"tags":["repair-manual","home-server"]}' } }],
+        }),
+        { status: 200 }
+      )
+    );
+
+    const formData = new FormData();
+    formData.append('file', new File(['image-bytes'], 'manual.png', { type: 'image/png' }));
+    formData.append('includeTags', 'true');
+    formData.append('skipDisplayName', 'true');
+    formData.append('tagCount', '2');
+
+    const response = await POST(createRequest(formData));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.tags).toEqual(['repair manual', 'home server']);
+  });
+
   it('uses OPENAI_DISPLAY_NAME_MODEL when provided', async () => {
     process.env.OPENAI_DISPLAY_NAME_MODEL = 'gpt-5-mini';
 

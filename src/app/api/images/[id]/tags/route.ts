@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { parseCloudflareMetadata } from '@/utils/cloudflareMetadata';
-import { sanitizeSingleWordSuggestedTags } from '@/server/aiTagParsing';
+import { sanitizeGeneratedSemanticTags } from '@/server/aiTagParsing';
 import { getOpenAiTagsModel, OPENAI_CHAT_COMPLETIONS_URL } from '@/server/openAiGeneratorModels';
 import { resolveVisionImageUrl } from '@/server/visionImageSource';
 const DEFAULT_TAG_COUNT = 6;
@@ -95,16 +95,16 @@ export async function POST(
       'Analyze this image and return only a comma-separated list of semantic tags.',
       `Return exactly ${requestedCount} tags.`,
       'Separate every tag with a comma.',
-      'Each tag must be a single word; represent a multi-word brand or trademark as one lowercase hyphenated tag.',
-      'Use lowercase ASCII words and hyphens only.',
+      'Each tag may be a single word or a concise multi-word semantic phrase.',
+      'Use lowercase ASCII words and spaces only.',
       'Describe visible scene, subject, object, mood, material, or setting content.',
       'Include every visible named brand, trademark, logo, slogan, product line, retailer, corporate symbol, or other recognizable commercial sign or signal when it is legible or confidently identifiable.',
       'Prefer the recognizable brand or trademark name over a generic category term when both are visible.',
       'Do not invent or infer a brand, trademark, or commercial entity that is not visible or confidently recognizable.',
       'Never tag the workflow, tool, provider, model, prompt, pipeline, provenance, filename, folder, or any other process that produced the image.',
       'Never use color names or color descriptions; CLIP and other vector embeddings handle color.',
-      'No phrases, no punctuation, no numbering, no explanation, no markdown.',
-      'Do not collapse multiple tags into one hyphenated slug.',
+      'No sentences, punctuation, numbering, explanation, or markdown.',
+      'Use spaces within a multi-word tag; never use hyphens.',
       existingTags.length ? `Existing tags for context: ${existingTags.join(', ')}` : null,
     ]
       .filter(Boolean)
@@ -124,7 +124,7 @@ export async function POST(
         messages: [
           {
             role: 'system',
-            content: 'You create compact semantic tags for image content. Use single words, with one lowercase hyphenated tag allowed for a multi-word brand or trademark. Include visible named brands, trademarks, and other recognizable commercial signs and signals. Exclude workflow/provenance terms and all color terms.'
+            content: 'You create compact semantic tags for image content. Use lowercase single words or concise multi-word phrases with spaces. Include visible named brands, trademarks, and other recognizable commercial signs and signals. Exclude workflow/provenance terms and all color terms.'
           },
           {
             role: 'user',
@@ -146,7 +146,7 @@ export async function POST(
     }
 
     const raw = extractMessageText(openAiPayload?.choices?.[0]?.message?.content);
-    const tags = sanitizeSingleWordSuggestedTags(raw, requestedCount);
+    const tags = sanitizeGeneratedSemanticTags(raw, requestedCount);
     if (tags.length === 0) {
       return NextResponse.json({ error: 'OpenAI response did not contain usable tags' }, { status: 422 });
     }

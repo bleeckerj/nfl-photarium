@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fallbackDisplayNameFromFilename, sanitizeSuggestedDisplayName } from '@/utils/displayName';
-import { sanitizePhraseSuggestedTags } from '@/server/aiTagParsing';
+import { sanitizeGeneratedSemanticTags } from '@/server/aiTagParsing';
 import { getOpenAiDisplayNameModel, OPENAI_CHAT_COMPLETIONS_URL } from '@/server/openAiGeneratorModels';
 import { isSvgMime, toVisionDataUrl, VisionRasterError } from '@/server/rasterForVision';
 import { getMimeFromImageUrl, isPrivateHost } from '@/server/import-metadata/http';
@@ -212,7 +212,7 @@ export async function POST(request: NextRequest) {
           ? sanitizeSuggestedDisplayName(parsedDisplayName)
           : fallbackDisplayNameFromFilename(filename);
     const suggestedTags = includeTags
-      ? sanitizePhraseSuggestedTags(parsedObject?.tags ?? raw, requestedTagCount)
+      ? sanitizeGeneratedSemanticTags(parsedObject?.tags ?? raw, requestedTagCount)
       : undefined;
 
     return NextResponse.json({
