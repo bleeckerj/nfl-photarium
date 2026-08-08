@@ -44,6 +44,16 @@ describe('imageMetadataDraft', () => {
     expect(parseUserTagsInput('hero, _favorite_, detail')).toEqual(['hero', 'detail']);
   });
 
+  it('does not mark a fresh upload with hyphenated semantic tags as dirty', () => {
+    const uploadedImage = {
+      ...image,
+      tags: ['book-promotion', 'repair-manual', 'home-server', 'cable-spool'],
+    };
+    const draft = resolveImageMetadataDraftValues(uploadedImage, null);
+
+    expect(isImageMetadataDraftDirty(draft, uploadedImage, null)).toBe(false);
+  });
+
   it('marks a changed folder as dirty during a background refresh comparison', () => {
     const draft = resolveImageMetadataDraftValues(image, null);
     expect(isImageMetadataDraftDirty({

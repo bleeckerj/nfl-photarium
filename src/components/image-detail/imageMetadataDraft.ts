@@ -108,7 +108,10 @@ export function isImageMetadataDraftDirty(
   const imageTags = getUserVisibleTags(image.tags);
   const normalizeTags = (tags: string[]) => [...tags].map((tag) => tag.trim()).filter(Boolean).sort();
   const normalizedInputTags = normalizeTags(inputTags);
-  const normalizedImageTags = normalizeTags(imageTags);
+  // The tag editor renders semantic tags with spaces while older and generated
+  // records commonly store their equivalent hyphenated form. Compare both
+  // sides through the editor parser so a fresh upload is not marked dirty.
+  const normalizedImageTags = normalizeTags(parseUserTagsInput(imageTags.join(', ')));
   if (normalizedInputTags.length !== normalizedImageTags.length) {
     return true;
   }
