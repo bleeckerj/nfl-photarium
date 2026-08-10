@@ -146,7 +146,7 @@ describe('photarium_aspect_ratio_variant', () => {
         });
       }
 
-      if (requestUrl.hostname === 'photarium.test' && requestUrl.pathname === '/api/upload/external') {
+      if (requestUrl.hostname === 'photarium.test' && requestUrl.pathname === '/api/upload') {
         const form = init?.body as FormData;
         uploadedParentId = form.get('parentId');
         uploadedNamespace = form.get('namespace');

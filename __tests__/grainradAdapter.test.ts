@@ -71,6 +71,9 @@ const uploadResult = {
   tags: ['source', 'grainrad', 'image-tool', 'threshold'],
 };
 
+// RGB display rendering can contend with the full suite's Sharp-heavy tests.
+const CPU_INTENSIVE_RENDER_TIMEOUT_MS = 30_000;
+
 let pngFixture: TestImageFixture;
 let webpFixture: TestImageFixture;
 
@@ -218,7 +221,7 @@ describe('grainradAdapter (in-process)', () => {
         }),
       })
     );
-  });
+  }, CPU_INTENSIVE_RENDER_TIMEOUT_MS);
 
   it('renders an ephemeral preview without uploading to Photarium', async () => {
     mockBlobFetch(pngFixture);

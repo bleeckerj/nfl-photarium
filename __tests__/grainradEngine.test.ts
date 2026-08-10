@@ -12,6 +12,9 @@ import {
 import type { ImageToolRequest } from '@/server/image-tools/types';
 import { createTestImageFixture } from './helpers/imageFixtures';
 
+// These animated effects share CPU with the parallel Sharp-heavy suite.
+const CPU_INTENSIVE_RENDER_TIMEOUT_MS = 30_000;
+
 const stillRequest = (overrides: Partial<ImageToolRequest> = {}): ImageToolRequest => ({
   effectId: 'threshold',
   params: { threshold: 120 },
@@ -320,7 +323,7 @@ describe('grainradEngine (in-process bridge)', () => {
     expect(meta.pages ?? 1).toBeGreaterThanOrEqual(2);
     expect(progress.some((event) => event.includes('Rendering Grainrad frame 1 of 2'))).toBe(true);
     expect(progress.some((event) => event.startsWith('encode:'))).toBe(true);
-  });
+  }, CPU_INTENSIVE_RENDER_TIMEOUT_MS);
 
   it('renders source-collage animated previews with multiple frames', async () => {
     const png = await createTestImageFixture('png');
@@ -340,7 +343,7 @@ describe('grainradEngine (in-process bridge)', () => {
     const meta = await sharp(artifact.buffer, { animated: true }).metadata();
     expect(meta.format).toBe('webp');
     expect(meta.pages ?? 1).toBeGreaterThanOrEqual(2);
-  });
+  }, CPU_INTENSIVE_RENDER_TIMEOUT_MS);
 
   it('expands vertical hold full-loop animations to one complete roll cycle', async () => {
     const png = await createTestImageFixture('png');

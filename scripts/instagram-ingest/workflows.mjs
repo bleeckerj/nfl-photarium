@@ -4,8 +4,12 @@ import { stdin as input, stdout as output } from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import puppeteer from 'puppeteer';
 import { DEFAULT_DATA_DIR } from './cli.mjs';
-import { extractShortcodeFromInstagramUrl, igGet, pushVideoToCloudflare } from './single-url-extract.mjs';
-import { reduceVideoUrlsForUpload } from './cloudflare-upload.mjs';
+import { igGet } from './single-url-extract.mjs';
+import {
+  extractShortcodeFromInstagramUrl,
+  pushVideoToCloudflare,
+  reduceVideoUrlsForUpload,
+} from './cloudflare-upload.mjs';
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 

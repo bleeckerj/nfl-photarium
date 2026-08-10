@@ -98,6 +98,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
+    "@modelcontextprotocol/sdk": "^1.25.3",
     "@tailwindcss/postcss": "^4",
     "@types/adm-zip": "^0.5.7",
     "@types/jsdom": "^28.0.3",
