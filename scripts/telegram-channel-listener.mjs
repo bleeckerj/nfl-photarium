@@ -8,6 +8,7 @@ import {
   runInstagramIngest,
   TELEGRAM_INGEST_NAMESPACE,
 } from './telegram-listener/instagram-ingest.mjs';
+import { acquireSingleInstanceLock } from './telegram-listener/single-instance-lock.mjs';
 
 const DEFAULT_BASE_URL = 'http://localhost:3000';
 const DEFAULT_STATE_FILE = path.join(os.tmpdir(), 'photarium-telegram-listener-state.json');
@@ -118,6 +119,7 @@ function getConfig() {
     allowedChatIds: new Set(splitCsv(env('TELEGRAM_ALLOWED_CHAT_IDS')).map(String)),
     pollTimeoutSeconds: envInt('TELEGRAM_POLL_TIMEOUT_SECONDS', DEFAULT_TIMEOUT_SECONDS),
     stateFile: env('TELEGRAM_STATE_FILE', DEFAULT_STATE_FILE),
+    lockFile: env('TELEGRAM_LOCK_FILE', `${env('TELEGRAM_STATE_FILE', DEFAULT_STATE_FILE)}.lock`),
     includeCaptionHashtags: envBool('TELEGRAM_INCLUDE_CAPTION_HASHTAGS', true),
     generateDisplayName: envBool('TELEGRAM_GENERATE_DISPLAY_NAME', true),
     once: process.argv.includes('--once'),
@@ -452,6 +454,7 @@ function printStartup(config) {
     baseTags: config.baseTags,
     allowedChatIds: Array.from(config.allowedChatIds),
     stateFile: config.stateFile,
+    lockFile: config.lockFile,
     once: config.once,
     generateDisplayName: config.generateDisplayName,
   });
@@ -461,26 +464,31 @@ async function main() {
   const configFile = getCliArgValue('--config') || DEFAULT_CONFIG_FILE;
   const loadedConfig = await loadEnvFile(configFile);
   const config = getConfig();
-  printStartup({ ...config, configFile, loadedConfig });
-  const state = await loadState(config);
+  const lock = await acquireSingleInstanceLock(config.lockFile);
+  try {
+    printStartup({ ...config, configFile, loadedConfig });
+    const state = await loadState(config);
 
-  while (true) {
-    try {
-      await pollOnce(config, state);
-      await saveState(config, state);
-    } catch (error) {
-      console.error('[telegram-listener] poll error', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      await saveState(config, state);
-      if (config.once) {
-        process.exitCode = 1;
-        return;
+    while (true) {
+      try {
+        await pollOnce(config, state);
+        await saveState(config, state);
+      } catch (error) {
+        console.error('[telegram-listener] poll error', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        await saveState(config, state);
+        if (config.once) {
+          process.exitCode = 1;
+          return;
+        }
+        await sleep(POLL_INTERVAL_MS);
       }
-      await sleep(POLL_INTERVAL_MS);
-    }
 
-    if (config.once) return;
+      if (config.once) return;
+    }
+  } finally {
+    await lock.release();
   }
 }
 
