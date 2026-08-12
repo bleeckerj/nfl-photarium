@@ -27,6 +27,7 @@ import type {
 
 interface SourceContext {
   imageId: string;
+  parentId: string;
   sourceFilename: string;
   outputFilename: string;
   displayName: string;
@@ -103,6 +104,7 @@ function readSourceContext(imageId: string, source: Record<string, unknown>, dow
   const outputFilename = buildDemarkedFilename(sourceFilename);
   return {
     imageId,
+    parentId: stringValue(source.parentId) || imageId,
     sourceFilename,
     outputFilename,
     displayName: buildDemarkedDisplayName(stringValue(source.displayName), sourceFilename),
@@ -198,7 +200,7 @@ async function uploadAndVerify(
     originalUrl: context.originalUrl,
     sourceUrl: context.sourceUrl,
     namespace: context.namespace,
-    parentId: context.imageId,
+    parentId: context.parentId,
     generateSemanticTags: false,
   });
   const childId = readChildId(upload);
@@ -214,7 +216,7 @@ async function uploadAndVerify(
       originalUrl: context.originalUrl,
       sourceUrl: context.sourceUrl,
       namespace: context.namespace,
-      parentId: context.imageId,
+      parentId: context.parentId,
     });
   } catch (error) {
     throw Object.assign(new Error(errorMessage(error)), { childId });
@@ -222,8 +224,8 @@ async function uploadAndVerify(
 
   const child = await getImage(childId);
   if (!child) throw Object.assign(new Error(`Uploaded child ${childId} could not be read back`), { childId });
-  if (stringValue(child.parentId) !== context.imageId) {
-    throw Object.assign(new Error(`Uploaded child ${childId} is not linked to ${context.imageId}`), { childId });
+  if (stringValue(child.parentId) !== context.parentId) {
+    throw Object.assign(new Error(`Uploaded child ${childId} is not linked to ${context.parentId}`), { childId });
   }
   const childDimensions = dimensionsValue(child.dimensions);
   if (!childDimensions || childDimensions.width !== verification.dimensions.width || childDimensions.height !== verification.dimensions.height) {
@@ -240,7 +242,7 @@ async function uploadAndVerify(
     filename: context.outputFilename,
     displayName: context.displayName,
     url,
-    parentId: context.imageId,
+    parentId: context.parentId,
     namespace: context.namespace,
     dimensions: childDimensions,
     verification: {

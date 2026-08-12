@@ -162,6 +162,35 @@ describe('Photarium demarked MCP tool', () => {
     });
   });
 
+  it('uses a variation source\'s canonical family parent for the child link', async () => {
+    const canonicalParentId = 'canonical-parent';
+    discoveryMocks.getImage.mockImplementation(async (imageId: string) => {
+      if (imageId === 'source-a') return { ...sourceImage(imageId), parentId: canonicalParentId };
+      if (imageId === 'child-a') return {
+        ...sourceImage(imageId),
+        id: imageId,
+        parentId: canonicalParentId,
+        filename: 'source-a-demarked.png',
+        displayName: 'Source A — Demarked',
+        url: 'https://cdn.example.com/child-a/public',
+      };
+      return null;
+    });
+
+    const result = await processDemarkImages(['source-a'], {
+      mode: 'demark',
+      strength: 0.04,
+      steps: 50,
+      modelProfile: 'ctrlregen',
+      device: 'auto',
+      removeAllMetadata: false,
+    });
+
+    expect(result).toMatchObject({ succeeded: 1, failed: 0, results: [{ parentId: canonicalParentId }] });
+    expect(uploadMocks.uploadFileBase64).toHaveBeenCalledWith('/api/upload', expect.objectContaining({ parentId: canonicalParentId }));
+    expect(organizationMocks.updateMetadata).toHaveBeenCalledWith('child-a', expect.objectContaining({ parentId: canonicalParentId }));
+  });
+
   it('continues after a source failure and returns a structured failure', async () => {
     const result = await processDemarkImages(['source-a', 'missing'], {
       mode: 'demark',

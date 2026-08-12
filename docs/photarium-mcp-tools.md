@@ -49,7 +49,7 @@ The image-tool runtime tools mirror Photarium's `/api/image-tools` manifest, run
 
 ## Demarked Variants
 
-`photarium_demark_images` processes one or more Photarium PNG or JPEG image IDs through the local `noai-watermark` checkout and uploads each output as a child variant. The default `ctrlregen` profile chunks the image during regeneration to reduce peak VRAM use. It keeps one Python worker and model loaded for the batch, processes items sequentially, and returns a result for every source even when one item fails.
+`photarium_demark_images` processes one or more Photarium PNG or JPEG image IDs through the local `noai-watermark` checkout and uploads each output as a child variant. The default `ctrlregen` profile chunks the image during regeneration to reduce peak VRAM use. It keeps one Python worker and model loaded for the batch, processes items sequentially, and returns a result for every source even when one item fails. When the requested source is already a variation, the tool uses that image's canonical family parent because Photarium does not allow a variation to be a parent.
 
 The tool defaults to `mode: "demark"`, `strength: 0.04`, `steps: 50`, and `device: "auto"`. `mode: "metadata"` runs AI-metadata cleanup without pixel regeneration. Standard metadata is preserved unless `removeAllMetadata: true` is supplied. Outputs use a `-demarked` filename suffix, receive a `demarked` tag, preserve the source namespace/folder and provenance URLs, and are linked to the source with `parentId`.
 
