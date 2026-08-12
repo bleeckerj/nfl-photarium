@@ -4,6 +4,8 @@ import { aiHandlers } from './ai/handlers.js';
 import { aiTools } from './ai/tools.js';
 import { discoveryHandlers } from './discovery/handlers.js';
 import { discoveryTools } from './discovery/tools.js';
+import { demarkHandlers } from './demark/handlers.js';
+import { demarkTools } from './demark/tools.js';
 import { imageToolHandlers } from './image-tools/handlers.js';
 import { imageToolTools } from './image-tools/tools.js';
 import { instagramHandlers } from './instagram/handlers.js';
@@ -27,6 +29,7 @@ const LIST_TOOLS_TOOL: Tool = {
 
 const runtimeModules: RuntimeToolModule[] = [
   { tools: discoveryTools, handlers: discoveryHandlers },
+  { tools: demarkTools, handlers: demarkHandlers },
   { tools: organizationTools, handlers: organizationHandlers },
   { tools: uploadTools, handlers: uploadHandlers },
   { tools: instagramTools, handlers: instagramHandlers },

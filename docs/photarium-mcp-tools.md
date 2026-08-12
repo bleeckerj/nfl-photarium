@@ -47,6 +47,21 @@ These tools wrap the current repository scripts and return captured command, std
 
 The image-tool runtime tools mirror Photarium's `/api/image-tools` manifest, run, preview, and status endpoints. `request` is optional for run and preview calls; when present, it is merged with the selected tool manifest's `defaultRequest`, including open-ended `params` for tool-specific controls.
 
+## Demarked Variants
+
+`photarium_demark_images` processes one or more Photarium PNG or JPEG image IDs through the local `noai-watermark` checkout and uploads each output as a child variant. The default `ctrlregen` profile chunks the image during regeneration to reduce peak VRAM use. It keeps one Python worker and model loaded for the batch, processes items sequentially, and returns a result for every source even when one item fails.
+
+The tool defaults to `mode: "demark"`, `strength: 0.04`, `steps: 50`, and `device: "auto"`. `mode: "metadata"` runs AI-metadata cleanup without pixel regeneration. Standard metadata is preserved unless `removeAllMetadata: true` is supplied. Outputs use a `-demarked` filename suffix, receive a `demarked` tag, preserve the source namespace/folder and provenance URLs, and are linked to the source with `parentId`.
+
+Configure the local utility for the MCP server process:
+
+```bash
+export PHOTARIUM_NOAI_WATERMARK_ROOT=/absolute/path/to/noai-watermark
+export PHOTARIUM_NOAI_WATERMARK_PYTHON=/absolute/path/to/noai-watermark/.venv/bin/python
+```
+
+The Python path is optional when the utility uses its checkout-local `.venv/bin/python`. The source image is never overwritten. The workflow verifies output dimensions, parent linkage, hosted child metadata, and AI-metadata absence; it does not independently detect invisible pixel watermarks.
+
 ### Crop Variants
 
 `photarium_crop_variant` downloads a Photarium image's original bytes, creates a full-width crop, uploads the result as WebP, and attaches it as a variant of the source image unless `parentId` is supplied.

@@ -1,5 +1,6 @@
 import { aiContracts } from './ai.js';
 import { discoveryContracts } from './discovery.js';
+import { demarkContracts } from './demark.js';
 import { imageToolContracts } from './image-tools.js';
 import { instagramContracts } from './instagram.js';
 import { organizationContracts } from './organization.js';
@@ -8,6 +9,7 @@ import { uploadContracts } from './upload.js';
 
 export const allToolContracts = [
   ...discoveryContracts,
+  ...demarkContracts,
   ...organizationContracts,
   ...uploadContracts,
   ...instagramContracts,
