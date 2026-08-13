@@ -28,7 +28,7 @@ Options:
   --ai-display-name           For images: generate displayName only
   --ai-tags                   For images: generate tags only
   --tag-count <n>             AI tag count target (default: 4)
-  --no-semantic-tags          Explicitly skip upload-time semantic tagging
+  --no-semantic-tags          Deprecated compatibility option; tagging is always queued
   --concurrency <n>           Parallel uploads (default: 2)
   --throttle-ms <n>          Minimum delay between upload requests (global, default: 0)
   --on-duplicate <mode>      Duplicate handling for image uploads: reject|family (default: reject)
@@ -198,7 +198,8 @@ export function parseArgs(argv) {
     } else if (arg === "--ai-tags") {
       opts.aiTags = true;
     } else if (arg === "--no-semantic-tags") {
-      opts.generateSemanticTags = false;
+      // Retain the option for scripts that still pass it, but every upload is
+      // queued for semantic tagging by the shared upload service.
     } else if (arg === "--dry-run") {
       opts.dryRun = true;
     } else if (arg === "--verbose") {

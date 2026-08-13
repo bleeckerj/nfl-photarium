@@ -85,7 +85,7 @@ Redis must be running first (`npm run redis:start` or as part of the full develo
 
 Upload and description generation are checkpointed separately. Semantic tagging is owned by Photarium's durable queue: the watcher stores the returned job ID, polls its status, and marks the tags stage complete only after the worker verifies persistence. If enrichment fails after upload, the next attempt resumes from the missing stage and does not upload the image again.
 
-Semantic tagging is enabled for uploads by default. An individual workflow can explicitly send `generateSemanticTags=false`; `AUTO_TAGS_ON_UPLOAD=false` remains an emergency global disable switch. When Redis is unavailable, the image upload still succeeds and returns a visible retryable semantic-tag error.
+Semantic tagging is queued for every successful upload. The legacy `generateSemanticTags` field is accepted for compatibility and ignored; `AUTO_TAGS_ON_UPLOAD=false` remains an emergency global disable switch. When Redis is unavailable, the image upload still succeeds and returns a visible retryable semantic-tag error.
 
 Useful commands:
 

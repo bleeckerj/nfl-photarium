@@ -107,7 +107,6 @@ export async function uploadFromUrl(
     formData.append('originalUrl', options.originalUrl || url);
     if (options.sourceUrl) formData.append('sourceUrl', options.sourceUrl);
     if (options.parentId) formData.append('parentId', options.parentId);
-    if (options.generateSemanticTags === false) formData.append('generateSemanticTags', 'false');
     if (options.semanticTagCount !== undefined) formData.append('semanticTagCount', String(options.semanticTagCount));
 
     // Prefer the same upload endpoint used by the web UI / file uploads.
@@ -235,7 +234,6 @@ export async function uploadFileBase64(
   if (payload.sourcePath) formData.append('sourcePath', payload.sourcePath);
   if (payload.namespace) formData.append('namespace', payload.namespace);
   if (payload.parentId) formData.append('parentId', payload.parentId);
-  if (payload.generateSemanticTags === false) formData.append('generateSemanticTags', 'false');
   if (payload.semanticTagCount !== undefined) formData.append('semanticTagCount', String(payload.semanticTagCount));
 
   const response = await fetch(`${BASE_URL}${endpoint}`, {

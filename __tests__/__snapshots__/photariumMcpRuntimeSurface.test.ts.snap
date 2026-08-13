@@ -245,7 +245,7 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "type": "string",
       },
       "generateSemanticTags": {
-        "description": "Enable upload-time semantic tagging. Defaults to true; set false only for an explicit opt-out.",
+        "description": "Legacy compatibility field. Semantic tagging is queued for every successful upload; this field is ignored.",
         "type": "boolean",
       },
       "includeFilename": {
@@ -968,7 +968,7 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "type": "string",
       },
       "generateSemanticTags": {
-        "description": "Enable semantic tagging after upload. Defaults to true; set false only for an explicit opt-out.",
+        "description": "Legacy compatibility field. Semantic tagging is queued for every successful upload; this field is ignored.",
         "type": "boolean",
       },
       "namespace": {
@@ -1027,7 +1027,7 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "type": "string",
       },
       "generateSemanticTags": {
-        "description": "Enable semantic tagging after upload. Defaults to true; set false only for an explicit opt-out.",
+        "description": "Legacy compatibility field. Semantic tagging is queued for every successful upload; this field is ignored.",
         "type": "boolean",
       },
       "namespace": {

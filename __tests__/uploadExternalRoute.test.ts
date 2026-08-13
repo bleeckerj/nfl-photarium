@@ -89,8 +89,11 @@ describe('POST /api/upload/external', () => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('folder', 'astro-uploads');
+    formData.append('createFolder', 'true');
     formData.append('tags', 'astro,cloudflare');
     formData.append('namespace', 'astro');
+    // Legacy callers may still send this field. Uploads must remain queued.
+    formData.append('generateSemanticTags', 'false');
 
     const request = createRequest(formData);
     const response = await POST(request);
@@ -100,6 +103,7 @@ describe('POST /api/upload/external', () => {
     expect(payload.id).toBe('abc123');
     expect(payload.url).toContain('public');
     expect(payload.folder).toBe('astro-uploads');
+    expect(payload.semanticTagging.state).toBe('queued');
     expect(mockFetch).toHaveBeenCalledWith(
       'https://api.cloudflare.com/client/v4/accounts/acct/images/v1',
       expect.objectContaining({ method: 'POST' })

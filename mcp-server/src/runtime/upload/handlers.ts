@@ -268,7 +268,6 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
       if (sourceUrl) form.append('sourceUrl', sourceUrl);
       if (namespace) form.append('namespace', namespace);
       if (parentId) form.append('parentId', parentId);
-      if (generateSemanticTags === false) form.append('generateSemanticTags', 'false');
       if (semanticTagCount !== undefined) form.append('semanticTagCount', String(semanticTagCount));
       if (tags && tags.length > 0) {
         form.append('tags', tags.join(','));

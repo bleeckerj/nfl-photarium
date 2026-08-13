@@ -3,7 +3,7 @@ import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 const semanticTagProperties = {
   generateSemanticTags: {
     type: 'boolean',
-    description: 'Enable semantic tagging after upload. Defaults to true; set false only for an explicit opt-out.',
+    description: 'Legacy compatibility field. Semantic tagging is queued for every successful upload; this field is ignored.',
   },
   semanticTagCount: {
     type: 'number',
@@ -506,7 +506,7 @@ export const uploadTools: Tool[] = [
         aiMetadata: { type: 'boolean', description: 'Generate both displayName and tags for images using AI' },
         aiDisplayName: { type: 'boolean', description: 'Generate image displayName using AI' },
         aiTags: { type: 'boolean', description: 'Generate image tags using AI' },
-        generateSemanticTags: { type: 'boolean', description: 'Enable upload-time semantic tagging. Defaults to true; set false only for an explicit opt-out.' },
+        generateSemanticTags: { type: 'boolean', description: 'Legacy compatibility field. Semantic tagging is queued for every successful upload; this field is ignored.' },
         tagCount: { type: 'number', description: 'AI tag count target (default: 4)' },
         concurrency: { type: 'number', description: 'Parallel upload concurrency (default: 2)' },
         throttleMs: { type: 'number', description: 'Minimum delay between upload requests in milliseconds (global throttle)' },

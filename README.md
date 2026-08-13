@@ -278,8 +278,8 @@ worker process.
 
 Uploads use the shared `/api/upload` service by default. `/api/upload/external`
 remains a compatibility adapter and reaches the same service. Semantic tagging
-is enabled by default for every upload; callers must explicitly send
-`generateSemanticTags=false` to opt out. `AUTO_TAGS_ON_UPLOAD=false` is an
+is queued for every successful upload. The legacy `generateSemanticTags` field
+is accepted for compatibility and ignored. `AUTO_TAGS_ON_UPLOAD=false` is an
 emergency global disable switch that leaves uploads available and reports the
 disabled enrichment state.
 

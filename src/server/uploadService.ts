@@ -213,7 +213,6 @@ export async function uploadImageBuffer({
     rotatedAt,
     rotationDegrees,
     isAnimated,
-    generateSemanticTags,
     semanticTagCount,
     comfyWorkflowJson,
   } = context;
@@ -635,8 +634,12 @@ export async function uploadImageBuffer({
     }
   }
 
+  // Every successful image upload enters the semantic-tag queue. Keep the
+  // legacy request field in UploadContext for caller compatibility, but do
+  // not let an accidental per-upload false value silently create a disabled
+  // job; the global AUTO_TAGS_ON_UPLOAD switch remains the explicit emergency
+  // control for turning enrichment off at runtime.
   const semanticTagging = await enqueueSemanticTagJob(webpVariantId || imageData.id, {
-    enabled: generateSemanticTags !== false,
     count: semanticTagCount,
   });
 

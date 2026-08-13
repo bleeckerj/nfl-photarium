@@ -43,7 +43,6 @@ export async function runFilesystemIngest(options: {
   if (options.aiMetadata) args.push('--ai-metadata');
   if (options.aiDisplayName) args.push('--ai-display-name');
   if (options.aiTags) args.push('--ai-tags');
-  if (options.generateSemanticTags === false) args.push('--no-semantic-tags');
   if (typeof options.tagCount === 'number') args.push('--tag-count', String(options.tagCount));
   if (typeof options.concurrency === 'number') args.push('--concurrency', String(options.concurrency));
   if (typeof options.throttleMs === 'number') args.push('--throttle-ms', String(options.throttleMs));
