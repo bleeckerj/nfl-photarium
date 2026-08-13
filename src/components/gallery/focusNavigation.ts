@@ -29,9 +29,6 @@ export const resetGalleryPreferencesForFocus = () => {
       showBrokenOnly: false,
       embeddingFilter: 'none',
       aspectRatioFilters: [],
-      hiddenFolders: [],
-      hiddenTags: [],
-      hiddenNamespaces: [],
       dateFilter: null,
     };
     window.localStorage.setItem(GALLERY_PREFERENCES_STORAGE_KEY, JSON.stringify(reset));

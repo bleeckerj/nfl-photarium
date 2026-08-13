@@ -52,6 +52,18 @@ This document summarizes the namespace feature, its goals, where it is stored, a
     - `imageNamespace = "namespace-value"`
     - `imageNamespace = "__all__"` for the all-namespace view
 
+## Gallery visibility rules
+
+Hidden folders, tags, and namespaces are durable visibility rules stored in
+dedicated browser storage. They remain active across refreshes, application and
+browser restarts, uploads, pagination, detail navigation, focus navigation,
+and return-state restoration.
+
+`Clear filters` clears ordinary search and gallery filters. It does not show
+hidden items. A hidden namespace is shown only through `show namespace`,
+`unhide namespace`, or `clear hidden namespaces` (and their corresponding
+explicit UI controls).
+
 ## Missing Namespace Migration
 
 - Normal UI does not expose a no-namespace browse or assignment mode.

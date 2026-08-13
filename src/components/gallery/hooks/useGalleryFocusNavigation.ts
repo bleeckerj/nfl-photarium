@@ -55,8 +55,8 @@ export const useGalleryFocusNavigation = ({
     clearColorSearch();
     setFocusNotice(
       focusTarget.namespace === '__all__'
-        ? 'Locating image in all namespaces; filters were cleared for this focused asset.'
-        : 'Locating image in this namespace; filters were cleared for this focused asset.'
+        ? 'Locating image in all namespaces; ordinary filters were cleared and hidden visibility was preserved.'
+        : 'Locating image in this namespace; ordinary filters were cleared and hidden visibility was preserved.'
     );
   }, [clearColorSearch, clearFilters, initialFocusTargetRef, namespace]);
 

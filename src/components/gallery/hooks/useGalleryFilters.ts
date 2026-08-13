@@ -456,13 +456,11 @@ export function useGalleryFilters({
     showComfyOnly ||
     embeddingFilter !== 'none' ||
     aspectRatioFilters.length > 0 ||
-    hiddenFolders.length > 0 ||
-    hiddenTags.length > 0 ||
-    hiddenNamespaces.length > 0 ||
     dateFilter !== null
   );
 
-  // Clear all filters
+  // Clear ordinary gallery filters. Hidden visibility rules are durable user
+  // preferences and have explicit show/unhide operations of their own.
   const clearFilters = useCallback(() => {
     setSearchTerm('');
     setSelectedFolder('all');
@@ -477,9 +475,6 @@ export function useGalleryFilters({
     setShowComfyOnly(false);
     setEmbeddingFilter('none');
     setAspectRatioFilters([]);
-    setHiddenFolders([]);
-    setHiddenTags([]);
-    setHiddenNamespaces([]);
     setDateFilter(null);
   }, []);
 

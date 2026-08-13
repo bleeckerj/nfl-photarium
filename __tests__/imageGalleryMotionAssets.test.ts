@@ -4,7 +4,10 @@ import {
   getDefaultStoredPreferences,
   getStoredPreferences,
 } from '@/components/ImageGallery';
-import { buildCanonicalGalleryHref } from '@/components/gallery/focusNavigation';
+import {
+  buildCanonicalGalleryHref,
+  resetGalleryPreferencesForFocus,
+} from '@/components/gallery/focusNavigation';
 import {
   getFreshGalleryReturnState,
   saveGalleryReturnState,
@@ -182,7 +185,8 @@ describe('ImageGallery motion assets helpers', () => {
   });
 
   it('restores the motion-assets filter from gallery return state', () => {
-    installWindow();
+    const { localStorage } = installWindow();
+    localStorage.setItem('galleryHiddenNamespaces', JSON.stringify(['durable-namespace']));
     saveGalleryReturnState({
       namespace: 'studio',
       savedAt: Date.now(),
@@ -206,6 +210,7 @@ describe('ImageGallery motion assets helpers', () => {
         dateFilter: null,
         hiddenFolders: [],
         hiddenTags: [],
+        hiddenNamespaces: ['stale-return-namespace'],
         pageSize: 30,
         currentPage: 1,
       },
@@ -216,6 +221,20 @@ describe('ImageGallery motion assets helpers', () => {
 
     expect(restoredState?.filters?.showMotionAssetsOnly).toBe(true);
     expect(prefs.showMotionAssetsOnly).toBe(true);
+    expect(prefs.hiddenNamespaces).toEqual(['durable-namespace']);
+  });
+
+  it('keeps dedicated hidden visibility through focus preference resets', () => {
+    const { localStorage } = installWindow('?gns=__all__&focus=img-1');
+    localStorage.setItem('galleryHiddenFolders', JSON.stringify(['durable-folder']));
+    localStorage.setItem('galleryHiddenTags', JSON.stringify(['durable-tag']));
+    localStorage.setItem('galleryHiddenNamespaces', JSON.stringify(['durable-namespace']));
+
+    resetGalleryPreferencesForFocus();
+
+    expect(JSON.parse(localStorage.getItem('galleryHiddenFolders') ?? 'null')).toEqual(['durable-folder']);
+    expect(JSON.parse(localStorage.getItem('galleryHiddenTags') ?? 'null')).toEqual(['durable-tag']);
+    expect(JSON.parse(localStorage.getItem('galleryHiddenNamespaces') ?? 'null')).toEqual(['durable-namespace']);
   });
 
   it('neutralizes restrictive stored filters for canonical gallery focus mode', () => {
@@ -244,6 +263,9 @@ describe('ImageGallery motion assets helpers', () => {
         viewMode: 'list',
       })
     );
+    localStorage.setItem('galleryHiddenFolders', JSON.stringify(['durable-folder']));
+    localStorage.setItem('galleryHiddenTags', JSON.stringify(['durable-tag']));
+    localStorage.setItem('galleryHiddenNamespaces', JSON.stringify(['durable-namespace']));
     saveGalleryReturnState({
       namespace: '__all__',
       savedAt: Date.now(),
@@ -268,6 +290,7 @@ describe('ImageGallery motion assets helpers', () => {
         dateFilter: { startDate: '2026-03-01', endDate: '2026-03-02' },
         hiddenFolders: ['ReturnHidden'],
         hiddenTags: ['return-private'],
+        hiddenNamespaces: ['return-namespace'],
         pageSize: 60,
         currentPage: 9,
       },
@@ -290,8 +313,9 @@ describe('ImageGallery motion assets helpers', () => {
       showComfyOnly: false,
       embeddingFilter: 'none',
       aspectRatioFilters: [],
-      hiddenFolders: [],
-      hiddenTags: [],
+      hiddenFolders: ['durable-folder'],
+      hiddenTags: ['durable-tag'],
+      hiddenNamespaces: ['durable-namespace'],
       dateFilter: null,
       currentPage: 1,
     });

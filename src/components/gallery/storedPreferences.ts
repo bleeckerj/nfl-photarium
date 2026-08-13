@@ -36,7 +36,7 @@ export type StoredGalleryPreferences = {
   aspectRatioFilters: AspectRatioClass[];
   hiddenFolders: string[];
   hiddenTags: string[];
-  hiddenNamespaces?: string[];
+  hiddenNamespaces: string[];
   showCli: boolean;
   controlsVisible: boolean;
   pageSize: number;
@@ -67,6 +67,7 @@ export const getDefaultStoredPreferences = (): StoredGalleryPreferences => ({
   aspectRatioFilters: [],
   hiddenFolders: [],
   hiddenTags: [],
+  hiddenNamespaces: [],
   showCli: true,
   controlsVisible: true,
   pageSize: DEFAULT_PAGE_SIZE,
@@ -193,9 +194,8 @@ export const getStoredPreferences = (
     next.embeddingFilter = initialGalleryReturnState.filters.embeddingFilter;
     next.aspectRatioFilters = initialGalleryReturnState.filters.aspectRatioFilters;
     next.dateFilter = initialGalleryReturnState.filters.dateFilter;
-    next.hiddenFolders = initialGalleryReturnState.filters.hiddenFolders;
-    next.hiddenTags = initialGalleryReturnState.filters.hiddenTags;
-    next.hiddenNamespaces = initialGalleryReturnState.filters.hiddenNamespaces;
+    // Hidden visibility is persisted independently from return-state filters.
+    // A session snapshot may be stale after the user hides or shows a rule.
     next.pageSize = initialGalleryReturnState.filters.pageSize;
     next.currentPage = initialGalleryReturnState.filters.currentPage;
     return next;
@@ -245,9 +245,6 @@ export const neutralizeStoredPreferenceFilters = (
   showBrokenOnly: false,
   embeddingFilter: 'none',
   aspectRatioFilters: [],
-  hiddenFolders: [],
-  hiddenTags: [],
-  hiddenNamespaces: [],
   dateFilter: null,
   currentPage: 1,
 });
