@@ -456,6 +456,11 @@ export function createGalleryCommandRunner(options: CommandRunnerOptions) {
         setStatusLine('Provide a folder name to hide.');
         return;
       }
+      const namespaceLikeFolder = /^namespace\s+(.+)$/i.exec(folderName);
+      if (namespaceLikeFolder) {
+        setStatusLine(`Use "hide namespace ${namespaceLikeFolder[1].trim()}" for a namespace.`);
+        return;
+      }
       const added = onHideFolder(folderName);
       setStatusLine(added ? `Hiding folder "${folderName}".` : `"${folderName}" is already hidden.`);
       if (added) {
@@ -469,6 +474,11 @@ export function createGalleryCommandRunner(options: CommandRunnerOptions) {
       const folderName = showMatch[2].trim();
       if (!folderName) {
         setStatusLine('Provide a folder name to show.');
+        return;
+      }
+      const namespaceLikeFolder = /^namespace\s+(.+)$/i.exec(folderName);
+      if (namespaceLikeFolder) {
+        setStatusLine(`Use "show namespace ${namespaceLikeFolder[1].trim()}" for a namespace.`);
         return;
       }
       const removed = onUnhideFolder(folderName);

@@ -21,16 +21,15 @@ import type { GalleryPreferences, BrokenAudit } from './types';
  */
 const isBrowser = () => typeof window !== 'undefined';
 
-/**
- * Load hidden folders from localStorage
- */
-export const loadHiddenFolders = (): string[] => {
+const LEGACY_NAMESPACE_FOLDER_PATTERN = /^namespace\s+(.+)$/i;
+
+const readStoredStringList = (key: string, label: string): string[] => {
   if (!isBrowser()) return [];
-  
+
   try {
-    const storedValue = window.localStorage.getItem(STORAGE_KEYS.HIDDEN_FOLDERS);
+    const storedValue = window.localStorage.getItem(key);
     if (!storedValue) return [];
-    
+
     const parsed = JSON.parse(storedValue);
     if (Array.isArray(parsed)) {
       return parsed
@@ -39,9 +38,26 @@ export const loadHiddenFolders = (): string[] => {
         .filter(Boolean);
     }
   } catch (error) {
-    console.warn('Failed to parse hidden folders', error);
+    console.warn(`Failed to parse ${label}`, error);
   }
   return [];
+};
+
+const getLegacyNamespaceFromFolder = (folder: string): string | null => {
+  const match = LEGACY_NAMESPACE_FOLDER_PATTERN.exec(folder);
+  return match?.[1]?.trim() || null;
+};
+
+/**
+ * Load hidden folders from localStorage
+ */
+export const loadHiddenFolders = (): string[] => {
+  // Older command state could persist "namespace <name>" as a folder when
+  // the namespace command was entered through the generic folder path. Keep
+  // that malformed token from behaving like a real folder; loadHiddenNamespaces
+  // promotes it into the durable namespace visibility list instead.
+  return readStoredStringList(STORAGE_KEYS.HIDDEN_FOLDERS, 'hidden folders')
+    .filter(folder => !getLegacyNamespaceFromFolder(folder));
 };
 
 /**
@@ -61,23 +77,7 @@ export const persistHiddenFolders = (folders: string[]): void => {
  * Load hidden tags from localStorage
  */
 export const loadHiddenTags = (): string[] => {
-  if (!isBrowser()) return [];
-  
-  try {
-    const storedValue = window.localStorage.getItem(STORAGE_KEYS.HIDDEN_TAGS);
-    if (!storedValue) return [];
-    
-    const parsed = JSON.parse(storedValue);
-    if (Array.isArray(parsed)) {
-      return parsed
-        .filter((item): item is string => typeof item === 'string')
-        .map(item => item.trim())
-        .filter(Boolean);
-    }
-  } catch (error) {
-    console.warn('Failed to parse hidden tags', error);
-  }
-  return [];
+  return readStoredStringList(STORAGE_KEYS.HIDDEN_TAGS, 'hidden tags');
 };
 
 /**
@@ -97,23 +97,15 @@ export const persistHiddenTags = (tags: string[]): void => {
  * Load namespaces hidden from the all-namespaces gallery view.
  */
 export const loadHiddenNamespaces = (): string[] => {
-  if (!isBrowser()) return [];
+  const storedNamespaces = readStoredStringList(
+    STORAGE_KEYS.HIDDEN_NAMESPACES,
+    'hidden namespaces'
+  );
+  const migratedNamespaces = readStoredStringList(STORAGE_KEYS.HIDDEN_FOLDERS, 'hidden folders')
+    .map(getLegacyNamespaceFromFolder)
+    .filter((namespace): namespace is string => Boolean(namespace));
 
-  try {
-    const storedValue = window.localStorage.getItem(STORAGE_KEYS.HIDDEN_NAMESPACES);
-    if (!storedValue) return [];
-
-    const parsed = JSON.parse(storedValue);
-    if (Array.isArray(parsed)) {
-      return parsed
-        .filter((item): item is string => typeof item === 'string')
-        .map(item => item.trim())
-        .filter(Boolean);
-    }
-  } catch (error) {
-    console.warn('Failed to parse hidden namespaces', error);
-  }
-  return [];
+  return Array.from(new Set([...storedNamespaces, ...migratedNamespaces]));
 };
 
 /**

@@ -4,6 +4,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it } from 'vitest';
 import { useGalleryFilters } from '@/components/gallery/hooks/useGalleryFilters';
+import { loadHiddenFolders, loadHiddenNamespaces } from '@/components/gallery/storage';
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -135,5 +136,17 @@ describe('gallery hidden visibility persistence', () => {
     await act(async () => latest?.clearHiddenNamespaces());
     expect(latest?.hiddenNamespaces).toEqual([]);
     expect(JSON.parse(window.localStorage.getItem('galleryHiddenNamespaces') ?? 'null')).toEqual([]);
+  });
+
+  it('repairs legacy namespace entries that were stored in the hidden-folder list', () => {
+    storage = installStorage();
+    storage.setItem(
+      'galleryHiddenFolders',
+      JSON.stringify(['archive', 'namespace cf-exports-for-mail'])
+    );
+    storage.setItem('galleryHiddenNamespaces', JSON.stringify([]));
+
+    expect(loadHiddenFolders()).toEqual(['archive']);
+    expect(loadHiddenNamespaces()).toEqual(['cf-exports-for-mail']);
   });
 });
