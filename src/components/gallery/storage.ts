@@ -48,6 +48,16 @@ const getLegacyNamespaceFromFolder = (folder: string): string | null => {
   return match?.[1]?.trim() || null;
 };
 
+export const extractLegacyNamespacesFromFolders = (folders: string[]): string[] =>
+  Array.from(new Set(
+    folders
+      .map(getLegacyNamespaceFromFolder)
+      .filter((namespace): namespace is string => Boolean(namespace))
+  ));
+
+export const removeLegacyNamespaceFolders = (folders: string[]): string[] =>
+  folders.filter(folder => !getLegacyNamespaceFromFolder(folder));
+
 /**
  * Load hidden folders from localStorage
  */
@@ -56,8 +66,7 @@ export const loadHiddenFolders = (): string[] => {
   // the namespace command was entered through the generic folder path. Keep
   // that malformed token from behaving like a real folder; loadHiddenNamespaces
   // promotes it into the durable namespace visibility list instead.
-  return readStoredStringList(STORAGE_KEYS.HIDDEN_FOLDERS, 'hidden folders')
-    .filter(folder => !getLegacyNamespaceFromFolder(folder));
+  return removeLegacyNamespaceFolders(readStoredStringList(STORAGE_KEYS.HIDDEN_FOLDERS, 'hidden folders'));
 };
 
 /**
@@ -101,9 +110,9 @@ export const loadHiddenNamespaces = (): string[] => {
     STORAGE_KEYS.HIDDEN_NAMESPACES,
     'hidden namespaces'
   );
-  const migratedNamespaces = readStoredStringList(STORAGE_KEYS.HIDDEN_FOLDERS, 'hidden folders')
-    .map(getLegacyNamespaceFromFolder)
-    .filter((namespace): namespace is string => Boolean(namespace));
+  const migratedNamespaces = extractLegacyNamespacesFromFolders(
+    readStoredStringList(STORAGE_KEYS.HIDDEN_FOLDERS, 'hidden folders')
+  );
 
   return Array.from(new Set([...storedNamespaces, ...migratedNamespaces]));
 };

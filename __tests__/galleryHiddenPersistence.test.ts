@@ -149,4 +149,32 @@ describe('gallery hidden visibility persistence', () => {
     expect(loadHiddenFolders()).toEqual(['archive']);
     expect(loadHiddenNamespaces()).toEqual(['cf-exports-for-mail']);
   });
+
+  it('repairs malformed hidden-folder state supplied by a stale session snapshot', async () => {
+    storage = installStorage();
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(
+        React.createElement(function Harness() {
+          latest = useGalleryFilters({
+            images: [image],
+            serverPagination: null,
+            initialPreferences: {
+              ...initialPreferences,
+              hiddenFolders: ['namespace cf-exports-for-mail'],
+              hiddenNamespaces: [],
+            },
+            brokenImageIds: new Set(),
+          });
+          return null;
+        })
+      );
+    });
+
+    expect(latest?.hiddenFolders).toEqual([]);
+    expect(latest?.hiddenNamespaces).toEqual(['cf-exports-for-mail']);
+  });
 });

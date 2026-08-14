@@ -16,6 +16,8 @@ import {
   persistHiddenFolders,
   persistHiddenNamespaces,
   persistHiddenTags,
+  extractLegacyNamespacesFromFolders,
+  removeLegacyNamespaceFolders,
 } from '../storage';
 import { computeDuplicateGroups, buildChildrenMap, buildFamilySummaryMap, formatDateRangeLabel } from '../utils';
 import { DEFAULT_PAGE_SIZE } from '../constants';
@@ -179,14 +181,19 @@ export function useGalleryFilters({
   const [pageSize, setPageSize] = useState(initialPreferences.pageSize ?? DEFAULT_PAGE_SIZE);
   
   // Hidden folders/tags
+  const initialHiddenFolders = initialPreferences.hiddenFolders ?? loadHiddenFolders();
+  const initialLegacyNamespaces = extractLegacyNamespacesFromFolders(initialHiddenFolders);
   const [hiddenFolders, setHiddenFolders] = useState<string[]>(
-    () => initialPreferences.hiddenFolders ?? loadHiddenFolders()
+    () => removeLegacyNamespaceFolders(initialHiddenFolders)
   );
   const [hiddenTags, setHiddenTags] = useState<string[]>(
     () => initialPreferences.hiddenTags ?? loadHiddenTags()
   );
   const [hiddenNamespaces, setHiddenNamespaces] = useState<string[]>(
-    () => initialPreferences.hiddenNamespaces ?? loadHiddenNamespaces()
+    () => Array.from(new Set([
+      ...(initialPreferences.hiddenNamespaces ?? loadHiddenNamespaces()),
+      ...initialLegacyNamespaces,
+    ]))
   );
   const didInitFilterPageRef = useRef(false);
 
