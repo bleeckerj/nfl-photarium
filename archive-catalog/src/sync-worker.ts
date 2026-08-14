@@ -9,6 +9,8 @@ interface SyncWorkerData {
   allowLockedCatalog: boolean;
   checkAvailability: boolean;
   stageCatalogs: boolean;
+  preservationRoot?: string;
+  verifyCatalogs: boolean;
   catalogPaths?: string[];
 }
 
@@ -31,6 +33,8 @@ try {
     allowLockedCatalog: input.allowLockedCatalog,
     checkAvailability: input.checkAvailability,
     stageCatalogs: input.stageCatalogs,
+    preservationRoot: input.preservationRoot,
+    verifyCatalogs: input.verifyCatalogs,
     catalogPaths: input.catalogPaths,
   });
   parentPort.postMessage({ status: 'complete', result } satisfies WorkerMessage);

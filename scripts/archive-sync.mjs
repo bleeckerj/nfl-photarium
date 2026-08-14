@@ -14,6 +14,7 @@ const response = await request('/sync', {
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify({
     hashFiles: process.argv.includes('--hash'),
+    verifyCatalogs: process.argv.includes('--verify-catalogs'),
     allowLockedCatalog: process.argv.includes('--allow-locked'),
     ...(catalogPaths.length ? { catalogPaths } : {}),
   }),

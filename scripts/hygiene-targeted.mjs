@@ -115,8 +115,14 @@ if (lintFiles.length > 0) {
 }
 
 const testFiles = unique(files.flatMap(testsForFile));
-if (testFiles.length > 0) {
-  run('npx', ['vitest', 'run', ...testFiles]);
-} else {
+const archiveTestFiles = testFiles.filter((file) => file.startsWith('archive-catalog/'));
+const rootTestFiles = testFiles.filter((file) => !file.startsWith('archive-catalog/'));
+if (archiveTestFiles.length > 0) {
+  run('npm', ['--prefix', 'archive-catalog', 'test']);
+}
+if (rootTestFiles.length > 0) {
+  run('npx', ['vitest', 'run', ...rootTestFiles]);
+}
+if (testFiles.length === 0) {
   console.log('[hygiene:targeted] no mapped targeted tests');
 }

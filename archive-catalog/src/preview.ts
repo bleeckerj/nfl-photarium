@@ -14,6 +14,7 @@ export interface PreviewInfo {
   width: number | null;
   height: number | null;
   createdAt: string;
+  stale: boolean;
 }
 
 async function embeddedPreview(sourcePath: string): Promise<Buffer | null> {
@@ -42,16 +43,17 @@ async function renderPreview(sourcePath: string): Promise<{ data: Buffer; width:
 }
 
 export async function ensurePreview(database: DatabaseSync, assetId: string, previewRoot: string): Promise<PreviewInfo | null> {
-  const existing = database.prepare('SELECT asset_id AS assetId, path, mime_type AS mimeType, width, height, created_at AS createdAt FROM previews WHERE asset_id = ? AND kind = ?').get(assetId, 'thumbnail') as PreviewInfo | undefined;
+  const existing = database.prepare('SELECT asset_id AS assetId, path, mime_type AS mimeType, width, height, source_mtime AS sourceMtime, created_at AS createdAt FROM previews WHERE asset_id = ? AND kind = ?').get(assetId, 'thumbnail') as (Omit<PreviewInfo, 'stale'> & { sourceMtime: number | null }) | undefined;
+  const asset = getAsset(database, assetId);
   if (existing) {
     try {
       await stat(existing.path);
-      return existing;
+      if (!asset?.sourceAvailable || asset.sourceMtime === existing.sourceMtime) return { ...existing, stale: !asset?.sourceAvailable };
+      database.prepare('DELETE FROM previews WHERE asset_id = ? AND kind = ?').run(assetId, 'thumbnail');
     } catch {
       database.prepare('DELETE FROM previews WHERE asset_id = ? AND kind = ?').run(assetId, 'thumbnail');
     }
   }
-  const asset = getAsset(database, assetId);
   if (!asset?.sourceAvailable || !asset.absolutePath) return null;
   await mkdir(previewRoot, { recursive: true });
   let rendered: Awaited<ReturnType<typeof renderPreview>>;
@@ -68,7 +70,7 @@ export async function ensurePreview(database: DatabaseSync, assetId: string, pre
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(asset_id, kind) DO UPDATE SET path = excluded.path, mime_type = excluded.mime_type, width = excluded.width, height = excluded.height, source_mtime = excluded.source_mtime, created_at = excluded.created_at
   `).run(assetId, 'thumbnail', previewPath, 'image/jpeg', rendered.width, rendered.height, asset.sourceMtime, createdAt);
-  return { assetId, path: previewPath, mimeType: 'image/jpeg', width: rendered.width, height: rendered.height, createdAt };
+  return { assetId, path: previewPath, mimeType: 'image/jpeg', width: rendered.width, height: rendered.height, createdAt, stale: false };
 }
 
 export async function readPreview(info: PreviewInfo): Promise<Buffer> {

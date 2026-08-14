@@ -63,3 +63,12 @@ export interface SearchResult extends CatalogRecord {
   matchedFields: string[];
   rank: number;
 }
+
+export interface PreservationStatus {
+  required: boolean;
+  root: string | null;
+  snapshots: number;
+  latestExport: { id: string; createdAt: string; path: string } | null;
+  lastVerification: { createdAt: string; ok: boolean; failures: string[] } | null;
+  metadataCoverageVersion: string;
+}

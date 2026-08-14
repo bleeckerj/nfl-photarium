@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { access } from 'node:fs/promises';
 import { Worker } from 'node:worker_threads';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -9,12 +9,14 @@ import { openCatalogDatabase } from './db.js';
 import { ensurePreview, readPreview } from './preview.js';
 import { getAsset, listCollections, listKeywords, saveAnnotation, searchAssets } from './search.js';
 import { catalogStatus, listCatalogSummaries, type SyncResult } from './sync.js';
+import { preservationStatus, restorePortableExport, validatePreservationRoot, verifyPreservation } from './preservation.js';
 import type { SearchFilters } from './types.js';
 
 const databasePath = process.env.ARCHIVE_DATABASE_PATH ?? '/data/catalog.sqlite';
 const previewRoot = process.env.ARCHIVE_PREVIEW_ROOT ?? '/data/previews';
 const backupRoot = process.env.ARCHIVE_BACKUP_ROOT ?? '/data/backups';
 const sourceRoot = process.env.ARCHIVE_SOURCE_ROOT ?? '/sources/photography-1';
+const preservationRoot = process.env.ARCHIVE_PRESERVATION_ROOT ?? null;
 const port = Number(process.env.ARCHIVE_PORT ?? 8790);
 const database = openCatalogDatabase(databasePath);
 
@@ -49,6 +51,8 @@ function runSyncWorker(options: {
     allowLockedCatalog: boolean;
     checkAvailability: boolean;
     stageCatalogs: boolean;
+    preservationRoot: string;
+    verifyCatalogs: boolean;
     catalogPaths?: string[];
 }): Promise<SyncResult> {
   return new Promise((resolveResult, reject) => {
@@ -123,6 +127,19 @@ function asFilters(body: unknown): SearchFilters {
   };
 }
 
+function assetWithPreviewState(assetId: string) {
+  const asset = getAsset(database, assetId);
+  if (!asset) return null;
+  const preview = database.prepare('SELECT source_mtime AS sourceMtime FROM previews WHERE asset_id = ? AND kind = ?').get(assetId, 'thumbnail') as { sourceMtime: number | null } | undefined;
+  return {
+    ...asset,
+    preview: {
+      available: Boolean(preview),
+      stale: Boolean(preview) && (!asset.sourceAvailable || preview?.sourceMtime !== asset.sourceMtime),
+    },
+  };
+}
+
 export function createArchiveServer() {
   return createServer(async (request, response) => {
     try {
@@ -132,7 +149,7 @@ export function createArchiveServer() {
         return;
       }
       if (request.method === 'GET' && parts[0] === 'status') {
-        sendJson(response, 200, { ...catalogStatus(database), sourceRoot, sourceConnected: await sourceConnected(), databasePath, previewRoot, backupRoot, sync: syncJob });
+        sendJson(response, 200, { ...catalogStatus(database), sourceRoot, sourceConnected: await sourceConnected(), databasePath, previewRoot, backupRoot, preservation: preservationStatus(database, preservationRoot), sync: syncJob });
         return;
       }
       if (request.method === 'GET' && parts[0] === 'catalogs') {
@@ -140,6 +157,10 @@ export function createArchiveServer() {
         return;
       }
       if (request.method === 'POST' && parts[0] === 'sync') {
+        if (!preservationRoot) {
+          sendError(response, 500, 'ARCHIVE_PRESERVATION_ROOT is required. Configure the local preservation bind mount before syncing.');
+          return;
+        }
         if (!(await sourceConnected())) {
           sendError(response, 409, 'The photography source is unavailable; cached catalog data was left unchanged.');
           return;
@@ -165,6 +186,8 @@ export function createArchiveServer() {
           allowLockedCatalog: input.allowLockedCatalog === true,
           checkAvailability: input.checkAvailability === true,
           stageCatalogs: input.stageCatalogs !== false,
+          preservationRoot,
+          verifyCatalogs: input.verifyCatalogs === true,
           catalogPaths: Array.isArray(input.catalogPaths) ? input.catalogPaths.filter((item): item is string => typeof item === 'string') : undefined
         };
         void runSyncWorker({ ...options, databasePath }).then((result) => {
@@ -173,6 +196,30 @@ export function createArchiveServer() {
           syncJob = { ...syncJob, status: 'failed', finishedAt: new Date().toISOString(), error: error instanceof Error ? error.message : String(error) };
         });
         sendJson(response, 202, { status: 'started', jobId });
+        return;
+      }
+      if (request.method === 'POST' && parts[0] === 'verify') {
+        if (!preservationRoot) {
+          sendError(response, 500, 'ARCHIVE_PRESERVATION_ROOT is required. Configure the local preservation bind mount before verifying.');
+          return;
+        }
+        sendJson(response, 200, await verifyPreservation(database));
+        return;
+      }
+      if (request.method === 'POST' && parts[0] === 'restore') {
+        if (!preservationRoot) {
+          sendError(response, 500, 'ARCHIVE_PRESERVATION_ROOT is required. Configure the local preservation bind mount before restoring.');
+          return;
+        }
+        const body = await requestBody(request);
+        const exportId = body && typeof body === 'object' && typeof (body as Record<string, unknown>).exportId === 'string'
+          ? (body as Record<string, unknown>).exportId as string
+          : '';
+        if (!/^[A-Za-z0-9-]+$/.test(exportId)) {
+          sendError(response, 400, 'A portable export ID is required.');
+          return;
+        }
+        sendJson(response, 200, { restored: await restorePortableExport(database, join(preservationRoot, 'exports', exportId)) });
         return;
       }
       if (request.method === 'POST' && parts[0] === 'search') {
@@ -202,7 +249,7 @@ export function createArchiveServer() {
           return;
         }
         if (request.method === 'GET') {
-          const asset = getAsset(database, assetId);
+          const asset = assetWithPreviewState(assetId);
           if (!asset) {
             sendError(response, 404, 'Asset not found.');
             return;
@@ -231,8 +278,14 @@ export function createArchiveServer() {
 }
 
 export function startArchiveServer(): void {
-  createArchiveServer().listen(port, '0.0.0.0', () => {
-    console.log(`photo-archive-catalog listening on ${port}`);
+  if (!preservationRoot) throw new Error('ARCHIVE_PRESERVATION_ROOT is required; configure a writable local preservation mount.');
+  void validatePreservationRoot(preservationRoot, sourceRoot).then(() => {
+    createArchiveServer().listen(port, '0.0.0.0', () => {
+      console.log(`photo-archive-catalog listening on ${port}`);
+    });
+  }).catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
   });
 }
 

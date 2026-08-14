@@ -6,6 +6,7 @@ import { basename, join } from 'node:path';
 import { catalogKey, discoverCatalogs, parseLightroomCatalog, type DiscoveredCatalog, type ParsedCatalog } from './lightroom.js';
 import { rebuildAssetSearchIndex } from './db.js';
 import type { CatalogSummary } from './types.js';
+import { catalogSnapshotIsCurrent, preserveArchive, type PreservationResult } from './preservation.js';
 
 export interface SyncOptions {
   sourceRoot: string;
@@ -15,6 +16,8 @@ export interface SyncOptions {
   allowLockedCatalog?: boolean;
   checkAvailability?: boolean;
   stageCatalogs?: boolean;
+  preservationRoot?: string;
+  verifyCatalogs?: boolean;
 }
 
 export interface SyncResult {
@@ -23,6 +26,7 @@ export interface SyncResult {
   assets: number;
   availableAssets: number;
   warnings: string[];
+  preservation?: PreservationResult;
 }
 
 async function hashFile(path: string): Promise<string> {
@@ -140,6 +144,7 @@ export async function syncArchive(options: SyncOptions): Promise<SyncResult> {
   const warnings: string[] = [];
   let assets = 0;
   let availableAssets = 0;
+  const preservedCatalogs: Array<{ catalog: DiscoveredCatalog; indexedAssets: number }> = [];
   for (const catalog of selected) {
     console.log(`[archive-sync] importing ${catalog.path}`);
     if (!options.allowLockedCatalog) {
@@ -158,9 +163,11 @@ export async function syncArchive(options: SyncOptions): Promise<SyncResult> {
         FROM assets a JOIN catalogs c ON c.id = a.catalog_id
         WHERE c.path = ? AND c.size = ? AND c.mtime = ?
       `).get(catalog.path, catalog.size, catalog.mtime) as { assets: number; availableAssets: number } | undefined;
-      if (existing && Number(existing.assets) > 0) {
+      const snapshotCurrent = !options.preservationRoot || !options.verifyCatalogs || await catalogSnapshotIsCurrent(options.database, catalog, true);
+      if (existing && Number(existing.assets) > 0 && snapshotCurrent) {
         assets += Number(existing.assets);
         availableAssets += Number(existing.availableAssets);
+        preservedCatalogs.push({ catalog, indexedAssets: Number(existing.assets) });
         console.log(`[archive-sync] skipped unchanged catalog ${catalog.path} (${existing.assets} assets already indexed)`);
         continue;
       }
@@ -173,6 +180,7 @@ export async function syncArchive(options: SyncOptions): Promise<SyncResult> {
       options.database.exec('COMMIT');
       assets += result.assets;
       availableAssets += result.availableAssets;
+      preservedCatalogs.push({ catalog, indexedAssets: result.assets });
       if (result.warning) warnings.push(`${catalog.path}: ${result.warning}`);
       console.log(`[archive-sync] indexed ${result.assets} assets (${result.availableAssets} source files available) from ${catalog.path}`);
     } catch (error) {
@@ -180,7 +188,10 @@ export async function syncArchive(options: SyncOptions): Promise<SyncResult> {
       throw error;
     }
   }
-  return { sourceRoot: options.sourceRoot, catalogs: selected.length, assets, availableAssets, warnings };
+  const preservation = options.preservationRoot
+    ? await preserveArchive(options.database, options.preservationRoot, options.sourceRoot, preservedCatalogs, options.verifyCatalogs === true)
+    : undefined;
+  return { sourceRoot: options.sourceRoot, catalogs: selected.length, assets, availableAssets, warnings, preservation };
 }
 
 export function listCatalogSummaries(database: DatabaseSync): CatalogSummary[] {

@@ -2,7 +2,7 @@
 
 The Photo Archive Catalog is an offline, read-only search index for Lightroom catalogs and the photograph files stored on the `Photography 1` NAS. It gives Photarium and its MCP server a durable metadata surface that remains useful when the NAS is disconnected.
 
-The archive has its own service, database, preview cache, and search vocabulary. The global Photarium catalog remains focused on the actively managed Cloudflare Images collection.
+The archive has its own service, database, preview cache, preservation store, and search vocabulary. The global Photarium catalog remains focused on the actively managed Cloudflare Images collection.
 
 ## What this provides
 
@@ -14,6 +14,7 @@ The archive has its own service, database, preview cache, and search vocabulary.
 - MCP tools for search, metadata inspection, previews, keyword/collection browsing, and annotations.
 - Read-only source handling with active-catalog lock protection.
 - Separate persistent storage for metadata, previews, and backup snapshots.
+- Immutable local copies of imported Lightroom catalogs and portable metadata exports that remain useful without Lightroom.
 
 ## Architecture
 
@@ -24,6 +25,7 @@ flowchart LR
   Catalog["photo-archive-catalog\nNode 25 + SQLite/FTS5"]
   DB["catalog.sqlite\nDocker volume"]
   Preview["cached previews\nDocker volume"]
+  Preserve["local preservation root\ncatalog snapshots and NDJSON exports"]
   MCP["Photarium MCP server"]
   Agent["MCP client or assistant"]
 
@@ -31,6 +33,7 @@ flowchart LR
   Compose --> Catalog
   Catalog --> DB
   Catalog --> Preview
+  Catalog --> Preserve
   Agent --> MCP
   MCP -->|ARCHIVE_CATALOG_BASE_URL| Catalog
 ```
@@ -39,15 +42,18 @@ The catalog service listens on port `8790`. The MCP server reaches it through `A
 
 ## Storage model
 
-The Compose service uses three named Docker volumes:
+The Compose service uses three named Docker volumes and one required local bind mount:
 
 | Volume | Container path | Contents |
 | --- | --- | --- |
 | `archive_catalog_data` | `/data` | SQLite database and SQLite journal/WAL files |
 | `archive_catalog_previews` | `/data/previews` | Generated JPEG thumbnails |
 | `archive_catalog_backups` | `/data/backups` | Reserved backup snapshots |
+| `ARCHIVE_PRESERVATION_HOST_PATH` | `/preservation` | Immutable `.lrcat` snapshots and portable metadata exports |
 
-The NAS is mounted at `/sources/photography-1` with read-only access. The service never copies the original photographs into Docker storage.
+The NAS is mounted at `/sources/photography-1` with read-only access. The service never copies the original photographs, preview bundles, lock files, or WAL files into Docker storage.
+
+`ARCHIVE_PRESERVATION_HOST_PATH` is required and must point to a writable local directory outside the NAS source mount and outside Docker volumes. Put this directory under the Mac's independent local backup regime. The service refuses to start or sync without it.
 
 The database contains derived metadata and provenance. It does not replace Lightroom and it does not write Lightroom catalog records, XMP sidecars, ratings, flags, keywords, or develop settings.
 
@@ -93,6 +99,8 @@ Use that override only after confirming Lightroom is closed and the lock file is
 If the NAS is unavailable, the HTTP sync endpoint returns `409` and leaves the existing database untouched. Missing individual files remain in the database with `sourceAvailable: false`; sync does not delete them.
 
 The Docker service stages each selected `.lrcat` file into its local data volume before reading it, then removes the temporary copy. This avoids slow random SQLite reads across the NAS; the catalog path and stable asset IDs continue to use the original NAS path.
+
+After a successful catalog import, the service stores an immutable SHA-256-addressed `.lrcat` snapshot in `/preservation/catalogs/<catalog-id>/`. It then writes a checksummed export bundle under `/preservation/exports/`. These artifacts provide independent metadata access and future re-indexing without Lightroom; they do not replace Lightroom's editing environment.
 
 ## What is imported
 
@@ -157,7 +165,9 @@ The repository wrapper first reuses catalog paths already registered in the arch
 
 The command starts a background worker job, polls `/status`, and reports each catalog and its indexed/available asset counts. Each catalog write is transactional, so a failed catalog write rolls back that catalog while earlier completed catalogs remain available. A second sync request is rejected while one is already running.
 
-The normal Docker import indexes Lightroom metadata and paths without probing every source file on the NAS. This keeps the inventory usable when the source is remote or intermittently connected; previews check the source lazily when requested. To perform an exhaustive availability pass through the HTTP API, set `checkAvailability` to `true`:
+The normal Docker import indexes Lightroom metadata and paths without probing every source file on the NAS. This keeps the inventory usable when the source is remote or intermittently connected; previews check the source lazily when requested. Each successful sync also updates any missing or changed catalog snapshots and writes a portable export bundle.
+
+Use `npm run archive:sync -- --verify-catalogs` to hash catalog sources before accepting an unchanged size/mtime record. This is slower and detects catalog changes that preserve size and mtime. To perform an exhaustive availability pass through the HTTP API, set `checkAvailability` to `true`:
 
 ```bash
 curl -fsS -X POST http://localhost:8790/sync \
@@ -270,7 +280,7 @@ Preview generation is on demand.
 
 `archive_get_preview` returns two MCP content blocks: the asset metadata as text and the thumbnail as image content. `archive_search` can attach thumbnails for its first 12 results.
 
-Cached thumbnails remain available while the NAS is offline. The current cache is keyed by archive asset ID. A future cache invalidation pass should compare source mtimes when source edits need to be reflected immediately.
+Cached thumbnails remain available while the NAS is offline. The cache is keyed by archive asset ID and records its source mtime. When an indexed source is available and its mtime changes, the thumbnail regenerates. When the NAS is offline, the existing cached thumbnail remains available and the asset metadata reports its preview as stale.
 
 ## Archive annotations
 
@@ -293,7 +303,7 @@ Annotations are preserved across catalog re-syncs for assets whose stable IDs st
 
 ## HTTP API
 
-The service is an internal trusted-network API. It has no user authentication layer. Keep port `8790` on localhost or on the existing trusted MCP path; do not expose it directly to the public internet.
+The service is an internal local API. It has no user authentication layer, and Compose publishes port `8790` only on `127.0.0.1`; do not expose it directly to the public internet.
 
 | Method | Route | Purpose |
 | --- | --- | --- |
@@ -301,6 +311,7 @@ The service is an internal trusted-network API. It has no user authentication la
 | `GET` | `/status` | Counts, source connection state, paths, and last sync |
 | `GET` | `/catalogs` | Imported catalog summaries |
 | `POST` | `/sync` | Start an explicit background import; accepts `hashFiles`, `checkAvailability`, `stageCatalogs`, `allowLockedCatalog`, and optional `catalogPaths`; returns `202` with a job ID |
+| `POST` | `/verify` | Verify SQLite integrity plus preservation snapshot and export checksums |
 | `POST` | `/search` | FTS search and filters |
 | `GET` | `/keywords?query=...` | Keyword counts |
 | `GET` | `/collections?query=...` | Collection counts |
@@ -341,6 +352,7 @@ npm run dev
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PHOTOGRAPHY_ARCHIVE_HOST_PATH` | `/Volumes/Photography 1` | Host path bound read-only into the service |
+| `ARCHIVE_PRESERVATION_HOST_PATH` | required | Local backup-covered host path bound to `/preservation` |
 
 ### Archive service variables
 
@@ -349,6 +361,7 @@ npm run dev
 | `ARCHIVE_DATABASE_PATH` | `/data/catalog.sqlite` | SQLite database path |
 | `ARCHIVE_PREVIEW_ROOT` | `/data/previews` | Preview cache path |
 | `ARCHIVE_BACKUP_ROOT` | `/data/backups` | Backup directory path |
+| `ARCHIVE_PRESERVATION_ROOT` | `/preservation` | Container path for catalog snapshots and portable exports |
 | `ARCHIVE_SOURCE_ROOT` | `/sources/photography-1` | Read-only source mount inside the container |
 | `ARCHIVE_PORT` | `8790` | HTTP port |
 
@@ -403,7 +416,29 @@ For restore, stop the service, extract the database snapshot into `archive_catal
 curl -fsS http://localhost:8790/status | jq
 ```
 
-A database backup is portable metadata. The original Lightroom catalogs and source photographs remain the source-of-truth archive and need their own NAS backup strategy.
+The preservation root contains the Adobe-independent artifacts:
+
+- `catalogs/<catalog-id>/<sha256>.lrcat` — immutable source-catalog copies.
+- `catalogs/<catalog-id>/manifest.json` — original path, catalog fingerprint, parser/schema versions, and indexed count.
+- `exports/<export-id>/assets.ndjson`, `keywords.ndjson`, `collections.ndjson`, `annotations.ndjson`, `asset_keywords.ndjson`, `asset_collections.ndjson`, and `manifest.json` — portable searchable metadata, relationships, and checksums.
+
+Run this after a sync and before relying on a backup:
+
+```bash
+npm run archive:verify
+```
+
+It checks SQLite integrity, snapshot checksums, export checksums, counts, and schema compatibility. The `archive_catalog_status` MCP response includes snapshot count, latest export, latest verification result, and metadata-coverage version.
+
+To rebuild a clean archive database from a portable export, stop the service, ensure its archive data volume is empty, start it, then run:
+
+```bash
+npm run archive:restore -- <export-id>
+```
+
+The restore command verifies the bundle before importing searchable assets, keywords, collections, annotations, and their relationships. It does not overwrite an existing archive database or restore previews.
+
+The portable export intentionally omits Lightroom develop settings, edit history, virtual-copy relationships, face metadata, and tables this parser does not read. The original Lightroom catalogs and source photographs remain the source-of-truth archive and need their own NAS backup strategy.
 
 ## Troubleshooting
 
@@ -454,7 +489,8 @@ When the MCP server runs in another container, `localhost` refers to that contai
 5. Save project annotations and confirm they survive a re-sync.
 6. Disconnect the NAS and confirm metadata and cached previews remain available.
 7. Import all discovered catalogs with `npm run archive:sync`.
-8. Take a database/preview snapshot after the first successful full import.
+8. Confirm the preservation root contains snapshots and one export bundle.
+9. Run `npm run archive:verify`, then let the configured local backup capture the preservation root.
 
 ## Current boundaries and future work
 
@@ -462,11 +498,11 @@ The current implementation deliberately keeps the first archive service understa
 
 - Incremental catalog-table updates that avoid re-reading every selected catalog on each sync.
 - Full Lightroom keyword hierarchy and genealogy preservation across all catalog variants.
-- A resumable background hash queue with progress checkpoints.
+- A resumable background source-file hash queue with progress checkpoints.
 - Preview prewarming by search shortlist or project folder.
 - Archive-specific visual embeddings stored outside Photarium’s global vector index.
 - Content-based deduplication across multiple Lightroom catalogs.
 - Optional XMP/sidecar reconciliation with explicit authority rules.
-- Authenticated remote access when the trusted MCP path is insufficient.
+- Remote access. This local archive intentionally exposes no remote interface.
 
 These extensions should preserve the source-read-only and separate-archive invariants.

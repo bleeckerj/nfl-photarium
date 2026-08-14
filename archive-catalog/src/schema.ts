@@ -1,7 +1,8 @@
-export const schemaSql = `
-PRAGMA journal_mode = WAL;
-PRAGMA foreign_keys = ON;
-
+export const schemaMigrations = [
+  {
+    version: 1,
+    name: 'initial archive catalog',
+    sql: `
 CREATE TABLE IF NOT EXISTS catalogs (
   id TEXT PRIMARY KEY,
   path TEXT NOT NULL UNIQUE,
@@ -110,4 +111,48 @@ CREATE VIRTUAL TABLE IF NOT EXISTS assets_fts USING fts5(
   annotation_text,
   tokenize='unicode61 remove_diacritics 2'
 );
-`;
+`,
+  },
+  {
+    version: 2,
+    name: 'local preservation records',
+    sql: `
+CREATE TABLE IF NOT EXISTS preservation_snapshots (
+  id TEXT PRIMARY KEY,
+  catalog_id TEXT NOT NULL REFERENCES catalogs(id) ON DELETE CASCADE,
+  source_path TEXT NOT NULL,
+  source_size INTEGER NOT NULL,
+  source_mtime INTEGER NOT NULL,
+  source_hash TEXT NOT NULL,
+  snapshot_path TEXT NOT NULL,
+  indexed_assets INTEGER NOT NULL,
+  parser_version TEXT NOT NULL,
+  schema_version INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(catalog_id, source_hash)
+);
+
+CREATE TABLE IF NOT EXISTS preservation_exports (
+  id TEXT PRIMARY KEY,
+  path TEXT NOT NULL UNIQUE,
+  manifest_path TEXT NOT NULL,
+  schema_version INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  assets_count INTEGER NOT NULL,
+  keywords_count INTEGER NOT NULL,
+  collections_count INTEGER NOT NULL,
+  annotations_count INTEGER NOT NULL,
+  checksums_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS preservation_verifications (
+  id TEXT PRIMARY KEY,
+  created_at TEXT NOT NULL,
+  ok INTEGER NOT NULL,
+  failures_json TEXT NOT NULL,
+  checked_snapshots INTEGER NOT NULL,
+  checked_exports INTEGER NOT NULL
+);
+`,
+  },
+] as const;
