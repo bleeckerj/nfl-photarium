@@ -84,6 +84,7 @@ export type ImageToolManifest = {
   inputAssetTypes: string[];
   outputModes: ImageToolOutputMode[];
   supportsAsync: boolean;
+  supportsPreview?: boolean;
   resultKinds?: Array<'image' | 'prompt'>;
   presentation: ImageToolPresentation;
   controls: ImageToolControl[];

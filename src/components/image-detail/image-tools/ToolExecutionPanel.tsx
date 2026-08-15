@@ -32,6 +32,7 @@ type ToolExecutionPanelProps = {
   previewRunning: boolean;
   running: boolean;
   acceptingPreview: boolean;
+  supportsPreview: boolean;
   canAcceptPreview: boolean;
   showPreviewStatus: boolean;
   preview: ImageToolPreview | null;
@@ -59,7 +60,7 @@ type ToolExecutionPanelProps = {
 
 export function ToolExecutionPanel({
   selectedTool, values, busy, previewMedia, sidebarGridClass, effectOptionGridClass, effectControl,
-  activeEffectValue, consoleGroups, previewing, previewRunning, running, acceptingPreview, canAcceptPreview,
+  activeEffectValue, consoleGroups, previewing, previewRunning, running, acceptingPreview, supportsPreview, canAcceptPreview,
   showPreviewStatus, preview, previewError, previewWarning, acceptError, previewStatus, run, runError, runWarning,
   editedPrompt, setEditedPrompt, promptSaveStatus, promptSaveError, uploadedAsset, detailHref, onBackToCatalog,
   onLoadConfiguration, onPreview, onRun, onAcceptPreview, onSavePrompt, onUpdateControl,
@@ -128,15 +129,17 @@ export function ToolExecutionPanel({
               <div>
                 <div className="mb-2 border-b border-gray-200 pb-1 font-mono text-[11px] font-semibold text-gray-800">Actions</div>
                 <div className={sidebarGridClass}>
-                  <button
-                    type="button"
-                    onClick={onPreview}
-                    disabled={busy}
-                    className="inline-flex items-center justify-center gap-1 rounded border border-gray-300 bg-white px-3 py-2 font-mono text-xs text-gray-800 hover:border-gray-500 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <Eye className="h-3.5 w-3.5" />
-                    {previewing || previewRunning ? 'Previewing' : 'Preview'}
-                  </button>
+                  {supportsPreview && (
+                    <button
+                      type="button"
+                      onClick={onPreview}
+                      disabled={busy}
+                      className="inline-flex items-center justify-center gap-1 rounded border border-gray-300 bg-white px-3 py-2 font-mono text-xs text-gray-800 hover:border-gray-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                      {previewing || previewRunning ? 'Previewing' : 'Preview'}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={onRun}

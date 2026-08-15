@@ -9,7 +9,8 @@ export type ImageToolAdapterKind =
   | 'grainrad-http'
   | 'grainrad-eight-bit-reinterpretation'
   | 'creative-brief'
-  | 'aspect-ratio-provider';
+  | 'aspect-ratio-provider'
+  | 'noai-watermark';
 // 'animatedImage' marks tools that preserve the motion of animated image assets
 // (GIF / animated WebP) rather than flattening them to their first frame.
 export type ImageToolInputAssetType = 'image' | 'video' | 'animatedImage';
@@ -101,6 +102,8 @@ export type ImageToolManifest = {
   inputAssetTypes: ImageToolInputAssetType[];
   outputModes: ImageToolOutputMode[];
   supportsAsync: boolean;
+  /** Some processors are intentionally run-only because a preview would be costly or misleading. */
+  supportsPreview?: boolean;
   resultKinds?: Array<'image' | 'prompt'>;
   presentation: ImageToolPresentation;
   controls: ImageToolControl[];

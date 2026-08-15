@@ -291,6 +291,7 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
       })
     : null;
   const previewStatus = preview?.message || (preview ? `Preview ${preview.status}` : null);
+  const supportsPreview = selectedTool?.supportsPreview !== false;
   const showPreviewStatus = Boolean(previewError || previewWarning || acceptError || preview?.error || previewStatus || preview?.events?.length);
   const canAcceptPreview = Boolean(preview?.status === 'completed' && preview.artifactUrl && !acceptedAsset);
   const sidebarGridClass = previewMedia
@@ -358,6 +359,7 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
           previewRunning={previewRunning}
           running={running}
           acceptingPreview={acceptingPreview}
+          supportsPreview={supportsPreview}
           canAcceptPreview={canAcceptPreview}
           showPreviewStatus={showPreviewStatus}
           preview={preview}

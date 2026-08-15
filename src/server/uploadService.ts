@@ -60,6 +60,7 @@ export type UploadContext = {
   folder?: string;
   tags: string[];
   displayName?: string;
+  altTag?: string;
   description?: string;
   originalUrl?: string;
   sourceUrl?: string;
@@ -198,6 +199,7 @@ export async function uploadImageBuffer({
     folder,
     tags,
     displayName,
+    altTag,
     description,
     originalUrl,
     sourceUrl,
@@ -373,6 +375,7 @@ export async function uploadImageBuffer({
   const metadataPayload: Record<string, unknown> = {
     filename: normalizedName,
     displayName: (typeof displayName === 'string' && displayName.trim()) ? displayName.trim() : normalizedName,
+    altTag: (typeof altTag === 'string' && altTag.trim()) ? altTag.trim() : undefined,
     uploadedAt: new Date().toISOString(),
     size: workingFileSize,
     type: workingFileType,

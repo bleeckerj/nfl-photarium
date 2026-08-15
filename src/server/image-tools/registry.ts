@@ -2,6 +2,7 @@ import { grainradAdapter } from '@/server/image-tools/grainradAdapter';
 import { eightBitAdapter } from '@/server/image-tools/eightBitAdapter';
 import { creativeBriefAdapter } from '@/server/image-tools/creativeBriefAdapter';
 import { aspectRatioExpandAdapter } from '@/server/image-tools/aspectRatioExpandAdapter';
+import { noAiDemarkAdapter } from '@/server/image-tools/noAiDemarkAdapter';
 import { ImageToolManifestError, mergeImageToolRequest, validateImageToolManifest } from '@/server/image-tools/manifest';
 import type { ImageToolAdapter, ImageToolManifest, ImageToolRunInput } from '@/server/image-tools/types';
 
@@ -9,6 +10,7 @@ const getAdapters = (): ImageToolAdapter[] => [
   aspectRatioExpandAdapter,
   grainradAdapter,
   eightBitAdapter,
+  noAiDemarkAdapter,
   ...(process.env.PHOTARIUM_ENABLE_CREATIVE_BRIEF_TOOL === 'true' ? [creativeBriefAdapter] : []),
 ];
 

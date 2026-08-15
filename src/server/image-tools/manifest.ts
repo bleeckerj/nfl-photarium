@@ -51,6 +51,9 @@ export const validateImageToolManifest = (manifest: ImageToolManifest): ImageToo
   assertNonEmptyString(manifest.label, `${manifest.id}.label`);
   assertNonEmptyString(manifest.description, `${manifest.id}.description`);
   assertNonEmptyString(manifest.adapterKind, `${manifest.id}.adapterKind`);
+  if (manifest.supportsPreview !== undefined && typeof manifest.supportsPreview !== 'boolean') {
+    throw new ImageToolManifestError(`Image tool ${manifest.id} supportsPreview must be a boolean`);
+  }
   if (!isRecord(manifest.presentation)) {
     throw new ImageToolManifestError(`Image tool ${manifest.id} requires presentation`);
   }

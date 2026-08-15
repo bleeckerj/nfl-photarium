@@ -112,6 +112,23 @@ describe('GET /api/image-tools', () => {
     );
   });
 
+  it('lists the run-only no-AI demarker for the image detail plugin catalog and MCP registry', async () => {
+    const response = await GET();
+    const payload = await response.json();
+    const demarker = (payload.tools as ImageToolManifest[]).find((tool) => tool.id === 'no-ai-demarker');
+
+    expect(demarker).toEqual(expect.objectContaining({
+      id: 'no-ai-demarker',
+      adapterKind: 'noai-watermark',
+      supportsAsync: true,
+      supportsPreview: false,
+      defaultRequest: expect.objectContaining({
+        effectId: 'demark',
+        params: expect.objectContaining({ modelProfile: 'ctrlregen', strength: 0.04, steps: 50 }),
+      }),
+    }));
+  });
+
   it('keeps Creative Brief feature-gated in the image-tools catalog', () => {
     vi.stubEnv('PHOTARIUM_ENABLE_CREATIVE_BRIEF_TOOL', 'false');
     expect(getImageToolRegistry().listManifests().some((tool) => tool.id === 'creative-brief')).toBe(false);
