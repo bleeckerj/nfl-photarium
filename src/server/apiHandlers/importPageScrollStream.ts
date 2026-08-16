@@ -169,7 +169,7 @@ export async function POST(request: NextRequest) {
             // Prioritize data-srcset over srcset (lazy loaders put high-res versions there)
             // Then check srcset, then data-src, then src
             const srcsetUrl = pickBestFromSrcset(img.dataSrcset) || pickBestFromSrcset(img.srcset);
-            const rawUrl = srcsetUrl || img.dataSrc || img.src;
+            const rawUrl = img.archivalSrc || srcsetUrl || img.dataSrc || img.src;
             if (!rawUrl) continue;
             
             try {
@@ -495,4 +495,3 @@ export async function POST(request: NextRequest) {
     },
   });
 }
-

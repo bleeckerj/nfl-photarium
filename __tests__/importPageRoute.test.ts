@@ -84,6 +84,105 @@ describe('POST /api/import/page', () => {
     expect(fetchMock).toHaveBeenCalled();
   });
 
+  it('prefers an archival image source over a display-sized image source', async () => {
+    const html = `
+      <html>
+        <body>
+          <img
+            src="https://payload.example.com/collection/artwork_2000.jpg"
+            src_o="https://payload.example.com/collection/artwork_3840.jpg"
+            data-hi-res="https://payload.example.com/collection/artwork_3500_c.jpg"
+          />
+        </body>
+      </html>
+    `;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = String(input);
+      if (url === 'https://example.com/page') {
+        return Promise.resolve(new Response(html, {
+          status: 200,
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        }));
+      }
+      if (url === 'https://payload.example.com/collection/artwork_3840.jpg' && init?.method === 'HEAD') {
+        return Promise.resolve(new Response(null, {
+          status: 200,
+          headers: {
+            'content-type': 'image/jpeg',
+            'content-length': '600000',
+          },
+        }));
+      }
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+
+    const response = await POST(createRequest({ url: 'https://example.com/page' }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.images).toEqual([
+      expect.objectContaining({
+        url: 'https://payload.example.com/collection/artwork_3840.jpg',
+      }),
+    ]);
+  });
+
+  it('selects Cargo project media over the page loader and navigation thumbnails', async () => {
+    const projectImages = Array.from({ length: 10 }, (_, index) => `
+      <img
+        src="https://payload.cargocollective.com/project/artwork-${index + 1}_2000.jpg"
+        src_o="https://payload.cargocollective.com/project/artwork-${index + 1}_3840.jpg"
+        data-mid="${index + 1}"
+      />
+    `).join('\n');
+    const html = `
+      <html>
+        <body>
+          <img src="https://static.cargocollective.com/loadingAnim.gif" class="loading" />
+          ${projectImages}
+          <img src="https://static.cargocollective.com/prt_650x438_navigation.jpg" />
+        </body>
+      </html>
+    `;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = String(input);
+      if (url === 'https://cargocollective.com/artist/project') {
+        return Promise.resolve(new Response(html, {
+          status: 200,
+          headers: { 'content-type': 'text/html; charset=utf-8' },
+        }));
+      }
+      if (url.startsWith('https://payload.cargocollective.com/project/') && init?.method === 'HEAD') {
+        return Promise.resolve(new Response(null, {
+          status: 200,
+          headers: {
+            'content-type': 'image/jpeg',
+            'content-length': '600000',
+          },
+        }));
+      }
+      return Promise.resolve(new Response(null, { status: 404 }));
+    });
+
+    const response = await POST(createRequest({ url: 'https://cargocollective.com/artist/project' }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.images).toHaveLength(10);
+    expect(payload.images).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          url: 'https://payload.cargocollective.com/project/artwork-1_3840.jpg',
+        }),
+        expect.objectContaining({
+          url: 'https://payload.cargocollective.com/project/artwork-10_3840.jpg',
+        }),
+      ])
+    );
+  });
+
   it('filters likely UI chrome assets from discovered media', async () => {
     const html = `
       <html>

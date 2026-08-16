@@ -3,6 +3,10 @@ import {
   looksLikeTrackingOrUtilityAsset,
   looksLikeUiChromeAsset,
 } from '@/server/pageImportFilters';
+import {
+  isCargoCollectivePage,
+  isCargoCollectiveProjectImage,
+} from '@/server/page-import/cargoCollective';
 import { toImportCandidate } from '@/server/import-metadata/candidates';
 import {
   buildSmallAssetFileSizeReview,
@@ -89,16 +93,23 @@ type DiscoveredMediaCandidate = {
   kind: 'image' | 'video';
   rawUrl: string;
   filenameHint?: string;
+  isSourcePageMedia?: boolean;
 };
 
-const extractImageUrls = (html: string) => {
+const extractImageUrls = (html: string, sourceUrl?: string) => {
   const tags = html.match(/<img\b[^>]*>/gi) ?? [];
   const urls: DiscoveredMediaCandidate[] = [];
+  const cargoCollectivePage = isCargoCollectivePage(sourceUrl);
   for (const tag of tags) {
     const attrs = parseAttributes(tag);
     const typeValue = (attrs.type || '').toLowerCase();
     const srcsetCandidate = attrs.srcset ? pickSrcsetCandidate(attrs.srcset) : undefined;
+    // Several older CMSes keep the archival source beside their display-sized src.
+    // Prefer it so a page scan preserves the largest source the publisher exposes.
+    const archivalSource =
+      attrs['data-original'] || attrs.src_o || attrs['data-full'] || attrs['data-hi-res'];
     const raw =
+      archivalSource ||
       srcsetCandidate ||
       attrs.src ||
       attrs['data-src'] ||
@@ -110,9 +121,13 @@ const extractImageUrls = (html: string) => {
     urls.push({
       kind: looksLikeVideoSource ? 'video' : 'image',
       rawUrl: raw,
+      isSourcePageMedia: cargoCollectivePage && isCargoCollectiveProjectImage(attrs),
     });
   }
-  return urls;
+
+  if (!cargoCollectivePage) return urls;
+  const projectMedia = urls.filter((candidate) => candidate.isSourcePageMedia);
+  return projectMedia.length > 0 ? projectMedia : urls;
 };
 
 const extractVideoUrls = (html: string) => {
@@ -274,7 +289,7 @@ export const discoverPageMediaFromHtml = async ({
   fetchHeadInfo,
 }: DiscoverPageMediaParams) => {
   const { baseHref, baseUrl } = resolveHtmlBaseUrl(html, sourceUrl);
-  const rawCandidates = [...extractImageUrls(html), ...extractVideoUrls(html)];
+  const rawCandidates = [...extractImageUrls(html, sourceUrl), ...extractVideoUrls(html)];
   const resolvedResults = rawCandidates.map((candidate) => resolveMediaCandidate(candidate, baseUrl));
   const skippedRelativeCount = resolvedResults.filter((result) => result.skippedRelative).length;
   const resolvedCandidates = resolvedResults

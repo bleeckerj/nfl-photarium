@@ -86,6 +86,7 @@ const makeMediaResults = (count: number) =>
   Array.from({ length: count }, (_, index) => ({
     mediaKind: 'image',
     src: `https://example.com/assets/image-${index + 1}.jpg`,
+    archivalSrc: '',
     srcset: '',
     dataSrcset: '',
     dataSrc: '',
@@ -142,6 +143,41 @@ describe('POST /api/import/page/scroll/stream', () => {
     expect((text.match(/event: media/g) || []).length).toBe(5);
     expect(text).toContain('event: done');
     expect(text).toContain('Reached max assets (5)');
+    expect(browser.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('streams the archival source when a browser image exposes one', async () => {
+    const { browser } = createMockBrowser({
+      mediaBatches: [[
+        {
+          ...makeMediaResults(1)[0],
+          src: 'https://archive.example.com/artwork_2000.jpg',
+          archivalSrc: 'https://archive.example.com/artwork_3840.jpg',
+        },
+      ]],
+    });
+
+    (globalThis as typeof globalThis & { __PHOTARIUM_TEST_PUPPETEER__?: unknown })
+      .__PHOTARIUM_TEST_PUPPETEER__ = {
+      launch: vi.fn(async () => browser),
+    };
+
+    const response = await POST(
+      createRequest({
+        url: 'https://example.com/page',
+        autoScrollUntilStable: false,
+        maxScrolls: 1,
+        maxAssets: 1,
+        maxPages: 1,
+        scrollDelayMs: 500,
+      })
+    );
+
+    const text = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(text).toContain('https://archive.example.com/artwork_3840.jpg');
+    expect(text).not.toContain('https://archive.example.com/artwork_2000.jpg');
     expect(browser.close).toHaveBeenCalledTimes(1);
   });
 

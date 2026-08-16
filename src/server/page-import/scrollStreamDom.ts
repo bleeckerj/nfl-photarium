@@ -6,6 +6,7 @@ export type ScrollStreamPage = {
 export type ScrollStreamMediaElement = {
   mediaKind: 'image' | 'video';
   src: string;
+  archivalSrc: string;
   srcset: string;
   dataSrcset: string;
   dataSrc: string;
@@ -100,6 +101,7 @@ export const extractScrollStreamMediaElements = async (
     const results: Array<{
       mediaKind: 'image' | 'video';
       src: string;
+      archivalSrc: string;
       srcset: string;
       dataSrcset: string;
       dataSrc: string;
@@ -158,6 +160,7 @@ export const extractScrollStreamMediaElements = async (
         results.push({
           mediaKind: 'image',
           src: candidate,
+          archivalSrc: '',
           srcset: '',
           dataSrcset: '',
           dataSrc: '',
@@ -175,6 +178,14 @@ export const extractScrollStreamMediaElements = async (
       results.push({
         mediaKind: 'image',
         src: img.currentSrc || img.src || '',
+        // Cargo and comparable older CMSes retain the uncapped file in a custom
+        // attribute while src points to a delivery-sized derivative.
+        archivalSrc:
+          img.getAttribute('data-original') ||
+          img.getAttribute('src_o') ||
+          img.getAttribute('data-full') ||
+          img.getAttribute('data-hi-res') ||
+          '',
         srcset: img.srcset || '',
         dataSrcset: img.dataset.srcset || img.getAttribute('data-srcset') || '',
         dataSrc: img.dataset.src || img.dataset.lazySrc || img.dataset.original || img.getAttribute('data-lazy') || '',
@@ -191,6 +202,7 @@ export const extractScrollStreamMediaElements = async (
       results.push({
         mediaKind: 'image',
         src: '',
+        archivalSrc: '',
         srcset: source.srcset || '',
         dataSrcset: source.dataset?.srcset || source.getAttribute('data-srcset') || '',
         dataSrc: source.dataset?.src || '',
@@ -210,6 +222,7 @@ export const extractScrollStreamMediaElements = async (
       results.push({
         mediaKind: 'video',
         src,
+        archivalSrc: '',
         srcset: '',
         dataSrcset: '',
         dataSrc: filenameHint,
@@ -227,6 +240,7 @@ export const extractScrollStreamMediaElements = async (
       results.push({
         mediaKind: 'image',
         src: link.href,
+        archivalSrc: '',
         srcset: '',
         dataSrcset: '',
         dataSrc: '',

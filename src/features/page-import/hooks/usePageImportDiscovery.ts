@@ -107,7 +107,7 @@ export function usePageImportDiscovery({
   const [pageImportSmallAssetThresholdMb, setPageImportSmallAssetThresholdMb] = useState(
     String(DEFAULT_SMALL_ASSET_THRESHOLD_MB)
   );
-  const [pageImportScrollMode, setPageImportScrollMode] = useState(true);
+  const [pageImportScrollMode, setPageImportScrollMode] = useState(false);
   const [pageImportAutoScroll, setPageImportAutoScroll] = useState(true);
   const [pageImportMaxScrolls, setPageImportMaxScrolls] = useState('10');
   const [pageImportScrollDelayMs, setPageImportScrollDelayMs] = useState('1500');
