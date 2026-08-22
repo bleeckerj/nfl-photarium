@@ -216,6 +216,8 @@ export async function PATCH(
       if (flags.variationSort) requiredKeys.add('variationSort');
       if (flags.namespace) requiredKeys.add('namespace');
 
+      let updatedOriginalUrl: string | undefined;
+      let updatedSourceUrl: string | undefined;
       const result = await patchCloudflareImageMetadata(targetId, async (existingMeta) => {
         const metadata = {
           ...existingMeta,
@@ -273,9 +275,11 @@ export async function PATCH(
           extrasPatch.originalUrl = cleanOriginalUrl || undefined;
           extrasPatch.originalUrlNormalized = normalizeOriginalUrl(cleanOriginalUrl) || undefined;
         }
-        if (Object.keys(extrasPatch).length > 0) {
-          await patchImageExtrasRecord(targetId, extrasPatch);
-        }
+        const updatedExtras = Object.keys(extrasPatch).length > 0
+          ? await patchImageExtrasRecord(targetId, extrasPatch)
+          : null;
+        updatedOriginalUrl = updatedExtras?.originalUrl;
+        updatedSourceUrl = updatedExtras?.sourceUrl;
 
         // Keep Cloudflare metadata compact: alt text gets a small mirror for fallback surfaces.
         metadata.altTag = toCloudflareTextMirror(
@@ -300,11 +304,18 @@ export async function PATCH(
       return {
         metadataPayload: result.metadataPayload,
         filename: result.filename,
+        originalUrl: updatedOriginalUrl,
+        sourceUrl: updatedSourceUrl,
       };
     };
 
     const updatedIds: string[] = [];
-    let targetResult: { metadataPayload: Record<string, unknown>; filename?: string } | null = null;
+    let targetResult: {
+      metadataPayload: Record<string, unknown>;
+      filename?: string;
+      originalUrl?: string;
+      sourceUrl?: string;
+    } | null = null;
 
     if (shouldApplyToFamily) {
       const cachedImages = await getCachedImages();
@@ -348,8 +359,12 @@ export async function PATCH(
     const finalDescription = targetFlags.description
       ? (cleanDescription ?? '')
       : cleanString(metadataPayload.description as string | undefined) ?? '';
-    const finalOriginalUrl = cleanString(metadataPayload.originalUrl as string | undefined);
-    const finalSourceUrl = cleanString(metadataPayload.sourceUrl as string | undefined);
+    const finalOriginalUrl = targetFlags.originalUrl
+      ? (targetResult.originalUrl ?? '')
+      : cleanString(metadataPayload.originalUrl as string | undefined);
+    const finalSourceUrl = targetFlags.sourceUrl
+      ? (targetResult.sourceUrl ?? '')
+      : cleanString(metadataPayload.sourceUrl as string | undefined);
     const finalDisplayName =
       (metadataPayload.displayName as string | undefined) ?? targetResult.filename;
     const finalAltTag = targetFlags.altTag
@@ -392,4 +407,3 @@ export async function PATCH(
     );
   }
 }
-

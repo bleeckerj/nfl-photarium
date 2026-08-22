@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  applyImageMetadataUrlSaveResponse,
   applyImageMetadataSaveResponse,
+  buildImageMetadataUrlSavePayload,
   buildImageMetadataSavePayload,
   isImageMetadataDraftDirty,
   parseUserTagsInput,
@@ -60,6 +62,36 @@ describe('imageMetadataDraft', () => {
       ...draft,
       folderSelect: 'new-folder',
     }, image, null)).toBe(true);
+  });
+
+  it('marks a changed source URL as dirty', () => {
+    const draft = resolveImageMetadataDraftValues(image, null);
+    expect(isImageMetadataDraftDirty({
+      ...draft,
+      sourceUrlInput: 'https://example.com/another-page',
+    }, image, null)).toBe(true);
+  });
+
+  it('builds a URL-only autosave payload', () => {
+    expect(buildImageMetadataUrlSavePayload({
+      originalUrlInput: '  https://example.com/source.jpg  ',
+      sourceUrlInput: 'https://example.com/page',
+    })).toEqual({
+      originalUrl: 'https://example.com/source.jpg',
+      sourceUrl: 'https://example.com/page',
+    });
+  });
+
+  it('applies a URL autosave response without changing other draft metadata', () => {
+    expect(applyImageMetadataUrlSaveResponse(image, {
+      originalUrl: 'https://example.com/updated-source.jpg',
+      sourceUrl: 'https://example.com/updated-page',
+    })).toMatchObject({
+      originalUrl: 'https://example.com/updated-source.jpg',
+      sourceUrl: 'https://example.com/updated-page',
+      description: 'Cloudflare description',
+      displayName: 'Original name',
+    });
   });
 
   it('builds the save payload from the selected folder and preserves system tags', () => {

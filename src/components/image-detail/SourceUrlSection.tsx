@@ -10,7 +10,9 @@ export function SourceUrlSection(props: {
 
   return (
     <div id="source-url-section">
-      <p className="text-xs font-mono font-medum text-gray-700">Source URL</p>
+      <p className="text-xs font-mono font-medum text-gray-700">
+        Source URL <span className="text-gray-500">(page where found)</span>
+      </p>
       <div className="flex items-center gap-3 mt-2">
         <input
           value={sourceUrlInput}

@@ -49,7 +49,12 @@ import { CropVariantModal } from '@/components/image-detail/CropVariantModal';
 import type { CloudflareImage } from '@/components/image-detail/types';
 import { useDetailNavigationGuard } from '@/components/image-detail/useDetailNavigationGuard';
 import { usePromptThisEditor } from '@/components/image-detail/usePromptThisEditor';
-import { parseUserTagsInput, type ImageMetadataSaveResponse } from '@/components/image-detail/imageMetadataDraft';
+import {
+  applyImageMetadataUrlSaveResponse,
+  parseUserTagsInput,
+  type ImageMetadataSaveResponse,
+  type ImageMetadataUrlSaveResponse,
+} from '@/components/image-detail/imageMetadataDraft';
 import {
   ensureWebpFormat,
   formatEntriesAsYaml,
@@ -71,6 +76,7 @@ import { useAltDescriptionGeneration } from '@/hooks/useAltDescriptionGeneration
 import { useDeleteImageFamily } from '@/hooks/useDeleteImageFamily';
 import { useShareLinks } from '@/hooks/useShareLinks';
 import { useImageMetadataDraft } from '@/hooks/useImageMetadataDraft';
+import { useImageUrlMetadataAutosave } from '@/hooks/useImageUrlMetadataAutosave';
 import { useTagCorpus } from '@/hooks/useTagCorpus';
 import { patchParentAssignment as patchParentAssignmentService } from '@/services/parentAssignmentService';
 import { usePersistentShareBaseUrl } from '@/hooks/usePersistentShareBaseUrl';
@@ -1484,12 +1490,46 @@ export default function ImageDetailPage() {
   const selectedVariationCount = selectedVariationIds.size;
   const isMetadataDirty = metadataDraft.isDirty;
   const isMetadataSaveDisabled = !isMetadataDirty || saving;
+  const handleUrlMetadataAutosaved = useCallback((savedImageId: string, response: ImageMetadataUrlSaveResponse) => {
+    if (savedImageId !== id) {
+      return;
+    }
+    const applyUrlResponse = (entry: CloudflareImage) => (
+      entry.id === savedImageId ? applyImageMetadataUrlSaveResponse(entry, response) : entry
+    );
+    setImage((prev) => (prev ? applyUrlResponse(prev) : prev));
+    setAllImages((prev) => prev.map(applyUrlResponse));
+    setExtrasRecord((prev) => ({
+      ...prev,
+      imageId: savedImageId,
+      ...(Object.prototype.hasOwnProperty.call(response, 'originalUrl')
+        ? { originalUrl: response.originalUrl || undefined }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(response, 'sourceUrl')
+        ? { sourceUrl: response.sourceUrl || undefined }
+        : {}),
+    }));
+  }, [id]);
+  const handleUrlMetadataAutosaveError = useCallback((message: string) => {
+    toast.push(message);
+  }, [toast]);
+  const urlMetadataAutosave = useImageUrlMetadataAutosave({
+    image,
+    originalUrlInput,
+    sourceUrlInput,
+    disabled: saving,
+    onSaved: handleUrlMetadataAutosaved,
+    onError: handleUrlMetadataAutosaveError,
+  });
+  const metadataSaving = saving || urlMetadataAutosave.isPending;
+  const isMetadataSaveDisabledWithAutosave = isMetadataSaveDisabled || urlMetadataAutosave.isPending;
   useEffect(() => {
     metadataDraftDirtyRef.current = isMetadataDirty;
   }, [isMetadataDirty]);
   const pendingAutoSave = useMemo(
     () =>
       saving ||
+      urlMetadataAutosave.isPending ||
       variationOrderSaving ||
       childUploadLoading ||
       bulkAltApplying ||
@@ -1506,6 +1546,7 @@ export default function ImageDetailPage() {
       descriptionGenerating,
       displayNameGenerating,
       saving,
+      urlMetadataAutosave.isPending,
       variationAltBusy,
       variationOrderSaving
     ]
@@ -1788,7 +1829,7 @@ export default function ImageDetailPage() {
   }, [extrasRecord, image, resetMetadataDraftFromImage]);
 
   const handleSaveMetadata = useCallback(async () => {
-    if (!image || !id || !isMetadataDirty) {
+    if (!image || !id || !isMetadataDirty || urlMetadataAutosave.isPending) {
       return;
     }
     setSaving(true);
@@ -1841,7 +1882,8 @@ export default function ImageDetailPage() {
     image,
     isMetadataDirty,
     markMetadataSaved,
-    toast
+    toast,
+    urlMetadataAutosave.isPending
   ]);
 
   const handleGenerateSemanticTags = useCallback(async () => {
@@ -2296,7 +2338,7 @@ export default function ImageDetailPage() {
               metadataByteSize={metadataByteSize} metadataPrunedByteSize={metadataPrunedByteSize}
               metadataLargestFields={metadataLargestFields} metadataPrunedDroppedFields={metadataPrunedDroppedFields}
               extrasBackedFields={[...CLOUDFLARE_EXTRAS_ONLY_FIELDS, 'altText']}
-              isMetadataDirty={isMetadataDirty} pendingAutoSave={pendingAutoSave} saving={saving}
+              isMetadataDirty={isMetadataDirty} pendingAutoSave={pendingAutoSave} saving={metadataSaving}
               detailAspectLoading={detailAspectLoading} detailDimensions={detailDimensions}
               detailAspectRatio={detailAspectRatio} detailFileSizeLabel={detailFileSizeLabel}
               detailNamespaceOptions={detailNamespaceOptions} namespaceMoving={namespaceMoving}
@@ -2479,7 +2521,7 @@ export default function ImageDetailPage() {
         </div>
 
         <ImageDetailFooterActions
-          saving={saving} isMetadataSaveDisabled={isMetadataSaveDisabled}
+          saving={metadataSaving} isMetadataSaveDisabled={isMetadataSaveDisabledWithAutosave}
           showDeleteFamily={variationCount > 0 || isChildImage}
           onCancel={handleCancelMetadata} onDeleteImage={handleDeleteCurrent}
           onDeleteFamily={handleDeleteFamily} onSave={handleSaveMetadata}

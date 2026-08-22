@@ -301,6 +301,86 @@ describe('PATCH /api/images/:id/update', () => {
     );
   });
 
+  it('returns URL values from the extras record after a metadata update', async () => {
+    const mockFetch = vi.spyOn(globalThis, 'fetch');
+    const originalUrl = 'https://example.com/assets/image.jpg';
+    const sourceUrl = 'https://example.com/gallery';
+
+    patchImageExtrasRecordMock.mockResolvedValueOnce({
+      schemaVersion: 1,
+      imageId: 'child',
+      originalUrl,
+      sourceUrl,
+      updatedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    });
+    mockFetch
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: {
+              id: 'child',
+              filename: 'child.png',
+              uploaded: '2026-02-01T00:00:00.000Z',
+              variants: ['https://example.com/public'],
+              meta: JSON.stringify({}),
+            },
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: {} }), { status: 200 }));
+
+    const request = createRequest({ originalUrl, sourceUrl });
+    const response = await PATCH(request, { params: Promise.resolve({ id: 'child' }) });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.originalUrl).toBe(originalUrl);
+    expect(payload.sourceUrl).toBe(sourceUrl);
+    expect(patchImageExtrasRecordMock).toHaveBeenCalledWith('child', expect.objectContaining({
+      originalUrl,
+      sourceUrl,
+    }));
+  });
+
+  it('returns explicit empty URL values when URL metadata is cleared', async () => {
+    const mockFetch = vi.spyOn(globalThis, 'fetch');
+
+    patchImageExtrasRecordMock.mockResolvedValueOnce({
+      schemaVersion: 1,
+      imageId: 'child',
+      updatedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+    });
+    mockFetch
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            result: {
+              id: 'child',
+              filename: 'child.png',
+              uploaded: '2026-02-01T00:00:00.000Z',
+              variants: ['https://example.com/public'],
+              meta: JSON.stringify({}),
+            },
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: {} }), { status: 200 }));
+
+    const response = await PATCH(
+      createRequest({ originalUrl: '', sourceUrl: '' }),
+      { params: Promise.resolve({ id: 'child' }) }
+    );
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload).toHaveProperty('originalUrl', '');
+    expect(payload).toHaveProperty('sourceUrl', '');
+  });
+
   it('stores a cleared folder in extras without writing stale Cloudflare folder metadata', async () => {
     const mockFetch = vi.spyOn(globalThis, 'fetch');
 

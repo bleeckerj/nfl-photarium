@@ -24,7 +24,9 @@ export function OriginalUrlSection(props: {
   return (
     <div id="original-url-section">
       <div className="flex items-center gap-2">
-        <p className="text-xs font-mono font-medum text-gray-700">Original URL</p>
+        <p className="text-xs font-mono font-medum text-gray-700">
+          Original URL <span className="text-gray-500">(direct asset)</span>
+        </p>
         {originalUrlTooLong && (
           <span className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-mono text-amber-800">
             ⚠ {originalUrlByteLength} bytes

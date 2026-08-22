@@ -1,4 +1,5 @@
 import { cleanString } from '@/utils/cloudflareMetadata';
+import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { mergeUserTagsPreservingSystemTags, getUserVisibleTags } from '@/utils/systemTags';
 import { isControlTag, normalizeSemanticTag } from './tagEditor';
 import {
@@ -12,7 +13,9 @@ export type ImageMetadataDraftAsset = {
   tags?: string[];
   description?: string;
   originalUrl?: string;
+  originalUrlNormalized?: string;
   sourceUrl?: string;
+  sourceUrlNormalized?: string;
   displayName?: string;
   filename?: string;
   altTag?: string;
@@ -45,6 +48,8 @@ export type ImageMetadataSaveResponse = {
   sourceUrl?: string;
   displayName?: string;
 };
+
+export type ImageMetadataUrlSaveResponse = Pick<ImageMetadataSaveResponse, 'originalUrl' | 'sourceUrl'>;
 
 export const emptyImageMetadataDraftValues = (): ImageMetadataDraftValues => ({
   folderSelect: '',
@@ -138,6 +143,12 @@ export function isImageMetadataDraftDirty(
     return true;
   }
 
+  const sourceValue = cleanString(values.sourceUrlInput) ?? '';
+  const imageSource = cleanString(image.sourceUrl) ?? '';
+  if (sourceValue !== imageSource) {
+    return true;
+  }
+
   const displayNameValue = cleanString(values.displayNameInput) ?? '';
   const imageDisplayName = cleanString(image.displayName || image.filename) ?? '';
   if (displayNameValue !== imageDisplayName) {
@@ -145,6 +156,39 @@ export function isImageMetadataDraftDirty(
   }
 
   return false;
+}
+
+export function buildImageMetadataUrlSavePayload(values: Pick<ImageMetadataDraftValues, 'originalUrlInput' | 'sourceUrlInput'>) {
+  return {
+    originalUrl: cleanString(values.originalUrlInput) ?? '',
+    sourceUrl: cleanString(values.sourceUrlInput) ?? '',
+  };
+}
+
+export function applyImageMetadataUrlSaveResponse<T extends ImageMetadataDraftAsset>(
+  image: T,
+  response: ImageMetadataUrlSaveResponse
+): T {
+  const hasOriginalUrl = Object.prototype.hasOwnProperty.call(response, 'originalUrl');
+  const hasSourceUrl = Object.prototype.hasOwnProperty.call(response, 'sourceUrl');
+  const originalUrl = cleanString(response.originalUrl);
+  const sourceUrl = cleanString(response.sourceUrl);
+
+  return {
+    ...image,
+    ...(hasOriginalUrl
+      ? {
+          originalUrl,
+          originalUrlNormalized: normalizeOriginalUrl(originalUrl),
+        }
+      : {}),
+    ...(hasSourceUrl
+      ? {
+          sourceUrl,
+          sourceUrlNormalized: normalizeOriginalUrl(sourceUrl),
+        }
+      : {}),
+  };
 }
 
 export function buildImageMetadataSavePayload(
