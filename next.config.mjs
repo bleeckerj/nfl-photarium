@@ -14,6 +14,16 @@ const nextConfig = {
   // docs/feature-map.json relative to its own module path, so it must run from
   // its on-disk location.
   serverExternalPackages: ['nfl-grainrad-clone', 'sharp', 'jsdom'],
+  // Dev-only: Next's on-demand entry handler defaults to disposing any compiled
+  // route that hasn't been accessed for 60s and isn't among the 5 most recent
+  // entries. Detail-page visits fire enough API-route entries to evict the
+  // gallery ("/") from that buffer, so returning to it forced a full webpack
+  // recompile (the 20-60s "Compiling..." stall). Keep entries hot instead —
+  // memory cost on a dev machine is trivial compared to recompiling.
+  onDemandEntries: {
+    maxInactiveAge: 6 * 60 * 60 * 1000,
+    pagesBufferLength: 100,
+  },
   webpack: (config, { dev, isServer }) => {
     if (isServer) {
       config.externalsPresets = {
