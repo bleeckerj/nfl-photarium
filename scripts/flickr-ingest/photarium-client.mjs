@@ -23,6 +23,12 @@ export async function uploadImageToPhotarium({
   if (metadata.sourceUrl) form.append('sourceUrl', metadata.sourceUrl);
   if (metadata.originalUrl) form.append('originalUrl', metadata.originalUrl);
   if (metadata.duplicateAction) form.append('duplicateAction', metadata.duplicateAction);
+  if (metadata.generateSemanticTags !== undefined) {
+    form.append('generateSemanticTags', metadata.generateSemanticTags ? 'true' : 'false');
+  }
+  if (metadata.semanticTagCount !== undefined) {
+    form.append('semanticTagCount', String(metadata.semanticTagCount));
+  }
 
   const response = await fetch(`${apiBase}/api/upload`, {
     method: 'POST',

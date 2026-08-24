@@ -50,6 +50,7 @@
     "page:auth-help": "node scripts/page-ingest.mjs auth-help",
     "video:frames": "node scripts/video-frames.mjs",
     "fs:ingest": "node scripts/fs-ingest.mjs",
+    "omata:source-images": "node scripts/omata-source-image-ingest.mjs",
     "media:ingest": "node scripts/dng-ingest.mjs",
     "dng:ingest": "npm run media:ingest --",
     "snagit:ingest": "node scripts/snagit-ingest.mjs",
