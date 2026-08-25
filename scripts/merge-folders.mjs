@@ -19,6 +19,7 @@
  *   node scripts/merge-folders.mjs --plan=data/reports/signals-folder-merge-plan-20260801.json --dry-run
  *   node scripts/merge-folders.mjs --plan=<file> --concurrency=4 --throttle-ms=100
  *   node scripts/merge-folders.mjs --from=blog-posts --to=blog --namespace=cf-default
+ *   node scripts/merge-folders.mjs --from=nfl_projects --to=nfl-projects --namespace=cf-default --extras-only
  *
  * Options:
  *   --plan=<file>        Merge plan JSON (as written by the folder audit)
@@ -30,6 +31,7 @@
  *   --concurrency=<n>    Parallel image updates (default 4)
  *   --throttle-ms=<n>    Minimum interval between updates (default 50)
  *   --limit=<n>          Stop after n image updates (for a cautious first pass)
+ *   --extras-only       Write the folder through the server-side extras route without rewriting Cloudflare metadata
  *   --dry-run            Report the plan without writing
  *   --no-create-target   Skip creating the target folder registry entry
  *   -v, -vv              Verbosity
@@ -61,6 +63,7 @@ function parseArgs(argv) {
     concurrency: 4,
     throttleMs: 50,
     limit: Infinity,
+    extrasOnly: false,
     dryRun: false,
     createTarget: true,
     verbosity: 2,
@@ -75,6 +78,7 @@ function parseArgs(argv) {
     else if (arg.startsWith('--concurrency=')) opts.concurrency = Number(arg.slice(14));
     else if (arg.startsWith('--throttle-ms=')) opts.throttleMs = Number(arg.slice(14));
     else if (arg.startsWith('--limit=')) opts.limit = Number(arg.slice(8));
+    else if (arg === '--extras-only') opts.extrasOnly = true;
     else if (arg === '--dry-run') opts.dryRun = true;
     else if (arg === '--no-create-target') opts.createTarget = false;
     else if (arg === '-v') opts.verbosity = 3;
@@ -187,7 +191,8 @@ async function ensureTargetFolder(opts, job) {
 }
 
 async function moveImage(opts, imageId, target) {
-  const res = await fetch(`${opts.apiBase}/api/images/${encodeURIComponent(imageId)}/update`, {
+  const endpoint = opts.extrasOnly ? 'extras' : 'update';
+  const res = await fetch(`${opts.apiBase}/api/images/${encodeURIComponent(imageId)}/${endpoint}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ folder: target }),

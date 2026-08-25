@@ -90,6 +90,24 @@ describe('PATCH /api/images/:id/extras', () => {
     );
   });
 
+  it('accepts a validated folder-only payload without touching Cloudflare metadata', async () => {
+    const request = createPatchRequest({ folder: 'nfl-projects' });
+
+    const response = await PATCH(request, { params: Promise.resolve({ id: 'img_1' }) });
+
+    expect(response.status).toBe(200);
+    expect(patchImageExtrasRecordMock).toHaveBeenCalledWith('img_1', { folder: 'nfl-projects' });
+  });
+
+  it('rejects folder names that do not satisfy the folder policy', async () => {
+    const request = createPatchRequest({ folder: 'nfl_projects' });
+
+    const response = await PATCH(request, { params: Promise.resolve({ id: 'img_1' }) });
+
+    expect(response.status).toBe(400);
+    expect(patchImageExtrasRecordMock).not.toHaveBeenCalled();
+  });
+
   it('clears description only when explicitly passed null or an empty string', async () => {
     const untouchedRequest = createPatchRequest({ altText: 'Alt text' });
     await PATCH(untouchedRequest, { params: Promise.resolve({ id: 'img_1' }) });

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cleanString } from '@/utils/cloudflareMetadata';
+import { requireValidFolderName } from '@/server/folderPolicy';
 import { getImageExtrasRecord, patchImageExtrasRecord } from '@/server/imageExtras';
 import type { DngIngestRecord, FlickrSourceRecord, ImageExifRecord, RawSourceReference, SnagitSourceRecord } from '@/server/imageExtras';
 import type { InstagramSourceRecord } from '@/server/instagramSource';
@@ -47,6 +48,7 @@ export async function PATCH(
     }
 
     const patch: {
+      folder?: string;
       description?: string;
       altText?: string;
       sourceUrl?: string;
@@ -60,6 +62,22 @@ export async function PATCH(
       flickrSource?: FlickrSourceRecord;
       snagitSource?: SnagitSourceRecord;
     } = {};
+
+    if (Object.prototype.hasOwnProperty.call(body ?? {}, 'folder')) {
+      const raw = body?.folder;
+      if (raw === null || raw === '') {
+        patch.folder = undefined;
+      } else if (typeof raw === 'string') {
+        try {
+          patch.folder = requireValidFolderName(raw);
+        } catch (error) {
+          return NextResponse.json(
+            { error: error instanceof Error ? error.message : 'Invalid folder name' },
+            { status: 400 }
+          );
+        }
+      }
+    }
 
     if (Object.prototype.hasOwnProperty.call(body ?? {}, 'description')) {
       const raw = body?.description;
