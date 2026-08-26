@@ -122,6 +122,27 @@ describe('POST /api/import/page/upload-video', () => {
     );
   });
 
+  it('passes source-url deduplication through to the video service', async () => {
+    const response = await POST(
+      createJsonRequest({
+        url: 'https://cdn.example.com/video.mp4',
+        namespace: 'ns-a',
+        sourceUrl: 'https://www.instagram.com/p/abc123/',
+        deduplicateBySourceUrl: true,
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(uploadVideoFromRemoteUrlMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          sourceUrl: 'https://www.instagram.com/p/abc123/',
+          deduplicateBySourceUrl: true,
+        }),
+      })
+    );
+  });
+
   it('passes the canonical parent id for remote variation uploads', async () => {
     validateParentForNewChildMock.mockResolvedValue({
       ok: true,

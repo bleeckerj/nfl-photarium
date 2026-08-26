@@ -771,6 +771,8 @@ npm run ig:ingest -- \
 
 If the shortcode is not found, the ingest continues until the available profile history is exhausted or `--max-pages` is reached, then prints a warning. `--no-resume` is implied by `--stop-at-shortcode` and does not need to be supplied separately.
 
+Profile ingest indexes prior NDJSON records by Instagram shortcode/media ID and processes only missing assets on repeated scans. Video uploads also use the canonical Instagram post URL as a server-side duplicate key. Still assets attached to video posts are included by default; pass `--skip-video-post-images` when only the video asset is wanted.
+
 These helpers are designed for source collections you control or are authorized to archive. Review platform terms and rights before ingesting third-party media.
 
 ### Client Sites

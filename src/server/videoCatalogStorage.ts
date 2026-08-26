@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { getCacheStorage } from '@/server/cacheStorage';
 import { getStreamVideo } from '@/server/cloudflareStreamClient';
 import { calculateAspectRatio } from '@/utils/imageUtils';
+import { normalizeOriginalUrl } from '@/utils/urlNormalization';
 import { deleteVideoExtrasRecord } from '@/server/videoExtras';
 
 export type VideoAssetRecord = {
@@ -355,6 +356,20 @@ export const listVideoAssetRecords = async (): Promise<VideoAssetRecord[]> => {
   const records = await ensureVideoCacheFresh();
   // Return a shallow copy so callers cannot accidentally mutate our cache.
   return records.slice();
+};
+
+export const findVideoAssetDuplicatesBySourceUrl = async (
+  sourceUrl: string,
+  namespace?: string
+): Promise<VideoAssetRecord[]> => {
+  const normalizedSourceUrl = normalizeOriginalUrl(sourceUrl);
+  if (!normalizedSourceUrl) return [];
+
+  const records = await listVideoAssetRecords();
+  return records.filter((record) => {
+    if (namespace && record.namespace !== namespace) return false;
+    return normalizeOriginalUrl(record.sourceUrl) === normalizedSourceUrl;
+  });
 };
 
 export const syncVideoAssetRecordFromStream = async (

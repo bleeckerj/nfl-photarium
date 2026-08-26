@@ -9,6 +9,7 @@ const {
   createStreamVideoFromFileMock,
   createStreamVideoFromUrlMock,
   createVideoAssetRecordMock,
+  findVideoAssetDuplicatesBySourceUrlMock,
   queueAutoEmbeddingsForVideoMock,
   extractComfyWorkflowMetadataMock,
   ingestComfyWorkflowForVideoMock,
@@ -17,6 +18,7 @@ const {
   createStreamVideoFromFileMock: vi.fn(),
   createStreamVideoFromUrlMock: vi.fn(),
   createVideoAssetRecordMock: vi.fn(),
+  findVideoAssetDuplicatesBySourceUrlMock: vi.fn(),
   queueAutoEmbeddingsForVideoMock: vi.fn(),
   extractComfyWorkflowMetadataMock: vi.fn(),
   ingestComfyWorkflowForVideoMock: vi.fn(),
@@ -30,6 +32,7 @@ vi.mock('@/server/cloudflareStreamClient', () => ({
 
 vi.mock('@/server/videoCatalogStorage', () => ({
   createVideoAssetRecord: createVideoAssetRecordMock,
+  findVideoAssetDuplicatesBySourceUrl: findVideoAssetDuplicatesBySourceUrlMock,
 }));
 
 vi.mock('@/server/videoEmbeddingService', () => ({
@@ -51,6 +54,7 @@ vi.mock('@/server/parentValidation', () => ({
 describe('videoUploadService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    findVideoAssetDuplicatesBySourceUrlMock.mockResolvedValue([]);
     createStreamVideoFromFileMock.mockResolvedValue({
       uid: 'stream-1',
       thumbnail: 'https://example.com/thumb.jpg',
@@ -227,6 +231,49 @@ describe('videoUploadService', () => {
     expect(createStreamVideoFromUrlMock).toHaveBeenCalledTimes(1);
     expect(extractComfyWorkflowMetadataMock).not.toHaveBeenCalled();
     expect(ingestComfyWorkflowForVideoMock).not.toHaveBeenCalled();
+  });
+
+  it('returns the existing video when source-url deduplication is requested', async () => {
+    findVideoAssetDuplicatesBySourceUrlMock.mockResolvedValueOnce([
+      {
+        id: 'existing-video-1',
+        assetType: 'video',
+        filename: 'existing.mp4',
+        uploaded: '2026-02-20T00:00:00.000Z',
+        streamUid: 'existing-stream',
+        videoStatus: 'ready',
+        tags: ['instagram', 'demo'],
+        sourceUrl: 'https://www.instagram.com/p/abc123/',
+        namespace: 'test',
+        createdAt: '2026-02-20T00:00:00.000Z',
+        updatedAt: '2026-02-20T00:00:00.000Z',
+      },
+    ]);
+
+    const result = await uploadVideoFromRemoteUrl({
+      sourceUrl: 'https://cdn.example.com/video.mp4',
+      context: {
+        tags: ['instagram', 'demo'],
+        namespace: 'test',
+        sourceUrl: 'https://www.instagram.com/p/abc123/',
+        deduplicateBySourceUrl: true,
+      },
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: {
+        id: 'existing-video-1',
+        alreadyExists: true,
+        duplicateIds: ['existing-video-1'],
+      },
+    });
+    expect(findVideoAssetDuplicatesBySourceUrlMock).toHaveBeenCalledWith(
+      'https://www.instagram.com/p/abc123/',
+      'test',
+    );
+    expect(createStreamVideoFromUrlMock).not.toHaveBeenCalled();
+    expect(createVideoAssetRecordMock).not.toHaveBeenCalled();
   });
 
   it('stores remote uploads under the canonical parent when the requested parent is a variant', async () => {

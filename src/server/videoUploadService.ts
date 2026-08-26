@@ -1,5 +1,9 @@
 import { createStreamVideoFromFile, createStreamVideoFromUrl } from '@/server/cloudflareStreamClient';
-import { createVideoAssetRecord, type VideoAssetRecord } from '@/server/videoCatalogStorage';
+import {
+  createVideoAssetRecord,
+  findVideoAssetDuplicatesBySourceUrl,
+  type VideoAssetRecord,
+} from '@/server/videoCatalogStorage';
 import { cleanString } from '@/utils/cloudflareMetadata';
 import { calculateAspectRatio } from '@/utils/imageUtils';
 import { queueAutoEmbeddingsForVideo } from '@/server/videoEmbeddingService';
@@ -40,6 +44,7 @@ export type VideoUploadContext = {
   rotatedFromId?: string;
   rotatedAt?: string;
   rotationDegrees?: number;
+  deduplicateBySourceUrl?: boolean;
 };
 
 export type VideoUploadSuccess = {
@@ -73,6 +78,8 @@ export type VideoUploadSuccess = {
   originalUrl?: string;
   sourceUrl?: string;
   namespace?: string;
+  alreadyExists?: boolean;
+  duplicateIds?: string[];
   mux?: {
     assetId: string;
     status: 'queued' | 'ingesting' | 'ready' | 'error';
@@ -135,6 +142,7 @@ const cleanVideoContext = (context: VideoUploadContext): VideoUploadContext => (
   rotatedFromId: cleanString(context.rotatedFromId),
   rotatedAt: cleanString(context.rotatedAt),
   rotationDegrees: context.rotationDegrees,
+  deduplicateBySourceUrl: context.deduplicateBySourceUrl === true,
 });
 
 const isExplicitNamespace = (value?: string) =>
@@ -245,6 +253,22 @@ const mapRecordToResponse = (record: VideoAssetRecord): VideoUploadSuccess => ({
   animatedWebpVariants: record.animatedWebpVariants,
 });
 
+const findExistingVideoUpload = async (context: VideoUploadContext) => {
+  if (!context.deduplicateBySourceUrl) return [];
+  const sourceUrl = cleanString(context.sourceUrl);
+  if (!sourceUrl) return [];
+  return findVideoAssetDuplicatesBySourceUrl(sourceUrl, context.namespace);
+};
+
+const mapExistingVideoUploadResponse = (
+  record: VideoAssetRecord,
+  duplicateIds: string[]
+): VideoUploadSuccess => ({
+  ...mapRecordToResponse(record),
+  alreadyExists: true,
+  duplicateIds,
+});
+
 const parseNumber = (value: unknown): number | undefined => {
   if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value;
   if (typeof value === 'string') {
@@ -309,6 +333,17 @@ export async function uploadVideoBuffer(
       error: `Video exceeds limit of ${(MAX_VIDEO_BYTES / 1024 / 1024).toFixed(0)}MB`,
       status: 400,
       reason: 'too-large',
+    };
+  }
+
+  const existingUploads = await findExistingVideoUpload(effectiveContext);
+  if (existingUploads.length > 0) {
+    return {
+      ok: true,
+      data: mapExistingVideoUploadResponse(
+        existingUploads[0],
+        existingUploads.map((record) => record.id)
+      ),
     };
   }
 
@@ -413,6 +448,17 @@ export async function uploadVideoFromRemoteUrl(
     }
   } catch {
     return { ok: false, error: 'A valid video URL is required', status: 400, reason: 'invalid-url' };
+  }
+
+  const existingUploads = await findExistingVideoUpload(effectiveContext);
+  if (existingUploads.length > 0) {
+    return {
+      ok: true,
+      data: mapExistingVideoUploadResponse(
+        existingUploads[0],
+        existingUploads.map((record) => record.id)
+      ),
+    };
   }
 
   try {

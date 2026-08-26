@@ -12,6 +12,8 @@ const noopLogger = {
 
 describe('instagram ingest script helpers', async () => {
   const script = await import('../scripts/instagram-ingest.mjs');
+  const dedup = await import('../scripts/instagram-ingest/dedup.mjs');
+  const cloudflareUpload = await import('../scripts/instagram-ingest/cloudflare-upload.mjs');
   const singleUrlExtract = await import('../scripts/instagram-ingest/single-url-extract.mjs');
 
   afterEach(() => {
@@ -56,6 +58,49 @@ describe('instagram ingest script helpers', async () => {
 
     expect(options.stopAtShortcode).toBe('ABC123');
     expect(options.resume).toBe(false);
+  });
+
+  it('parses the profile still-image opt-out without changing the default', () => {
+    expect(script.parseArgs(['ingest', '--username', 'demo']).skipVideoPostImages).toBe(false);
+    expect(
+      script.parseArgs(['ingest', '--username', 'demo', '--skip-video-post-images']).skipVideoPostImages,
+    ).toBe(true);
+  });
+
+  it('plans only missing assets for a previously retrieved Instagram post', () => {
+    const existing = dedup.buildInstagramAssetIndex([
+      {
+        shortcode: 'mixed-1',
+        cloudflare: [
+          { assetType: 'image', ok: true },
+          { assetType: 'video', ok: true },
+        ],
+      },
+    ]);
+
+    expect(
+      dedup.getInstagramAssetPlan(
+        { shortcode: 'mixed-1', imageUrls: ['image-1', 'image-2'], videoUrls: ['video-1'] },
+        existing.get('shortcode:mixed-1'),
+      ),
+    ).toEqual({ imageStart: 1, videoStart: 1, skipRecord: false });
+  });
+
+  it('skips a fully persisted record and counts it once', () => {
+    const index = dedup.buildInstagramAssetIndex([
+      {
+        shortcode: 'still-1',
+        cloudflare: [{ assetType: 'image', ok: true }],
+      },
+    ]);
+
+    expect(
+      dedup.getInstagramAssetPlan(
+        { shortcode: 'still-1', imageUrls: ['image-1'], videoUrls: [] },
+        index.get('shortcode:still-1'),
+      ).skipRecord,
+    ).toBe(true);
+    expect(index.get('shortcode:still-1')).toMatchObject({ records: 1, images: 1, videos: 0 });
   });
 
   it('matches only the configured Instagram boundary shortcode', () => {
@@ -252,6 +297,39 @@ describe('instagram ingest script helpers', async () => {
       description: 'Backfilled caption',
       instagramSource: { likeCount: 3, commentCount: 1 },
     });
+  });
+
+  it('marks a source-url video upload as already existing', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response('video-bytes', {
+          status: 200,
+          headers: { 'Content-Type': 'video/mp4' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ alreadyExists: true, duplicateIds: ['video-existing-1'] }),
+          { status: 200 },
+        ),
+      );
+
+    const result = await cloudflareUpload.pushVideoToCloudflare({
+      apiBase: 'http://localhost:3000',
+      videoUrl: 'https://cdn.example.com/video.mp4',
+      username: 'demo',
+      shortcode: 'video-1',
+      permalink: 'https://www.instagram.com/p/video-1/',
+      sourcePageUrl: 'https://www.instagram.com/p/video-1/',
+      namespace: 'cf-default',
+      deduplicateBySourceUrl: true,
+      log: noopLogger,
+    });
+
+    expect(result).toMatchObject({ alreadyExists: true, duplicateIds: ['video-existing-1'] });
+    const [, init] = fetchMock.mock.calls[1];
+    expect((init?.body as FormData).get('deduplicateBySourceUrl')).toBe('true');
   });
 
   it('continues uploading when AI display-name generation fails', async () => {

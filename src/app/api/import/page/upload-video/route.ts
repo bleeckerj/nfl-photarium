@@ -17,6 +17,7 @@ type UploadVideoRequestBody = {
   namespace?: string;
   parentId?: string;
   requireSignedUrls?: boolean;
+  deduplicateBySourceUrl?: boolean;
 };
 
 const isPrivateHost = (hostname: string) => {
@@ -79,6 +80,7 @@ const parseContext = (
     namespace,
     parentId,
     requireSignedUrls,
+    deduplicateBySourceUrl,
   }: {
     folder?: string | null;
     tags?: string | null;
@@ -89,6 +91,7 @@ const parseContext = (
     namespace?: string | null;
     parentId?: string | null;
     requireSignedUrls?: boolean;
+    deduplicateBySourceUrl?: boolean;
   }
 ): VideoUploadContext => ({
   folder: cleanString(folder),
@@ -100,6 +103,7 @@ const parseContext = (
   namespace: cleanString(namespace),
   parentId: cleanString(parentId),
   requireSignedUrls,
+  deduplicateBySourceUrl: deduplicateBySourceUrl === true,
 });
 
 const validateRemoteUrl = (rawUrl: string): string | null => {
@@ -153,6 +157,7 @@ export async function POST(request: NextRequest) {
           namespace: namespaceValue,
           parentId: parentValidation.canonicalParentId,
           requireSignedUrls: body.requireSignedUrls === true,
+          deduplicateBySourceUrl: body.deduplicateBySourceUrl === true,
         }),
       });
 
@@ -199,6 +204,8 @@ export async function POST(request: NextRequest) {
         parentId: parentValidation.canonicalParentId,
         requireSignedUrls:
           cleanString(formData.get('requireSignedUrls') as string | null) === 'true',
+        deduplicateBySourceUrl:
+          cleanString(formData.get('deduplicateBySourceUrl') as string | null) === 'true',
       }),
     });
 

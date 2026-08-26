@@ -28,6 +28,13 @@ import {
   mapItemToRecord,
 } from "./instagram-ingest/records.mjs";
 import {
+  buildInstagramAssetIndex,
+  getInstagramAssetPlan,
+  getInstagramRecordKey,
+  mergeInstagramAssetIndex,
+  readInstagramNdjsonRecords,
+} from "./instagram-ingest/dedup.mjs";
+import {
   extractSingleUrlRecord,
   fetchSingleUrlRecordFromApiByShortcode,
   fetchSingleUrlRecordFromUserFeedByShortcode,
@@ -73,10 +80,15 @@ async function runIngest(opts, log) {
   let cloudflareImagePushOk = 0;
   let cloudflareImageAlreadyExists = 0;
   let cloudflareImagePushFail = 0;
+  let cloudflareImageSkippedExisting = 0;
   let cloudflareVideoPushOk = 0;
+  let cloudflareVideoAlreadyExists = 0;
   let cloudflareVideoPushFail = 0;
+  let cloudflareVideoSkippedExisting = 0;
+  let recordsSkippedExisting = 0;
   let stopAtShortcodeFound = false;
   await ensureParentDir(opts.outputPath);
+  const existingAssetIndex = buildInstagramAssetIndex(await readInstagramNdjsonRecords(opts.outputPath));
   const out = fs.createWriteStream(opts.outputPath, { flags: "a" });
   if (opts.downloadDir) await ensureDir(opts.downloadDir);
   while (true) {
@@ -108,6 +120,19 @@ async function runIngest(opts, log) {
         );
         break;
       }
+      const recordKey = getInstagramRecordKey(record);
+      const assetPlan = getInstagramAssetPlan(record, existingAssetIndex.get(recordKey));
+      const skipVideoPostImages = opts.skipVideoPostImages && record.mediaType === 2;
+      const imageStart = skipVideoPostImages ? record.imageUrls.length : assetPlan.imageStart;
+      const videoStart = assetPlan.videoStart;
+      if (
+        (recordKey && opts.pushCloudflare && assetPlan.skipRecord) ||
+        (recordKey && !opts.pushCloudflare && existingAssetIndex.has(recordKey))
+      ) {
+        recordsSkippedExisting += 1;
+        log.info(`record_skip_existing shortcode=${record.shortcode ?? "n/a"} media_id=${record.mediaId ?? "n/a"}`);
+        continue;
+      }
       record.cloudflare = [];
       const captionPreview = (record.caption || "").replace(/\s+/g, " ").slice(0, 80);
       log.trace(
@@ -137,13 +162,19 @@ async function runIngest(opts, log) {
         }
       }
 
-      if (opts.pushCloudflare && record.mediaType === 2 && record.imageUrls.length > 0) {
+      if (opts.pushCloudflare && imageStart > 0) {
+        cloudflareImageSkippedExisting += imageStart;
+        log.trace(
+          `cloudflare_image_skip_existing shortcode=${record.shortcode ?? "n/a"} count=${imageStart}`,
+        );
+      }
+      if (opts.pushCloudflare && skipVideoPostImages && record.imageUrls.length > 0) {
         log.trace(
           `cloudflare_image_skip_video_post shortcode=${record.shortcode ?? "n/a"} media_type=${record.mediaType} images=${record.imageUrls.length}`,
         );
-      } else if (opts.pushCloudflare && record.imageUrls.length > 0) {
+      } else if (opts.pushCloudflare && imageStart < record.imageUrls.length) {
         const sourcePageUrl = record.permalink || `https://www.instagram.com/${opts.username}/`;
-        for (const imageUrl of record.imageUrls) {
+        for (const imageUrl of record.imageUrls.slice(imageStart)) {
           try {
             const pushed = await ingestImageToCloudflare({
               apiBase: opts.apiBase,
@@ -199,13 +230,19 @@ async function runIngest(opts, log) {
         }
       }
 
-      if (opts.pushCloudflare && opts.skipVideoPush && record.videoUrls.length > 0) {
+      if (opts.pushCloudflare && videoStart > 0) {
+        cloudflareVideoSkippedExisting += videoStart;
         log.trace(
-          `cloudflare_video_skip shortcode=${record.shortcode ?? "n/a"} reason=skip_video_push urls=${record.videoUrls.length}`,
+          `cloudflare_video_skip_existing shortcode=${record.shortcode ?? "n/a"} count=${videoStart}`,
         );
-      } else if (opts.pushCloudflare && record.videoUrls.length > 0) {
+      }
+      if (opts.pushCloudflare && opts.skipVideoPush && videoStart < record.videoUrls.length) {
+        log.trace(
+          `cloudflare_video_skip shortcode=${record.shortcode ?? "n/a"} reason=skip_video_push urls=${record.videoUrls.length - videoStart}`,
+        );
+      } else if (opts.pushCloudflare && videoStart < record.videoUrls.length) {
         const sourcePageUrl = record.permalink || `https://www.instagram.com/${opts.username}/`;
-        for (const videoUrl of record.videoUrls) {
+        for (const videoUrl of record.videoUrls.slice(videoStart)) {
           try {
             const pushed = await pushVideoToCloudflare({
               apiBase: opts.apiBase,
@@ -216,13 +253,20 @@ async function runIngest(opts, log) {
               sourcePageUrl,
               description: record.caption,
               namespace: opts.namespace,
+              deduplicateBySourceUrl: Boolean(record.permalink),
               log,
             });
-            cloudflareVideoPushOk += 1;
+            if (pushed.alreadyExists) {
+              cloudflareVideoAlreadyExists += 1;
+            } else {
+              cloudflareVideoPushOk += 1;
+            }
             record.cloudflare.push({
               assetType: "video",
               videoUrl,
               ok: true,
+              alreadyExists: pushed.alreadyExists === true,
+              duplicateIds: pushed.duplicateIds ?? [],
               id: pushed.id,
               streamUid: pushed.streamUid,
               playbackUrl: pushed.playbackUrl,
@@ -230,9 +274,9 @@ async function runIngest(opts, log) {
               thumbnailUrl: pushed.thumbnailUrl,
               previewUrl: pushed.previewUrl,
             });
-            log.trace(
-              `cloudflare_video_push_ok shortcode=${record.shortcode ?? "n/a"} video=${videoUrl} id=${pushed.id ?? "n/a"} stream_uid=${pushed.streamUid ?? "n/a"}`,
-            );
+            log.trace(pushed.alreadyExists
+              ? `cloudflare_video_push_exists shortcode=${record.shortcode ?? "n/a"} duplicate_ids=${(pushed.duplicateIds ?? []).join(",") || "n/a"}`
+              : `cloudflare_video_push_ok shortcode=${record.shortcode ?? "n/a"} video=${videoUrl} id=${pushed.id ?? "n/a"} stream_uid=${pushed.streamUid ?? "n/a"}`);
           } catch (err) {
             cloudflareVideoPushFail += 1;
             record.cloudflare.push({
@@ -258,6 +302,7 @@ async function runIngest(opts, log) {
 
       out.write(`${JSON.stringify(record)}\n`);
       recordCount += 1;
+      mergeInstagramAssetIndex(existingAssetIndex, record);
     }
 
     if (stopAtShortcodeFound) break;
@@ -309,7 +354,7 @@ async function runIngest(opts, log) {
   }
 
   log.success(`Ingest complete for @${opts.username}`);
-  log.success(`records_written=${recordCount} pages_fetched=${pageCount}`);
+  log.success(`records_written=${recordCount} records_skipped_existing=${recordsSkippedExisting} pages_fetched=${pageCount}`);
   log.info(`output=${opts.outputPath || "(auto; will route after owner resolution)"}`);
   log.info(`checkpoint=${opts.checkpointPath}`);
   if (opts.downloadDir) {
@@ -317,7 +362,7 @@ async function runIngest(opts, log) {
   }
   if (opts.pushCloudflare) {
     log.info(
-      `cloudflare_push images_uploaded=${cloudflareImagePushOk} images_exists=${cloudflareImageAlreadyExists} images_failed=${cloudflareImagePushFail} videos_uploaded=${cloudflareVideoPushOk} videos_failed=${cloudflareVideoPushFail}`,
+      `cloudflare_push images_uploaded=${cloudflareImagePushOk} images_exists=${cloudflareImageAlreadyExists} images_skipped_existing=${cloudflareImageSkippedExisting} images_failed=${cloudflareImagePushFail} videos_uploaded=${cloudflareVideoPushOk} videos_exists=${cloudflareVideoAlreadyExists} videos_skipped_existing=${cloudflareVideoSkippedExisting} videos_failed=${cloudflareVideoPushFail}`,
     );
   }
 }
@@ -508,6 +553,7 @@ async function runSingleUrl(opts, log) {
     let cloudflareImageAlreadyExists = 0;
     let cloudflareImagePushFail = 0;
     let cloudflareVideoPushOk = 0;
+    let cloudflareVideoAlreadyExists = 0;
     let cloudflareVideoPushFail = 0;
 
     if (opts.pushCloudflare) {
@@ -590,13 +636,20 @@ async function runSingleUrl(opts, log) {
               sourcePageUrl,
               description: record.caption,
               namespace: opts.namespace,
+              deduplicateBySourceUrl: Boolean(record.permalink || parsedInputUrl?.shortcode),
               log,
             });
-            cloudflareVideoPushOk += 1;
+            if (pushed.alreadyExists) {
+              cloudflareVideoAlreadyExists += 1;
+            } else {
+              cloudflareVideoPushOk += 1;
+            }
             record.cloudflare.push({
               assetType: "video",
               videoUrl,
               ok: true,
+              alreadyExists: pushed.alreadyExists === true,
+              duplicateIds: pushed.duplicateIds ?? [],
               tags: uploadTags,
               id: pushed.id,
               streamUid: pushed.streamUid,
@@ -629,7 +682,7 @@ async function runSingleUrl(opts, log) {
       }
 
       log.success(
-        `single_url_cloudflare images_uploaded=${cloudflareImagePushOk} images_exists=${cloudflareImageAlreadyExists} images_failed=${cloudflareImagePushFail} videos_uploaded=${cloudflareVideoPushOk} videos_failed=${cloudflareVideoPushFail}`,
+        `single_url_cloudflare images_uploaded=${cloudflareImagePushOk} images_exists=${cloudflareImageAlreadyExists} images_failed=${cloudflareImagePushFail} videos_uploaded=${cloudflareVideoPushOk} videos_exists=${cloudflareVideoAlreadyExists} videos_failed=${cloudflareVideoPushFail}`,
       );
     }
 

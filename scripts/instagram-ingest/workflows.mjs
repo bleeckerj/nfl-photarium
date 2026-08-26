@@ -44,6 +44,7 @@ export function logIngestStart(opts, log) {
     log.info(`push_namespace=${opts.namespace}`);
     log.info(`push_tags=instagram,${opts.username} push_folder=instagram`);
     log.info(`push_ai_display_name=${opts.aiDisplayName}`);
+    log.info(`push_video_post_images=${!opts.skipVideoPostImages}`);
     if (opts.skipVideoPush) log.warn('skip_video_push=true (videos will be deferred; only images pushed during ingest)');
   } else log.warn('push_cloudflare=false (explicit opt-out; omit --no-push-cloudflare to catalog assets in Cloudflare).');
 }
@@ -138,16 +139,22 @@ export async function runVideosFromNdjson(opts, log) {
   if (rowsWithLikelyVideoNoUrl > 0) log.warn(`rows_likely_video_but_no_video_url=${rowsWithLikelyVideoNoUrl}`);
   log.info(`video_queue_size=${queue.length}`);
   let uploaded = 0;
+  let alreadyExists = 0;
   let failed = 0;
   for (let i = 0; i < queue.length; i += 1) {
     const item = queue[i];
     log.trace(`video_replay_item index=${i + 1}/${queue.length} shortcode=${item.shortcode ?? 'n/a'} url=${item.videoUrl}`);
     try {
-      const pushed = await pushVideoToCloudflare({ apiBase: opts.apiBase, videoUrl: item.videoUrl, username: item.username, shortcode: item.shortcode, permalink: item.permalink, sourcePageUrl: item.sourcePageUrl, description: item.caption, namespace: opts.namespace, log });
-      uploaded += 1;
-      log.trace(`video_replay_ok shortcode=${item.shortcode ?? 'n/a'} id=${pushed.id ?? 'n/a'} stream_uid=${pushed.streamUid ?? 'n/a'}`);
+      const pushed = await pushVideoToCloudflare({ apiBase: opts.apiBase, videoUrl: item.videoUrl, username: item.username, shortcode: item.shortcode, permalink: item.permalink, sourcePageUrl: item.sourcePageUrl, description: item.caption, namespace: opts.namespace, deduplicateBySourceUrl: Boolean(item.shortcode), log });
+      if (pushed.alreadyExists) {
+        alreadyExists += 1;
+        log.info(`video_replay_exists shortcode=${item.shortcode ?? 'n/a'} duplicate_ids=${pushed.duplicateIds.join(',') || 'n/a'}`);
+      } else {
+        uploaded += 1;
+        log.trace(`video_replay_ok shortcode=${item.shortcode ?? 'n/a'} id=${pushed.id ?? 'n/a'} stream_uid=${pushed.streamUid ?? 'n/a'}`);
+      }
     } catch (err) { failed += 1; log.warn(`video_replay_failed shortcode=${item.shortcode ?? 'n/a'} err=${err.message}`); }
     if (opts.requestDelayMs > 0) { log.trace(`request_sleep_ms=${opts.requestDelayMs} after=video_replay_push`); await sleep(opts.requestDelayMs); }
   }
-  log.success(`video_replay_complete uploaded=${uploaded} failed=${failed} queued=${queue.length}`);
+  log.success(`video_replay_complete uploaded=${uploaded} already_exists=${alreadyExists} failed=${failed} queued=${queue.length}`);
 }

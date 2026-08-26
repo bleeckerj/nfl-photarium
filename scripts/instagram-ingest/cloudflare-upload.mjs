@@ -422,6 +422,7 @@ export async function pushVideoToCloudflare({
   sourcePageUrl,
   description,
   namespace,
+  deduplicateBySourceUrl = false,
   log,
 }) {
   const sanitizedVideoUrl = sanitizeVideoUrlForUpload(videoUrl);
@@ -443,6 +444,7 @@ export async function pushVideoToCloudflare({
   form.append("originalUrl", sanitizedVideoUrl);
   form.append("sourceUrl", sourcePageUrl);
   form.append("namespace", uploadNamespace);
+  if (deduplicateBySourceUrl) form.append("deduplicateBySourceUrl", "true");
   if (description) form.append("description", description);
 
   log.trace(
@@ -464,6 +466,8 @@ export async function pushVideoToCloudflare({
 
     if (res.ok) {
       return {
+        alreadyExists: body?.alreadyExists === true,
+        duplicateIds: Array.isArray(body?.duplicateIds) ? body.duplicateIds : [],
         id: body?.id || null,
         streamUid: body?.streamUid || null,
         playbackUrl: body?.playbackUrl || null,

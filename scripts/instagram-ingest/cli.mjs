@@ -113,6 +113,7 @@ Options:
   --no-push-cloudflare      Disable Photarium/Cloudflare pushes
   --ai-display-name         Generate display names for image uploads during ingest
   --skip-video-push         Skip pushing videos during ingest
+  --skip-video-post-images  Skip still assets attached to video posts during profile ingest
   --api-base <url>          Base URL for local API (default: http://localhost:3000)
   --namespace <name>        Upload namespace (default: ingest; single-url default: cf-instagram)
   --no-resume               Ignore existing checkpoint and start from newest page
@@ -143,6 +144,7 @@ export function parseArgs(argv) {
     pushCloudflare: false,
     aiDisplayName: false,
     skipVideoPush: false,
+    skipVideoPostImages: false,
     apiBase: "http://localhost:3000",
     namespace: "ingest",
     namespaceProvided: false,
@@ -211,6 +213,7 @@ export function parseArgs(argv) {
     else if (arg === "--no-push-cloudflare") out.pushCloudflare = false;
     else if (arg === "--ai-display-name") out.aiDisplayName = true;
     else if (arg === "--skip-video-push") out.skipVideoPush = true;
+    else if (arg === "--skip-video-post-images") out.skipVideoPostImages = true;
     else if (arg === "--no-resume") out.resume = false;
     else if (arg === "--headful") out.headful = true;
     else if (arg === "--quiet") out.verbosity = 0;
