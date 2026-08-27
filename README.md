@@ -700,6 +700,10 @@ npm run hygiene:targeted
 npm run hygiene
 ```
 
+`npm run dev` also starts the configured CleanShotX folder watcher. The watcher
+uses `adjacent/photarium-folder-uploader/photarium-folder-uploader.cleanshot.json`
+and stops automatically when the Photarium development server stops.
+
 `npm run hygiene` is the full local quality gate: size audit, lint, tests, and production build.
 
 ### Redis And Embeddings

@@ -50,8 +50,8 @@ else
 fi
 
 echo ""
-echo -e "${BLUE}→ Starting Next.js dev server...${NC}"
+echo -e "${BLUE}→ Starting Photarium and the CleanShotX folder watcher...${NC}"
 echo ""
 
-# Start the dev server
+# The development supervisor starts both processes and forwards shutdown signals.
 exec npm run dev
