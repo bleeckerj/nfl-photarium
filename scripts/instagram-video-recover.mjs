@@ -3,9 +3,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { INSTAGRAM_NAMESPACE, resolveInstagramNamespace } from "./instagram-ingest/namespace.mjs";
 
 const DEFAULT_API_BASE = "http://localhost:3000";
-const DEFAULT_NAMESPACE = "cf-default";
+const DEFAULT_NAMESPACE = INSTAGRAM_NAMESPACE;
 const DEFAULT_REQUEST_DELAY_MS = 800;
 const DEFAULT_PROFILE_DIR = path.resolve(".cache/instagram-profile");
 
@@ -15,11 +16,11 @@ function printUsage() {
 Resolve missing Instagram video URLs in NDJSON, then replay video uploads.
 
 Usage:
-  node scripts/instagram-video-recover.mjs --input <path> --namespace <name> [options]
+  node scripts/instagram-video-recover.mjs --input <path> [options]
 
 Options:
   --input <path>            NDJSON file to repair and replay (required)
-  --namespace <name>        Target namespace for replay upload (default: ${DEFAULT_NAMESPACE})
+  --namespace <name>        Compatibility option; must be ${DEFAULT_NAMESPACE}
   --api-base <url>          Local API base (default: ${DEFAULT_API_BASE})
   --request-delay-ms <n>    Delay between replay pushes (default: ${DEFAULT_REQUEST_DELAY_MS})
   --profile-dir <path>      Chromium profile for ig:url resolve step (default: ${DEFAULT_PROFILE_DIR})
@@ -33,8 +34,8 @@ Options:
   -h, --help                Show this help
 
 Examples:
-  node scripts/instagram-video-recover.mjs --input data/instagram/darthjulian.ndjson --namespace ig-videos
-  node scripts/instagram-video-recover.mjs --input data/instagram/darthjulian.ndjson --namespace ig-videos --headful --limit 5
+  node scripts/instagram-video-recover.mjs --input data/instagram/darthjulian.ndjson
+  node scripts/instagram-video-recover.mjs --input data/instagram/darthjulian.ndjson --headful --limit 5
 `);
 }
 
@@ -62,7 +63,7 @@ function parseArgs(argv) {
       out.input = path.resolve(next);
       i += 1;
     } else if (arg === "--namespace" && next) {
-      out.namespace = next.trim();
+      out.namespace = resolveInstagramNamespace(next);
       i += 1;
     } else if (arg === "--api-base" && next) {
       out.apiBase = next.trim().replace(/\/+$/, "");
@@ -201,9 +202,7 @@ async function main() {
     throw new Error("--request-delay-ms must be >= 0");
   }
   if (!Number.isFinite(opts.limit) || opts.limit < 0) throw new Error("--limit must be >= 0");
-  if (!opts.skipReplay && (opts.namespace === "__all__" || opts.namespace === "__none__")) {
-    throw new Error('Invalid --namespace. Use a specific namespace, not "__all__" or "__none__".');
-  }
+  opts.namespace = resolveInstagramNamespace(opts.namespace);
 
   const records = await loadNdjson(opts.input);
   const candidates = buildResolveCandidates(records, opts.username);
@@ -253,7 +252,7 @@ async function main() {
       "--input",
       opts.input,
       "--namespace",
-      opts.namespace,
+      INSTAGRAM_NAMESPACE,
       "--api-base",
       opts.apiBase,
       "--request-delay-ms",

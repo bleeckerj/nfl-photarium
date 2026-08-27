@@ -13,10 +13,6 @@ const sharedInstagramProperties = {
     type: 'string',
     description: 'Photarium base URL override. Defaults to PHOTARIUM_BASE_URL / runtime BASE_URL.',
   },
-  namespace: {
-    type: 'string',
-    description: 'Specific Photarium namespace for uploaded media.',
-  },
   headful: {
     type: 'boolean',
     description: 'Run with a visible browser window instead of headless mode.',
@@ -51,12 +47,11 @@ export const instagramTools: Tool[] = [
   {
     name: 'photarium_instagram_ingest_profile',
     description:
-      'Ingest Instagram profile feed posts through the existing authenticated CLI/browser profile flow, optionally downloading source images and pushing discovered media into Photarium. Cloudflare/Photarium push defaults to enabled; set pushCloudflare to false to opt out.',
+      'Ingest Instagram profile feed posts through the existing authenticated CLI/browser profile flow into the fixed Photarium namespace "cf-instagram", optionally downloading source images. Cloudflare/Photarium push defaults to enabled; set pushCloudflare to false to opt out.',
     inputSchema: {
       type: 'object',
       properties: {
         username: sharedInstagramProperties.username,
-        namespace: sharedInstagramProperties.namespace,
         apiBase: sharedInstagramProperties.apiBase,
         profileDir: sharedInstagramProperties.profileDir,
         count: { type: 'number', description: 'Items per Instagram API page.' },
@@ -74,13 +69,13 @@ export const instagramTools: Tool[] = [
         verbose: sharedInstagramProperties.verbose,
         noColor: sharedInstagramProperties.noColor,
       },
-      required: ['username', 'namespace'],
+      required: ['username'],
     },
   },
   {
     name: 'photarium_instagram_ingest_single_url',
     description:
-      'Ingest a single Instagram post or reel URL through the existing Instagram CLI/browser profile flow. Defaults to namespace "cf-instagram" and Cloudflare push enabled.',
+      'Ingest a single Instagram post or reel URL through the existing Instagram CLI/browser profile flow into the fixed Photarium namespace "cf-instagram". Cloudflare push is enabled by default.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -91,10 +86,6 @@ export const instagramTools: Tool[] = [
         username: {
           type: 'string',
           description: 'Known owner username for the Instagram post. Omit unless the source account is known.',
-        },
-        namespace: {
-          type: 'string',
-          description: 'Target namespace for uploaded media. Defaults to "cf-instagram".',
         },
         apiBase: sharedInstagramProperties.apiBase,
         profileDir: sharedInstagramProperties.profileDir,
@@ -124,30 +115,28 @@ export const instagramTools: Tool[] = [
   {
     name: 'photarium_instagram_replay_videos',
     description:
-      'Replay video uploads from an Instagram NDJSON file through the existing videos-from-ndjson script.',
+      'Replay video uploads from an Instagram NDJSON file through the existing videos-from-ndjson script into the fixed Photarium namespace "cf-instagram".',
     inputSchema: {
       type: 'object',
       properties: {
         input: { type: 'string', description: 'Input Instagram NDJSON path.' },
-        namespace: sharedInstagramProperties.namespace,
         username: sharedInstagramProperties.username,
         apiBase: sharedInstagramProperties.apiBase,
         requestDelayMs: { type: 'number', description: 'Delay between per-video push requests in milliseconds.' },
         verbose: sharedInstagramProperties.verbose,
         noColor: sharedInstagramProperties.noColor,
       },
-      required: ['input', 'namespace'],
+      required: ['input'],
     },
   },
   {
     name: 'photarium_instagram_recover_videos',
     description:
-      'Resolve missing Instagram video URLs in an NDJSON file, then replay video uploads through the existing recovery helper.',
+      'Resolve missing Instagram video URLs in an NDJSON file, then replay video uploads through the existing recovery helper into the fixed Photarium namespace "cf-instagram".',
     inputSchema: {
       type: 'object',
       properties: {
         input: { type: 'string', description: 'Input Instagram NDJSON path to repair and replay.' },
-        namespace: sharedInstagramProperties.namespace,
         username: sharedInstagramProperties.username,
         apiBase: sharedInstagramProperties.apiBase,
         requestDelayMs: { type: 'number', description: 'Delay between replay pushes in milliseconds.' },
@@ -159,7 +148,7 @@ export const instagramTools: Tool[] = [
         dryRun: { type: 'boolean', description: 'Print planned commands without executing them.' },
         verbose: sharedInstagramProperties.verbose,
       },
-      required: ['input', 'namespace'],
+      required: ['input'],
     },
   },
 ];

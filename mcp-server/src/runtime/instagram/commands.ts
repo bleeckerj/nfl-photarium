@@ -3,6 +3,8 @@ import path from 'node:path';
 import { BASE_URL, REPO_ROOT } from '../shared/config.js';
 import { runCommandCapture } from '../shared/command-runner.js';
 
+const INSTAGRAM_NAMESPACE = 'cf-instagram';
+
 export interface InstagramCommandResult {
   ok: boolean;
   exitCode: number;
@@ -25,6 +27,17 @@ function appendNumberArg(args: string[], value: number | undefined, flag: string
 
 function appendStringArg(args: string[], value: string | undefined, flag: string): void {
   if (value) args.push(flag, value);
+}
+
+function resolveInstagramNamespace(namespace?: string): string {
+  const requested = typeof namespace === 'string' ? namespace.trim() : '';
+  if (!requested) return INSTAGRAM_NAMESPACE;
+  if (requested !== INSTAGRAM_NAMESPACE) {
+    throw new Error(
+      `Instagram ingestion only supports namespace "${INSTAGRAM_NAMESPACE}"; received "${requested}".`,
+    );
+  }
+  return INSTAGRAM_NAMESPACE;
 }
 
 async function runNodeScript(args: string[]): Promise<InstagramCommandResult> {
@@ -57,7 +70,7 @@ export async function runInstagramAuth(options: {
 
 export async function runInstagramProfileIngest(options: {
   username: string;
-  namespace: string;
+  namespace?: string;
   apiBase?: string;
   profileDir?: string;
   count?: number;
@@ -81,7 +94,7 @@ export async function runInstagramProfileIngest(options: {
     '--username',
     options.username,
     '--namespace',
-    options.namespace,
+    resolveInstagramNamespace(options.namespace),
     '--api-base',
     options.apiBase || BASE_URL,
   ];
@@ -126,7 +139,7 @@ export async function runInstagramSingleUrlIngest(options: {
   const args = [scriptPath('instagram-ingest.mjs'), 'single-url', '--url', options.url];
 
   appendStringArg(args, options.username, '--username');
-  args.push('--namespace', options.namespace || 'cf-instagram');
+  args.push('--namespace', resolveInstagramNamespace(options.namespace));
   args.push('--api-base', options.apiBase || BASE_URL);
 
   if (options.noPushCloudflare) {
@@ -146,7 +159,7 @@ export async function runInstagramSingleUrlIngest(options: {
 
 export async function runInstagramVideoReplay(options: {
   input: string;
-  namespace: string;
+  namespace?: string;
   username?: string;
   apiBase?: string;
   requestDelayMs?: number;
@@ -159,7 +172,7 @@ export async function runInstagramVideoReplay(options: {
     '--input',
     options.input,
     '--namespace',
-    options.namespace,
+    resolveInstagramNamespace(options.namespace),
     '--api-base',
     options.apiBase || BASE_URL,
   ];
@@ -174,7 +187,7 @@ export async function runInstagramVideoReplay(options: {
 
 export async function runInstagramVideoRecovery(options: {
   input: string;
-  namespace: string;
+  namespace?: string;
   username?: string;
   apiBase?: string;
   requestDelayMs?: number;
@@ -191,7 +204,7 @@ export async function runInstagramVideoRecovery(options: {
     '--input',
     options.input,
     '--namespace',
-    options.namespace,
+    resolveInstagramNamespace(options.namespace),
     '--api-base',
     options.apiBase || BASE_URL,
   ];

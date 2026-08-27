@@ -69,7 +69,7 @@ describe('Photarium MCP Instagram command wrappers', async () => {
 
     await commands.runInstagramProfileIngest({
       username: 'demo',
-      namespace: 'ig-archive',
+      namespace: 'cf-instagram',
       count: 24,
       maxPages: 2,
       pushCloudflare: true,
@@ -85,7 +85,7 @@ describe('Photarium MCP Instagram command wrappers', async () => {
         '--username',
         'demo',
         '--namespace',
-        'ig-archive',
+        'cf-instagram',
         '--count',
         '24',
         '--max-pages',
@@ -103,7 +103,7 @@ describe('Photarium MCP Instagram command wrappers', async () => {
 
     await commands.runInstagramProfileIngest({
       username: 'demo',
-      namespace: 'ig-archive',
+      namespace: 'cf-instagram',
       pushCloudflare: false,
     });
 
@@ -117,7 +117,7 @@ describe('Photarium MCP Instagram command wrappers', async () => {
 
     await commands.runInstagramVideoRecovery({
       input: 'data/instagram/demo.ndjson',
-      namespace: 'ig-videos',
+      namespace: 'cf-instagram',
       limit: 3,
       skipReplay: true,
       dryRun: true,
@@ -131,7 +131,7 @@ describe('Photarium MCP Instagram command wrappers', async () => {
         '--input',
         'data/instagram/demo.ndjson',
         '--namespace',
-        'ig-videos',
+        'cf-instagram',
         '--limit',
         '3',
         '--skip-replay',
@@ -139,5 +139,15 @@ describe('Photarium MCP Instagram command wrappers', async () => {
         '--verbose',
       ]),
     );
+  });
+
+  it('rejects a non-Instagram namespace before spawning an ingest command', async () => {
+    await expect(
+      commands.runInstagramProfileIngest({
+        username: 'demo',
+        namespace: 'cf-default',
+      }),
+    ).rejects.toThrow('Instagram ingestion only supports namespace "cf-instagram"');
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 });

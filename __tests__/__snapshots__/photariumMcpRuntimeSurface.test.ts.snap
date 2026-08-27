@@ -621,10 +621,6 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "description": "Stop after N feed pages. The CLI default is unbounded.",
         "type": "number",
       },
-      "namespace": {
-        "description": "Specific Photarium namespace for uploaded media.",
-        "type": "string",
-      },
       "noColor": {
         "description": "Disable ANSI colors in captured CLI output.",
         "type": "boolean",
@@ -664,7 +660,6 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
     },
     "required": [
       "username",
-      "namespace",
     ],
     "type": "object",
   },
@@ -677,10 +672,6 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
       "headful": {
         "description": "Run with a visible browser window instead of headless mode.",
         "type": "boolean",
-      },
-      "namespace": {
-        "description": "Target namespace for uploaded media. Defaults to "cf-instagram".",
-        "type": "string",
       },
       "noColor": {
         "description": "Disable ANSI colors in captured CLI output.",
@@ -746,10 +737,6 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "description": "Resolve at most N missing shortcodes.",
         "type": "number",
       },
-      "namespace": {
-        "description": "Specific Photarium namespace for uploaded media.",
-        "type": "string",
-      },
       "profileDir": {
         "description": "Persistent Chromium profile directory to reuse for the Instagram session. Defaults to the CLI default when omitted.",
         "type": "string",
@@ -777,7 +764,6 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
     },
     "required": [
       "input",
-      "namespace",
     ],
     "type": "object",
   },

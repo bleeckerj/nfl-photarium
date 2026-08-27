@@ -32,7 +32,7 @@ describe('instagram ingest script helpers', async () => {
     expect(options.command).toBe('ingest');
     expect(options.pushCloudflare).toBe(true);
     expect(options.aiDisplayName).toBe(true);
-    expect(options.namespace).toBe('ingest');
+    expect(options.namespace).toBe('cf-instagram');
   });
 
   it('enables Cloudflare pushes by default for profile ingest', () => {
@@ -132,6 +132,12 @@ describe('instagram ingest script helpers', async () => {
     expect(options.namespace).toBe('cf-instagram');
   });
 
+  it('rejects a non-Instagram namespace at CLI parse time', () => {
+    expect(() => script.parseArgs(['ingest', '--username', 'demo', '--namespace', 'cf-default'])).toThrow(
+      'Instagram ingestion only supports namespace "cf-instagram"',
+    );
+  });
+
   it('fetches Instagram API paths with the browser session headers', async () => {
     const page = {
       evaluate: vi.fn(async (_fn, args) => {
@@ -206,7 +212,7 @@ describe('instagram ingest script helpers', async () => {
       shortcode: 'abc123',
       permalink: 'https://instagram.com/p/abc123/',
       sourcePageUrl: 'https://instagram.com/demo/',
-      namespace: 'ingest',
+      namespace: 'cf-instagram',
       log: noopLogger,
       displayName: 'Ocean Cliffs',
       fetchedImage: { bytes: Buffer.from('image-bytes'), contentType: 'image/jpeg' },
@@ -220,13 +226,13 @@ describe('instagram ingest script helpers', async () => {
       shortcode: 'abc124',
       permalink: 'https://instagram.com/p/abc124/',
       sourcePageUrl: 'https://instagram.com/demo/',
-      namespace: ' ingest ',
+      namespace: ' cf-instagram ',
       log: noopLogger,
       fetchedImage: { bytes: Buffer.from('image-bytes'), contentType: 'image/jpeg' },
     });
 
     expect(bodyValues).toEqual(['Ocean Cliffs', null]);
-    expect(namespaceValues).toEqual(['ingest', 'ingest']);
+    expect(namespaceValues).toEqual(['cf-instagram', 'cf-instagram']);
   });
 
   it('sends Instagram captions and source metrics with image uploads', async () => {
@@ -322,7 +328,7 @@ describe('instagram ingest script helpers', async () => {
       shortcode: 'video-1',
       permalink: 'https://www.instagram.com/p/video-1/',
       sourcePageUrl: 'https://www.instagram.com/p/video-1/',
-      namespace: 'cf-default',
+      namespace: 'cf-instagram',
       deduplicateBySourceUrl: true,
       log: noopLogger,
     });
@@ -360,7 +366,7 @@ describe('instagram ingest script helpers', async () => {
       shortcode: 'abc125',
       permalink: 'https://instagram.com/p/abc125/',
       sourcePageUrl: 'https://instagram.com/demo/',
-      namespace: 'cf-default',
+      namespace: 'cf-instagram',
       log: { ...noopLogger, warn },
       aiDisplayName: true,
     });

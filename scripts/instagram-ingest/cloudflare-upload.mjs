@@ -1,4 +1,5 @@
 import path from "node:path";
+import { resolveInstagramNamespace } from "./namespace.mjs";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -237,11 +238,7 @@ function contentTypeToExt(contentType) {
 }
 
 function normalizeUploadNamespace(namespace) {
-  const trimmed = typeof namespace === "string" ? namespace.trim() : "";
-  if (!trimmed || trimmed === "undefined" || trimmed === "__all__" || trimmed === "__none__") {
-    throw new Error("A specific upload namespace is required.");
-  }
-  return trimmed;
+  return resolveInstagramNamespace(namespace);
 }
 
 export async function pushImageToCloudflare({

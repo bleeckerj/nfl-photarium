@@ -1,4 +1,5 @@
 import path from "node:path";
+import { INSTAGRAM_NAMESPACE, resolveInstagramNamespace } from "./namespace.mjs";
 
 export const APP_ID = "936619743392459";
 export const DEFAULT_USERNAME = "";
@@ -115,7 +116,7 @@ Options:
   --skip-video-push         Skip pushing videos during ingest
   --skip-video-post-images  Skip still assets attached to video posts during profile ingest
   --api-base <url>          Base URL for local API (default: http://localhost:3000)
-  --namespace <name>        Upload namespace (default: ingest; single-url default: cf-instagram)
+  --namespace <name>        Compatibility option; must be ${INSTAGRAM_NAMESPACE}
   --no-resume               Ignore existing checkpoint and start from newest page
   --stop-at-shortcode <id>  Stop before processing this post (starts from newest)
   --headful                 Run ingest with visible browser window
@@ -146,7 +147,7 @@ export function parseArgs(argv) {
     skipVideoPush: false,
     skipVideoPostImages: false,
     apiBase: "http://localhost:3000",
-    namespace: "ingest",
+    namespace: INSTAGRAM_NAMESPACE,
     namespaceProvided: false,
     stopAtShortcode: "",
     resume: true,
@@ -203,7 +204,7 @@ export function parseArgs(argv) {
       out.apiBase = next.trim().replace(/\/+$/, "");
       i += 1;
     } else if (arg === "--namespace" && next) {
-      out.namespace = next.trim();
+      out.namespace = resolveInstagramNamespace(next);
       out.namespaceProvided = true;
       i += 1;
     } else if (arg === "--stop-at-shortcode" && next) {
@@ -228,9 +229,7 @@ export function parseArgs(argv) {
   }
   if (!out.inputPath) out.inputPath = path.join(DEFAULT_DATA_DIR, `${defaultUsernameBase}.ndjson`);
   if (!out.checkpointPath) out.checkpointPath = path.join(DEFAULT_DATA_DIR, `${defaultUsernameBase}.checkpoint.json`);
-  if (out.command === "single-url" && !out.namespaceProvided) {
-    out.namespace = "cf-instagram";
-  }
+  out.namespace = resolveInstagramNamespace(out.namespace);
   if (out.stopAtShortcode) out.resume = false;
 
   return out;

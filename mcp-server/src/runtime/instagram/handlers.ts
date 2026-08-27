@@ -68,7 +68,7 @@ export const instagramHandlers: Record<string, RuntimeToolHandler> = {
       noColor,
     } = args as {
       username: string;
-      namespace: string;
+      namespace?: string;
       apiBase?: string;
       profileDir?: string;
       count?: number;
@@ -159,7 +159,7 @@ export const instagramHandlers: Record<string, RuntimeToolHandler> = {
   'photarium_instagram_replay_videos': async (args: Record<string, unknown>) => {
     const { input, namespace, username, apiBase, requestDelayMs, verbose, noColor } = args as {
       input: string;
-      namespace: string;
+      namespace?: string;
       username?: string;
       apiBase?: string;
       requestDelayMs?: number;
@@ -195,7 +195,7 @@ export const instagramHandlers: Record<string, RuntimeToolHandler> = {
       verbose,
     } = args as {
       input: string;
-      namespace: string;
+      namespace?: string;
       username?: string;
       apiBase?: string;
       requestDelayMs?: number;
