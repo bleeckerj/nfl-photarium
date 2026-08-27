@@ -1,6 +1,6 @@
 # Photarium Folder Uploader
 
-A standalone local folder watcher for Photarium. It uploads newly detected images to a configured namespace, applies configured fixed tags at upload time, and waits for Photarium's durable background enrichment jobs to verify their results.
+A standalone local folder watcher for Photarium. It uploads newly detected images and videos to a configured namespace, applies configured fixed tags at upload time, and waits for Photarium's durable background enrichment jobs to verify image results.
 
 Operational metadata stays in the local checkpoint. The utility does not add filenames, paths, namespaces, provider names, workflow names, or watcher labels as image tags.
 
@@ -18,7 +18,7 @@ Edit `photarium-folder-uploader.json`, then run:
 npm start -- --config ./photarium-folder-uploader.json
 ```
 
-The watcher only processes image files placed directly in `watchPath`. It leaves source files in place and uses a content-hash checkpoint to avoid re-uploading renamed or copied files in the same namespace. The `tags` array is sent directly to the canonical upload workflow, which queues semantic tag generation by default.
+The watcher processes supported image and video files placed directly in `watchPath`. It leaves source files in place and uses a size/mtime path index for fast startup skips, with a content-hash fallback for renamed files. The `tags` array is sent directly to the canonical upload workflow, which queues semantic tag generation for images by default.
 
 ## CleanShotX listener
 
@@ -28,9 +28,9 @@ From this directory, start the dedicated CleanShotX listener with:
 npm run listen:cleanshot
 ```
 
-It watches `/Users/julian/OMATA Dropbox/Julian Bleecker/CleanShotX/`, uploads to the `cf-cleanshot` namespace, and applies the fixed `screenshot` tag to every upload. The command builds the watcher before starting it. Leave the terminal open while it runs and press `Ctrl-C` to stop it.
+It watches `/Users/julian/OMATA Dropbox/Julian Bleecker/CleanShotX/`, uploads images and videos to the `cf-cleanshot` namespace, and applies the fixed `screenshot` tag to every upload. The command builds the watcher before starting it. Leave the terminal open while it runs and press `Ctrl-C` to stop it.
 
-The listener uses the durable checkpoint at `~/.photarium-folder-uploader/state.json`. It scans existing eligible files on startup and then watches for new top-level image files. The MCP wrapper is launched with HTTP compatibility disabled because this listener uses the MCP stdio connection.
+The listener uses the durable checkpoint at `~/.photarium-folder-uploader/state.json`. It scans existing eligible files on startup and then watches for new top-level media files. Unchanged files with recorded size and modification time are skipped without reading their contents.
 
 ## Connection modes
 

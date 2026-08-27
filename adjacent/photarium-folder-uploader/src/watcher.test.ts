@@ -55,6 +55,12 @@ test('processes only top-level images and resumes enrichment without re-uploadin
   await first.stop();
   assert.deepEqual(client.calls, ['upload', 'description', 'tags']);
 
+  const samePathClient = fakeClient();
+  const samePath = new FolderWatcher(config(directory), samePathClient, { logger: () => undefined });
+  await samePath.start();
+  await samePath.stop();
+  assert.deepEqual(samePathClient.calls, []);
+
   const renamed = path.join(directory, 'renamed.png');
   await writeFile(renamed, 'same bytes');
   const secondClient = fakeClient();
@@ -63,6 +69,29 @@ test('processes only top-level images and resumes enrichment without re-uploadin
   await second.stop();
   assert.deepEqual(secondClient.calls, []);
   assert.match(await readFile(config(directory).stateFile, 'utf8'), /image-789/);
+  assert.match(await readFile(config(directory).stateFile, 'utf8'), /"size"/);
+});
+
+test('processes top-level videos and marks the upload complete', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'photarium-folder-uploader-'));
+  const filePath = path.join(directory, 'recording.mp4');
+  await writeFile(filePath, 'video bytes');
+  const calls: string[] = [];
+  const client = {
+    ...fakeClient(),
+    async uploadVideoFromPath() {
+      calls.push('video-upload');
+      return { assetType: 'video' as const, imageId: 'video-789', videoId: 'video-789' };
+    },
+  };
+  const watcher = new FolderWatcher({ ...config(directory), extensions: ['.mp4'] }, client, { logger: () => undefined });
+  await watcher.start();
+  await watcher.stop();
+
+  assert.deepEqual(calls, ['video-upload']);
+  const state = await readFile(config(directory).stateFile, 'utf8');
+  assert.match(state, /"assetType": "video"/);
+  assert.match(state, /video-789/);
 });
 
 test('keeps an uploaded image checkpoint when tag generation fails', async () => {

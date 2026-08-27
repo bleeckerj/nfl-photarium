@@ -30,3 +30,26 @@ test('HTTP client uploads to the configured namespace and enriches the returned 
   assert.equal(calls[2].url, 'http://localhost:3000/api/images/tag-enrichment/job-123');
   assert.equal(status.state, 'succeeded');
 });
+
+test('HTTP client uploads local videos through the video workflow', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'photarium-folder-uploader-'));
+  const filePath = path.join(directory, 'recording.mp4');
+  await writeFile(filePath, 'mp4 bytes');
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const fetchMock: typeof fetch = async (input, init) => {
+    calls.push({ url: String(input), init });
+    return new Response(JSON.stringify({ id: 'video-123', assetType: 'video' }), { status: 200 });
+  };
+
+  const client = new HttpPhotariumClient('http://localhost:3000', fetchMock);
+  const uploaded = await client.uploadVideoFromPath(filePath, 'cf-cleanshot', ['screenshot']);
+
+  assert.equal(uploaded.assetType, 'video');
+  assert.equal(uploaded.videoId, 'video-123');
+  assert.equal(calls[0].url, 'http://localhost:3000/api/import/page/upload-video');
+  assert.equal((calls[0].init?.body as FormData).get('namespace'), 'cf-cleanshot');
+  assert.equal((calls[0].init?.body as FormData).get('tags'), 'screenshot');
+  const filePart = (calls[0].init?.body as FormData).get('file');
+  assert.ok(filePart instanceof File);
+  assert.equal(filePart.type, 'video/mp4');
+});

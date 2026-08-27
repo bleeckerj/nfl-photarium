@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { DEFAULT_MEDIA_EXTENSIONS } from './media.js';
 import type { ConnectionConfig, UploaderConfig } from './types.js';
 
 export interface CliOptions {
@@ -35,7 +36,7 @@ function positiveNumber(value: unknown, fallback: number): number {
 
 function normalizeExtensions(value: unknown): string[] {
   if (!Array.isArray(value) || value.length === 0) {
-    return ['.avif', '.gif', '.heic', '.jpeg', '.jpg', '.png', '.tif', '.tiff', '.webp'];
+    return [...DEFAULT_MEDIA_EXTENSIONS];
   }
   return Array.from(
     new Set(

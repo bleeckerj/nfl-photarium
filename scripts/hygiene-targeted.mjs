@@ -36,7 +36,8 @@ function changedFiles() {
 
 function testsForFile(file) {
   const tests = [];
-  if (TEST_EXTENSIONS.test(file)) tests.push(file);
+  // The folder uploader is a separate Node package with its own test runner.
+  if (TEST_EXTENSIONS.test(file) && !file.startsWith('adjacent/photarium-folder-uploader/')) tests.push(file);
   if (file.includes('ImageUploader') || file.includes('image-uploader/')) {
     tests.push('__tests__/imageUploaderHelpers.test.ts');
   }

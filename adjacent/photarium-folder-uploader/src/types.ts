@@ -45,12 +45,17 @@ export interface UploaderConfig {
 }
 
 export type MetadataStage = 'uploaded' | 'description' | 'tags';
+export type AssetType = 'image' | 'video';
 
 export interface CheckpointEntry {
   namespace: string;
   contentHash: string;
   lastPath: string;
+  assetType?: AssetType;
+  size?: number;
+  mtimeMs?: number;
   imageId?: string;
+  videoId?: string;
   semanticTagJobId?: string;
   completed: MetadataStage[];
   attempts: number;
@@ -64,7 +69,9 @@ export interface Checkpoint {
 }
 
 export interface PhotariumUploadResult {
+  assetType?: AssetType;
   imageId: string;
+  videoId?: string;
   semanticTagging?: {
     jobId: string;
     state: string;
@@ -75,6 +82,7 @@ export interface PhotariumUploadResult {
 export interface PhotariumClient {
   connect(): Promise<void>;
   uploadFromPath(filePath: string, namespace: string, tags: string[], semanticTagCount?: number): Promise<PhotariumUploadResult>;
+  uploadVideoFromPath?(filePath: string, namespace: string, tags: string[]): Promise<PhotariumUploadResult>;
   generateDescription(imageId: string): Promise<void>;
   getSemanticTagStatus(jobId: string): Promise<{ state: string; error?: string }>;
   close(): Promise<void>;

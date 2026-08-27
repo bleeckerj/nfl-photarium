@@ -1,25 +1,9 @@
 import path from 'node:path';
+import { mimeTypeForPath } from './media.js';
 import type { PhotariumClient, PhotariumUploadResult } from './types.js';
 import { extractImageId } from './photarium-client.js';
 
 type FetchLike = typeof fetch;
-
-const MIME_BY_EXTENSION: Record<string, string> = {
-  '.avif': 'image/avif',
-  '.gif': 'image/gif',
-  '.heic': 'image/heic',
-  '.jpeg': 'image/jpeg',
-  '.jpg': 'image/jpeg',
-  '.png': 'image/png',
-  '.tif': 'image/tiff',
-  '.tiff': 'image/tiff',
-  '.webp': 'image/webp',
-};
-
-function mimeForPath(filePath: string): string {
-  const extension = filePath.slice(filePath.lastIndexOf('.')).toLowerCase();
-  return MIME_BY_EXTENSION[extension] ?? 'application/octet-stream';
-}
 
 async function readResponse(response: Response): Promise<unknown> {
   const text = await response.text();
@@ -54,7 +38,7 @@ export class HttpPhotariumClient implements PhotariumClient {
   async uploadFromPath(filePath: string, namespace: string, tags: string[], semanticTagCount?: number): Promise<PhotariumUploadResult> {
     const bytes = await (await import('node:fs/promises')).readFile(filePath);
     const form = new FormData();
-    form.append('file', new Blob([bytes], { type: mimeForPath(filePath) }), path.basename(filePath));
+    form.append('file', new Blob([bytes], { type: mimeTypeForPath(filePath) }), path.basename(filePath));
     form.append('namespace', namespace);
     if (tags.length > 0) form.append('tags', tags.join(','));
     if (semanticTagCount !== undefined) form.append('semanticTagCount', String(semanticTagCount));
@@ -72,6 +56,22 @@ export class HttpPhotariumClient implements PhotariumClient {
         ? { semanticTagging: { jobId: tagging.jobId, state: tagging.state, ...(typeof tagging.error === 'string' ? { error: tagging.error } : {}) } }
         : {}),
     };
+  }
+
+  async uploadVideoFromPath(filePath: string, namespace: string, tags: string[]): Promise<PhotariumUploadResult> {
+    const bytes = await (await import('node:fs/promises')).readFile(filePath);
+    const form = new FormData();
+    form.append('file', new Blob([bytes], { type: mimeTypeForPath(filePath) }), path.basename(filePath));
+    form.append('namespace', namespace);
+    if (tags.length > 0) form.append('tags', tags.join(','));
+    const payload = await readResponse(await this.fetchImpl(`${this.baseUrl}/api/import/page/upload-video`, {
+      method: 'POST',
+      body: form,
+    }));
+    const record = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+    const videoId = typeof record.id === 'string' ? record.id : undefined;
+    if (!videoId) throw new Error('Video upload response did not include an asset ID.');
+    return { assetType: 'video', imageId: videoId, videoId };
   }
 
   async generateDescription(imageId: string): Promise<void> {

@@ -4,13 +4,8 @@
   "stateFile": "~/.photarium-folder-uploader/state.json",
   "tags": ["screenshot"],
   "connection": {
-    "mode": "mcp",
-    "command": "/Users/julian/Code/cloud-flare-image-handler/run_photarium_mcp_server.sh",
-    "args": ["start"],
-    "cwd": "/Users/julian/Code/cloud-flare-image-handler",
-    "env": {
-      "PHOTARIUM_HTTP_ENABLED": "false"
-    }
+    "mode": "http",
+    "baseUrl": "http://localhost:3000"
   },
   "tagCount": 8,
   "stability": {

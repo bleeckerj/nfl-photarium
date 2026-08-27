@@ -49,3 +49,9 @@ export function markStage(entry: CheckpointEntry, stage: MetadataStage): Checkpo
     ? entry
     : { ...entry, completed: [...entry.completed, stage], lastError: undefined, updatedAt: new Date().toISOString() };
 }
+
+export function isCheckpointComplete(entry: CheckpointEntry): boolean {
+  return entry.assetType === 'video'
+    ? entry.completed.includes('uploaded')
+    : entry.completed.includes('tags');
+}

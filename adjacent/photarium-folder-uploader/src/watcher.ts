@@ -2,7 +2,8 @@ import fs from 'node:fs/promises';
 import { watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { checkpointKey, hashFile, loadCheckpoint, markStage, saveCheckpoint } from './checkpoint.js';
+import { checkpointKey, hashFile, isCheckpointComplete, loadCheckpoint, markStage, saveCheckpoint } from './checkpoint.js';
+import { mediaTypeForPath, type MediaType } from './media.js';
 import type { Checkpoint, CheckpointEntry, PhotariumClient, UploaderConfig } from './types.js';
 
 interface FileSnapshot {
@@ -17,10 +18,6 @@ export interface WatcherOptions {
 
 function timestamp(): string {
   return new Date().toISOString();
-}
-
-function isImage(filePath: string, extensions: string[]): boolean {
-  return extensions.includes(path.extname(filePath).toLowerCase());
 }
 
 async function stableSnapshot(filePath: string, pollMs: number, checks: number): Promise<FileSnapshot | null> {
@@ -41,13 +38,22 @@ async function stableSnapshot(filePath: string, pollMs: number, checks: number):
   return previous ?? null;
 }
 
-async function listTopLevelImages(root: string, extensions: string[]): Promise<string[]> {
+async function listTopLevelMedia(root: string, extensions: string[]): Promise<string[]> {
   const entries = await fs.readdir(root, { withFileTypes: true });
   return entries
     .filter((entry) => entry.isFile())
     .map((entry) => path.join(root, entry.name))
-    .filter((filePath) => isImage(filePath, extensions));
+    .filter((filePath) => mediaTypeForPath(filePath, extensions) !== null);
 }
+
+function isMediaComplete(entry: CheckpointEntry): boolean {
+  return isCheckpointComplete(entry);
+}
+
+type IndexedCheckpointEntry = {
+  key: string;
+  entry: CheckpointEntry;
+};
 
 export class FolderWatcher {
   private readonly config: UploaderConfig;
@@ -58,6 +64,7 @@ export class FolderWatcher {
   private readonly active = new Set<string>();
   private readonly queued = new Set<string>();
   private readonly retryTimers = new Set<NodeJS.Timeout>();
+  private readonly pathIndex = new Map<string, IndexedCheckpointEntry>();
   private watcher?: FSWatcher;
   private stopped = false;
 
@@ -71,6 +78,7 @@ export class FolderWatcher {
   async start(): Promise<void> {
     await fs.mkdir(this.config.watchPath, { recursive: true });
     this.checkpoint = await loadCheckpoint(this.config.stateFile);
+    this.rebuildPathIndex();
     if (!this.dryRun) await this.client.connect();
     await this.scan();
     if (!this.dryRun) {
@@ -85,8 +93,8 @@ export class FolderWatcher {
   }
 
   async scan(): Promise<void> {
-    const files = await listTopLevelImages(this.config.watchPath, this.config.extensions);
-    this.log(`[${timestamp()}] found ${files.length} eligible image${files.length === 1 ? '' : 's'}`);
+    const files = await listTopLevelMedia(this.config.watchPath, this.config.extensions);
+    this.log(`[${timestamp()}] found ${files.length} eligible media file${files.length === 1 ? '' : 's'}`);
     await Promise.all(files.map((filePath) => this.enqueue(filePath)));
     await this.waitForQueue();
   }
@@ -102,7 +110,7 @@ export class FolderWatcher {
   }
 
   private enqueue(filePath: string): Promise<void> {
-    if (this.stopped || !isImage(filePath, this.config.extensions) || this.queued.has(filePath) || this.active.has(filePath)) {
+    if (this.stopped || mediaTypeForPath(filePath, this.config.extensions) === null || this.queued.has(filePath) || this.active.has(filePath)) {
       return Promise.resolve();
     }
     this.queued.add(filePath);
@@ -130,16 +138,64 @@ export class FolderWatcher {
     await saveCheckpoint(this.config.stateFile, this.checkpoint);
   }
 
+  private rebuildPathIndex(): void {
+    this.pathIndex.clear();
+    for (const [key, entry] of Object.entries(this.checkpoint.entries)) {
+      if (!entry.lastPath) continue;
+      const indexKey = `${entry.namespace}\n${entry.lastPath}`;
+      const current = this.pathIndex.get(indexKey);
+      if (!current || current.entry.updatedAt < entry.updatedAt) {
+        this.pathIndex.set(indexKey, { key, entry });
+      }
+    }
+  }
+
+  private updatePathIndex(key: string, entry: CheckpointEntry): void {
+    this.pathIndex.set(`${entry.namespace}\n${entry.lastPath}`, { key, entry });
+  }
+
+  private async readSnapshot(filePath: string): Promise<FileSnapshot | null> {
+    try {
+      const stat = await fs.stat(filePath);
+      return stat.isFile() ? { size: stat.size, mtimeMs: stat.mtimeMs } : null;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw error;
+    }
+  }
+
+  private async skipKnownPath(filePath: string, snapshot: FileSnapshot): Promise<boolean> {
+    const relativePath = path.relative(this.config.watchPath, filePath) || path.basename(filePath);
+    const indexed = this.pathIndex.get(`${this.config.namespace}\n${relativePath}`);
+    if (!indexed || !isMediaComplete(indexed.entry)) return false;
+    if (indexed.entry.size !== snapshot.size || indexed.entry.mtimeMs !== snapshot.mtimeMs) return false;
+    this.log(`[${timestamp()}] skip ${relativePath} (already complete as ${indexed.entry.videoId ?? indexed.entry.imageId ?? 'unknown'})`);
+    return true;
+  }
+
   private async process(filePath: string): Promise<void> {
     const relativePath = path.relative(this.config.watchPath, filePath) || path.basename(filePath);
+    let snapshot: FileSnapshot | null = null;
     try {
-      const snapshot = await stableSnapshot(filePath, this.config.stability.pollMs, this.config.stability.checks);
+      const initialSnapshot = await this.readSnapshot(filePath);
+      if (!initialSnapshot || await this.skipKnownPath(filePath, initialSnapshot)) return;
+      snapshot = await stableSnapshot(filePath, this.config.stability.pollMs, this.config.stability.checks);
       if (!snapshot) return;
       const contentHash = await hashFile(filePath);
       const key = checkpointKey(this.config.namespace, contentHash);
       const existing = this.checkpoint.entries[key];
-      if (existing?.completed.includes('tags')) {
-        this.log(`[${timestamp()}] skip ${relativePath} (already complete as ${existing.imageId ?? 'unknown'})`);
+      if (existing && isMediaComplete(existing)) {
+        const updated = {
+          ...existing,
+          lastPath: relativePath,
+          size: snapshot.size,
+          mtimeMs: snapshot.mtimeMs,
+          updatedAt: new Date().toISOString(),
+        };
+        this.checkpoint.entries[key] = updated;
+        this.updatePathIndex(key, updated);
+        await this.persist();
+        this.log(`[${timestamp()}] skip ${relativePath} (already complete as ${existing.videoId ?? existing.imageId ?? 'unknown'})`);
         return;
       }
       if (this.dryRun) {
@@ -155,22 +211,44 @@ export class FolderWatcher {
         attempts: 0,
         updatedAt: new Date().toISOString(),
       };
-      entry = { ...entry, lastPath: relativePath, attempts: entry.attempts + 1, updatedAt: new Date().toISOString() };
+      entry = {
+        ...entry,
+        lastPath: relativePath,
+        size: snapshot.size,
+        mtimeMs: snapshot.mtimeMs,
+        attempts: entry.attempts + 1,
+        updatedAt: new Date().toISOString(),
+      };
       this.checkpoint.entries[key] = entry;
+      this.updatePathIndex(key, entry);
       await this.persist();
       this.log(`[${timestamp()}] processing ${relativePath}`);
 
       if (!entry.completed.includes('uploaded')) {
-        const uploaded = await this.client.uploadFromPath(filePath, this.config.namespace, this.config.tags, this.config.tagCount);
+        const mediaType = mediaTypeForPath(filePath, this.config.extensions) as MediaType;
+        const uploaded = mediaType === 'video'
+          ? await this.uploadVideo(filePath)
+          : await this.client.uploadFromPath(filePath, this.config.namespace, this.config.tags, this.config.tagCount);
         entry = {
           ...entry,
+          assetType: uploaded.assetType ?? mediaType,
           imageId: uploaded.imageId,
+          ...(uploaded.videoId ? { videoId: uploaded.videoId } : {}),
           ...(uploaded.semanticTagging?.jobId ? { semanticTagJobId: uploaded.semanticTagging.jobId } : {}),
         };
         entry = markStage(entry, 'uploaded');
+        if (mediaType === 'video') {
+          entry = markStage(entry, 'description');
+          entry = markStage(entry, 'tags');
+        }
         this.checkpoint.entries[key] = entry;
+        this.updatePathIndex(key, entry);
         await this.persist();
-        this.log(`[${timestamp()}] uploaded ${relativePath} -> ${uploaded.imageId}`);
+        this.log(`[${timestamp()}] uploaded ${relativePath} -> ${uploaded.videoId ?? uploaded.imageId}`);
+      }
+      if (entry.assetType === 'video') {
+        this.log(`[${timestamp()}] complete ${relativePath} -> ${entry.videoId ?? entry.imageId}`);
+        return;
       }
       const imageId = entry.imageId;
       if (!imageId) throw new Error('Checkpoint has upload completion without an image ID.');
@@ -178,6 +256,7 @@ export class FolderWatcher {
         await this.client.generateDescription(imageId);
         entry = markStage(entry, 'description');
         this.checkpoint.entries[key] = entry;
+        this.updatePathIndex(key, entry);
         await this.persist();
         this.log(`[${timestamp()}] description generated for ${imageId}`);
       }
@@ -187,6 +266,7 @@ export class FolderWatcher {
         await this.waitForSemanticTags(jobId, imageId);
         entry = markStage(entry, 'tags');
         this.checkpoint.entries[key] = entry;
+        this.updatePathIndex(key, entry);
         await this.persist();
         this.log(`[${timestamp()}] semantic tags generated for ${imageId}`);
       }
@@ -207,9 +287,12 @@ export class FolderWatcher {
             updatedAt: new Date().toISOString(),
           }),
           lastPath: relativePath,
+          size: snapshot?.size,
+          mtimeMs: snapshot?.mtimeMs,
           lastError: message,
           updatedAt: new Date().toISOString(),
         };
+        this.updatePathIndex(key, this.checkpoint.entries[key]);
         await this.persist().catch(() => undefined);
       }
       this.log(`[${timestamp()}] failed ${relativePath}: ${message}`);
@@ -222,6 +305,13 @@ export class FolderWatcher {
         this.retryTimers.add(timer);
       }
     }
+  }
+
+  private async uploadVideo(filePath: string) {
+    if (!this.client.uploadVideoFromPath) {
+      throw new Error('The configured Photarium connection does not support local video uploads. Use HTTP mode for video files.');
+    }
+    return this.client.uploadVideoFromPath(filePath, this.config.namespace, this.config.tags);
   }
 
   private async waitForSemanticTags(jobId: string, imageId: string): Promise<void> {

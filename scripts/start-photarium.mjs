@@ -24,27 +24,32 @@ function requestStop(child) {
   child.kill('SIGINT');
 }
 
+async function waitForPhotarium(baseUrl, timeoutMs = 60_000, isExited = () => false) {
+  const deadline = Date.now() + timeoutMs;
+  const healthUrl = `${baseUrl.replace(/\/+$/, '')}/health`;
+  while (Date.now() < deadline) {
+    if (isExited()) return false;
+    try {
+      const response = await fetch(healthUrl);
+      if (response.ok) return true;
+    } catch {
+      // The development server may still be compiling or binding its port.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return false;
+}
+
 async function main() {
   let shuttingDown = false;
   let shutdownPromise;
+  let watcher;
 
   console.log('[startup] launching Photarium development server');
   const photarium = startNpmScript('dev:server');
 
   photarium.once('error', (error) => {
     console.error(`[startup] Photarium failed to start: ${error.message}`);
-  });
-
-  console.log('[startup] launching CleanShot Photarium folder watcher');
-  const watcher = startNpmScript('listen:cleanshot', FOLDER_UPLOADER_DIR);
-
-  watcher.once('error', (error) => {
-    console.error(`[startup] CleanShot watcher failed to start: ${error.message}`);
-  });
-  watcher.once('exit', (code, signal) => {
-    if (!shuttingDown) {
-      console.error(`[startup] CleanShot watcher exited${signal ? ` from ${signal}` : ` with code ${code ?? 1}`}`);
-    }
   });
 
   const shutdown = (reason, exitCode = 0) => {
@@ -65,6 +70,31 @@ async function main() {
   photarium.once('exit', (code, signal) => {
     if (shuttingDown) return;
     void shutdown('Photarium exited', signal ? 0 : code ?? 1);
+  });
+
+  const ready = await waitForPhotarium(
+    process.env.PHOTARIUM_BASE_URL || 'http://localhost:3000',
+    60_000,
+    () => photarium.exitCode !== null || photarium.signalCode !== null,
+  );
+  if (!ready && !shuttingDown) {
+    console.warn('[startup] Photarium did not become ready before the watcher timeout; starting the watcher anyway');
+  }
+  if (shuttingDown) {
+    await shutdownPromise;
+    return;
+  }
+
+  console.log('[startup] launching CleanShot Photarium folder watcher');
+  watcher = startNpmScript('listen:cleanshot', FOLDER_UPLOADER_DIR);
+
+  watcher.once('error', (error) => {
+    console.error(`[startup] CleanShot watcher failed to start: ${error.message}`);
+  });
+  watcher.once('exit', (code, signal) => {
+    if (!shuttingDown) {
+      console.error(`[startup] CleanShot watcher exited${signal ? ` from ${signal}` : ` with code ${code ?? 1}`}`);
+    }
   });
 
   await new Promise((resolve) => photarium.once('exit', resolve));
