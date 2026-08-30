@@ -1,5 +1,13 @@
 # Repository Operating Instructions
 
+## Instagram Ingestion Routing Lock
+
+Instagram ingestion is a routine, MCP-owned workflow. For a request to ingest an Instagram username/profile, call `mcp__photarium__photarium_instagram_ingest_profile` directly with the requested username, `namespace: "cf-instagram"`, and Cloudflare push enabled. This is the authoritative path behind the repository's `npm run ig:ingest` contract in `package.json`.
+
+Do not call `mcp__photarium__photarium_instagram_auth`, launch a headful browser, use Playwright/browser MCPs, open Google Chrome, enumerate profile links manually, or substitute repeated single-URL imports when profile ingestion fails. Authentication is handled by the existing Instagram tooling and persistent profile. The auth tool is reserved for an explicit authentication/setup request, and the single-URL tool is reserved for an explicitly supplied post/reel URL.
+
+If the profile-ingest MCP returns an error, stop the Instagram workflow and report the exact failure. Do not improvise a fallback, retry through another browser path, or claim completion. Only use another Instagram MCP after the user explicitly directs that recovery path.
+
 ## Photarium Creative-Derivation Invariant
 
 Every actual Codex-generated image must be uploaded to Photarium and verified before the workflow is complete. A local generated file or provider handoff is not a completed result. Completion requires a Photarium child ID and hosted URL, with the final prompt, provider, source relationship, dimensions/aspect ratio, parentage, and description/alt-text enrichment status retained. If upload, recording, or verification fails, report the workflow as incomplete.
