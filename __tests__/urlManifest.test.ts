@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseUrlManifest } from '@/features/page-import/utils/urlManifest';
+import { parseUrlLines, parseUrlManifest } from '@/features/page-import/utils/urlManifest';
 
 describe('parseUrlManifest', () => {
   it('reads the image URL manifest exported by the URL reviewer', () => {
@@ -31,5 +31,14 @@ describe('parseUrlManifest', () => {
       duplicateCount: 0,
     });
     expect(() => parseUrlManifest({ source: 'https://example.com' })).toThrow(/imageUrls or urls array/);
+  });
+
+  it('parses one URL per line for multiline queue input', () => {
+    expect(parseUrlLines('\nhttps://example.com/one.jpg\nhttps://example.com/two.png\nhttps://example.com/one.jpg')).toMatchObject({
+      urls: ['https://example.com/one.jpg', 'https://example.com/two.png'],
+      invalidCount: 0,
+      duplicateCount: 1,
+    });
+    expect(() => parseUrlLines('not a URL')).toThrow(/No valid http\(s\) URLs/);
   });
 });

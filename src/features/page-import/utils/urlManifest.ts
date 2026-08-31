@@ -75,3 +75,18 @@ export const parseUrlManifest = (input: unknown): ParsedUrlManifest => {
   const cleanQuery = typeof query === 'string' && query.trim() ? query.trim() : undefined;
   return { urls, sourceUrl, query: cleanQuery, invalidCount, duplicateCount };
 };
+
+export const parseUrlLines = (value: string): ParsedUrlManifest => {
+  const lines = value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) {
+    throw new Error('Enter at least one http(s) URL, one per line.');
+  }
+  try {
+    return parseUrlManifest(lines);
+  } catch {
+    throw new Error('No valid http(s) URLs were found. Enter one URL per line.');
+  }
+};
