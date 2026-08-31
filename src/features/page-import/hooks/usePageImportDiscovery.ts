@@ -11,6 +11,8 @@ import {
   mbToSmallAssetThresholdBytes,
   normalizeSmallAssetThresholdMb,
 } from '@/features/page-import/utils/smallAssetPolicy';
+import { parseUrlManifest } from '@/features/page-import/utils/urlManifest';
+import { inferAssetTypeFromUrl } from '@/utils/mediaAssetType';
 
 const PAGE_IMPORT_PREVIEW_LIMIT = 60;
 const DEFAULT_PAGE_IMPORT_MAX_ASSETS = '250';
@@ -31,6 +33,11 @@ const parseCookieHeaderFromClipboard = (raw: string) => {
 const isHtmlFile = (file: File) => {
   const lowerName = file.name.toLowerCase();
   return file.type === 'text/html' || lowerName.endsWith('.html') || lowerName.endsWith('.htm');
+};
+
+const isJsonFile = (file: File) => {
+  const lowerName = file.name.toLowerCase();
+  return file.type === 'application/json' || lowerName.endsWith('.json');
 };
 
 const isValidHttpUrl = (value: string) => {
@@ -420,6 +427,91 @@ export function usePageImportDiscovery({
     ]
   );
 
+  const handleImportUrlManifestFile = useCallback(
+    async (file: File) => {
+      if (pageImportLoading) return;
+      if (!isJsonFile(file)) {
+        setPageImportError('Drop a .json file containing image URLs.');
+        return;
+      }
+
+      setPageImportLoading(true);
+      setPageImportError(null);
+      setPageImportProgress(null);
+
+      try {
+        const raw = await file.text();
+        if (!raw.trim()) {
+          throw new Error('JSON file is empty');
+        }
+
+        const manifest = parseUrlManifest(JSON.parse(raw));
+        const sessionId = await ensureImportSession();
+        const maxAssets = Math.max(1, Number(pageImportMaxAssets) || Number(DEFAULT_PAGE_IMPORT_MAX_ASSETS));
+        const urls = manifest.urls.slice(0, maxAssets);
+        const queueItems = urls.map((url) => {
+          const kind = inferAssetTypeFromUrl(url);
+          const filename = (() => {
+            try {
+              const pathname = new URL(url).pathname;
+              return decodeURIComponent(pathname.split('/').pop() || '') || (kind === 'video' ? 'remote-video' : 'remote-image');
+            } catch {
+              return kind === 'video' ? 'remote-video' : 'remote-image';
+            }
+          })();
+          return toQueueItem(
+            {
+              id: url,
+              kind,
+              url,
+              filename,
+              previewUrl: kind === 'image' ? url : undefined,
+              isBlobSource: false,
+              metadata: { status: 'pending' },
+            },
+            createQueueId(),
+            sessionId,
+            true
+          );
+        });
+
+        addQueuedFiles(queueItems);
+        if (manifest.sourceUrl) {
+          setSourceUrlIfEmpty(manifest.sourceUrl);
+        }
+        setPageImportUrl('');
+        setPageImportProgress({
+          message: `Loaded ${file.name}`,
+          scrollCount: 0,
+          imageCount: urls.length,
+        });
+
+        const skipped = manifest.urls.length - urls.length;
+        const warnings = [
+          manifest.invalidCount ? `${manifest.invalidCount} invalid entr${manifest.invalidCount === 1 ? 'y' : 'ies'} skipped` : '',
+          manifest.duplicateCount ? `${manifest.duplicateCount} duplicate${manifest.duplicateCount === 1 ? '' : 's'} skipped` : '',
+          skipped ? `${skipped} URL${skipped === 1 ? '' : 's'} beyond the ${maxAssets}-asset limit skipped` : '',
+        ].filter(Boolean);
+        if (warnings.length > 0) {
+          setPageImportError(warnings.join('; '));
+        }
+      } catch (error) {
+        console.error('Import URL manifest failed', error);
+        setPageImportError(error instanceof Error ? error.message : 'Failed to import JSON URL manifest');
+      } finally {
+        setPageImportLoading(false);
+      }
+    },
+    [
+      addQueuedFiles,
+      createQueueId,
+      ensureImportSession,
+      pageImportLoading,
+      pageImportMaxAssets,
+      setSourceUrlIfEmpty,
+    ]
+  );
+
   const handlePasteCookiesAndScan = useCallback(async () => {
     if (pageImportLoading) return;
     if (!pageImportUrl.trim()) {
@@ -477,6 +569,7 @@ export function usePageImportDiscovery({
     setPageImportProgress,
     handleImportPage,
     handleImportHtmlFile,
+    handleImportUrlManifestFile,
     handleStopImportPage,
     handlePasteCookiesAndScan,
   };
