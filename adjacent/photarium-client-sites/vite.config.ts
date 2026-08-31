@@ -12,5 +12,11 @@ export default defineConfig({
   build: {
     outDir: '../../dist/client',
     emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'src/client/index.html'),
+        urlReview: path.resolve(__dirname, 'src/client/url-review.html'),
+      },
+    },
   },
 });

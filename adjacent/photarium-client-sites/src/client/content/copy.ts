@@ -51,6 +51,7 @@ export const clientCopy = {
   localDevResumeDemo: 'Resume last demo',
   localDevResumeAvailable: 'A previously opened project route is available in this browser.',
   localDevNoLastProject: 'No prior local project route is stored in this browser yet.',
+  localDevUrlReview: 'Review image URLs',
 } as const;
 
 export const getSubmissionStatusCopy = (state: SubmissionState): string => {

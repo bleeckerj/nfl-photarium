@@ -98,7 +98,12 @@ export const renderDevLandingView = (
   resumeButton.textContent = clientCopy.localDevResumeDemo;
   resumeButton.addEventListener('click', handlers.onResumeLastDemo);
 
-  actions.append(createButton, resumeButton);
+  const urlReviewLink = document.createElement('a');
+  urlReviewLink.className = 'button';
+  urlReviewLink.href = '/url-review.html';
+  urlReviewLink.textContent = clientCopy.localDevUrlReview;
+
+  actions.append(createButton, resumeButton, urlReviewLink);
 
   const note = document.createElement('p');
   note.className = 'dev-panel__note';
@@ -111,4 +116,3 @@ export const renderDevLandingView = (
   panel.append(intro, details, actions, note);
   shell.galleryRoot.append(panel);
 };
-
