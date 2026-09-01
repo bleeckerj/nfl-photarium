@@ -33,6 +33,7 @@ const UI_CHROME_NAME_PATTERN =
 
 const TRACKING_OR_UTILITY_PATH_PATTERNS = [
   /\/(?:webreports?|webreport|analytics?|tracking|tracker|metrics?|telemetry|beacon|pixel|collect|impression)(?:[\/_.-]|$)/i,
+  /(?:^|\/)0\.gif(?:$|[?#])/i,
   /\/204(?:$|[/?#.])/i,
   /\/ecm\d*(?:$|[/?#.])/i,
   /\/x\.(?:png|gif|svg|webp|bmp|ico)(?:$|[?#])/i,
