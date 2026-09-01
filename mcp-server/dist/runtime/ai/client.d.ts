@@ -3,6 +3,8 @@ export declare const SOURCE_RELATIONSHIPS: readonly ["brief_led", "faithful_adap
 export type SourceRelationship = (typeof SOURCE_RELATIONSHIPS)[number];
 export declare const GENERATION_PROVIDERS: readonly ["codex_imagegen", "comfyui", "photarium_openai"];
 export type GenerationProvider = (typeof GENERATION_PROVIDERS)[number];
+export declare const PROMPT_THIS_DETAIL_LEVELS: readonly ["standard", "high"];
+export type PromptThisDetailLevel = (typeof PROMPT_THIS_DETAIL_LEVELS)[number];
 export type CreativeBriefReference = {
     imageId: string;
     role: 'subject_reference' | 'brand_reference' | 'logo_reference';
@@ -54,6 +56,8 @@ export declare function generatePrompt(imageId: string, options?: {
     creativeBrief?: string;
     sourceRelationship?: SourceRelationship;
     aspectRatio?: string;
+    detailLevel?: PromptThisDetailLevel;
+    promptNuance?: string;
     saveAsCurrent?: boolean;
 }): Promise<{
     prompt?: string;

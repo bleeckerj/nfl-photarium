@@ -1,6 +1,7 @@
 import { apiRequest } from '../shared/api-client.js';
 export const SOURCE_RELATIONSHIPS = ['brief_led', 'faithful_adaptation', 'related_design', 'inspired_concept'];
 export const GENERATION_PROVIDERS = ['codex_imagegen', 'comfyui', 'photarium_openai'];
+export const PROMPT_THIS_DETAIL_LEVELS = ['standard', 'high'];
 export function aspectRatioToSize(aspectRatio) {
     if (!aspectRatio)
         return undefined;
@@ -44,6 +45,8 @@ export async function generatePrompt(imageId, options = {}) {
             creativeBrief: options.creativeBrief,
             sourceRelationship: options.sourceRelationship,
             aspectRatio: options.aspectRatio,
+            detailLevel: options.detailLevel,
+            promptNuance: options.promptNuance,
             saveAsCurrent: options.saveAsCurrent,
         }),
     });

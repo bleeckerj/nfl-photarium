@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { PromptThisDetailLevel } from '@/server/promptThisOptions';
 
-type PromptThisMeta = { saved?: boolean; updatedAt?: string; model?: string } | null;
+type PromptThisMeta = {
+  saved?: boolean;
+  updatedAt?: string;
+  model?: string;
+  detailLevel?: PromptThisDetailLevel;
+  promptNuance?: string;
+} | null;
 type SavePromptThisOptions = {
   prompt?: string;
   suppressSuccessToast?: boolean;
@@ -20,6 +27,8 @@ export const usePromptThisEditor = ({
   const [promptThisGenerating, setPromptThisGenerating] = useState(false);
   const [promptThisSaving, setPromptThisSaving] = useState(false);
   const [lastSavedPromptThis, setLastSavedPromptThis] = useState<string>('');
+  const [promptDetailLevel, setPromptDetailLevel] = useState<PromptThisDetailLevel>('standard');
+  const [promptNuance, setPromptNuance] = useState('');
   const [promptThisMeta, setPromptThisMeta] = useState<PromptThisMeta>(null);
   const promptThisInputRef = useRef('');
   const saveSequenceRef = useRef(0);
@@ -42,10 +51,22 @@ export const usePromptThisEditor = ({
       const record = data?.record;
       if (record?.prompt && typeof record.prompt === 'string') {
         setPromptThisInput(record.prompt);
-        setPromptThisMeta({ saved: true, updatedAt: record.updatedAt, model: record.model });
+        const detailLevel = record.detailLevel === 'high' ? 'high' : 'standard';
+        const storedNuance = typeof record.promptNuance === 'string' ? record.promptNuance : '';
+        setPromptDetailLevel(detailLevel);
+        setPromptNuance(storedNuance);
+        setPromptThisMeta({
+          saved: true,
+          updatedAt: record.updatedAt,
+          model: record.model,
+          detailLevel,
+          promptNuance: storedNuance || undefined,
+        });
         setLastSavedPromptThis(record.prompt);
       } else {
         setPromptThisInput('');
+        setPromptDetailLevel('standard');
+        setPromptNuance('');
         setPromptThisMeta(null);
         setLastSavedPromptThis('');
       }
@@ -91,7 +112,15 @@ export const usePromptThisEditor = ({
           saved: Boolean(data?.saved),
           updatedAt: data?.record?.updatedAt,
           model: data?.record?.model,
+          detailLevel: data?.record?.detailLevel === 'high' ? 'high' : promptDetailLevel,
+          promptNuance: typeof data?.record?.promptNuance === 'string'
+            ? data.record.promptNuance
+            : promptDetailLevel === 'high' ? promptNuance || undefined : undefined,
         });
+        setPromptDetailLevel(data?.record?.detailLevel === 'high' ? 'high' : promptDetailLevel);
+        setPromptNuance(typeof data?.record?.promptNuance === 'string'
+          ? data.record.promptNuance
+          : promptDetailLevel === 'high' ? promptNuance : '');
         if (!options?.suppressSuccessToast) {
           toastPush('Prompt saved');
         }
@@ -104,7 +133,7 @@ export const usePromptThisEditor = ({
         setPromptThisSaving(false);
       }
     }
-  }, [imageId, lastSavedPromptThis, promptThisInput, toastPush]);
+  }, [imageId, lastSavedPromptThis, promptNuance, promptDetailLevel, promptThisInput, toastPush]);
 
   const generatePromptThis = useCallback(async (force?: boolean) => {
     if (!imageId) {
@@ -118,6 +147,8 @@ export const usePromptThisEditor = ({
         body: JSON.stringify({
           force: Boolean(force),
           existingPrompt: promptThisInput || '',
+          detailLevel: promptDetailLevel,
+          promptNuance: promptDetailLevel === 'high' ? promptNuance : undefined,
         }),
       });
       const data = await response.json();
@@ -127,10 +158,18 @@ export const usePromptThisEditor = ({
       }
       const promptText: string = data.record.prompt;
       setPromptThisInput(promptText);
+      const detailLevel = data?.record?.detailLevel === 'high' ? 'high' : promptDetailLevel;
+      const storedNuance = typeof data?.record?.promptNuance === 'string'
+        ? data.record.promptNuance
+        : detailLevel === 'high' ? promptNuance : '';
+      setPromptDetailLevel(detailLevel);
+      setPromptNuance(storedNuance);
       setPromptThisMeta({
         saved: Boolean(data?.saved),
         updatedAt: data?.record?.updatedAt,
         model: data?.record?.model,
+        detailLevel,
+        promptNuance: storedNuance || undefined,
       });
       if (data?.saved) {
         setLastSavedPromptThis(promptText);
@@ -142,7 +181,7 @@ export const usePromptThisEditor = ({
     } finally {
       setPromptThisGenerating(false);
     }
-  }, [imageId, promptThisInput, toastPush]);
+  }, [imageId, promptNuance, promptDetailLevel, promptThisInput, toastPush]);
 
   useEffect(() => {
     refreshPromptThis();
@@ -173,6 +212,10 @@ export const usePromptThisEditor = ({
     promptThisGenerating,
     promptThisSaving,
     promptThisMeta,
+    promptDetailLevel,
+    setPromptDetailLevel,
+    promptNuance,
+    setPromptNuance,
     generatePromptThis,
   };
 };

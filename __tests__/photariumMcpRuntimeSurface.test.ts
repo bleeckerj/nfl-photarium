@@ -41,6 +41,49 @@ describe('Photarium MCP runtime surface', () => {
     );
   });
 
+  it('exposes Prompt This detail controls through the MCP tool', () => {
+    const tool = RUNTIME_TOOLS.find((candidate) => candidate.name === 'photarium_generate_prompt');
+    expect(tool?.inputSchema).toMatchObject({
+      properties: {
+        detailLevel: { enum: ['standard', 'high'], default: 'standard' },
+        promptNuance: { type: 'string', maxLength: 2000 },
+      },
+    });
+  });
+
+  it('forwards Prompt This detail controls to the Photarium API', async () => {
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      expect(url).toBe('http://localhost:3000/api/images/image-1/prompt?force=1');
+      expect(init?.method).toBe('POST');
+      expect(JSON.parse(String(init?.body))).toMatchObject({
+        detailLevel: 'high',
+        promptNuance: 'Emphasize the paper texture.',
+      });
+      return new Response(JSON.stringify({
+        imageId: 'image-1',
+        generated: true,
+        saved: true,
+        record: {
+          imageId: 'image-1',
+          prompt: 'Detailed prompt',
+          detailLevel: 'high',
+          promptNuance: 'Emphasize the paper texture.',
+        },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as typeof global.fetch;
+
+    const result = await handleRuntimeToolCall('photarium_generate_prompt', {
+      imageId: 'image-1',
+      force: true,
+      detailLevel: 'high',
+      promptNuance: 'Emphasize the paper texture.',
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(JSON.parse(result.content[0]?.text || '{}')).toMatchObject({ generated: true, saved: true });
+  });
+
   it('has exactly one runtime handler for each tool definition', () => {
     const toolNames = RUNTIME_TOOLS.map((tool) => tool.name);
     expect(new Set(toolNames).size).toBe(toolNames.length);

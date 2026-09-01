@@ -11,6 +11,11 @@ import {
   type PromptDerivationRecord,
   type SourceRelationship,
 } from '@/server/creativeBrief';
+import {
+  normalizePromptThisDetailLevel,
+  normalizePromptThisNuance,
+  type PromptThisDetailLevel,
+} from '@/server/promptThisOptions';
 
 function parseForce(request: NextRequest): boolean {
   const fromQuery = request.nextUrl.searchParams.get('force');
@@ -59,7 +64,7 @@ async function fetchCloudflareImage(imageId: string) {
   return { ok: true as const, status: 200, payload: imagePayload?.result };
 }
 
-function buildPromptThisUserText(options: {
+export function buildPromptThisUserText(options: {
   filename?: string;
   folder?: string;
   tags?: string;
@@ -70,6 +75,8 @@ function buildPromptThisUserText(options: {
   creativeBrief?: string;
   sourceRelationship?: SourceRelationship;
   aspectRatio?: string;
+  detailLevel: PromptThisDetailLevel;
+  promptNuance?: string;
 }) {
   const contextSegments: string[] = [];
   if (options.filename) contextSegments.push(`Filename: ${options.filename}`);
@@ -82,6 +89,7 @@ function buildPromptThisUserText(options: {
   if (options.creativeBrief) contextSegments.push(`Creative brief: ${options.creativeBrief}`);
   if (options.sourceRelationship) contextSegments.push(`Source relationship: ${options.sourceRelationship}`);
   if (options.aspectRatio) contextSegments.push(`Target aspect ratio: ${options.aspectRatio}`);
+  if (options.promptNuance) contextSegments.push(`Additional user guidance for specificity:\n${options.promptNuance}`);
 
   const hasCreativeBrief = Boolean(options.creativeBrief);
   const transformationInstruction = hasCreativeBrief
@@ -93,21 +101,37 @@ function buildPromptThisUserText(options: {
       ].join(' ')
     : 'Create a faithful recreation prompt from the visible source image; preserve the existing default behavior when no creative brief is supplied.';
 
+  const detailInstruction = options.detailLevel === 'high'
+    ? [
+        'Use the High detail level. Produce an extensive, high-signal recreation prompt rather than a general impression.',
+        'Inventory every visible and generatively useful detail in a deliberate sequence: subject identity and count, silhouette and geometry, pose or orientation, expression, clothing and props, spatial relationships, foreground and background, composition and crop, perspective and camera position, lens and depth-of-field cues, lighting direction and quality, shadows and reflections, color relationships, materials and surface texture, wear and imperfections, visible typography or logos, atmosphere, era, visual medium, and photographic or rendering characteristics.',
+        'Use specific nouns, measurable or relational descriptions, and spatial language wherever the image supports them. Distinguish visible evidence from reasonable stylistic inference and never invent hidden specifications or context.',
+        'The user guidance is an emphasis request, not evidence. Integrate it as a priority while keeping image-derived claims grounded in what is visible.',
+      ].join(' ')
+    : 'Use the Standard detail level and preserve the existing Prompt This behavior.';
+
   return [
     'You are a prompt engineer for text-to-image models (Stable Diffusion / ComfyUI / Midjourney-like).',
     transformationInstruction,
+    detailInstruction,
     'Create ONE highly detailed, production-ready prompt. This is not a caption; it should be a dense generative prompt with enough specificity for another model to build the requested result.',
     'Describe concrete visual evidence from the image in rich detail: subject identity and count, poses, expressions, wardrobe, props, setting, foreground/background, composition, crop, perspective, camera angle, lens/framing cues, lighting direction, shadows, color palette, textures, materials, surface wear, typography/logos/text if visible, mood, era, style, medium, rendering/photographic qualities, and any distinctive imperfections or artifacts.',
     'Preserve specific observable details over generic adjectives. Name the visual medium clearly, such as line illustration, oil painting, watercolor, 3D render, product photo, vintage photograph, phone snapshot, editorial portrait, screenshot, UI mockup, or other visible style. Do not invent hidden context that is not visible, but include reasonable visual descriptors needed to reproduce what can be seen or what the brief explicitly asks to transform.',
     'Write as one flowing prompt paragraph, using semicolons or comma-separated clauses where useful. Avoid markdown, labels, bullet points, file formats, "alt text", and phrases like "this image".',
-    'Return ONLY the prompt text. Aim for 1200-3000 characters when the image has enough detail; shorter is acceptable only for very simple images.',
+    options.detailLevel === 'high'
+      ? 'Return ONLY the prompt text. Aim for 2500-5000 characters when the image has enough detail; shorter is acceptable only for very simple images.'
+      : 'Return ONLY the prompt text. Aim for 1200-3000 characters when the image has enough detail; shorter is acceptable only for very simple images.',
     contextSegments.length ? `Context:\n${contextSegments.join('\n')}` : null
   ]
     .filter(Boolean)
     .join('\n\n');
 }
 
-async function generatePromptFromOpenAI(imageUrl: string, userText: string) {
+async function generatePromptFromOpenAI(
+  imageUrl: string,
+  userText: string,
+  detailLevel: PromptThisDetailLevel,
+) {
   const openAiKey = process.env.OPENAI_API_KEY;
   if (!openAiKey) {
     return { ok: false as const, status: 500, payload: { error: 'OpenAI API key not configured' } };
@@ -123,7 +147,7 @@ async function generatePromptFromOpenAI(imageUrl: string, userText: string) {
     },
     body: JSON.stringify({
       model: promptModel,
-      max_tokens: 2600,
+      max_tokens: detailLevel === 'high' ? 4000 : 2600,
       messages: [
         {
           role: 'system',
@@ -205,6 +229,16 @@ export async function POST(
     const existingPromptFromClient = typeof body?.existingPrompt === 'string' ? body.existingPrompt : undefined;
     const creativeBrief = cleanString(typeof body?.creativeBrief === 'string' ? body.creativeBrief : undefined);
 
+    let detailLevel: PromptThisDetailLevel;
+    let promptNuance: string | undefined;
+    try {
+      detailLevel = normalizePromptThisDetailLevel(body?.detailLevel);
+      promptNuance = normalizePromptThisNuance(body?.promptNuance);
+    } catch (error) {
+      return NextResponse.json({ error: error instanceof Error ? error.message : 'Invalid Prompt This options' }, { status: 400 });
+    }
+    const effectivePromptNuance = detailLevel === 'high' ? promptNuance : undefined;
+
     let sourceRelationship: SourceRelationship;
     let aspectRatio: string | undefined;
     try {
@@ -218,10 +252,15 @@ export async function POST(
 
     const existing = await getPromptThisRecord(imageId);
     const hasClientPrompt = typeof existingPromptFromClient === 'string';
-    // If we already have a prompt, reuse it unless the caller explicitly forces
-    // regeneration _and_ didn't provide a client prompt (cleared/edited text
-    // counts as an intentional request to regenerate).
-    if (existing && !hasCreativeBrief && !force && !hasClientPrompt) {
+    const hasDetailLevel = Object.prototype.hasOwnProperty.call(body ?? {}, 'detailLevel');
+    const hasPromptNuance = Object.prototype.hasOwnProperty.call(body ?? {}, 'promptNuance');
+    const settingsDiffer = Boolean(existing) && (
+      (hasDetailLevel && (existing?.detailLevel ?? 'standard') !== detailLevel) ||
+      (hasPromptNuance && detailLevel === 'high' && (existing?.promptNuance ?? '') !== (effectivePromptNuance ?? ''))
+    );
+    // If we already have a prompt, reuse it unless the caller forces regeneration,
+    // supplies a client prompt, or requests different Prompt This settings.
+    if (existing && !hasCreativeBrief && !force && !hasClientPrompt && !settingsDiffer) {
       return NextResponse.json({ imageId, record: existing, generated: false, saved: true });
     }
 
@@ -256,9 +295,11 @@ export async function POST(
       creativeBrief,
       sourceRelationship: hasCreativeBrief ? sourceRelationship : undefined,
       aspectRatio,
+      detailLevel,
+      promptNuance: effectivePromptNuance,
     });
 
-    const ai = await generatePromptFromOpenAI(imageUrl, userText);
+    const ai = await generatePromptFromOpenAI(imageUrl, userText, detailLevel);
     if (!ai.ok) {
       console.error('[PromptThis] OpenAI error:', ai.payload);
       return NextResponse.json(ai.payload, { status: ai.status });
@@ -270,6 +311,8 @@ export async function POST(
       prompt: ai.payload.prompt,
       model: ai.payload.model,
       provider: 'openai',
+      detailLevel,
+      ...(effectivePromptNuance ? { promptNuance: effectivePromptNuance } : {}),
       ...(hasCreativeBrief ? {
         creativeBrief,
         sourceRelationship,
@@ -359,6 +402,8 @@ export async function PATCH(
       prompt,
       model: 'manual',
       provider: 'manual',
+      detailLevel: existing?.detailLevel ?? 'standard',
+      promptNuance: existing?.promptNuance,
       createdAt: existing?.createdAt || now,
       updatedAt: now
     };
@@ -377,4 +422,3 @@ export async function PATCH(
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-

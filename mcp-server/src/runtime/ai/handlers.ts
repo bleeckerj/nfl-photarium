@@ -16,6 +16,7 @@ import {
   recordPromptDerivationResult,
   aspectRatioToSize,
   type GenerationProvider,
+  type PromptThisDetailLevel,
   type SourceRelationship,
 } from './client.js';
 import { enrichCreativeBriefImage } from './creative-brief-enrichment.js';
@@ -173,16 +174,18 @@ export const aiHandlers: Record<string, RuntimeToolHandler> = {
   },
 
   'photarium_generate_prompt': async (args: Record<string, unknown>) => {
-    const { imageId, force, existingPrompt, creativeBrief, sourceRelationship, aspectRatio, saveAsCurrent } = args as {
+    const { imageId, force, existingPrompt, creativeBrief, sourceRelationship, aspectRatio, detailLevel, promptNuance, saveAsCurrent } = args as {
       imageId: string;
       force?: boolean;
       existingPrompt?: string;
       creativeBrief?: string;
       sourceRelationship?: SourceRelationship;
       aspectRatio?: string;
+      detailLevel?: PromptThisDetailLevel;
+      promptNuance?: string;
       saveAsCurrent?: boolean;
     };
-    const result = await generatePrompt(imageId, { force, existingPrompt, creativeBrief, sourceRelationship, aspectRatio, saveAsCurrent });
+    const result = await generatePrompt(imageId, { force, existingPrompt, creativeBrief, sourceRelationship, aspectRatio, detailLevel, promptNuance, saveAsCurrent });
     return {
       content: [
         {

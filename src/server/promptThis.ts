@@ -6,12 +6,15 @@ import {
   type PromptThisEntry,
   type PromptThisProvider
 } from '@/server/imageExtras';
+import type { PromptThisDetailLevel } from '@/server/promptThisOptions';
 
 export type PromptThisRecord = {
   imageId: string;
   prompt: string;
   model: string;
   provider: PromptThisProvider;
+  detailLevel?: PromptThisDetailLevel;
+  promptNuance?: string;
   creativeBrief?: string;
   sourceRelationship?: string;
   aspectRatio?: string;
@@ -30,6 +33,10 @@ function fromEntry(imageId: string, entry: PromptThisEntry): PromptThisRecord {
     prompt: entry.prompt,
     model: entry.model,
     provider: entry.provider,
+    detailLevel: entry.detailLevel === 'high' ? 'high' : 'standard',
+    ...(typeof entry.promptNuance === 'string' && entry.promptNuance.trim()
+      ? { promptNuance: entry.promptNuance.trim() }
+      : {}),
     creativeBrief: entry.creativeBrief,
     sourceRelationship: entry.sourceRelationship,
     aspectRatio: entry.aspectRatio,
@@ -57,6 +64,8 @@ export async function getPromptThisRecord(imageId: string): Promise<PromptThisRe
           prompt: legacy.prompt,
           model: legacy.model,
           provider: legacy.provider,
+          detailLevel: legacy.detailLevel === 'high' ? 'high' : 'standard',
+          promptNuance: legacy.promptNuance,
           creativeBrief: legacy.creativeBrief,
           sourceRelationship: legacy.sourceRelationship,
           aspectRatio: legacy.aspectRatio,
@@ -69,7 +78,7 @@ export async function getPromptThisRecord(imageId: string): Promise<PromptThisRe
     } catch {
       // ignore migration errors
     }
-    return legacy;
+    return fromEntry(imageId, legacy);
   }
 
   return null;
@@ -81,6 +90,8 @@ export async function setPromptThisRecord(record: PromptThisRecord): Promise<voi
       prompt: record.prompt,
       model: record.model,
       provider: record.provider,
+      detailLevel: record.detailLevel ?? 'standard',
+      promptNuance: record.promptNuance,
       creativeBrief: record.creativeBrief,
       sourceRelationship: record.sourceRelationship,
       aspectRatio: record.aspectRatio,
@@ -119,18 +130,20 @@ export async function getPromptThisRecords(imageIds: string[]): Promise<Record<s
         const legacyKey = legacyKeys[idx];
         const legacy = legacyByKey[legacyKey];
         if (!legacy || typeof legacy.prompt !== 'string' || !legacy.prompt.trim()) return;
-        result[imageId] = legacy;
+        result[imageId] = fromEntry(imageId, legacy);
         try {
           await patchImageExtrasRecord(imageId, {
             promptThis: {
-            prompt: legacy.prompt,
-            model: legacy.model,
-            provider: legacy.provider,
-            creativeBrief: legacy.creativeBrief,
-            sourceRelationship: legacy.sourceRelationship,
-            aspectRatio: legacy.aspectRatio,
-            derivationId: legacy.derivationId,
-            createdAt: legacy.createdAt,
+              prompt: legacy.prompt,
+              model: legacy.model,
+              provider: legacy.provider,
+              detailLevel: legacy.detailLevel === 'high' ? 'high' : 'standard',
+              promptNuance: legacy.promptNuance,
+              creativeBrief: legacy.creativeBrief,
+              sourceRelationship: legacy.sourceRelationship,
+              aspectRatio: legacy.aspectRatio,
+              derivationId: legacy.derivationId,
+              createdAt: legacy.createdAt,
               updatedAt: legacy.updatedAt
             }
           });

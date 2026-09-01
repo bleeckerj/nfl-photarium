@@ -5,6 +5,8 @@ export const SOURCE_RELATIONSHIPS = ['brief_led', 'faithful_adaptation', 'relate
 export type SourceRelationship = (typeof SOURCE_RELATIONSHIPS)[number];
 export const GENERATION_PROVIDERS = ['codex_imagegen', 'comfyui', 'photarium_openai'] as const;
 export type GenerationProvider = (typeof GENERATION_PROVIDERS)[number];
+export const PROMPT_THIS_DETAIL_LEVELS = ['standard', 'high'] as const;
+export type PromptThisDetailLevel = (typeof PROMPT_THIS_DETAIL_LEVELS)[number];
 
 export type CreativeBriefReference = {
   imageId: string;
@@ -81,6 +83,8 @@ export async function generatePrompt(
     creativeBrief?: string;
     sourceRelationship?: SourceRelationship;
     aspectRatio?: string;
+    detailLevel?: PromptThisDetailLevel;
+    promptNuance?: string;
     saveAsCurrent?: boolean;
   } = {}
 ): Promise<{ prompt?: string; record?: unknown; derivation?: PromptDerivationRecord; plan?: CreativeBriefGenerationPlan; generated?: boolean; saved?: boolean }> {
@@ -95,6 +99,8 @@ export async function generatePrompt(
       creativeBrief: options.creativeBrief,
       sourceRelationship: options.sourceRelationship,
       aspectRatio: options.aspectRatio,
+      detailLevel: options.detailLevel,
+      promptNuance: options.promptNuance,
       saveAsCurrent: options.saveAsCurrent,
     }),
   });

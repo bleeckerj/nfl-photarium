@@ -84,6 +84,17 @@ export const aiTools = [
                     type: 'string',
                     description: 'Optional target aspect ratio such as 1:1, 4:5, 16:9, or 9:16.',
                 },
+                detailLevel: {
+                    type: 'string',
+                    enum: ['standard', 'high'],
+                    default: 'standard',
+                    description: 'Prompt detail level. High produces an extensive visual inventory.',
+                },
+                promptNuance: {
+                    type: 'string',
+                    maxLength: 2000,
+                    description: 'Optional user guidance describing the specificity or visual nuances to emphasize, especially at the High detail level.',
+                },
                 saveAsCurrent: {
                     type: 'boolean',
                     description: 'If true, save a creative-brief result as the current Prompt This value. Defaults to false.',

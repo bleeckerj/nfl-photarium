@@ -44,6 +44,10 @@ export const ImageDetailMetadataPanel = ({
   promptThisGenerating,
   promptThisSaving,
   promptThisMeta,
+  promptDetailLevel,
+  setPromptDetailLevel,
+  promptNuance,
+  setPromptNuance,
   comfyWorkflow,
   folderEditorProps,
   originalUrlInput,
@@ -108,7 +112,11 @@ export const ImageDetailMetadataPanel = ({
   promptThisLoading: boolean;
   promptThisGenerating: boolean;
   promptThisSaving: boolean;
-  promptThisMeta: { saved?: boolean; updatedAt?: string; model?: string } | null;
+  promptThisMeta: React.ComponentProps<typeof PromptThisEditor>['promptThisMeta'];
+  promptDetailLevel: React.ComponentProps<typeof PromptThisEditor>['promptDetailLevel'];
+  setPromptDetailLevel: React.ComponentProps<typeof PromptThisEditor>['setPromptDetailLevel'];
+  promptNuance: React.ComponentProps<typeof PromptThisEditor>['promptNuance'];
+  setPromptNuance: React.ComponentProps<typeof PromptThisEditor>['setPromptNuance'];
   comfyWorkflow?: ComfyWorkflowRecord | null;
   folderEditorProps: React.ComponentProps<typeof FolderTagsNameEditor>;
   originalUrlInput: string;
@@ -226,6 +234,10 @@ export const ImageDetailMetadataPanel = ({
       promptThisGenerating={promptThisGenerating}
       promptThisSaving={promptThisSaving}
       promptThisMeta={promptThisMeta}
+      promptDetailLevel={promptDetailLevel}
+      setPromptDetailLevel={setPromptDetailLevel}
+      promptNuance={promptNuance}
+      setPromptNuance={setPromptNuance}
       onGenerate={onGeneratePromptThis}
       onCopy={() => onCopyText(promptThisInput || '', 'Prompt copied')}
     />

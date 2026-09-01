@@ -133,8 +133,8 @@ export const aiHandlers = {
         };
     },
     'photarium_generate_prompt': async (args) => {
-        const { imageId, force, existingPrompt, creativeBrief, sourceRelationship, aspectRatio, saveAsCurrent } = args;
-        const result = await generatePrompt(imageId, { force, existingPrompt, creativeBrief, sourceRelationship, aspectRatio, saveAsCurrent });
+        const { imageId, force, existingPrompt, creativeBrief, sourceRelationship, aspectRatio, detailLevel, promptNuance, saveAsCurrent } = args;
+        const result = await generatePrompt(imageId, { force, existingPrompt, creativeBrief, sourceRelationship, aspectRatio, detailLevel, promptNuance, saveAsCurrent });
         return {
             content: [
                 {

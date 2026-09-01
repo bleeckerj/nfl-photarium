@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { getExtrasStorage } from '@/server/extrasStorage';
 import type { InstagramSourceRecord } from '@/server/instagramSource';
 import { sanitizeImageExifRecord, sanitizeImageExtrasRecord } from './imageExtrasExif';
+import type { PromptThisDetailLevel } from './promptThisOptions';
 
 export type PromptThisProvider = 'openai' | 'manual';
 
@@ -9,6 +10,8 @@ export type PromptThisEntry = {
   prompt: string;
   model: string;
   provider: PromptThisProvider;
+  detailLevel?: PromptThisDetailLevel;
+  promptNuance?: string;
   creativeBrief?: string;
   sourceRelationship?: string;
   aspectRatio?: string;
