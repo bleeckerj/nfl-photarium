@@ -22,7 +22,7 @@ const providers = [
 const manifest = {
   id: 'creative-brief',
   label: 'Creative Brief',
-  description: 'Derive a transformation prompt and provider handoff plan from this image.',
+  description: 'Prepare a direct prompt and provider handoff plan from this image.',
   adapterKind: 'creative-brief' as const,
   inputAssetTypes: ['image' as const],
   outputModes: ['still' as const],
@@ -30,16 +30,16 @@ const manifest = {
   supportsAsync: false,
   presentation: {
     thumbnailUrl: '/image-tools/grainrad-preview.svg',
-    shortDescription: 'Rebrand, restyle, re-era, or reinterpret a catalog image through a freeform brief.',
+    shortDescription: 'Generate from Prompt This while retaining the original Photarium source.',
   },
   controls: [
     {
-      id: 'params.creativeBrief',
-      label: 'Creative brief',
+      id: 'params.prompt',
+      label: 'Prompt',
       type: 'textarea' as const,
       required: true,
       group: 'brief',
-      helpText: 'Describe the transformation direction, source traits to preserve, and changes to introduce.',
+      helpText: 'The prompt is passed to the provider unchanged.',
       defaultValue: '',
     },
     {
@@ -66,44 +66,34 @@ const manifest = {
       defaultValue: 'codex_imagegen',
       options: providers,
     },
-    {
-      id: 'params.saveAsCurrent',
-      label: 'Save as current Prompt This',
-      type: 'switch' as const,
-      group: 'output',
-      defaultValue: false,
-      helpText: 'Keep this off to preserve the canonical recreation prompt.',
-    },
   ],
   defaultRequest: {
     effectId: 'creative-brief',
     params: {
-      creativeBrief: '',
+      prompt: '',
       sourceRelationship: 'brief_led',
       aspectRatio: '',
       provider: 'codex_imagegen',
-      saveAsCurrent: false,
     },
     output: { mode: 'still' as const, format: 'png' },
   },
 };
 
 function readParams(request: ImageToolRequest): {
-  creativeBrief: string;
+  prompt: string;
   sourceRelationship?: string;
   aspectRatio?: string;
   provider?: string;
-  saveAsCurrent?: boolean;
 } {
   const params = request.params;
-  const creativeBrief = typeof params.creativeBrief === 'string' ? params.creativeBrief.trim() : '';
-  if (!creativeBrief) throw new Error('Creative brief is required');
+  const promptValue = typeof params.prompt === 'string' ? params.prompt : params.creativeBrief;
+  const prompt = typeof promptValue === 'string' ? promptValue : '';
+  if (!prompt.trim()) throw new Error('Prompt is required');
   return {
-    creativeBrief,
+    prompt,
     sourceRelationship: typeof params.sourceRelationship === 'string' ? params.sourceRelationship : undefined,
     aspectRatio: typeof params.aspectRatio === 'string' ? params.aspectRatio.trim() || undefined : undefined,
     provider: typeof params.provider === 'string' ? params.provider : undefined,
-    saveAsCurrent: Boolean(params.saveAsCurrent),
   };
 }
 
@@ -113,7 +103,7 @@ async function prepare(imageId: string, request: ImageToolRequest): Promise<{
 }> {
   const params = readParams(request);
   const baseUrl = process.env.PHOTARIUM_BASE_URL || process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
-  const response = await fetch(new URL(`/api/images/${encodeURIComponent(imageId)}/prompt`, baseUrl), {
+  const response = await fetch(new URL(`/api/images/${encodeURIComponent(imageId)}/prompt/handoff`, baseUrl), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),

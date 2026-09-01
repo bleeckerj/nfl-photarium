@@ -2521,6 +2521,7 @@ export default function ImageDetailPage() {
                 imageId={image.id}
                 sourcePreviewUrl={imageToolSourcePreviewUrl}
                 sourceLabel={image.filename || image.id}
+                promptThisInput={promptThisInput}
                 onRunComplete={refreshImageList}
               />
           </div>

@@ -148,6 +148,22 @@ const richTool = {
   },
 } satisfies ImageToolManifest;
 
+const creativeBriefTool = {
+  id: 'creative-brief',
+  label: 'Creative Brief',
+  description: 'Prepare a direct prompt handoff.',
+  adapterKind: 'creative-brief',
+  inputAssetTypes: ['image'],
+  outputModes: ['still'],
+  controls: [{ id: 'params.prompt', label: 'Prompt', type: 'textarea', defaultValue: '', group: 'brief' }],
+  defaultRequest: {
+    effectId: 'creative-brief',
+    params: { prompt: '' },
+    output: { mode: 'still', format: 'png' },
+  },
+  presentation: { thumbnailUrl: '/image-tools/grainrad-preview.svg' },
+} satisfies ImageToolManifest;
+
 const controlById = (id: string) => richTool.controls.find((control) => control.id === id) as ImageToolControl;
 
 const createMemoryStorage = () => {
@@ -245,6 +261,12 @@ describe('ImageToolsPanel', () => {
 
     expect(values.effectId).toBe('vhs');
     expect(values['params.jitterAmount']).toBe(0.5);
+  });
+
+  it('prefills the Creative Brief prompt from Prompt This while allowing later edits', () => {
+    const values = buildInitialValues(creativeBriefTool, { 'params.prompt': 'Prompt This text' });
+    expect(values['params.prompt']).toBe('Prompt This text');
+    expect({ ...values, 'params.prompt': 'Manual edit' }['params.prompt']).toBe('Manual edit');
   });
 
   it('groups controls for the selected effect and hides unrelated effect controls', () => {

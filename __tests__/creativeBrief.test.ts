@@ -23,6 +23,7 @@ import {
   getPromptDerivations,
   updatePromptDerivation,
 } from '@/server/creativeBrief';
+import { prepareDirectCreativeBriefHandoff } from '@/server/image-tools/creativeBriefHandoff';
 
 beforeEach(() => extras.clear());
 
@@ -87,5 +88,32 @@ describe('creative brief helpers', () => {
       }),
     ]);
     expect(updated.updatedAt).not.toBe(record.updatedAt);
+  });
+
+  it('persists a direct handoff without rewriting the prompt', async () => {
+    const prompt = 'Preserve every edge and label; reinterpret this object as a translucent archival instrument.';
+    const result = await prepareDirectCreativeBriefHandoff('source-direct', {
+      prompt,
+      sourceRelationship: 'faithful_adaptation',
+      aspectRatio: '4:5',
+      provider: 'codex_imagegen',
+    });
+
+    expect(result.prompt).toBe(prompt);
+    expect(result.plan).toMatchObject({
+      promptMode: 'direct',
+      sourceImageId: 'source-direct',
+      sourceVariant: 'original',
+      prompt,
+      sourceRelationship: 'faithful_adaptation',
+      aspectRatio: '4:5',
+      provider: 'codex_imagegen',
+      references: [{ imageId: 'source-direct', role: 'subject_reference' }],
+    });
+    expect(await getPromptDerivations('source-direct')).toEqual([result.derivation]);
+  });
+
+  it('rejects an empty direct prompt', async () => {
+    await expect(prepareDirectCreativeBriefHandoff('source-direct', { prompt: '   ' })).rejects.toThrow('Prompt is required');
   });
 });

@@ -2,7 +2,7 @@ import { normalizeManualPrompt } from '../shared/prompts.js';
 import { downloadOriginalImageById, getImage } from '../discovery/client.js';
 import { updateMetadata } from '../organization/client.js';
 import { uploadFileBase64 } from '../upload/client.js';
-import { generateAlt, generateDescription, generateTags, generatePrompt, getConcepts, getHaiku, getPromptRecord, getPromptsBulk, getPromptDerivations, recordPromptDerivationResult, aspectRatioToSize, } from './client.js';
+import { generateAlt, generateDescription, generateTags, generatePrompt, prepareDirectPromptHandoff, getConcepts, getHaiku, getPromptRecord, getPromptsBulk, getPromptDerivations, recordPromptDerivationResult, aspectRatioToSize, } from './client.js';
 import { enrichCreativeBriefImage } from './creative-brief-enrichment.js';
 function positiveDimensions(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value))
@@ -150,15 +150,12 @@ export const aiHandlers = {
         return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
     },
     'photarium_prepare_creative_brief_generation': async (args) => {
-        const { imageId, creativeBrief, sourceRelationship, aspectRatio, existingPrompt } = args;
-        const result = await generatePrompt(imageId, {
-            creativeBrief,
-            sourceRelationship,
-            aspectRatio,
-            existingPrompt,
-            force: true,
-            saveAsCurrent: false,
-        });
+        const { imageId, prompt, creativeBrief, sourceRelationship, aspectRatio, provider, existingPrompt } = args;
+        if (!prompt?.trim() && !creativeBrief?.trim())
+            throw new Error('Provide either prompt or creativeBrief');
+        const result = prompt?.trim()
+            ? await prepareDirectPromptHandoff(imageId, { prompt, sourceRelationship, aspectRatio, provider })
+            : await generatePrompt(imageId, { creativeBrief, sourceRelationship, aspectRatio, existingPrompt, force: true, saveAsCurrent: false });
         return {
             content: [{
                     type: 'text',
@@ -237,15 +234,12 @@ export const aiHandlers = {
         };
     },
     'photarium_generate_from_creative_brief': async (args) => {
-        const { imageId, creativeBrief, sourceRelationship, aspectRatio, provider = 'codex_imagegen', existingPrompt, dryRun, ...settings } = args;
-        const prepared = await generatePrompt(imageId, {
-            creativeBrief,
-            sourceRelationship,
-            aspectRatio,
-            existingPrompt,
-            force: true,
-            saveAsCurrent: false,
-        });
+        const { imageId, prompt, creativeBrief, sourceRelationship, aspectRatio, provider = 'codex_imagegen', existingPrompt, dryRun, ...settings } = args;
+        if (!prompt?.trim() && !creativeBrief?.trim())
+            throw new Error('Provide either prompt or creativeBrief');
+        const prepared = prompt?.trim()
+            ? await prepareDirectPromptHandoff(imageId, { prompt, sourceRelationship, aspectRatio, provider })
+            : await generatePrompt(imageId, { creativeBrief, sourceRelationship, aspectRatio, existingPrompt, force: true, saveAsCurrent: false });
         if (!prepared.plan || !prepared.prompt)
             throw new Error('Creative brief prompt generation did not return a plan');
         if (provider !== 'photarium_openai') {

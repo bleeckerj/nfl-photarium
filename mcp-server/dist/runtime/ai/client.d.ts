@@ -18,6 +18,8 @@ export type CreativeBriefGenerationPlan = {
     aspectRatio?: string;
     provider?: GenerationProvider;
     references: CreativeBriefReference[];
+    promptMode?: 'derived' | 'direct';
+    sourceVariant?: 'original';
 };
 export type PromptDerivationRecord = CreativeBriefGenerationPlan & {
     generatedImageId?: string;
@@ -66,6 +68,16 @@ export declare function generatePrompt(imageId: string, options?: {
     plan?: CreativeBriefGenerationPlan;
     generated?: boolean;
     saved?: boolean;
+}>;
+export declare function prepareDirectPromptHandoff(imageId: string, options: {
+    prompt: string;
+    sourceRelationship?: SourceRelationship;
+    aspectRatio?: string;
+    provider?: GenerationProvider;
+}): Promise<{
+    prompt: string;
+    plan: CreativeBriefGenerationPlan;
+    derivation: PromptDerivationRecord;
 }>;
 export declare function getPromptDerivations(imageId: string): Promise<{
     imageId: string;

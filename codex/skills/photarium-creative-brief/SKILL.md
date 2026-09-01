@@ -37,12 +37,16 @@ Read [references/photarium-contract.md](references/photarium-contract.md) when a
 
 ## Source-based derivation sequence
 
-For a creative brief, call `photarium_prepare_creative_brief_generation` and retain its `derivationId`, `sourceImageId`, `creativeBrief`, final prompt, relationship, requested ratio, references, and provider.
+For an explicit creative brief, call `photarium_prepare_creative_brief_generation` with `creativeBrief` and retain its `derivationId`, `sourceImageId`, `creativeBrief`, final prompt, relationship, requested ratio, references, and provider.
+
+For a direct-prompt handoff from the Photarium image-detail plugin, retain the persisted plan with `promptMode: "direct"`, `sourceImageId`, `sourceVariant: "original"`, `prompt`, relationship, ratio, references, provider, and `derivationId`. The persisted `prompt` is the final provider prompt: use it byte-for-byte and skip prompt rewriting or a second creative-brief preparation step.
+
+For every source-based workflow, call `photarium_download_original` with the source image ID. Inspect the complete downloaded artifact with `view_image` before generation. The image-detail source preview is a display aid; the downloaded original is the generation reference.
 
 For `codex_imagegen`:
 
-1. Use the persisted prompt, not an unrelated rewritten prompt.
-2. Call built-in imagegen with the inspected source as a reference and state the source role and preservation constraints explicitly.
+1. Use the persisted prompt unchanged. Direct handoffs must retain the exact prompt text from the plan.
+2. Pass the local artifact downloaded by `photarium_download_original` to built-in imagegen as the `subject_reference`, preserving the complete source composition, edges, embedded text, whitespace, and aspect ratio unless the prompt explicitly requests a change.
 3. Include the requested aspect ratio in the prompt when one is supplied.
 4. Inspect the generated output. Make at most one focused correction pass for an obvious text, branding, crop, or source-preservation defect.
 5. Upload the selected output with `photarium_upload_from_path`, passing the source image as `parentId`, the final prompt, the inherited namespace, and the exact inherited folder. Omit `folder` when the parent is unfiled. Do not pass tags: provider, derivation, relationship, or workflow data belongs in provenance fields, never semantic image tags.

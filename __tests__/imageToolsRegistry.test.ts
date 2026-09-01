@@ -129,7 +129,18 @@ describe('GET /api/image-tools', () => {
     }));
   });
 
-  it('keeps Creative Brief feature-gated in the image-tools catalog', () => {
+  it('lists Creative Brief by default and supports an explicit disable switch', () => {
+    vi.unstubAllEnvs();
+    expect(getImageToolRegistry().listManifests()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'creative-brief',
+        resultKinds: ['prompt', 'image'],
+        controls: expect.arrayContaining([
+          expect.objectContaining({ id: 'params.prompt', label: 'Prompt', type: 'textarea' }),
+        ]),
+      }),
+    ]));
+
     vi.stubEnv('PHOTARIUM_ENABLE_CREATIVE_BRIEF_TOOL', 'false');
     expect(getImageToolRegistry().listManifests().some((tool) => tool.id === 'creative-brief')).toBe(false);
 
@@ -139,7 +150,7 @@ describe('GET /api/image-tools', () => {
         id: 'creative-brief',
         resultKinds: ['prompt', 'image'],
         controls: expect.arrayContaining([
-          expect.objectContaining({ id: 'params.creativeBrief', type: 'textarea' }),
+          expect.objectContaining({ id: 'params.prompt', type: 'textarea' }),
         ]),
       }),
     ]));

@@ -18,7 +18,7 @@ import {
   type ImageToolPreview,
   type ImageToolRun,
 } from '@/services/imageToolsService';
-import { resolveGeneratedImageToolPreviewMedia } from '@/components/image-detail/image-tools/previewMedia';
+import { resolveImageToolPreviewMedia } from '@/components/image-detail/image-tools/previewMedia';
 import { PluginCard } from '@/components/image-detail/image-tools/ToolCards';
 import { ToolExecutionPanel } from '@/components/image-detail/image-tools/ToolExecutionPanel';
 import {
@@ -33,6 +33,7 @@ type ImageToolsPanelProps = {
   imageId: string;
   sourcePreviewUrl?: string;
   sourceLabel?: string;
+  promptThisInput?: string;
   onRunComplete?: () => void | Promise<void>;
 };
 
@@ -43,7 +44,7 @@ const isTerminalRun = (value: ImageToolRun) => value.status === 'completed' || v
 const isTerminalPreview = (value: ImageToolPreview) => value.status === 'completed' || value.status === 'failed';
 
 
-export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps) {
+export function ImageToolsPanel({ imageId, sourcePreviewUrl, sourceLabel, promptThisInput, onRunComplete }: ImageToolsPanelProps) {
   const [tools, setTools] = useState<ImageToolManifest[]>([]);
   const [selectedToolId, setSelectedToolId] = useState<string | null>(null);
   const [values, setValues] = useState<ToolValues>({});
@@ -191,8 +192,13 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
 
   const handleSelectTool = (tool: ImageToolManifest) => {
     setSelectedToolId(tool.id);
-    setValues(buildInitialValues(tool));
+    setValues(buildInitialValues(tool, tool.id === 'creative-brief' && promptThisInput ? { 'params.prompt': promptThisInput } : {}));
     resetToolExecutionState();
+  };
+
+  const handleUsePromptThis = () => {
+    if (selectedTool?.id !== 'creative-brief' || !promptThisInput) return;
+    setValues((prev) => ({ ...prev, 'params.prompt': promptThisInput }));
   };
 
   const handleLoadConfiguration = (nextValues: ToolValues) => {
@@ -285,9 +291,11 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
     ? `${uploadedAsset.assetType === 'video' ? '/videos' : '/images'}/${uploadedAsset.id}`
     : undefined;
   const previewMedia = selectedTool
-    ? resolveGeneratedImageToolPreviewMedia({
+    ? resolveImageToolPreviewMedia({
         tool: selectedTool,
         preview,
+        sourcePreviewUrl,
+        sourceLabel,
       })
     : null;
   const previewStatus = preview?.message || (preview ? `Preview ${preview.status}` : null);
@@ -385,6 +393,8 @@ export function ImageToolsPanel({ imageId, onRunComplete }: ImageToolsPanelProps
           onRun={handleRun}
           onAcceptPreview={handleAcceptPreview}
           onSavePrompt={handleSavePrompt}
+          promptThisInput={promptThisInput}
+          onUsePromptThis={handleUsePromptThis}
           onUpdateControl={updateControl}
         />
       )}

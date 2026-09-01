@@ -22,6 +22,8 @@ export type CreativeBriefGenerationPlan = {
   aspectRatio?: string;
   provider?: GenerationProvider;
   references: CreativeBriefReference[];
+  promptMode?: 'derived' | 'direct';
+  sourceVariant?: 'original';
 };
 
 export type PromptDerivationRecord = CreativeBriefGenerationPlan & {
@@ -105,6 +107,21 @@ export async function generatePrompt(
     }),
   });
   return data;
+}
+
+export async function prepareDirectPromptHandoff(
+  imageId: string,
+  options: {
+    prompt: string;
+    sourceRelationship?: SourceRelationship;
+    aspectRatio?: string;
+    provider?: GenerationProvider;
+  },
+): Promise<{ prompt: string; plan: CreativeBriefGenerationPlan; derivation: PromptDerivationRecord }> {
+  return apiRequest(`/api/images/${encodeURIComponent(imageId)}/prompt/handoff`, {
+    method: 'POST',
+    body: JSON.stringify(options),
+  });
 }
 
 export async function getPromptDerivations(imageId: string): Promise<{ imageId: string; derivations: PromptDerivationRecord[] }> {

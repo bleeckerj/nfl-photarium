@@ -55,6 +55,8 @@ type ToolExecutionPanelProps = {
   onRun: () => void;
   onAcceptPreview: () => void;
   onSavePrompt: () => void;
+  promptThisInput?: string;
+  onUsePromptThis: () => void;
   onUpdateControl: (control: ImageToolControl, value: string | boolean) => void;
 };
 
@@ -63,7 +65,7 @@ export function ToolExecutionPanel({
   activeEffectValue, consoleGroups, previewing, previewRunning, running, acceptingPreview, supportsPreview, canAcceptPreview,
   showPreviewStatus, preview, previewError, previewWarning, acceptError, previewStatus, run, runError, runWarning,
   editedPrompt, setEditedPrompt, promptSaveStatus, promptSaveError, uploadedAsset, detailHref, onBackToCatalog,
-  onLoadConfiguration, onPreview, onRun, onAcceptPreview, onSavePrompt, onUpdateControl,
+  onLoadConfiguration, onPreview, onRun, onAcceptPreview, onSavePrompt, promptThisInput, onUsePromptThis, onUpdateControl,
 }: ToolExecutionPanelProps) {
   return (
     <>
@@ -273,7 +275,19 @@ export function ToolExecutionPanel({
           <div className="border-t border-gray-200 bg-gray-50/70 p-3">
             <div className="mb-2 flex items-center justify-between gap-2 border-b border-gray-200 pb-1 font-mono text-[11px] font-semibold text-gray-800">
               <span>Parameters</span>
-              <span className="text-[10px] font-normal text-gray-500">{consoleGroups.length} group{consoleGroups.length === 1 ? '' : 's'}</span>
+              <div className="flex items-center gap-2 text-[10px] font-normal text-gray-500">
+                {selectedTool.id === 'creative-brief' && promptThisInput?.trim() && (
+                  <button
+                    type="button"
+                    onClick={onUsePromptThis}
+                    disabled={busy}
+                    className="rounded border border-gray-300 bg-white px-2 py-1 text-gray-700 hover:border-gray-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Use Prompt This
+                  </button>
+                )}
+                <span>{consoleGroups.length} group{consoleGroups.length === 1 ? '' : 's'}</span>
+              </div>
             </div>
             <ParameterGroupsLayout
               groups={consoleGroups}

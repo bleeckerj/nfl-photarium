@@ -1,4 +1,11 @@
 interface:
   display_name: "Photarium Creative Derivation"
   short_description: "Catalog every generated image"
-  default_prompt: "Use $photarium-creative-brief to derive, generate, upload, and verify this image in Photarium."
+  default_prompt: "Use $photarium-creative-brief to generate, upload, and verify this Photarium image from its direct prompt and full-resolution source."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "photarium"
+      description: "Existing Photarium MCP server for source download, upload, provenance, metadata, and verification."
+policy:
+  allow_implicit_invocation: true

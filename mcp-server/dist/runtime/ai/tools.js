@@ -122,15 +122,17 @@ export const aiTools = [
             properties: {
                 imageId: { type: 'string', description: 'The source Photarium image ID.' },
                 creativeBrief: { type: 'string', description: 'Freeform transformation direction for the source image.' },
+                prompt: { type: 'string', description: 'Final generation prompt, passed unchanged. Use this instead of creativeBrief for a direct handoff.' },
                 sourceRelationship: {
                     type: 'string',
                     enum: ['brief_led', 'faithful_adaptation', 'related_design', 'inspired_concept'],
                     description: 'Relationship to the source. Defaults to brief_led.',
                 },
                 aspectRatio: { type: 'string', description: 'Optional target aspect ratio such as 4:5.' },
+                provider: { type: 'string', enum: ['codex_imagegen', 'comfyui', 'photarium_openai'], description: 'Optional provider recorded on a direct handoff.' },
                 existingPrompt: { type: 'string', description: 'Optional prompt draft to revise under the brief.' },
             },
-            required: ['imageId', 'creativeBrief'],
+            required: ['imageId'],
         },
     },
     {
@@ -230,6 +232,7 @@ export const aiTools = [
             properties: {
                 imageId: { type: 'string', description: 'The primary Photarium source image ID.' },
                 creativeBrief: { type: 'string', description: 'Freeform transformation direction.' },
+                prompt: { type: 'string', description: 'Final generation prompt, passed unchanged. Use this instead of creativeBrief for a direct handoff.' },
                 sourceRelationship: {
                     type: 'string',
                     enum: ['brief_led', 'faithful_adaptation', 'related_design', 'inspired_concept'],
@@ -255,7 +258,7 @@ export const aiTools = [
                 displayName: { type: 'string' },
                 dryRun: { type: 'boolean', description: 'Return the derived plan and, for Photarium OpenAI, the planned image request without generating.' },
             },
-            required: ['imageId', 'creativeBrief'],
+            required: ['imageId'],
         },
     },
     {

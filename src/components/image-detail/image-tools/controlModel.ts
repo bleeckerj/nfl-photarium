@@ -82,7 +82,7 @@ export const valueFromRequest = (request: ImageToolRequest, path: string) => {
   return current;
 };
 
-export const buildInitialValues = (tool: ImageToolManifest): ToolValues => {
+export const buildInitialValues = (tool: ImageToolManifest, overrides: ToolValues = {}): ToolValues => {
   const values: ToolValues = {};
   tool.controls.forEach((control) => {
     const existing = valueFromRequest(tool.defaultRequest, control.id);
@@ -91,7 +91,7 @@ export const buildInitialValues = (tool: ImageToolManifest): ToolValues => {
       values[control.id] = value;
     }
   });
-  return values;
+  return { ...values, ...overrides };
 };
 
 const assignPath = (target: Record<string, unknown>, path: string, value: unknown) => {

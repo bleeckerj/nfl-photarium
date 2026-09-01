@@ -8,6 +8,7 @@ import {
   generateDescription,
   generateTags,
   generatePrompt,
+  prepareDirectPromptHandoff,
   getConcepts,
   getHaiku,
   getPromptRecord,
@@ -203,21 +204,19 @@ export const aiHandlers: Record<string, RuntimeToolHandler> = {
   },
 
   'photarium_prepare_creative_brief_generation': async (args: Record<string, unknown>) => {
-    const { imageId, creativeBrief, sourceRelationship, aspectRatio, existingPrompt } = args as {
+    const { imageId, prompt, creativeBrief, sourceRelationship, aspectRatio, provider, existingPrompt } = args as {
       imageId: string;
-      creativeBrief: string;
+      prompt?: string;
+      creativeBrief?: string;
       sourceRelationship?: SourceRelationship;
       aspectRatio?: string;
+      provider?: GenerationProvider;
       existingPrompt?: string;
     };
-    const result = await generatePrompt(imageId, {
-      creativeBrief,
-      sourceRelationship,
-      aspectRatio,
-      existingPrompt,
-      force: true,
-      saveAsCurrent: false,
-    });
+    if (!prompt?.trim() && !creativeBrief?.trim()) throw new Error('Provide either prompt or creativeBrief');
+    const result = prompt?.trim()
+      ? await prepareDirectPromptHandoff(imageId, { prompt, sourceRelationship, aspectRatio, provider })
+      : await generatePrompt(imageId, { creativeBrief, sourceRelationship, aspectRatio, existingPrompt, force: true, saveAsCurrent: false });
     return {
       content: [{
         type: 'text',
@@ -317,6 +316,7 @@ export const aiHandlers: Record<string, RuntimeToolHandler> = {
   'photarium_generate_from_creative_brief': async (args: Record<string, unknown>) => {
     const {
       imageId,
+      prompt,
       creativeBrief,
       sourceRelationship,
       aspectRatio,
@@ -326,7 +326,8 @@ export const aiHandlers: Record<string, RuntimeToolHandler> = {
       ...settings
     } = args as unknown as {
       imageId: string;
-      creativeBrief: string;
+      prompt?: string;
+      creativeBrief?: string;
       sourceRelationship?: SourceRelationship;
       aspectRatio?: string;
       provider?: GenerationProvider;
@@ -334,14 +335,10 @@ export const aiHandlers: Record<string, RuntimeToolHandler> = {
       dryRun?: boolean;
       [key: string]: unknown;
     };
-    const prepared = await generatePrompt(imageId, {
-      creativeBrief,
-      sourceRelationship,
-      aspectRatio,
-      existingPrompt,
-      force: true,
-      saveAsCurrent: false,
-    });
+    if (!prompt?.trim() && !creativeBrief?.trim()) throw new Error('Provide either prompt or creativeBrief');
+    const prepared = prompt?.trim()
+      ? await prepareDirectPromptHandoff(imageId, { prompt, sourceRelationship, aspectRatio, provider })
+      : await generatePrompt(imageId, { creativeBrief, sourceRelationship, aspectRatio, existingPrompt, force: true, saveAsCurrent: false });
     if (!prepared.plan || !prepared.prompt) throw new Error('Creative brief prompt generation did not return a plan');
 
     if (provider !== 'photarium_openai') {

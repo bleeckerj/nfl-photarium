@@ -1786,7 +1786,7 @@ CLOUDFLARE_DELIVERY_URL=https://imagedelivery.net/your-hash
 # Optional
 IMAGE_NAMESPACE=default-namespace
 OPENAI_API_KEY=sk-...  # For Photarium-side AI features
-PHOTARIUM_ENABLE_CREATIVE_BRIEF_TOOL=true  # Optional feature-gated image-detail plugin
+PHOTARIUM_ENABLE_CREATIVE_BRIEF_TOOL=false  # Optional explicit disable for the image-detail Creative Brief plugin
 DISABLE_EXTERNAL_API=false
 MAX_VIDEO_UPLOAD_BYTES=104857600
 VIDEO_ROTATION_TIMEOUT_MS=120000

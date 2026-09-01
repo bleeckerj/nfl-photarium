@@ -19,6 +19,9 @@ export type CreativeBriefReference = {
   role: 'subject_reference' | 'brand_reference' | 'logo_reference';
 };
 
+export type CreativeBriefPromptMode = 'derived' | 'direct';
+export type CreativeBriefSourceVariant = 'original';
+
 export type CreativeBriefGenerationPlan = {
   derivationId: string;
   sourceImageId: string;
@@ -28,6 +31,8 @@ export type CreativeBriefGenerationPlan = {
   aspectRatio?: string;
   provider?: GenerationProvider;
   references: CreativeBriefReference[];
+  promptMode?: CreativeBriefPromptMode;
+  sourceVariant?: CreativeBriefSourceVariant;
 };
 
 export type PromptDerivationRecord = CreativeBriefGenerationPlan & {

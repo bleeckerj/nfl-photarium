@@ -52,6 +52,12 @@ export async function generatePrompt(imageId, options = {}) {
     });
     return data;
 }
+export async function prepareDirectPromptHandoff(imageId, options) {
+    return apiRequest(`/api/images/${encodeURIComponent(imageId)}/prompt/handoff`, {
+        method: 'POST',
+        body: JSON.stringify(options),
+    });
+}
 export async function getPromptDerivations(imageId) {
     return apiRequest(`/api/images/${encodeURIComponent(imageId)}/prompt/derivations`);
 }

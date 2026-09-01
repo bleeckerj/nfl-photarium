@@ -1,0 +1,23 @@
+{
+  "name": "photarium",
+  "version": "0.1.0",
+  "description": "Source-backed Photarium image generation, derivation, and metadata workflows for Codex.",
+  "author": { "name": "Julian Bleecker" },
+  "license": "MIT",
+  "keywords": ["photarium", "image-generation", "image-derivation", "provenance"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Photarium",
+    "shortDescription": "Source-backed image generation and derivation",
+    "longDescription": "Use Photarium images as full-resolution sources for prompt-driven generation, derivation, upload, and provenance verification.",
+    "developerName": "Julian Bleecker",
+    "category": "Creative",
+    "capabilities": ["Interactive", "Write"],
+    "defaultPrompt": [
+      "Generate a verified Photarium derivative from this image.",
+      "Use Prompt This as the generation prompt for this source image.",
+      "Inspect and preserve the full-resolution source before generating."
+    ],
+    "brandColor": "#111827"
+  }
+}

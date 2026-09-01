@@ -51,6 +51,56 @@ describe('Photarium MCP runtime surface', () => {
     });
   });
 
+  it('exposes the direct Creative Brief prompt handoff contract', () => {
+    for (const name of ['photarium_prepare_creative_brief_generation', 'photarium_generate_from_creative_brief']) {
+      const tool = RUNTIME_TOOLS.find((candidate) => candidate.name === name);
+      expect(tool?.inputSchema).toMatchObject({
+        properties: {
+          prompt: { type: 'string' },
+          creativeBrief: { type: 'string' },
+        },
+        required: ['imageId'],
+      });
+    }
+  });
+
+  it('forwards a direct Creative Brief prompt unchanged to the dedicated handoff route', async () => {
+    const prompt = 'Keep this exact punctuation: [source] -> archival instrument.';
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      expect(url).toBe('http://localhost:3000/api/images/source-1/prompt/handoff');
+      expect(JSON.parse(String(init?.body))).toEqual({
+        prompt,
+        sourceRelationship: 'faithful_adaptation',
+        aspectRatio: '4:5',
+        provider: 'codex_imagegen',
+      });
+      return new Response(JSON.stringify({
+        prompt,
+        plan: {
+          derivationId: 'derivation-1',
+          sourceImageId: 'source-1',
+          sourceVariant: 'original',
+          promptMode: 'direct',
+          prompt,
+          references: [{ imageId: 'source-1', role: 'subject_reference' }],
+        },
+        derivation: { derivationId: 'derivation-1' },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as typeof global.fetch;
+
+    const result = await handleRuntimeToolCall('photarium_prepare_creative_brief_generation', {
+      imageId: 'source-1',
+      prompt,
+      sourceRelationship: 'faithful_adaptation',
+      aspectRatio: '4:5',
+      provider: 'codex_imagegen',
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(JSON.parse(result.content[0]?.text || '{}')).toMatchObject({ prompt, plan: { sourceVariant: 'original', promptMode: 'direct' } });
+  });
+
   it('forwards Prompt This detail controls to the Photarium API', async () => {
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;

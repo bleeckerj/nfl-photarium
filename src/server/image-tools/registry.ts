@@ -11,7 +11,7 @@ const getAdapters = (): ImageToolAdapter[] => [
   grainradAdapter,
   eightBitAdapter,
   noAiDemarkAdapter,
-  ...(process.env.PHOTARIUM_ENABLE_CREATIVE_BRIEF_TOOL === 'true' ? [creativeBriefAdapter] : []),
+  ...(process.env.PHOTARIUM_ENABLE_CREATIVE_BRIEF_TOOL !== 'false' ? [creativeBriefAdapter] : []),
 ];
 
 class ImageToolRegistry {
