@@ -350,10 +350,11 @@ async function resolveGenerationReference(deps: ImageGenerationDeps, reference: 
   throw new Error(`Reference ${index + 1} must include imageId or url`);
 }
 
-type ReferenceGenerationMode = 'reference_generate' | 'semantic_merge' | 'aspect_ratio_variant' | 'creative_brief';
+type ReferenceGenerationMode = 'reference_generate' | 'semantic_merge' | 'aspect_ratio_variant' | 'creative_brief' | 'direct_prompt';
 
 function buildReferencePrompt(prompt: string, references: Array<{ role: ImageReferenceRole; instructions?: string }>, mode: ReferenceGenerationMode): string {
   const lines = [prompt.trim()];
+  if (mode === 'direct_prompt') return lines[0];
   if (mode === 'semantic_merge') {
     lines.push('', 'Semantic merge instruction: synthesize a new image that blends concepts, visual language, subjects, textures, product cues, and mood from the sources. Do not preserve exact placement, exact logos, or pixel-level composition unless explicitly requested elsewhere.');
   }

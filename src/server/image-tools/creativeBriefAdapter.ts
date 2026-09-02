@@ -5,6 +5,7 @@ import type {
   ImageToolRunResult,
 } from '@/server/image-tools/types';
 import type { CreativeBriefGenerationPlan } from '@/server/creativeBrief';
+import { generateCreativeBriefThroughMcp } from '@/server/image-tools/creativeBriefMcp';
 
 const sourceRelationships = [
   { value: 'brief_led', label: 'Follow brief' },
@@ -16,7 +17,7 @@ const sourceRelationships = [
 const providers = [
   { value: 'codex_imagegen', label: 'Codex imagegen' },
   { value: 'comfyui', label: 'ComfyUI' },
-  { value: 'photarium_openai', label: 'Photarium OpenAI' },
+  { value: 'photarium_openai', label: 'Photarium OpenAI (run now)' },
 ];
 
 const manifest = {
@@ -63,7 +64,7 @@ const manifest = {
       label: 'Provider handoff',
       type: 'select' as const,
       group: 'provider',
-      defaultValue: 'codex_imagegen',
+      defaultValue: 'photarium_openai',
       options: providers,
     },
   ],
@@ -73,7 +74,7 @@ const manifest = {
       prompt: '',
       sourceRelationship: 'brief_led',
       aspectRatio: '',
-      provider: 'codex_imagegen',
+      provider: 'photarium_openai',
     },
     output: { mode: 'still' as const, format: 'png' },
   },
@@ -100,8 +101,35 @@ function readParams(request: ImageToolRequest): {
 async function prepare(imageId: string, request: ImageToolRequest): Promise<{
   prompt: string;
   plan: CreativeBriefGenerationPlan;
+  generatedId?: string;
+  generatedUrl?: string;
+  metadataEnrichment?: unknown;
+  mcpResult?: Record<string, unknown>;
 }> {
   const params = readParams(request);
+  if (params.provider === 'photarium_openai') {
+    const result = await generateCreativeBriefThroughMcp({
+      imageId,
+      prompt: params.prompt,
+      sourceRelationship: params.sourceRelationship,
+      aspectRatio: params.aspectRatio,
+      provider: 'photarium_openai',
+      outputFormat: request.output.format,
+    });
+    const plan = result.plan as CreativeBriefGenerationPlan | undefined;
+    const generated = result.result as Record<string, unknown> | undefined;
+    const generatedId = typeof generated?.imageId === 'string' ? generated.imageId : undefined;
+    const generatedUrl = typeof generated?.url === 'string' ? generated.url : undefined;
+    if (!plan || !generatedId) throw new Error('Photarium MCP generation returned no uploaded child image');
+    return {
+      prompt: params.prompt,
+      plan,
+      generatedId,
+      generatedUrl,
+      metadataEnrichment: result.metadataEnrichment,
+      mcpResult: result,
+    };
+  }
   const baseUrl = process.env.PHOTARIUM_BASE_URL || process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
   const response = await fetch(new URL(`/api/images/${encodeURIComponent(imageId)}/prompt/handoff`, baseUrl), {
     method: 'POST',
@@ -117,9 +145,28 @@ async function prepare(imageId: string, request: ImageToolRequest): Promise<{
 export const creativeBriefAdapter: ImageToolAdapter = {
   manifest,
   async run({ imageId, request, updateRun, addEvent }): Promise<ImageToolRunResult> {
-    addEvent({ phase: 'creative-brief.prepare', message: 'Deriving creative-brief prompt' });
-    updateRun({ message: 'Deriving creative-brief prompt', percent: 0.5 });
+    addEvent({ phase: 'creative-brief.prepare', message: 'Preparing image generation' });
+    updateRun({ message: 'Preparing image generation', percent: 0.15 });
     const result = await prepare(imageId, request);
+    if (result.generatedId) {
+      addEvent({ phase: 'creative-brief.generated', message: 'Photarium image generation completed', details: { imageId: result.generatedId } });
+      updateRun({ message: 'Photarium image generation completed', percent: 1 });
+      return {
+        kind: 'image',
+        state: 'uploaded',
+        prompt: result.prompt,
+        plan: result.plan,
+        uploadedAsset: {
+          id: result.generatedId,
+          filename: result.generatedId,
+          url: result.generatedUrl || '',
+          variants: [],
+          uploaded: new Date().toISOString(),
+          tags: [],
+        },
+        metadata: { metadataEnrichment: result.metadataEnrichment, mcpResult: result.mcpResult },
+      };
+    }
     addEvent({ phase: 'creative-brief.handoff', message: 'Provider handoff plan ready' });
     updateRun({ message: 'Provider handoff plan ready', percent: 1 });
     return { kind: 'prompt', state: 'handoff', prompt: result.prompt, plan: result.plan };

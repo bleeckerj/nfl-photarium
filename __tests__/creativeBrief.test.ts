@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const extras = vi.hoisted(() => new Map<string, unknown>());
 
@@ -24,8 +24,10 @@ import {
   updatePromptDerivation,
 } from '@/server/creativeBrief';
 import { prepareDirectCreativeBriefHandoff } from '@/server/image-tools/creativeBriefHandoff';
+import { creativeBriefAdapter } from '@/server/image-tools/creativeBriefAdapter';
 
 beforeEach(() => extras.clear());
+afterEach(() => vi.unstubAllGlobals());
 
 describe('creative brief helpers', () => {
   it('normalizes common aspect-ratio spellings', () => {
@@ -115,5 +117,45 @@ describe('creative brief helpers', () => {
 
   it('rejects an empty direct prompt', async () => {
     await expect(prepareDirectCreativeBriefHandoff('source-direct', { prompt: '   ' })).rejects.toThrow('Prompt is required');
+  });
+
+  it('runs the executable provider and returns an uploaded image result', async () => {
+    const prompt = 'Generate this source as an archival instrument with its complete composition preserved.';
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe('http://127.0.0.1:8787/tools/photarium_generate_from_creative_brief');
+      expect(JSON.parse(String(init?.body))).toMatchObject({
+        imageId: 'source-run',
+        prompt,
+        provider: 'photarium_openai',
+      });
+      return new Response(JSON.stringify({
+        ok: true,
+        result: {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              plan: { derivationId: 'derivation-run', sourceImageId: 'source-run', promptMode: 'direct', sourceVariant: 'original', prompt },
+              result: { imageId: 'child-run', url: 'https://imagedelivery.net/example/child-run/public' },
+              metadataEnrichment: { status: 'completed' },
+            }),
+          }],
+        },
+      }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await creativeBriefAdapter.run({
+      runId: 'run-1',
+      imageId: 'source-run',
+      request: {
+        effectId: 'creative-brief',
+        params: { prompt, provider: 'photarium_openai', sourceRelationship: 'brief_led' },
+        output: { mode: 'still', format: 'png' },
+      },
+      updateRun: vi.fn(),
+      addEvent: vi.fn(),
+    });
+
+    expect(result).toMatchObject({ kind: 'image', state: 'uploaded', prompt, uploadedAsset: { id: 'child-run' } });
   });
 });

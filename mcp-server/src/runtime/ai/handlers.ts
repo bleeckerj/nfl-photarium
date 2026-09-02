@@ -356,6 +356,10 @@ export const aiHandlers: Record<string, RuntimeToolHandler> = {
       };
     }
 
+    const source = await getImage(imageId);
+    const sourceRecord = source as Record<string, unknown>;
+    const inheritedNamespace = typeof sourceRecord.namespace === 'string' ? sourceRecord.namespace : undefined;
+    const inheritedFolder = typeof sourceRecord.folder === 'string' ? sourceRecord.folder : undefined;
     const { tags: ignoredTags, ...creativeBriefSettings } = settings as unknown as ImageGenerationSettings;
     void ignoredTags;
     const generationSettings = creativeBriefSettings as Omit<ImageGenerationSettings, 'prompt'>;
@@ -364,12 +368,15 @@ export const aiHandlers: Record<string, RuntimeToolHandler> = {
       { downloadOriginalImageById, uploadFileBase64 },
       {
         ...generationSettings,
+        namespace: generationSettings.namespace || inheritedNamespace,
+        folder: generationSettings.folder || inheritedFolder,
+        parentId: imageId,
         prompt: prepared.prompt,
         size: outputSize,
         dryRun,
       },
       [{ imageId, role: 'subject_reference' }],
-      'creative_brief',
+      prompt?.trim() ? 'direct_prompt' : 'creative_brief',
     );
     const generatedImageId = typeof result.imageId === 'string' ? result.imageId : undefined;
     let metadataEnrichment;

@@ -37,6 +37,7 @@ Every source-based derivative inherits the parent image's folder exactly. A null
 ## Defaults
 
 - Provider: `codex_imagegen`.
+- Image-detail plugin Run provider: `photarium_openai`, which executes through the existing Photarium MCP generation endpoint.
 - Namespace: source namespace, otherwise Photarium's configured `IMAGE_NAMESPACE`.
 - Folder: exact source folder; if the source is unfiled, leave the derivative unfiled.
 - Relationship: `brief_led` unless the user specifies another relationship.

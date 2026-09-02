@@ -20,6 +20,7 @@ Read [references/photarium-contract.md](references/photarium-contract.md) when a
 
 - Trigger for every Codex image generation, including standalone concepts and source-based transformations.
 - Default to `codex_imagegen`.
+- The Photarium image-detail Creative Brief plugin defaults to `photarium_openai` so its Run action completes generation and upload; `codex_imagegen` remains available as an explicit Codex handoff.
 - Use `photarium_openai` only when explicitly selected; it can execute inside Photarium MCP.
 - Use `comfyui` only when an available MCP capability exposes a configured workflow that accepts the required source, prompt, and ratio inputs.
 - Never silently switch providers.
