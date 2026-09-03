@@ -9,6 +9,7 @@ import {
   sortFamilyAssets,
   toOptionalPositiveInt,
   toOptionalPositiveNumber,
+  resolveVideoMediaPresentation,
   videoRecordFromSeed,
 } from '@/components/video-detail/videoTransforms';
 
@@ -67,6 +68,49 @@ describe('video detail transforms', () => {
     expect(formatFrameTime(0.42)).toBe('0.42s');
     expect(formatFrameTime(65.42)).toBe('1:05.42');
     expect(normalizeTags(' hero, hero, , Editorial ')).toEqual(['hero', 'Editorial']);
+  });
+
+  it('resolves media in playback, HLS, preview, and unavailable order', () => {
+    expect(resolveVideoMediaPresentation({
+      playbackUrl: 'https://example.com/player',
+      hlsUrl: 'https://example.com/video.m3u8',
+      thumbnailUrl: 'https://example.com/thumb.jpg',
+      previewUrl: 'https://example.com/preview.jpg',
+      width: 640,
+      height: 768,
+    })).toEqual({
+      mode: 'stream',
+      url: 'https://example.com/player',
+      posterUrl: 'https://example.com/thumb.jpg',
+      aspectRatio: '640 / 768',
+    });
+
+    expect(resolveVideoMediaPresentation({
+      hlsUrl: 'https://example.com/video.m3u8',
+      previewUrl: 'https://example.com/preview.jpg',
+      width: 1280,
+      height: 720,
+    })).toMatchObject({
+      mode: 'hls',
+      url: 'https://example.com/video.m3u8',
+      posterUrl: 'https://example.com/preview.jpg',
+      aspectRatio: '1280 / 720',
+    });
+
+    expect(resolveVideoMediaPresentation({
+      thumbnailUrl: 'https://example.com/thumb.jpg',
+    })).toEqual({
+      mode: 'preview',
+      url: 'https://example.com/thumb.jpg',
+      posterUrl: 'https://example.com/thumb.jpg',
+      aspectRatio: '16 / 9',
+    });
+
+    expect(resolveVideoMediaPresentation({})).toEqual({
+      mode: 'unavailable',
+      posterUrl: undefined,
+      aspectRatio: '16 / 9',
+    });
   });
 
   it('sorts family assets by variation sort or newest upload fallback', () => {

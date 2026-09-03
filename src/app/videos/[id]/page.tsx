@@ -14,11 +14,9 @@ import { buildAdoptVariationCandidatePage, getDefaultAdoptVariationScope } from 
 import { UploadVariationSection } from '@/components/image-detail/UploadVariationSection';
 import { VARIATION_UPLOAD_ACCEPT } from '@/components/image-detail/variationUploadConfig';
 import { AssetFamilyList } from '@/components/asset-detail/AssetFamilyList';
-import { AssetTypeBadge } from '@/components/asset-detail/AssetTypeBadge';
-import { ComfyIndicator } from '@/components/asset-detail/ComfyIndicator';
 import AnimatedWebpSection from '@/components/video-detail/AnimatedWebpSection';
 import FrameExtractionSection from '@/components/video-detail/FrameExtractionSection';
-import { VideoRotationControls } from '@/components/video-detail/VideoRotationControls';
+import { VideoHeroSection } from '@/components/video-detail/VideoHeroSection';
 import { useVideoRotation } from '@/components/video-detail/useVideoRotation';
 
 import { copyToClipboard } from '@/utils/clipboard';
@@ -29,7 +27,6 @@ import {
   PRESET_MAP,
   createVariationDraft,
   formatBytes,
-  formatDuration,
   getNow,
   logVideoDetailPerf,
   mergeUniqueAssetsById,
@@ -1277,31 +1274,23 @@ export default function VideoDetailPage() {
           </div>
         </div>
 
-        <section className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
-          <div className="flex items-center gap-2">
-            <AssetTypeBadge assetType="video" />
-            <ComfyIndicator asset={video} id={`video-detail-comfy-indicator-${video.id}`} />
-            <h1 className="text-lg font-semibold text-gray-900">{video.displayName || video.filename}</h1>
-          </div>
-          <p className="text-xs font-mono text-gray-600">
-            status={video.videoStatus} • duration={formatDuration(video.durationSeconds)} • dims={video.width && video.height ? `${video.width}x${video.height}` : '--'}
-          </p>
-          {video.streamError && (
-            <p className="text-xs font-mono text-amber-700">stream_error={video.streamError}</p>
-          )}
-          <div className="flex flex-wrap items-center gap-2 text-[11px]">
-            <button
-              onClick={() => void handleCopyText(video.id, 'Video ID')}
-              className="rounded border border-gray-300 px-2 py-1 text-gray-700 hover:bg-gray-50"
-            >
-              Copy ID
-            </button>
-          </div>
-        </section>
+        <VideoHeroSection
+          video={video}
+          previewStyle={videoRotation.previewStyle}
+          rotation={{
+            normalizedRotation: videoRotation.normalizedRotation,
+            loading: videoRotation.loading,
+            error: videoRotation.error,
+            rotatedAsset: videoRotation.rotatedAsset,
+            onAdjust: videoRotation.adjust,
+            onConfirm: () => void videoRotation.confirm(),
+          }}
+          onCopyId={() => handleCopyText(video.id, 'Video ID')}
+        />
 
-        <section className="space-y-4 rounded-lg border border-gray-200 bg-white p-4">
+        <section aria-labelledby="video-metadata-heading" className="space-y-4 rounded-lg border border-gray-200 bg-white p-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-gray-900">Metadata</h2>
+            <h2 id="video-metadata-heading" className="text-sm font-semibold text-gray-900">Metadata</h2>
             <div className="flex items-center gap-2">
               <button
                 onClick={handleDiscard}
@@ -1436,8 +1425,8 @@ export default function VideoDetailPage() {
           </div>
         )}
 
-        <section className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
-          <h2 className="text-sm font-semibold text-gray-900">Add Variants</h2>
+        <section aria-labelledby="add-variants-heading" className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
+          <h2 id="add-variants-heading" className="text-sm font-semibold text-gray-900">Add Variants</h2>
           <div className="space-y-4">
             <p className="text-xs text-gray-600">
               {isCanonicalVideo ? (
@@ -1506,8 +1495,47 @@ export default function VideoDetailPage() {
           </div>
         </section>
 
-        <section className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
-          <h2 className="text-sm font-semibold text-gray-900">Share + Copy</h2>
+        {sortedAnimatedWebpVariants.length > 0 && (
+          <section
+            aria-labelledby="generated-webps-heading"
+            className="space-y-3 rounded-lg border border-gray-200 bg-white p-4"
+          >
+            <div className="flex items-center justify-between">
+              <h2 id="generated-webps-heading" className="text-sm font-semibold text-gray-900">Generated WebPs</h2>
+              <p className="text-xs font-mono text-gray-600">count={sortedAnimatedWebpVariants.length}</p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+              {sortedAnimatedWebpVariants.map((variant) => (
+                <Link
+                  key={variant.imageId}
+                  href={`/images/${variant.imageId}`}
+                  className="group rounded border border-gray-200 bg-white p-2 hover:border-gray-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+                  title="Open image detail"
+                >
+                  <div className="relative aspect-square w-full overflow-hidden rounded bg-gray-100">
+                    <img
+                      src={variant.url}
+                      alt={variant.filename}
+                      className="absolute inset-0 h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
+                    />
+                  </div>
+                  <div className="mt-2 space-y-1">
+                    <p className="truncate text-xs font-mono text-gray-900" title={variant.filename}>
+                      {variant.filename}
+                    </p>
+                    <p className="text-[11px] font-mono text-gray-600">
+                      {formatBytes(variant.bytes)} • {variant.fps}fps • {variant.loop ? 'loop' : 'no-loop'}
+                    </p>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+
+        <section aria-labelledby="share-copy-heading" className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
+          <h2 id="share-copy-heading" className="text-sm font-semibold text-gray-900">Share + Copy</h2>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="flex-1 space-y-3">
               <label className="block space-y-1 text-xs text-gray-700">
@@ -1609,9 +1637,9 @@ export default function VideoDetailPage() {
           </div>
         </section>
 
-        <section className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
+        <section aria-labelledby="mux-export-heading" className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-gray-900">Mux Export</h2>
+            <h2 id="mux-export-heading" className="text-sm font-semibold text-gray-900">Mux Export</h2>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => void refreshMuxStatus()}
@@ -1668,33 +1696,6 @@ export default function VideoDetailPage() {
           </div>
         </section>
 
-        <section className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
-          <h2 className="text-sm font-semibold text-gray-900">Deletion</h2>
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => void handleDeleteCurrent()}
-              disabled={deletingCurrent}
-              className="rounded border border-red-300 px-3 py-1 text-xs text-red-700 disabled:opacity-50"
-            >
-              {deletingCurrent ? 'Deleting…' : 'Delete video'}
-            </button>
-            <button
-              onClick={() => void handleDeleteFamily()}
-              disabled={!video.parentId || Boolean(deleteFamilyJobId && !deleteFamilyStatus?.finishedAt)}
-              className="rounded border border-red-500 bg-red-50 px-3 py-1 text-xs text-red-800 disabled:opacity-50"
-            >
-              Delete parent family
-            </button>
-          </div>
-          {deleteFamilyStatus && (
-            <div className="rounded border border-gray-200 bg-gray-50 p-2 text-xs font-mono text-gray-700">
-              <p>status={deleteFamilyStatus.status} attempted={deleteFamilyStatus.attempted}/{deleteFamilyStatus.total}</p>
-              <p>deleted={deleteFamilyStatus.deleted} failed={deleteFamilyStatus.failed}</p>
-              {deleteFamilyStatus.lastError && <p className="text-red-700">error={deleteFamilyStatus.lastError}</p>}
-            </div>
-          )}
-        </section>
-
         <AnimatedWebpSection
           videoStatus={video.videoStatus}
           variationDrafts={variationDrafts}
@@ -1725,76 +1726,36 @@ export default function VideoDetailPage() {
           onLoadExactFramePreview={(frameNumber) => void loadExactFramePreview(frameNumber)}
         />
 
-        {sortedAnimatedWebpVariants.length > 0 && (
-          <section className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-gray-900">Generated WebPs</h2>
-              <p className="text-xs font-mono text-gray-600">count={sortedAnimatedWebpVariants.length}</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-              {sortedAnimatedWebpVariants.map((variant) => (
-                <Link
-                  key={variant.imageId}
-                  href={`/images/${variant.imageId}`}
-                  className="group rounded border border-gray-200 bg-white p-2 hover:border-gray-300"
-                  title="Open image detail"
-                >
-                  <div className="relative aspect-square w-full overflow-hidden rounded bg-gray-100">
-                    <img
-                      src={variant.url}
-                      alt={variant.filename}
-                      className="absolute inset-0 h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.02]"
-                    />
-                  </div>
-                  <div className="mt-2 space-y-1">
-                    <p className="truncate text-xs font-mono text-gray-900" title={variant.filename}>
-                      {variant.filename}
-                    </p>
-                    <p className="text-[11px] font-mono text-gray-600">
-                      {formatBytes(variant.bytes)} • {variant.fps}fps • {variant.loop ? 'loop' : 'no-loop'}
-                    </p>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          </section>
-        )}
-
-        <section className="rounded-lg border border-gray-200 bg-black p-3">
-          {video.videoStatus === 'ready' && video.playbackUrl ? (
-            <iframe
-              src={video.playbackUrl}
-              className="h-[60vh] w-full rounded"
-              allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
-              allowFullScreen
-              title={video.displayName || video.filename}
-              style={videoRotation.previewStyle}
-            />
-          ) : (
-            <div className="flex h-[40vh] flex-col items-center justify-center gap-2 rounded text-center font-mono text-gray-300">
-              <p className="text-sm">
-                {video.videoStatus === 'pending'
-                  ? 'Video is still processing in Cloudflare Stream.'
-                  : video.videoStatus === 'error'
-                    ? 'Video processing failed.'
-                    : 'Playback URL unavailable'}
-              </p>
-              <p className="text-xs text-gray-400">
-                status={video.videoStatus}
-                {video.streamError ? ` • ${video.streamError}` : ''}
-              </p>
+        <section
+          aria-labelledby="video-deletion-heading"
+          className="space-y-3 rounded-lg border border-red-200 bg-white p-4"
+        >
+          <h2 id="video-deletion-heading" className="text-sm font-semibold text-gray-900">Deletion</h2>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => void handleDeleteCurrent()}
+              disabled={deletingCurrent}
+              className="rounded border border-red-300 px-3 py-1 text-xs text-red-700 transition hover:bg-red-50 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+            >
+              {deletingCurrent ? 'Deleting…' : 'Delete video'}
+            </button>
+            <button
+              onClick={() => void handleDeleteFamily()}
+              disabled={!video.parentId || Boolean(deleteFamilyJobId && !deleteFamilyStatus?.finishedAt)}
+              className="rounded border border-red-500 bg-red-50 px-3 py-1 text-xs text-red-800 transition hover:bg-red-100 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600"
+            >
+              Delete parent family
+            </button>
+          </div>
+          {deleteFamilyStatus && (
+            <div className="rounded border border-gray-200 bg-gray-50 p-2 text-xs font-mono text-gray-700">
+              <p>status={deleteFamilyStatus.status} attempted={deleteFamilyStatus.attempted}/{deleteFamilyStatus.total}</p>
+              <p>deleted={deleteFamilyStatus.deleted} failed={deleteFamilyStatus.failed}</p>
+              {deleteFamilyStatus.lastError && <p className="text-red-700">error={deleteFamilyStatus.lastError}</p>}
             </div>
           )}
         </section>
-        <VideoRotationControls
-          normalizedRotation={videoRotation.normalizedRotation}
-          loading={videoRotation.loading}
-          error={videoRotation.error}
-          rotatedAsset={videoRotation.rotatedAsset}
-          onAdjust={videoRotation.adjust}
-          onConfirm={() => void videoRotation.confirm()}
-        />
+
       </div>
 
       {hoverPreview && (

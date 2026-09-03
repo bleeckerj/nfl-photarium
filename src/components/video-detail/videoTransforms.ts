@@ -70,6 +70,15 @@ export type VideoRecord = {
   }>;
 };
 
+export type VideoMediaMode = 'stream' | 'hls' | 'preview' | 'unavailable';
+
+export type VideoMediaPresentation = {
+  mode: VideoMediaMode;
+  url?: string;
+  posterUrl?: string;
+  aspectRatio: string;
+};
+
 export type AssetRecord = {
   id: string;
   assetType?: 'image' | 'video';
@@ -159,6 +168,35 @@ export type ActiveFramePreview = {
 export type DownloadProbeState = {
   status: 'idle' | 'checking' | 'ready' | 'preparing' | 'unavailable' | 'error';
   message?: string;
+};
+
+const firstNonEmptyString = (values: Array<string | undefined>) =>
+  values.find((value) => typeof value === 'string' && value.trim().length > 0);
+
+const resolveVideoAspectRatio = (width?: number, height?: number) => {
+  if (typeof width === 'number' && Number.isFinite(width) && width > 0
+    && typeof height === 'number' && Number.isFinite(height) && height > 0) {
+    return `${width} / ${height}`;
+  }
+  return '16 / 9';
+};
+
+export const resolveVideoMediaPresentation = (
+  video: Pick<VideoRecord, 'playbackUrl' | 'hlsUrl' | 'thumbnailUrl' | 'previewUrl' | 'width' | 'height'>
+): VideoMediaPresentation => {
+  const posterUrl = firstNonEmptyString([video.thumbnailUrl, video.previewUrl]);
+  const aspectRatio = resolveVideoAspectRatio(video.width, video.height);
+
+  if (video.playbackUrl?.trim()) {
+    return { mode: 'stream', url: video.playbackUrl, posterUrl, aspectRatio };
+  }
+  if (video.hlsUrl?.trim()) {
+    return { mode: 'hls', url: video.hlsUrl, posterUrl, aspectRatio };
+  }
+  if (posterUrl) {
+    return { mode: 'preview', url: posterUrl, posterUrl, aspectRatio };
+  }
+  return { mode: 'unavailable', posterUrl, aspectRatio };
 };
 
 const MAX_OUTPUT_MB_DEFAULT = 10;
