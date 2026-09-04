@@ -832,6 +832,45 @@ Photarium
 |   `-- Cloudflare Workers + D1 client sites
 ```
 
+## Extending Photarium
+
+### Custom File Type Support
+
+Photarium includes a plugin architecture for handling different file formats. Built-in plugins support:
+
+- **`.snagx`** — Snagit screenshot archives (extracts PNG + metadata)
+- **`.zip`** — Generic ZIP archives (extracts all images)
+
+Want to support `.psd`, `.heic`, or custom archive formats? Create a plugin:
+
+```typescript
+// src/plugins/customPlugin.ts
+import { PackagePlugin } from '@/plugins';
+
+export const customPlugin: PackagePlugin = {
+  name: 'My Custom Format',
+  extensions: ['.custom'],
+  mimeTypes: ['application/x-custom'],
+
+  canHandle(filename: string) {
+    return filename.toLowerCase().endsWith('.custom');
+  },
+
+  async extract(input) {
+    // Extract assets and return metadata
+    return { assets: [...], tagOverride: 'custom' };
+  }
+};
+```
+
+Then register it in `src/plugins/index.ts`:
+
+```typescript
+registry.register(customPlugin);
+```
+
+**Full guide:** [Plugin Architecture](./docs/plugins.md)
+
 ### Data Ownership
 
 | Data | Location |
@@ -904,6 +943,7 @@ The production build catches static rendering, route compatibility, client/serve
   gallery version counter. Gallery responses are revalidated by `ETag`, so a
   write that skips the counter can keep clients on a cached body. See
   [Gallery Performance & Cache Invariants](./docs/gallery-performance.md).
+- See [Plugin Architecture](./docs/plugins.md) for custom file type handlers.
 
 ### The Gallery Is Slow To Load Or Return From Detail
 
