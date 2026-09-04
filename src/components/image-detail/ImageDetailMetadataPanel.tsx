@@ -61,6 +61,10 @@ export const ImageDetailMetadataPanel = ({
   shareUrl,
   shareQrDataUrl,
   exifEntries,
+  exifPushTargetLabel,
+  exifPushTargetCount,
+  exifPushing,
+  onPushExif,
   variants,
   imageDownloadName,
   onToggleFavorite,
@@ -130,6 +134,10 @@ export const ImageDetailMetadataPanel = ({
   shareUrl: string;
   shareQrDataUrl: string;
   exifEntries: Array<[string, string]>;
+  exifPushTargetLabel?: string;
+  exifPushTargetCount?: number;
+  exifPushing?: boolean;
+  onPushExif?: React.ComponentProps<typeof ExifSection>['onPushExif'];
   variants: Record<string, string>;
   imageDownloadName: string;
   onToggleFavorite: () => void;
@@ -278,7 +286,13 @@ export const ImageDetailMetadataPanel = ({
       shareQrDataUrl={shareQrDataUrl}
       onCopyToClipboard={onCopyText}
     />
-    <ExifSection exifEntries={exifEntries} />
+    <ExifSection
+      exifEntries={exifEntries}
+      exifPushTargetLabel={exifPushTargetLabel}
+      exifPushTargetCount={exifPushTargetCount}
+      exifPushing={exifPushing}
+      onPushExif={onPushExif}
+    />
     <VariantLinksSection
       variants={variants}
       getVariantWidthLabel={getVariantWidthLabel}
