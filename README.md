@@ -13,6 +13,7 @@ Use Photarium when you want a working catalog with real operational control: nam
 Photarium is currently designed as a local-first or trusted-internal-network tool. Put authentication, VPN, Cloudflare Access, or another trusted access layer in front of it before exposing it beyond a controlled environment.
 
 The external upload endpoint, `POST /api/upload/external`, is intentionally useful for scripts and adjacent tools. It does not include built-in user authentication. Disable it with `DISABLE_EXTERNAL_API=true` when you do not need script-driven uploads, or protect the full app with trusted network controls.
+Set `API_SECRET` to require a bearer token for external uploads when network-level access controls are not sufficient.
 
 Never place Cloudflare tokens, OpenAI keys, Redis credentials, Stream tokens, client-site publish secrets, or signing secrets in browser code. Keep them in `.env.local`, deployment secrets, or another server-only secret store.
 

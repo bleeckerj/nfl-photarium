@@ -8,10 +8,11 @@ import * as duplicateDetector from '@/server/duplicateDetector';
 const TEST_URL = 'http://localhost/api/upload/external';
 const ORIGINAL_ENV = { ...process.env };
 
-function createRequest(formData: FormData) {
+function createRequest(formData: FormData, headers?: HeadersInit) {
   const baseRequest = new Request(TEST_URL, {
     method: 'POST',
     body: formData,
+    headers,
   });
   return new NextRequest(baseRequest);
 }
@@ -28,6 +29,37 @@ describe('POST /api/upload/external', () => {
 
   afterAll(() => {
     process.env = ORIGINAL_ENV;
+  });
+
+  it('rejects external uploads when a configured API secret is missing', async () => {
+    process.env.API_SECRET = 'test-secret';
+
+    const formData = new FormData();
+    formData.append('file', new File(['test'], 'sample.png', { type: 'image/png' }));
+
+    const response = await POST(createRequest(formData));
+    const payload = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(payload.error).toMatch(/Invalid or missing API secret/i);
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('*');
+  });
+
+  it('continues to credential validation after accepting the API secret', async () => {
+    process.env.API_SECRET = 'test-secret';
+    delete process.env.CLOUDFLARE_ACCOUNT_ID;
+    delete process.env.CLOUDFLARE_API_TOKEN;
+
+    const formData = new FormData();
+    formData.append('file', new File(['test'], 'sample.png', { type: 'image/png' }));
+
+    const response = await POST(createRequest(formData, {
+      Authorization: 'Bearer test-secret',
+    }));
+    const payload = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(payload.error).toMatch(/Cloudflare credentials not configured/i);
   });
 
   it('returns 400 when no file is provided', async () => {

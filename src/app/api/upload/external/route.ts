@@ -33,6 +33,20 @@ export async function POST(request: NextRequest) {
       ));
     }
 
+    // Require bearer authentication only when an API secret is configured.
+    const apiSecret = process.env.API_SECRET;
+    if (apiSecret) {
+      const authHeader = request.headers.get('Authorization');
+      const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+
+      if (!token || token !== apiSecret) {
+        return withCors(NextResponse.json(
+          { error: 'Unauthorized: Invalid or missing API secret' },
+          { status: 401 },
+        ));
+      }
+    }
+
     const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
     const apiToken = process.env.CLOUDFLARE_API_TOKEN;
     if (!accountId || !apiToken) {
