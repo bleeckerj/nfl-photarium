@@ -121,3 +121,7 @@ Compatibility expectations:
 - When touching Next.js pages or components that use `useSearchParams`, routing hooks, browser APIs, or client components, verify the production build so prerender and Suspense requirements are checked.
 - When changing upload, import, namespace, image detail, image tools, gallery, or uploader flows, run the targeted tests selected by `npm run hygiene:targeted`; add or update tests when the changed behavior is not already covered.
 - Treat pre-existing warnings as warnings only after confirming there are no new errors. Do not bury new failures under known warnings.
+
+## Branch And Worktree Integration Policy
+
+`main` is the repository integration branch. A completed change must be reachable from `main`; a commit that exists only in a detached worktree or task branch is incomplete. Follow the full workflow in [docs/branch-and-worktree-policy.md](docs/branch-and-worktree-policy.md): test the change, commit it, merge it into `main` in the same work session, verify the merge, and remove temporary worktrees and branches. Preserve unrelated dirty files, and retain a branch only when it is explicitly designated as an active long-lived workstream with an owner and purpose.
