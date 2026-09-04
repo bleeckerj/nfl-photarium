@@ -1,10 +1,11 @@
-import { isSystemTag } from '@/utils/systemTags';
+import { CONTROL_TAGS, isControlTag, isOperationalProvenanceTag, isSystemTag } from '@/utils/systemTags';
 
-export const CONTROL_TAGS = ['x-clip', 'x-color', 'x-search'] as const;
-const CONTROL_TAG_SET = new Set<string>(CONTROL_TAGS);
+// Re-exported so existing importers of these from './tagEditor' keep working;
+// the definitions now live in systemTags.ts alongside the browsable-tag policy.
+export { CONTROL_TAGS, isControlTag, isOperationalProvenanceTag };
+
 const CONTROL_TAG_ORDER = new Map<string, number>(CONTROL_TAGS.map((tag, index) => [tag, index] as [string, number]));
 const HYPHEN_RUN = /[-‐‑‒–—―﹘﹣－]+/gu;
-const OPERATIONAL_TAG_PATTERN = /^(?:provider|model|workflow|source|namespace|filename|filepath|file|path|folder|upload|ingest)(?:[:=/_-]|$)/i;
 
 export type TagCorpusEntry = {
   value: string;
@@ -22,12 +23,6 @@ export type TagSubmission =
 
 export const normalizeSemanticTag = (value: string): string =>
   value.replace(HYPHEN_RUN, ' ').replace(/\s+/gu, ' ').trim();
-
-export const isControlTag = (value: string): boolean =>
-  CONTROL_TAG_SET.has(value.trim().toLocaleLowerCase());
-
-export const isOperationalProvenanceTag = (value: string): boolean =>
-  OPERATIONAL_TAG_PATTERN.test(value.trim());
 
 export const compareTags = (left: string, right: string): number =>
   left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' });

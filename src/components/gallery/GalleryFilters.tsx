@@ -9,6 +9,7 @@
 
 import React, { useState } from 'react';
 import MonoSelect from '@/components/MonoSelect';
+import { TAG_FREQUENCY_FLOOR, TAG_LIST_RENDER_LIMIT } from './constants';
 import type { AspectRatioClass } from './types';
 
 interface GalleryFiltersProps {
@@ -31,7 +32,10 @@ interface GalleryFiltersProps {
   hiddenTags: Set<string>;
   onToggleHiddenTag: (tag: string) => void;
   onShowAllTags: () => void;
-  
+  /** Reveals tags below the frequency floor, which are hidden by default. */
+  showRareTags?: boolean;
+  onShowRareTagsChange?: (value: boolean) => void;
+
   // Aspect ratio filters
   aspectRatioFilters: AspectRatioClass[];
   onAspectRatioFiltersChange: (filters: AspectRatioClass[]) => void;
@@ -76,6 +80,8 @@ export const GalleryFilters: React.FC<GalleryFiltersProps> = ({
   hiddenTags,
   onToggleHiddenTag,
   onShowAllTags,
+  showRareTags = false,
+  onShowRareTagsChange,
   aspectRatioFilters,
   onAspectRatioFiltersChange,
   showDuplicatesOnly,
@@ -101,6 +107,17 @@ export const GalleryFilters: React.FC<GalleryFiltersProps> = ({
 }) => {
   const [showFolderDropdown, setShowFolderDropdown] = useState(false);
   const [showTagDropdown, setShowTagDropdown] = useState(false);
+  const [tagSearch, setTagSearch] = useState('');
+
+  // The hidden-tag panel used to mount one checkbox per tag for the entire
+  // vocabulary. Narrow by search first, then cap, so the panel stays cheap
+  // even when "Rare" is on and the full tail is in play.
+  const tagSearchQuery = tagSearch.trim().toLowerCase();
+  const matchingTags = tagSearchQuery
+    ? allTags.filter((tag) => tag.toLowerCase().includes(tagSearchQuery))
+    : allTags;
+  const visibleTagRows = matchingTags.slice(0, TAG_LIST_RENDER_LIMIT);
+  const hiddenTagRowCount = matchingTags.length - visibleTagRows.length;
 
   // Build folder options for the select
   const folderOptions = [
@@ -210,6 +227,8 @@ export const GalleryFilters: React.FC<GalleryFiltersProps> = ({
             options={tagOptions}
             value={selectedTag}
             onChange={onTagChange}
+            searchable
+            searchPlaceholder="Filter tags…"
             className="text-[0.7em] w-36"
           />
           <button
@@ -223,20 +242,42 @@ export const GalleryFilters: React.FC<GalleryFiltersProps> = ({
           {/* Tag visibility dropdown */}
           {showTagDropdown && (
             <div className="absolute top-full left-0 mt-1 w-64 bg-white border rounded shadow-lg z-[5000] max-h-60 overflow-y-auto">
-              <div className="p-2 border-b bg-gray-50 flex items-center justify-between">
-                <span className="text-[0.7em] font-mono font-medium">Hidden Tags</span>
-                <button
-                  onClick={() => {
-                    onShowAllTags();
-                    setShowTagDropdown(false);
-                  }}
-                  className="text-[0.7em] font-mono text-blue-600 hover:underline"
-                >
-                  Show All
-                </button>
+              <div className="p-2 border-b bg-gray-50 sticky top-0 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[0.7em] font-mono font-medium">Hidden Tags</span>
+                  <button
+                    onClick={() => {
+                      onShowAllTags();
+                      setShowTagDropdown(false);
+                    }}
+                    className="text-[0.7em] font-mono text-blue-600 hover:underline"
+                  >
+                    Show All
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={tagSearch}
+                  onChange={(event) => setTagSearch(event.target.value)}
+                  placeholder="Search tags…"
+                  className="w-full px-2 py-1 text-[0.7em] font-mono border rounded"
+                />
+                {onShowRareTagsChange && (
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showRareTags}
+                      onChange={() => onShowRareTagsChange(!showRareTags)}
+                      className="rounded"
+                    />
+                    <span className="text-[0.7em] font-mono text-gray-600">
+                      Rare tags (under {TAG_FREQUENCY_FLOOR} images)
+                    </span>
+                  </label>
+                )}
               </div>
               <div className="p-2 space-y-1">
-                {allTags.map((tag) => (
+                {visibleTagRows.map((tag) => (
                   <label
                     key={tag}
                     className="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 rounded cursor-pointer"
@@ -250,6 +291,16 @@ export const GalleryFilters: React.FC<GalleryFiltersProps> = ({
                     <span className="text-[0.7em] font-mono text-gray-700">{tag}</span>
                   </label>
                 ))}
+                {!matchingTags.length && (
+                  <p className="px-2 py-1 text-[0.7em] font-mono text-gray-500">
+                    No tags match “{tagSearch}”.
+                  </p>
+                )}
+                {hiddenTagRowCount > 0 && (
+                  <p className="px-2 py-1 text-[0.7em] font-mono text-gray-500">
+                    +{hiddenTagRowCount} more — narrow with search.
+                  </p>
+                )}
               </div>
             </div>
           )}

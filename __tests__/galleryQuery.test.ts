@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { queryGalleryAssets, type GalleryQueryAsset } from '@/server/galleryQuery';
+import { isBrowsableTag } from '@/utils/systemTags';
 import { formatDateRangeLabel } from '@/components/gallery/utils';
 
 const hash = 'a'.repeat(64);
@@ -342,5 +343,94 @@ describe('queryGalleryAssets', () => {
       pageSize: 1,
       total: 2,
     });
+  });
+});
+
+describe('tag filter normalization', () => {
+  const variants = [
+    asset({ id: 'lower', tags: ['technology'] }),
+    asset({ id: 'upper', tags: ['Technology'] }),
+    asset({ id: 'hyphen', tags: ['off-road'] }),
+    asset({ id: 'solid', tags: ['offroad'] }),
+    asset({ id: 'plural', tags: ['sports'] }),
+    asset({ id: 'singular', tags: ['sport'] }),
+    asset({ id: 'unrelated', tags: ['skateboarding'] }),
+  ];
+
+  it('matches case variants of the same tag', () => {
+    // Before normalization this returned only `lower`, silently dropping the
+    // image tagged with the capitalized surface form.
+    expect(queryGalleryAssets(variants, { tag: 'technology' }, 1, 60).images.map((i) => i.id))
+      .toEqual(['lower', 'upper']);
+    expect(queryGalleryAssets(variants, { tag: 'Technology' }, 1, 60).images.map((i) => i.id))
+      .toEqual(['lower', 'upper']);
+  });
+
+  it('matches punctuation and plural variants of the same tag', () => {
+    expect(queryGalleryAssets(variants, { tag: 'off-road' }, 1, 60).images.map((i) => i.id))
+      .toEqual(['hyphen', 'solid']);
+    expect(queryGalleryAssets(variants, { tag: 'sport' }, 1, 60).images.map((i) => i.id))
+      .toEqual(['plural', 'singular']);
+  });
+
+  it('does not widen a tag filter onto unrelated tags', () => {
+    expect(queryGalleryAssets(variants, { tag: 'skateboarding' }, 1, 60).images.map((i) => i.id))
+      .toEqual(['unrelated']);
+    expect(queryGalleryAssets(variants, { tag: 'nonexistent' }, 1, 60).total).toBe(0);
+  });
+
+  it('leaves the facet vocabulary complete and unmerged', () => {
+    // The facet doubles as the tag-editor autocomplete corpus, so every stored
+    // surface form must survive here even though the dropdown merges them.
+    const result = queryGalleryAssets(variants, {}, 1, 60);
+    expect(result.facets.tags).toEqual([
+      { value: 'off-road', count: 1 },
+      { value: 'offroad', count: 1 },
+      { value: 'skateboarding', count: 1 },
+      { value: 'sport', count: 1 },
+      { value: 'sports', count: 1 },
+      { value: 'technology', count: 1 },
+      { value: 'Technology', count: 1 },
+    ]);
+    expect(result.total).toBe(variants.length);
+  });
+});
+
+describe('facet vocabulary contract', () => {
+  // The facet doubles as the tag-editor autocomplete corpus, which needs the
+  // complete vocabulary — including the machine-generated values the gallery
+  // dropdown suppresses. If someone de-noises `buildFacets` itself, typo
+  // correction on the image-detail page silently changes behavior. This test
+  // is the tripwire for that.
+  const machineTags = ['iso 160', 'f/2.8', '-118.475425', 'no flash', 'digest:01072026_124815_x'];
+
+  it('keeps machine-class tags in the facet even though the dropdown hides them', () => {
+    const result = queryGalleryAssets(
+      [asset({ id: 'shot', tags: ['skateboarding', ...machineTags] })],
+      {},
+      1,
+      60
+    );
+    const values = result.facets.tags.map((entry) => entry.value);
+
+    machineTags.forEach((tag) => {
+      expect(isBrowsableTag(tag)).toBe(false); // suppressed from the dropdown
+      expect(values).toContain(tag); // but still present in the corpus
+    });
+    expect(values).toContain('skateboarding');
+  });
+
+  it('reports a count for every facet entry', () => {
+    // parseTagCorpusResponse discards entries without a numeric count.
+    const result = queryGalleryAssets(
+      [asset({ id: 'a', tags: ['hero', 'iso 160'] }), asset({ id: 'b', tags: ['hero'] })],
+      {},
+      1,
+      60
+    );
+    expect(result.facets.tags).toEqual([
+      { value: 'hero', count: 2 },
+      { value: 'iso 160', count: 1 },
+    ]);
   });
 });

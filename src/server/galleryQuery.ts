@@ -1,4 +1,4 @@
-import { getUserVisibleTags, hasFavoriteTag } from '@/utils/systemTags';
+import { getUserVisibleTags, hasFavoriteTag, normalizeTagKey } from '@/utils/systemTags';
 import { clearGalleryScopeAssemblyMemo } from '@/server/galleryScopeAssembly';
 import { computeDuplicateGroups, buildFamilySummaryMap } from '@/components/gallery/utils';
 import {
@@ -148,9 +148,22 @@ const matchesFolder = (asset: GalleryQueryAsset, folder?: string) => {
   return asset.folder === folder;
 };
 
-const matchesTag = (asset: GalleryQueryAsset, tag?: string) => {
+// Tag matching is normalized so that surface variants of one concept —
+// `Technology`/`technology`, `off-road`/`offroad`, `sport`/`sports` — behave as
+// a single filter. Previously this was an exact `includes`, so picking one
+// variant from the dropdown silently missed images tagged with another.
+//
+// The exact comparison is kept as a fast path: the dropdown offers the most
+// common surface form, so the majority of matching assets hit it without
+// normalizing anything. The normalized scan only runs when that misses, and
+// its cost is paid once per distinct tag selection because `buildProjection`
+// results are memoized per filter set.
+const matchesTag = (asset: GalleryQueryAsset, tag?: string, tagKey?: string) => {
   if (!tag) return true;
-  return Array.isArray(asset.tags) && asset.tags.includes(tag);
+  if (!Array.isArray(asset.tags)) return false;
+  if (asset.tags.includes(tag)) return true;
+  if (!tagKey) return false;
+  return asset.tags.some((assetTag) => normalizeTagKey(assetTag) === tagKey);
 };
 
 const matchesHidden = (
@@ -265,6 +278,20 @@ export const compareGalleryAssetsByNewestUpload = <T extends GalleryQueryAsset>(
 export const sortGalleryAssetsByUploadedDesc = <T extends GalleryQueryAsset>(assets: T[]): T[] =>
   [...assets].sort(compareGalleryAssetsByNewestUpload);
 
+// CONTRACT: `facets.tags` is the COMPLETE tag vocabulary, with accurate counts.
+// Do not filter or merge tags here.
+//
+// This one array serves two consumers with opposite needs. The gallery tag
+// dropdown wants a small browsable subset — but it derives that itself, in
+// `browsableTags` (src/components/ImageGallery.tsx) via `isBrowsableTag` and
+// `normalizeTagKey`. The image-detail tag editor needs everything: the same
+// array is fetched by src/services/tagCorpusService.ts as the autocomplete
+// corpus, where it also drives canonical casing and a Damerau-Levenshtein typo
+// corrector that silently rewrites a typed tag to the nearest known entry.
+// De-noising here would quietly change which corrections fire, and
+// `parseTagCorpusResponse` drops any entry whose `count` is not a number.
+//
+// __tests__/galleryQuery.test.ts pins this contract.
 const buildFacets = <T extends GalleryQueryAsset>(assets: T[]): GalleryQueryFacets => {
   const folders = new Map<string, number>();
   const tags = new Map<string, number>();
@@ -365,6 +392,34 @@ export const clearGalleryQueryScopeMemo = () => {
   clearGalleryScopeAssemblyMemo();
 };
 
+// Guards the memo caches against *code* changes.
+//
+// Every other component of the memo key is derived from data (catalog version,
+// folder-override version) or from the request. That means a change to the
+// filtering, faceting or hidden-matching logic in this module produces
+// identical cache keys for different behavior, and the caches keep serving
+// results computed by the old logic. Two mechanisms cover the two ways that
+// happens:
+//
+//  1. GALLERY_QUERY_LOGIC_VERSION — bump when you change `matchesTag`,
+//     `buildFacets`, `matchesHidden`, or anything else feeding a memoized
+//     result. It lives here, beside the logic it guards, rather than in the
+//     route that happens to build the scope key, so the reason to bump it is
+//     visible at the point of the edit.
+//
+//  2. MODULE_INSTANCE_ID (development only) — the caches deliberately live on
+//     globalThis under a `Symbol.for` key so they survive HMR, and that
+//     survival is exactly what lets a dev server serve stale results after an
+//     edit. Re-evaluating this module mints a fresh id and namespaces the
+//     cache anew, so editing this file busts it automatically while edits
+//     elsewhere (which do not re-evaluate this module) still reuse it. In
+//     production the module is evaluated once, so this contributes nothing
+//     and behavior is unchanged.
+const GALLERY_QUERY_LOGIC_VERSION = 'v4';
+const MODULE_INSTANCE_ID =
+  process.env.NODE_ENV === 'production' ? '' : `.dev-${Math.random().toString(36).slice(2, 10)}`;
+const GALLERY_QUERY_LOGIC_KEY = `${GALLERY_QUERY_LOGIC_VERSION}${MODULE_INSTANCE_ID}`;
+
 const buildScopeMemoKey = (
   scopeKey: string,
   filters: GalleryQueryFilters
@@ -372,7 +427,7 @@ const buildScopeMemoKey = (
   const hiddenFolders = (filters.hiddenFolders ?? []).slice().sort().join(',');
   const hiddenTags = (filters.hiddenTags ?? []).slice().sort().join(',');
   const hiddenNamespaces = (filters.hiddenNamespaces ?? []).slice().sort().join(',');
-  return `${scopeKey}|hf:${hiddenFolders}|ht:${hiddenTags}|hn:${hiddenNamespaces}`;
+  return `${GALLERY_QUERY_LOGIC_KEY}|${scopeKey}|hf:${hiddenFolders}|ht:${hiddenTags}|hn:${hiddenNamespaces}`;
 };
 
 const buildProjectionMemoKey = (scopeKey: string, filters: GalleryQueryFilters) =>
@@ -434,9 +489,11 @@ export const queryGalleryAssets = <T extends GalleryQueryAsset>(
 
   const projectionStartedAt = performance.now();
   const buildProjection = (): ProjectionMemoEntry => {
+    // Normalized once per projection, not once per asset.
+    const tagKey = filters.tag ? normalizeTagKey(filters.tag) : '';
     const baseFiltered = facetBase.filter((asset) => {
       if (!matchesFolder(asset, filters.folder)) return false;
-      if (!matchesTag(asset, filters.tag)) return false;
+      if (!matchesTag(asset, filters.tag, tagKey)) return false;
       if (filters.favorites && !hasFavoriteTag(asset.tags)) return false;
       if (!matchesSearch(asset, filters.search, options.extrasSearchTextById?.get(asset.id))) return false;
       if (filters.onlyCanonical && asset.parentId) return false;

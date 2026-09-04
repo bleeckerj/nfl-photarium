@@ -294,7 +294,12 @@ export async function GET(request: NextRequest) {
     // Stable scope key for queryGalleryAssets' family/facet/projection memos.
     // Same version-counted inputs as the assembly memo; per-request filters
     // (search, folder, tag, page, etc.) are applied AFTER the memoized stage.
-    const scopeKey = `v3|${scopeVersions}`;
+    //
+    // This prefix guards the *composition* of scopeVersions below — bump it
+    // when you add, remove or reorder an input here. It does NOT cover changes
+    // to the filtering/faceting logic itself; galleryQuery.ts carries its own
+    // GALLERY_QUERY_LOGIC_VERSION for that, beside the code it guards.
+    const scopeKey = `v4|${scopeVersions}`;
     const queryFilters = {
       search,
       folder,
