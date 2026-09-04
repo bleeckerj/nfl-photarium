@@ -18,6 +18,18 @@ export const GRID_SIZE_OPTIONS: Array<{ value: GridSize; label: string }> = [
   { value: 'xlarge', label: 'X-Large' },
 ];
 
+// Tag filter
+// Minimum images a tag concept must cover before it is offered in the tag
+// dropdown. Roughly 55% of the tag vocabulary sits on a single image, which
+// makes those tags useless for filtering even though they are useful search
+// terms. Tags below the floor stay on their images and stay searchable; the
+// "Rare" toggle in the filter bar reveals them on demand.
+export const TAG_FREQUENCY_FLOOR = 5;
+
+// Maximum tag rows rendered at once in the filter dropdown and the hidden-tag
+// panel. Both previously mounted the entire vocabulary (~24k nodes each).
+export const TAG_LIST_RENDER_LIMIT = 500;
+
 // Local storage keys
 export const STORAGE_KEYS = {
   PREFERENCES: 'galleryPreferences',

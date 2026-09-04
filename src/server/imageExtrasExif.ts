@@ -164,3 +164,29 @@ export function sanitizeImageExtrasRecord(record: ImageExtrasRecord | null): Ima
   return { ...record, exif: sanitizedExif };
 }
 
+
+/**
+ * Flatten a stored EXIF payload into the display/search summary shape.
+ *
+ * Extras records have carried EXIF in two layouts: the upload path writes the
+ * flat `extractExifSummary` record directly into `extras.exif`, while the
+ * typed `ImageExifRecord` nests it under `summary`. Both must keep resolving
+ * to the same `Record<string, string | number>` the detail page renders.
+ */
+export function toExifSummaryRecord(value: unknown): Record<string, string | number> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  const candidate =
+    record.summary && typeof record.summary === 'object' && !Array.isArray(record.summary)
+      ? (record.summary as Record<string, unknown>)
+      : record;
+  const entries = Object.entries(candidate).filter(
+    (entry): entry is [string, string | number] =>
+      typeof entry[1] === 'string' || typeof entry[1] === 'number'
+  );
+
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}

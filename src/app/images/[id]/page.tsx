@@ -8,6 +8,7 @@ import {
   isVideoAsset,
 } from '@/utils/assetUrls';
 import { useToast } from '@/components/Toast';
+import { useExifPropagation } from '@/hooks/useExifPropagation';
 import { subscribeEmbeddingPending, clearPendingIfHasEmbeddings, type EmbeddingPendingEntry } from '@/utils/embeddingPending';
 import {
   cleanString,
@@ -1427,6 +1428,18 @@ export default function ImageDetailPage() {
 
   const isChildImage = Boolean(image?.parentId);
   const hasVariations = !isChildImage && variationChildren.length > 0;
+  // EXIF push targets mirror the server's rule: a parent pushes to its
+  // variants, a variant pushes to its parent (when loaded) plus siblings.
+  const exifPushTargetCount = isChildImage
+    ? siblingVariations.length + (allImages.some((img) => img.id === image?.parentId) ? 1 : 0)
+    : variationChildren.length;
+  const exifPushTargetLabel = isChildImage ? 'parent + siblings' : 'variations';
+  const { exifPushing, pushExif } = useExifPropagation({
+    imageId: typeof id === 'string' ? id : undefined,
+    targetCount: exifPushTargetCount,
+    toast,
+    onPushed: refreshImageList,
+  });
   const variationCount = displayedVariations.length;
   const {
     bulkDescriptionApplying,
@@ -2368,7 +2381,9 @@ export default function ImageDetailPage() {
               originalUrlByteLength={originalUrlByteLength} originalDeliveryUrl={originalDeliveryUrl}
               sourceUrlInput={sourceUrlInput} shareBaseUrl={shareBaseUrl} shareVariant={shareVariant}
               shareVariantOptions={shareVariantOptions} shareUrl={shareUrl} shareQrDataUrl={shareQrDataUrl}
-              exifEntries={exifEntries} variants={variants}
+              exifEntries={exifEntries} exifPushTargetLabel={exifPushTargetLabel}
+              exifPushTargetCount={exifPushTargetCount} exifPushing={exifPushing} onPushExif={pushExif}
+              variants={variants}
               imageDownloadName={displayNameInput.trim() || image.displayName || image.filename}
               onToggleFavorite={handleToggleFavorite} onDiscard={handleCancelMetadata} onSave={handleSaveMetadata}
               onCreateNamespace={registerDetailNamespace} onMoveNamespace={handleMoveFamilyNamespace}

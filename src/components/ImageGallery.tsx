@@ -32,7 +32,7 @@ import { useGalleryVideoExpansion } from './gallery/hooks/useGalleryVideoExpansi
 import { GalleryShell } from './gallery/GalleryShell';
 import { GalleryLoadingState } from './gallery/GalleryLoadingState';
 import { normalizeColorSearchHex, resolveColorSearchAssets, type ColorSearchResultRow } from './gallery/colorSearch';
-import { DEFAULT_GRID_SIZE, VARIANT_OPTIONS } from './gallery/constants';
+import { DEFAULT_GRID_SIZE, TAG_FREQUENCY_FLOOR, VARIANT_OPTIONS } from './gallery/constants';
 import { normalizeGridSize } from './gallery/gridSizing';
 import { toDateKey } from './gallery/dateFilter';
 import { collectFacetFolders, collectImageFolders, mergeFolderNames } from './gallery/folderOptions';
@@ -40,7 +40,7 @@ import { loadHiddenNamespaces } from './gallery/storage';
 import { getKnownNamespaces } from './gallery/namespaceVisibility';
 import { useSearchParams } from 'next/navigation';
 import { isLikelySourceSearchTerm } from '@/utils/galleryFilter';
-import { getUserVisibleTags } from '@/utils/systemTags';
+import { getUserVisibleTags, isBrowsableTag, normalizeTagKey } from '@/utils/systemTags';
 import { buildGalleryImagesUrl, resolveGalleryRefreshServerQuery, type GalleryServerQueryState } from './gallery/galleryImagesUrl';
 import {
   dedupeGalleryImages, formatVideoResultsNotice, parseGalleryServerFamilySummaryMap,
@@ -139,6 +139,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [serverPagination, setServerPagination] = useState<GalleryServerPagination | null>(null);
   const [serverFocus, setServerFocus] = useState<GalleryServerFocus>(null);
   const [serverFacets, setServerFacets] = useState<GalleryServerFacets | null>(null);
+  const [showRareTags, setShowRareTags] = useState(false);
   const [serverFamilySummaryMap, setServerFamilySummaryMap] = useState<Record<string, GalleryFamilySummary>>({});
   const [serverDuplicateSummary, setServerDuplicateSummary] = useState<GalleryDuplicateSummary | null>(null);
   const [catalogVersion, setCatalogVersion] = useState<number | null>(null);
@@ -730,7 +731,10 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     ? 0
     : duplicateGroupCount;
 
-  const uniqueTags = useMemo(() => {
+  // The complete tag vocabulary. The command bar validates `show only tags X`
+  // against this list and `list tags` prints it, so it must stay unfiltered —
+  // otherwise de-noised tags become impossible to name from the CLI.
+  const allKnownTags = useMemo(() => {
     if (serverFacets?.tags) {
       return serverFacets.tags.map((entry) => entry.value);
     }
@@ -739,6 +743,55 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     );
     return tags.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
   }, [images, serverFacets]);
+
+  // The browsable subset offered in the tag filter: machine-generated values
+  // (EXIF, coordinates, ingest slugs, system keys) dropped, surface variants
+  // folded onto one label, and concepts below the frequency floor hidden
+  // unless the user asks for them. Nothing is deleted here — every tag stays
+  // on its image, stays searchable, and stays in `allKnownTags`.
+  const browsableTags = useMemo(() => {
+    const entries = serverFacets?.tags ?? (() => {
+      const counts = new Map<string, number>();
+      images.forEach((image) => {
+        getUserVisibleTags(image.tags).forEach((tag) => {
+          counts.set(tag, (counts.get(tag) ?? 0) + 1);
+        });
+      });
+      return Array.from(counts, ([value, count]) => ({ value, count }));
+    })();
+
+    const groups = new Map<string, { label: string; labelCount: number; total: number }>();
+    entries.forEach(({ value, count }) => {
+      if (!isBrowsableTag(value)) return;
+      const key = normalizeTagKey(value);
+      if (!key) return;
+      const group = groups.get(key);
+      if (!group) {
+        groups.set(key, { label: value, labelCount: count, total: count });
+        return;
+      }
+      group.total += count;
+      // Label the merged concept with its most common surface form.
+      if (count > group.labelCount) {
+        group.label = value;
+        group.labelCount = count;
+      }
+    });
+
+    // Without server facets we only have the current page, where counts carry
+    // no real frequency signal, so the floor would empty the list.
+    const floor = showRareTags || !serverFacets?.tags ? 0 : TAG_FREQUENCY_FLOOR;
+    const labels = Array.from(groups.values())
+      .filter((group) => group.total >= floor)
+      .map((group) => group.label);
+
+    // A tag restored from saved preferences may now sit below the floor. Keep
+    // it listed so the select never shows an active filter with no matching
+    // option, which reads as a stuck, invisible filter.
+    if (selectedTag && !labels.includes(selectedTag)) labels.push(selectedTag);
+
+    return labels.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  }, [images, selectedTag, serverFacets, showRareTags]);
 
   const showLastUploaded = useCallback(() => {
     if (!sortedImages.length) {
@@ -867,8 +920,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           onFolderChange: handleFolderFilterChange, hiddenFolders: hiddenFolderSet,
           onToggleHiddenFolder: (folder: string) =>
             hiddenFolderSet.has(folder) ? unhideFolderByName(folder) : hideFolderByName(folder),
-          onShowAllFolders: clearHiddenFolders, allTags: uniqueTags, selectedTag,
+          onShowAllFolders: clearHiddenFolders, allTags: browsableTags, selectedTag,
           onTagChange: setSelectedTag, hiddenTags: hiddenTagSet,
+          showRareTags, onShowRareTagsChange: setShowRareTags,
           onToggleHiddenTag: (tag: string) =>
             hiddenTagSet.has(tag.toLowerCase()) ? unhideTagByName(tag) : hideTagByName(tag),
           onShowAllTags: clearHiddenTags, aspectRatioFilters, onAspectRatioFiltersChange: setAspectRatioFilters,
@@ -886,7 +940,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         },
         auditLoading, auditEntries, auditProgress, showCli,
         commandBarProps: {
-          hiddenFolders, hiddenTags, hiddenNamespaces, knownFolders: uniqueFolders, knownTags: uniqueTags,
+          hiddenFolders, hiddenTags, hiddenNamespaces, knownFolders: uniqueFolders, knownTags: allKnownTags,
           knownNamespaces: uniqueNamespaces,
           onHideFolder: hideFolderByName, onUnhideFolder: unhideFolderByName, onClearHidden: clearHiddenFolders,
           onHideTag: hideTagByName, onUnhideTag: unhideTagByName, onClearHiddenTags: clearHiddenTags,

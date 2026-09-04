@@ -1,4 +1,4 @@
-import { hasFavoriteTag } from '@/utils/systemTags';
+import { hasFavoriteTag, normalizeTagKey } from '@/utils/systemTags';
 
 export interface GalleryImage {
   id: string;
@@ -76,9 +76,15 @@ const matchesFolderFilter = (image: GalleryImage, selectedFolder: string) => {
   return image.folder === selectedFolder;
 };
 
-const matchesTagFilter = (image: GalleryImage, selectedTag: string) => {
+// Client-side twin of `matchesTag` in src/server/galleryQuery.ts. The two must
+// agree on normalization or the gallery and the Client Pages picker disagree
+// about which images a tag selects.
+const matchesTagFilter = (image: GalleryImage, selectedTag: string, selectedTagKey: string) => {
   if (!selectedTag) return true;
-  return Array.isArray(image.tags) && image.tags.includes(selectedTag);
+  if (!Array.isArray(image.tags)) return false;
+  if (image.tags.includes(selectedTag)) return true;
+  if (!selectedTagKey) return false;
+  return image.tags.some((tag) => normalizeTagKey(tag) === selectedTagKey);
 };
 
 const stripQuery = (value: string) => value.split('?')[0];
@@ -157,9 +163,10 @@ export const filterImagesForGallery = (
     hiddenNamespaces,
     showFavoritesOnly,
   } = options;
+  const selectedTagKey = selectedTag ? normalizeTagKey(selectedTag) : '';
   return images.filter((image) => {
     if (!matchesFolderFilter(image, selectedFolder)) return false;
-    if (!matchesTagFilter(image, selectedTag)) return false;
+    if (!matchesTagFilter(image, selectedTag, selectedTagKey)) return false;
     if (showFavoritesOnly && !hasFavoriteTag(image.tags)) return false;
     if (!matchesSearchFilter(image, searchTerm)) return false;
     if (onlyCanonical && image.parentId) return false;
