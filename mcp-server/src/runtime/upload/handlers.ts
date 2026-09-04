@@ -216,7 +216,7 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
   },
 
   'photarium_upload_from_path': async (args: Record<string, unknown>) => {
-    const { filePath, filename, folder, createFolder, tags, description, prompt, originalUrl, sourceUrl, namespace, parentId, generateSemanticTags, semanticTagCount } = args as {
+    const { filePath, filename, folder, createFolder, tags, description, prompt, originalUrl, sourceUrl, namespace, parentId, semanticTagCount } = args as {
       filePath: string;
       filename?: string;
       folder?: string;
