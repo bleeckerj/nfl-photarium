@@ -11,7 +11,7 @@ export const snagxPlugin: PackagePlugin = {
   extensions: ['.snagx'],
   mimeTypes: ['application/zip', 'application/x-zip-compressed', 'application/octet-stream'],
 
-  canHandle(filename: string, _mimeType: string): boolean {
+  canHandle(filename: string): boolean {
     return filename.toLowerCase().endsWith('.snagx');
   },
 
