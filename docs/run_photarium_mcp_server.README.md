@@ -17,6 +17,12 @@ From `cloud-flare-image-handler/`:
 ./run_photarium_mcp_server.sh status
 ```
 
+## Started automatically by `npm run dev`
+
+`scripts/start-photarium.mjs` (the `npm run dev` supervisor) launches this script with `start` once Photarium reports healthy, and stops it on Ctrl-C. It sets `KILL_IF_OCCUPIED=1` so a stale bridge on the port is replaced. Set `PHOTARIUM_MCP_BRIDGE=0` to skip it, for example when you run the bridge by hand from another terminal.
+
+Image-detail tools such as Creative Brief call the bridge over HTTP; the Next app reads `PHOTARIUM_MCP_URL` (default `http://127.0.0.1:8787`) to find it, so keep that in step with `PHOTARIUM_HTTP_PORT` if you change the port. When the bridge is down those tools now fail with a message naming this script rather than a bare `fetch failed`.
+
 ## Port configuration
 
 Defaults:

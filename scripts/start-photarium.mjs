@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FOLDER_UPLOADER_DIR = path.join(ROOT_DIR, 'adjacent', 'photarium-folder-uploader');
+const MCP_BRIDGE_SCRIPT = path.join(ROOT_DIR, 'run_photarium_mcp_server.sh');
 const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 function startNpmScript(script, cwd = ROOT_DIR) {
@@ -12,6 +13,21 @@ function startNpmScript(script, cwd = ROOT_DIR) {
     env: process.env,
     stdio: 'inherit',
   });
+}
+
+// The Photarium MCP bridge serves the HTTP tool endpoints (default 127.0.0.1:8787)
+// that image-detail tools such as Creative Brief call. Set PHOTARIUM_MCP_BRIDGE=0 to skip it.
+function startMcpBridge() {
+  return spawn(MCP_BRIDGE_SCRIPT, ['start'], {
+    cwd: ROOT_DIR,
+    env: { ...process.env, KILL_IF_OCCUPIED: process.env.KILL_IF_OCCUPIED ?? '1' },
+    stdio: 'inherit',
+  });
+}
+
+function mcpBridgeEnabled() {
+  const flag = (process.env.PHOTARIUM_MCP_BRIDGE || '').trim().toLowerCase();
+  return !['0', 'false', 'off', 'no'].includes(flag);
 }
 
 function waitForExit(child) {
@@ -44,6 +60,7 @@ async function main() {
   let shuttingDown = false;
   let shutdownPromise;
   let watcher;
+  let mcpBridge;
 
   console.log('[startup] launching Photarium development server');
   const photarium = startNpmScript('dev:server');
@@ -55,10 +72,11 @@ async function main() {
   const shutdown = (reason, exitCode = 0) => {
     if (shutdownPromise) return shutdownPromise;
     shuttingDown = true;
-    console.log(`[startup] stopping Photarium and CleanShot watcher (${reason})`);
+    console.log(`[startup] stopping Photarium, MCP bridge, and CleanShot watcher (${reason})`);
+    requestStop(mcpBridge);
     requestStop(watcher);
     requestStop(photarium);
-    shutdownPromise = Promise.all([waitForExit(watcher), waitForExit(photarium)]).then(() => {
+    shutdownPromise = Promise.all([waitForExit(mcpBridge), waitForExit(watcher), waitForExit(photarium)]).then(() => {
       process.exitCode = exitCode;
     });
     return shutdownPromise;
@@ -83,6 +101,21 @@ async function main() {
   if (shuttingDown) {
     await shutdownPromise;
     return;
+  }
+
+  if (mcpBridgeEnabled()) {
+    console.log('[startup] launching Photarium MCP bridge');
+    mcpBridge = startMcpBridge();
+    mcpBridge.once('error', (error) => {
+      console.error(`[startup] MCP bridge failed to start: ${error.message}`);
+    });
+    mcpBridge.once('exit', (code, signal) => {
+      if (!shuttingDown) {
+        console.error(`[startup] MCP bridge exited${signal ? ` from ${signal}` : ` with code ${code ?? 1}`}; image tools that call it will report "fetch failed"`);
+      }
+    });
+  } else {
+    console.log('[startup] skipping Photarium MCP bridge (PHOTARIUM_MCP_BRIDGE is off)');
   }
 
   console.log('[startup] launching CleanShot Photarium folder watcher');
