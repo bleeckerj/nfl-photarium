@@ -21,6 +21,14 @@ These fields can be larger, change frequently, or are derived. They are stored i
 - creative-brief derivation history (briefs, derived prompts, provider handoffs, and generated-child provenance)
 - future fields: captions/OCR, annotations, notes, etc.
 
+`POST /api/images/:id/alt` persists generated text as `altText` through the
+extras record helper. It reads the image from Cloudflare for generation and
+does not PATCH Cloudflare metadata. A failed extras write returns HTTP 500.
+The response retains `altTag` and `saved` for callers; legacy diagnostics report
+`droppedFields: []` and `metadataBytes: 0` because no Cloudflare metadata is sent.
+General metadata edits still maintain a short `altTag` mirror in Cloudflare for
+fallback readers; extras holds the complete text.
+
 ## Storage backend
 
 Extras Storage is configured via environment variables:

@@ -27,6 +27,12 @@ const CATEGORY_THRESHOLDS = {
 };
 
 const ALLOWED_OVERSIZED_FILES = new Map([
+  ['src/components/ImageGallery.tsx', {
+    category: 'component',
+    owner: 'maintainability-refactor',
+    reason: 'gallery composition awaiting section extraction; baseline is 1035 lines',
+    expires: '2026-12-31',
+  }],
   ['src/app/images/[id]/page.tsx', {
     category: 'component',
     owner: 'maintainability-refactor',
