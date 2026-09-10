@@ -32,6 +32,7 @@ const {
 vi.mock('@/server/cloudflareImageCache', () => ({
   getCachedImages: getCachedImagesMock,
   getCacheStats: getCacheStatsMock,
+  getCachedImageCatalog: async (refresh: boolean) => ({ images: await getCachedImagesMock(refresh), cache: getCacheStatsMock() }),
 }));
 
 vi.mock('@/server/vectorSearch', () => ({
@@ -159,6 +160,47 @@ describe('GET /api/images video integration', () => {
     const response = await GET(new NextRequest('http://localhost/api/images?includeVectorMeta=1'));
     expect(response.status).toBe(200);
     expect(response.headers.get('ETag')).toBeNull();
+  });
+
+  it('does not cache an older image list under a catalog version updated while videos load', async () => {
+    const olderImage = {
+      id: 'older-image', filename: 'older.jpg', uploaded: '2026-09-09T02:38:00Z',
+      variants: [], namespace: 'cf-codex',
+    };
+    const newUpload = {
+      id: 'new-dng-upload', filename: 'converted.jpg', uploaded: '2026-09-10T05:04:36Z',
+      variants: [], namespace: 'cf-nokia',
+    };
+    getCachedImagesMock.mockResolvedValue([olderImage]);
+    getCacheStatsMock.mockReturnValue({ contentVersion: 10, count: 1, lastFetched: 10 });
+    let finishVideoLoad: (videos: never[]) => void = () => {};
+    listVideoAssetRecordsWithSyncMock.mockImplementationOnce(() => new Promise((resolve) => {
+      finishVideoLoad = resolve;
+    })).mockResolvedValue([]);
+
+    const url = 'http://localhost/api/images?namespace=__all__&page=1&pageSize=120';
+    const pending = GET(new NextRequest(url));
+    await vi.waitFor(() => expect(getCachedImagesMock).toHaveBeenCalled());
+    await Promise.resolve();
+    getCachedImagesMock.mockResolvedValue([newUpload, olderImage]);
+    getCacheStatsMock.mockReturnValue({ contentVersion: 11, count: 2, lastFetched: 11 });
+    finishVideoLoad([]);
+    const first = await pending;
+    const firstBody = await first.json();
+    expect(firstBody.images.map((image: { id: string }) => image.id)).toEqual(['older-image']);
+
+    const second = await GET(new NextRequest(url));
+    const secondBody = await second.json();
+    expect(secondBody.images.map((image: { id: string }) => image.id)).toEqual(['new-dng-upload', 'older-image']);
+    expect(secondBody.pagination.total).toBe(2);
+    expect(first.headers.get('x-photarium-catalog-version')).toBe('10');
+    expect(second.headers.get('x-photarium-catalog-version')).toBe('11');
+
+    const revalidated = await GET(new NextRequest(url, {
+      headers: { 'if-none-match': first.headers.get('etag')! },
+    }));
+    expect(revalidated.status).toBe(200);
+    expect((await revalidated.json()).images[0].id).toBe('new-dng-upload');
   });
 
   it('marks existing animated WebP derivatives as Comfy when their source video is Comfy', async () => {

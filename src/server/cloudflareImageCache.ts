@@ -647,6 +647,15 @@ export const getCacheStats = () => ({
   backgroundRefreshInProgress: cacheState.backgroundRefreshInProgress
 });
 
+export const getCachedImageCatalog = async (forceRefresh = false) => {
+  const loadedImages = await getCachedImages(forceRefresh);
+  // Read the resident list and its version together: reconciliation can replace
+  // the array while a caller awaits other data. Copy membership so an upload
+  // cannot mutate a snapshot already associated with an older version.
+  const images = CLOUDFLARE_CACHE_DISABLED ? loadedImages : cacheState.images;
+  return { images: images.slice(), cache: getCacheStats() };
+};
+
 /**
  * Force clear all caches (useful for debugging)
  */

@@ -32,6 +32,7 @@ const {
 vi.mock('@/server/cloudflareImageCache', () => ({
   getCachedImages: getCachedImagesMock,
   getCacheStats: getCacheStatsMock,
+  getCachedImageCatalog: async (refresh: boolean) => ({ images: await getCachedImagesMock(refresh), cache: getCacheStatsMock() }),
 }));
 
 vi.mock('@/server/vectorSearch', () => ({

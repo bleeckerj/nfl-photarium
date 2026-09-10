@@ -49,6 +49,24 @@ describe('cloudflareImageCache parent overrides', () => {
     process.env = ORIGINAL_ENV;
   });
 
+  it('keeps a catalog snapshot and its version consistent when another upload arrives', async () => {
+    process.env.CLOUDFLARE_DEV_BACKGROUND_REFRESH_DISABLED = '1';
+    process.env.CLOUDFLARE_SIZE_BACKFILL_DISABLED = 'true';
+    const { clearAllCaches, getCachedImageCatalog, upsertCachedImage } = await import('@/server/cloudflareImageCache');
+    await clearAllCaches();
+    const oldImage = { id: 'old', filename: 'old.jpg', uploaded: '2026-09-09T02:38:00Z', variants: [], size: 100 };
+    store.set('cloudflare-images', { data: [oldImage], timestamp: Date.now(), version: 2 });
+    const beforeUpload = await getCachedImageCatalog();
+    await upsertCachedImage({ id: 'new-dng', filename: 'converted.jpg', uploaded: '2026-09-10T05:04:36Z', variants: [], size: 100 });
+    const afterUpload = await getCachedImageCatalog();
+
+    expect(beforeUpload.images.map(image => image.id)).toEqual(['old']);
+    expect(beforeUpload.cache.count).toBe(1);
+    expect(afterUpload.images.map(image => image.id)).toEqual(['new-dng', 'old']);
+    expect(afterUpload.cache.count).toBe(2);
+    expect(afterUpload.cache.contentVersion).toBeGreaterThan(beforeUpload.cache.contentVersion);
+  });
+
   it('persists a cleared parent override so stale Cloudflare metadata cannot resurrect a detached variant', async () => {
     const {
       clearAllCaches,

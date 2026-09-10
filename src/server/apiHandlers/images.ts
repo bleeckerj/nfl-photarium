@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCachedImages, getCacheStats } from '@/server/cloudflareImageCache';
+import { getCachedImageCatalog } from '@/server/cloudflareImageCache';
 import { getVideoAssetCatalogVersion, listVideoAssetRecordsWithSync } from '@/server/videoCatalogStorage';
 import {
   getImageExtrasRecords,
@@ -106,7 +106,7 @@ export async function GET(request: NextRequest) {
       console.warn('[ImagesAPI] Folder override warm failed:', error);
     });
 
-    const cachePromise = markStage('cache_load', () => getCachedImages(forceRefresh));
+    const cachePromise = markStage('cache_load', () => getCachedImageCatalog(forceRefresh));
 
     const videoAssetsEnabled = process.env.ENABLE_VIDEO_ASSETS === '1';
     const configuredVideoLimit = Number(process.env.VIDEO_ASSET_LIST_LIMIT ?? 300);
@@ -118,7 +118,7 @@ export async function GET(request: NextRequest) {
       ? markStage('videos_load', () => listVideoAssetRecordsWithSync())
       : Promise.resolve([] as Awaited<ReturnType<typeof listVideoAssetRecordsWithSync>>);
 
-    const images = await cachePromise;
+    const { images, cache: cacheStats } = await cachePromise;
     const allVideos = await videosPromise;
 
     // Everything in the response body normally derives from three versioned
@@ -137,8 +137,8 @@ export async function GET(request: NextRequest) {
     await folderOverridesPromise.catch(() => null);
     const requestEtag = consumesUnversionedMetadata
       ? undefined
-      : buildGalleryCollectionEtag('g1', [
-          getCacheStats().contentVersion ?? 0,
+      : buildGalleryCollectionEtag('g2', [
+          cacheStats.contentVersion ?? 0,
           getImageFolderOverridesVersion(),
           getVideoAssetCatalogVersion(),
           request.nextUrl.search,
@@ -196,7 +196,6 @@ export async function GET(request: NextRequest) {
     const extrasSearchTextById = search ? await getImageExtrasSearchText() : null;
     diagnostics.search_extras_text_count = extrasSearchTextById ? extrasSearchTextById.size : 0;
 
-    const cacheStats = getCacheStats();
     const catalogVersion = cacheStats.contentVersion ?? cacheStats.lastFetched ?? 0;
     const catalogSource = cacheStats.source ?? (cacheStats.initialized ? 'memory' : 'empty');
     const lastReconciledAt = cacheStats.lastReconciledAt ?? cacheStats.lastFetched ?? 0;
@@ -212,7 +211,8 @@ export async function GET(request: NextRequest) {
     ].join('|');
     const assembly = await markStage('scope_assembly', () =>
       getScopedAssetAssembly({
-        cacheKey: `${scopeVersions}|overrides:${folderOverrides ? '1' : '0'}`,
+        // Exclude entries built before catalog membership and version were captured together.
+        cacheKey: `snapshot-v1|${scopeVersions}|overrides:${folderOverrides ? '1' : '0'}`,
         images,
         allVideos,
         namespace,
@@ -299,7 +299,7 @@ export async function GET(request: NextRequest) {
     // when you add, remove or reorder an input here. It does NOT cover changes
     // to the filtering/faceting logic itself; galleryQuery.ts carries its own
     // GALLERY_QUERY_LOGIC_VERSION for that, beside the code it guards.
-    const scopeKey = `v4|${scopeVersions}`;
+    const scopeKey = `v5|${scopeVersions}`;
     const queryFilters = {
       search,
       folder,
