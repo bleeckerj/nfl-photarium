@@ -20,6 +20,7 @@ import { useGalleryEmbedding } from './gallery/hooks/useGalleryEmbedding';
 import { useGalleryFavoriteToggle } from './gallery/hooks/useGalleryFavoriteToggle';
 import { useGalleryDeleteConfirmation } from './gallery/hooks/useGalleryDeleteConfirmation';
 import { useGalleryFocusNavigation } from './gallery/hooks/useGalleryFocusNavigation';
+import { resolveGalleryRequestFocus } from './gallery/focusNavigation';
 import { rememberGalleryResponseSnapshot, useGalleryInitialLoadState } from './gallery/hooks/useGalleryInitialLoadState';
 import { useGalleryMetadataEffects } from './gallery/hooks/useGalleryMetadataEffects';
 import { useGalleryNamespaceLifecycle } from './gallery/hooks/useGalleryNamespaceLifecycle';
@@ -243,8 +244,9 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
       setRefreshingCache(true);
     }
     try {
-      const focusTarget = initialFocusTargetRef.current;
-      const focusAssetId = focusTarget && !focusAppliedRef.current ? focusTarget.assetId : undefined;
+      const focusAssetId = resolveGalleryRequestFocus({
+        target: initialFocusTargetRef.current, namespace, applied: focusAppliedRef.current, firstPage,
+      });
       const effectiveServerQuery = resolveGalleryRefreshServerQuery(
         serverQueryOverride ?? galleryServerQueryRef.current,
         { firstPage }
@@ -481,6 +483,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
 
   useGalleryRefreshLifecycle({
     fetchImages,
+    focusAppliedRef,
     imageCount: images.length,
     loading,
     perfLoggingEnabled: PERF_LOGGING_ENABLED,

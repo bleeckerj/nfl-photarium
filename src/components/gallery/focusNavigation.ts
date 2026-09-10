@@ -42,6 +42,24 @@ export type CanonicalGalleryFocusTarget = {
   namespace: string;
 };
 
+// Legacy /?focus=<id> links have no namespace. They use the active gallery
+// scope, including a namespace restored from preferences after hydration.
+export const isGalleryFocusScopeActive = (target: CanonicalGalleryFocusTarget, namespace?: string) =>
+  !target.namespace || target.namespace === (namespace ?? '');
+
+export const resolveGalleryRequestFocus = ({
+  target, namespace, applied, firstPage = false,
+}: {
+  target: CanonicalGalleryFocusTarget | null;
+  namespace?: string;
+  applied: boolean;
+  firstPage?: boolean;
+}): string | undefined => (
+  target && !applied && !firstPage && isGalleryFocusScopeActive(target, namespace)
+    ? target.assetId
+    : undefined
+);
+
 const normalizeSearch = (search: string) => (search.startsWith('?') ? search.slice(1) : search);
 
 export const parseGalleryNamespaceFromSearch = (search: string): string | undefined => {

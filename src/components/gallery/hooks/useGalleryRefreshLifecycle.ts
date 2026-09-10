@@ -1,4 +1,4 @@
-import { useEffect, useImperativeHandle, useRef, type ForwardedRef, type MutableRefObject } from 'react';
+import { useCallback, useEffect, useImperativeHandle, useRef, type ForwardedRef, type MutableRefObject } from 'react';
 import type { ImageGalleryRef } from '../types';
 import type { GalleryServerPagination } from '../serverState';
 
@@ -6,6 +6,7 @@ type FetchImages = (options?: { silent?: boolean; forceRefresh?: boolean; syncNa
 
 type UseGalleryRefreshLifecycleOptions = {
   fetchImages: FetchImages;
+  focusAppliedRef: MutableRefObject<boolean>;
   imageCount: number;
   loading: boolean;
   perfLoggingEnabled: boolean;
@@ -18,6 +19,7 @@ type UseGalleryRefreshLifecycleOptions = {
 
 export function useGalleryRefreshLifecycle({
   fetchImages,
+  focusAppliedRef,
   imageCount,
   loading,
   perfLoggingEnabled,
@@ -40,19 +42,19 @@ export function useGalleryRefreshLifecycle({
     );
   }, [imageCount, loading, perfLoggingEnabled, returningFromDetailRef, serverPagination]);
 
-  useImperativeHandle(ref, () => ({
-    refreshImages: () => {
-      // Newly uploaded assets sort onto the first page; jump there so they are
-      // visible even when the user was browsing a later page.
-      resetToFirstPage(1);
-      return fetchImages({ silent: true, syncNamespaces: true, firstPage: true });
-    },
-  }));
+  const refreshUploadedImages = useCallback(() => {
+    // An upload takes precedence over a pending detail-page focus. Release it
+    // before changing page state so both refresh paths request the newest page.
+    focusAppliedRef.current = true;
+    resetToFirstPage(1);
+    return fetchImages({ silent: true, syncNamespaces: true, firstPage: true });
+  }, [fetchImages, focusAppliedRef, resetToFirstPage]);
+
+  useImperativeHandle(ref, () => ({ refreshImages: refreshUploadedImages }), [refreshUploadedImages]);
 
   useEffect(() => {
     if (refreshTrigger && refreshTrigger > 0) {
-      resetToFirstPage(1);
-      fetchImages({ silent: true, syncNamespaces: true, firstPage: true });
+      void refreshUploadedImages();
     }
-  }, [refreshTrigger, fetchImages, resetToFirstPage]);
+  }, [refreshTrigger, refreshUploadedImages]);
 }

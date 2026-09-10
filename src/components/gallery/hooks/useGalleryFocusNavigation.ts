@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import type { CanonicalGalleryFocusTarget } from '../focusNavigation';
+import { isGalleryFocusScopeActive } from '../focusNavigation';
 import type { CloudflareImage } from '../types';
 
 type GalleryServerFocus = {
@@ -47,8 +48,7 @@ export const useGalleryFocusNavigation = ({
     const focusTarget = initialFocusTargetRef.current;
     if (!focusTarget) return;
     if (focusCanonicalizedRef.current) return;
-    const activeNamespace = namespace ?? '';
-    if (focusTarget.namespace !== activeNamespace) return;
+    if (!isGalleryFocusScopeActive(focusTarget, namespace)) return;
 
     focusCanonicalizedRef.current = true;
     clearFilters();
@@ -64,8 +64,7 @@ export const useGalleryFocusNavigation = ({
     const focusTarget = initialFocusTargetRef.current;
     if (!focusTarget) return;
     if (focusAppliedRef.current) return;
-    const activeNamespace = namespace ?? '';
-    if (focusTarget.namespace !== activeNamespace) return;
+    if (!isGalleryFocusScopeActive(focusTarget, namespace)) return;
     if (!focusCanonicalizedRef.current) return;
     if (loading) return;
     if (!serverFocus || serverFocus.assetId !== focusTarget.assetId) return;
