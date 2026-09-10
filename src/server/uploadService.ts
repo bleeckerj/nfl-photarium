@@ -28,6 +28,7 @@ import { validateParentForNewChild } from '@/server/parentValidation';
 import { enqueueSemanticTagJob } from '@/server/semanticTagQueue';
 import type { SemanticTagJob } from '@/types/semanticTagging';
 import type { InstagramSourceRecord } from '@/server/instagramSource';
+import { DNG_MIME_TYPE, DNG_MIME_TYPES, isDngFile } from '@/utils/dng';
 
 // Re-export for backward compatibility
 export { sanitizeFilename, MAX_FILENAME_LENGTH } from '@/utils/filename';
@@ -45,6 +46,7 @@ export type {
 } from '@/server/uploadPreparation';
 
 export const SUPPORTED_IMAGE_TYPES = new Set([
+  ...DNG_MIME_TYPES,
   'image/jpeg',
   'image/jpg',
   'image/png',
@@ -249,7 +251,8 @@ export async function uploadImageBuffer({
   const canonicalParentId = parentValidation.canonicalParentId;
   const effectiveNamespace = parentValidation.canonicalParentNamespace ?? normalizedNamespace;
 
-  if (!isSnagx && !SUPPORTED_IMAGE_TYPES.has(fileType)) {
+  const inputFileType = isDngFile(fileName, fileType) ? DNG_MIME_TYPE : fileType;
+  if (!isSnagx && !SUPPORTED_IMAGE_TYPES.has(inputFileType)) {
     logIssue('Rejected non-image upload', { filename: fileName, type: fileType });
     return { ok: false, error: 'File must be an image', status: 400, reason: 'invalid-type' };
   }
@@ -261,7 +264,7 @@ export async function uploadImageBuffer({
 
   let workingBuffer = buffer;
   let workingOriginalBuffer = originalBuffer;
-  let workingFileType = fileType;
+  let workingFileType = inputFileType;
   let workingFileSize = fileSize;
 
   if (isSnagx) {
@@ -404,6 +407,7 @@ export async function uploadImageBuffer({
     sourceUrlNormalized: normalizedSourceUrl,
     instagramSource: instagramSource || undefined,
     exif: exifSummary,
+    ...(isDngFile(fileName, fileType) ? { uploadNormalization: prepared.data.uploadNormalization } : {}),
   };
   const cachedMetadataPayload = {
     ...metadataPayload,

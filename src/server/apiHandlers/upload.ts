@@ -17,6 +17,7 @@ const logIssue = (message: string, details?: Record<string, unknown>) => {
 
 const MAX_ZIP_BYTES = 500 * 1024 * 1024;
 const MIME_BY_EXTENSION: Record<string, string> = {
+  '.dng': 'image/x-adobe-dng',
   '.jpeg': 'image/jpeg',
   '.jpg': 'image/jpeg',
   '.png': 'image/png',
@@ -439,4 +440,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

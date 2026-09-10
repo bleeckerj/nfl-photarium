@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   getAspectRatioExpansionProviderStatuses,
@@ -9,6 +9,10 @@ import {
   resolveAspectRatioSourceMetadata,
   resolveAspectRatioExpansionTags,
 } from '@/server/aspectRatioExpansion/service';
+
+beforeEach(() => {
+  vi.stubEnv('OPENAI_API_KEY', '');
+});
 
 afterEach(() => {
   vi.unstubAllEnvs();

@@ -7,12 +7,13 @@ import {
   extractZipImages,
   getFileSourcePath,
   inferAssetTypeFromFile,
-  isImageFile,
+  canPreviewImageFile,
   isKeynoteFile,
   isZipFile,
   mergeTagInputs,
 } from '@/components/image-uploader/fileHelpers';
 import type { UploaderQueueItem } from '@/features/page-import/types';
+import { DNG_UPLOAD_ACCEPT } from '@/utils/dng';
 
 type UseUploaderFileIntakeOptions = {
   createQueueId: () => string;
@@ -22,19 +23,20 @@ type UseUploaderFileIntakeOptions = {
 };
 
 const DROPZONE_ACCEPT = {
+  ...DNG_UPLOAD_ACCEPT,
   'image/*': ['.jpeg', '.jpg', '.png', '.gif', '.webp', '.svg'],
   // Some browsers report SVG only by its exact type, so the wildcard above is not
   // sufficient on its own for drag-and-drop.
   'image/svg+xml': ['.svg'],
   'video/*': ['.mp4', '.webm', '.mov', '.m4v', '.ogv', '.ogg'],
-  'application/octet-stream': ['.snagx', '.key'],
+  'application/octet-stream': ['.snagx', '.key', '.dng'],
   'application/zip': ['.zip', '.snagx', '.key'],
   'application/x-zip-compressed': ['.zip', '.key'],
   'application/vnd.apple.keynote': ['.key'],
   'application/x-iwork-keynote-sffkey': ['.key'],
 };
 
-const previewUrlFor = (file: File) => (isImageFile(file) ? URL.createObjectURL(file) : undefined);
+const previewUrlFor = (file: File) => (canPreviewImageFile(file) ? URL.createObjectURL(file) : undefined);
 
 /**
  * Turns dropped files into queue items, expanding Keynote decks and zips into

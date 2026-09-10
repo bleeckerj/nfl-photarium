@@ -120,6 +120,27 @@ const getPostedMetadata = () => {
 };
 
 describe('uploadImageBuffer parent validation', () => {
+  it.each(['', 'application/octet-stream', 'image/tiff', 'image/dng'])('prepares DNG uploads reported as %s and sends only converted bytes', async (fileType) => {
+    const png = Buffer.from('converted-png');
+    const normalization = { originalType: 'image/x-adobe-dng', originalFilename: 'Camera.DNG', finalType: 'image/png', reasons: ['format-conversion'] };
+    prepareImageForUploadMock.mockResolvedValue({ ok: true, data: {
+      buffer: png, fileName: 'Camera.png', fileType: 'image/png', transformed: true,
+      bytesBefore: 3, bytesAfter: png.length, uploadNormalization: normalization,
+    } });
+    const result = await uploadImageBuffer({
+      buffer: Buffer.from('raw'), originalBuffer: Buffer.from('raw'), fileName: 'Camera.DNG', fileType, fileSize: 3,
+      context: { accountId: 'acct', apiToken: 'token', namespace: 'cf-test', tags: [] },
+    });
+    expect(result.ok).toBe(true);
+    expect(prepareImageForUploadMock).toHaveBeenCalledWith(expect.objectContaining({ fileName: 'Camera.DNG', fileType: 'image/x-adobe-dng' }));
+    const form = vi.mocked(globalThis.fetch).mock.calls[0][1]?.body as FormData;
+    const file = form.get('file') as File;
+    expect(file.name).toBe('Camera.png');
+    expect(file.type).toBe('image/png');
+    expect(Buffer.from(await file.arrayBuffer())).toEqual(png);
+    expect(extractExifSummaryMock).toHaveBeenCalledWith(Buffer.from('raw'));
+    expect(patchImageExtrasRecordMock).toHaveBeenCalledWith('generated-image', expect.objectContaining({ uploadNormalization: normalization }));
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(

@@ -2,6 +2,7 @@ import { PackagePlugin, PackagePluginInput, PackagePluginOutput } from './types'
 import AdmZip from 'adm-zip';
 
 const SUPPORTED_IMAGE_TYPES = new Set([
+  'image/x-adobe-dng',
   'image/jpeg',
   'image/jpg',
   'image/png',
@@ -11,6 +12,7 @@ const SUPPORTED_IMAGE_TYPES = new Set([
 ]);
 
 const MIME_BY_EXTENSION: Record<string, string> = {
+  '.dng': 'image/x-adobe-dng',
   '.jpeg': 'image/jpeg',
   '.jpg': 'image/jpeg',
   '.png': 'image/png',

@@ -166,6 +166,9 @@ export type ImageExtrasRecordV1 = {
   /** DNG ingest bookkeeping for generated preview artifacts. */
   dngIngest?: DngIngestRecord;
 
+  /** Conversion details retained even when Cloudflare's metadata budget is full. */
+  uploadNormalization?: import('@/server/uploadPreparation').UploadNormalizationMetadata;
+
   /** Durable Flickr import provenance for backup/sync workflows. */
   flickrSource?: FlickrSourceRecord;
 

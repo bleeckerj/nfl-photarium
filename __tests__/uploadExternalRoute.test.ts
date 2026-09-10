@@ -8,6 +8,18 @@ import * as duplicateDetector from '@/server/duplicateDetector';
 const TEST_URL = 'http://localhost/api/upload/external';
 const ORIGINAL_ENV = { ...process.env };
 
+// Queue contracts are exercised here; workers must not outlive a request and
+// consume the next test's fetch mock. Worker behavior has its own test suite.
+vi.mock('@/server/semanticTagQueue', () => ({
+  enqueueSemanticTagJob: vi.fn(async (imageId: string) => ({
+    jobId: `test-${imageId}`, imageId, state: 'queued',
+    createdAt: '2026-09-09T00:00:00Z', updatedAt: '2026-09-09T00:00:00Z',
+  })),
+}));
+vi.mock('@/server/autoEmbeddings', () => ({
+  queueAutoEmbeddingsForImage: vi.fn(async () => ({ enabled: true, queued: true })),
+}));
+
 function createRequest(formData: FormData, headers?: HeadersInit) {
   const baseRequest = new Request(TEST_URL, {
     method: 'POST',
@@ -198,6 +210,7 @@ describe('POST /api/upload/external', () => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('folder', 'icons');
+    formData.append('createFolder', 'true');
     formData.append('namespace', 'icons');
     const request = createRequest(formData);
 
@@ -248,6 +261,7 @@ describe('POST /api/upload/external', () => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('folder', 'comfy');
+    formData.append('createFolder', 'true');
     formData.append('namespace', 'comfy');
     formData.append(
       'comfyWorkflowJson',

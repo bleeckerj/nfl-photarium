@@ -1,5 +1,7 @@
 import sharp from 'sharp';
 import { sanitizeSvgBuffer } from '@/server/svgSanitizer';
+import { convertDngToPng } from '@/server/dngConversion';
+import { isDngFile } from '@/utils/dng';
 
 /**
  * Rasterization shim for generative/vision calls.
@@ -47,13 +49,24 @@ export const isSvgFilename = (name?: string | null): boolean =>
  * Return bytes a vision/embedding provider can decode.
  *
  * Raster input is passed through untouched so existing behaviour is unchanged;
- * only SVG is sanitized and rasterized to WebP.
+ * SVG is sanitized and rasterized; DNG is decoded before producing a WebP preview.
  */
 export async function toVisionImage(
   buffer: Buffer,
   mime?: string | null,
   fileName?: string | null
 ): Promise<VisionImage> {
+  if (isDngFile(fileName ?? '', mime ?? '')) {
+    try {
+      const png = await convertDngToPng(buffer);
+      const preview = await sharp(png)
+        .resize(VISION_RASTER_EDGE, VISION_RASTER_EDGE, { fit: 'inside', withoutEnlargement: true })
+        .webp({ quality: 85 }).toBuffer();
+      return { buffer: preview, mime: 'image/webp', rasterized: true };
+    } catch (error) {
+      throw new VisionRasterError(error instanceof Error ? error.message : 'DNG conversion failed for AI processing');
+    }
+  }
   const looksLikeSvg = isSvgMime(mime) || (!mime && isSvgFilename(fileName));
   if (!looksLikeSvg) {
     return { buffer, mime: mime?.trim() || 'image/jpeg', rasterized: false };

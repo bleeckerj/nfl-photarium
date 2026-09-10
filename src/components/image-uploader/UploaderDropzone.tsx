@@ -40,7 +40,7 @@ export default function UploaderDropzone({
         {isUploading ? 'Uploading...' : isDragActive ? 'Drop images or a .zip/.key here' : 'Drag & drop images or a .zip/.key here'}
       </p>
       <p className="text-xs font-mono text-gray-500">
-        {isUploading ? 'Please wait while your images are being uploaded' : 'or click to select files (.zip/.key supported)'}
+        {isUploading ? 'Please wait while your images are being uploaded' : 'or click to select files (.dng/.zip/.key supported; DNGs convert automatically)'}
       </p>
     </div>
   );

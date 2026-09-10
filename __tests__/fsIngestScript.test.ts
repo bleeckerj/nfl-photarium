@@ -24,6 +24,30 @@ describe('fs-ingest script', async () => {
     expect(options.onDuplicate).toBe('family');
   });
 
+  it('discovers DNGs recursively and uploads their raw bytes with a DNG MIME type', async () => {
+    const { walkMediaFiles } = await import('../scripts/fs-ingest/mediaPipeline.mjs');
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'fs-dng-'));
+    try {
+      await fs.mkdir(path.join(directory, 'photos'));
+      const filePath = path.join(directory, 'photos', 'Camera.DNG');
+      await fs.writeFile(filePath, 'raw-bytes');
+      expect(await walkMediaFiles(directory)).toEqual([{ path: filePath, kind: 'image' }]);
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+        const body = init?.body as FormData;
+        const file = body.get('file') as File;
+        expect(file.name).toBe('Camera.DNG');
+        expect(file.type).toBe('image/x-adobe-dng');
+        expect(await file.text()).toBe('raw-bytes');
+        expect(body.get('namespace')).toBe('cf-test');
+        return new Response(JSON.stringify({ id: 'converted-image' }), { status: 200 });
+      });
+      const result = await script.uploadImage({ apiBase: 'http://localhost:3000', filePath, namespace: 'cf-test', tags: [] });
+      expect(result.ok).toBe(true);
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('passes duplicateAction through multipart uploads when family mode is requested', async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'fs-ingest-'));
     const filePath = path.join(tmpDir, 'sample.png');

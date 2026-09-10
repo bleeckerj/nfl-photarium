@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import JSZip from 'jszip';
 import {
   buildUploaderGallerySummaryUrl,
+  canPreviewImageFile,
   extractZipImages,
   inferAssetTypeFromFile,
   isArchiveFile,
@@ -33,6 +34,24 @@ describe('image uploader helpers', () => {
     expect(mergeTagInputs('Keynote, Hero', 'hero, Slide')).toBe('Keynote, hero, Slide');
     expect(resolveTagInput('global', undefined)).toBe('global');
     expect(resolveTagInput('global', '')).toBe('');
+  });
+
+  it('queues raw DNG images without browser previews', () => {
+    for (const type of ['', 'application/octet-stream', 'image/x-adobe-dng']) {
+      const file = new File(['raw'], 'camera.DNG', { type });
+      expect(isImageFile(file)).toBe(true);
+      expect(canPreviewImageFile(file)).toBe(false);
+      expect(inferAssetTypeFromFile(file)).toBe('image');
+    }
+    expect(canPreviewImageFile(new File(['png'], 'photo.png', { type: 'image/png' }))).toBe(true);
+  });
+
+  it('extracts DNG images from archives', async () => {
+    const zip = new JSZip();
+    zip.file('photos/Camera.DNG', 'raw-bytes');
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const extracted = await extractZipImages(new File([blob], 'photos.zip', { type: 'application/zip' }));
+    expect(extracted.map((entry) => [entry.filename, entry.file.type])).toEqual([['Camera.DNG', 'image/x-adobe-dng']]);
   });
 
   it('builds the uploader gallery summary URL for namespace states', () => {

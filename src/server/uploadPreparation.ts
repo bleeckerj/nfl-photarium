@@ -1,5 +1,7 @@
 import sharp from 'sharp';
 import { sanitizeSvgBuffer } from '@/server/svgSanitizer';
+import { convertDngToPng } from '@/server/dngConversion';
+import { DNG_MIME_TYPE, isDngFile } from '@/utils/dng';
 
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 export const CLOUDFLARE_MAX_IMAGE_DIMENSION = 12_000;
@@ -20,7 +22,7 @@ export type PreparedUploadPayload = {
   uploadNormalization?: UploadNormalizationMetadata;
 };
 
-export type UploadNormalizationReason = 'max-bytes' | 'max-dimension' | 'max-area' | 'max-frame-area';
+export type UploadNormalizationReason = 'max-bytes' | 'max-dimension' | 'max-area' | 'max-frame-area' | 'format-conversion';
 
 export type UploadNormalizationMetadata = {
   reasons: UploadNormalizationReason[];
@@ -31,6 +33,7 @@ export type UploadNormalizationMetadata = {
   maxArea: number;
   maxAnimationFrameArea: number;
   originalType: string;
+  originalFilename?: string;
   finalType: string;
   originalWidth?: number;
   originalHeight?: number;
@@ -117,6 +120,7 @@ const describeReasons = (reasons: UploadNormalizationReason[]): string => {
     if (reason === 'max-bytes') return 'byte limit';
     if (reason === 'max-dimension') return 'dimension limit';
     if (reason === 'max-frame-area') return 'animation frame-area limit';
+    if (reason === 'format-conversion') return 'format conversion';
     return 'pixel-area limit';
   });
   return labels.join(', ');
@@ -207,7 +211,52 @@ const probeEncodedMetrics = async ({
   }
 };
 
-export async function prepareImageForUpload({
+type UploadPreparationInput = { buffer: Buffer; fileType: string; fileName: string; maxBytes?: number };
+
+export async function prepareImageForUpload(input: UploadPreparationInput): Promise<
+  { ok: true; data: PreparedUploadPayload } | { ok: false; error: string }
+> {
+  if (!isDngFile(input.fileName, input.fileType)) return prepareRasterImageForUpload(input);
+  try {
+    const png = await convertDngToPng(input.buffer);
+    const dimensions = await sharp(png).metadata();
+    const result = await prepareRasterImageForUpload({
+      ...input, buffer: png, fileType: 'image/png', fileName: withExtensionForType(input.fileName, 'image/png'),
+    });
+    if (!result.ok) return result;
+    const previous = result.data.uploadNormalization;
+    return {
+      ok: true,
+      data: {
+        ...result.data,
+        transformed: true,
+        bytesBefore: input.buffer.byteLength,
+        note: ['Converted DNG to PNG', result.data.note].filter(Boolean).join('; '),
+        uploadNormalization: {
+          maxBytes: input.maxBytes ?? MAX_IMAGE_BYTES,
+          maxDimension: CLOUDFLARE_MAX_IMAGE_DIMENSION,
+          maxArea: CLOUDFLARE_MAX_IMAGE_AREA,
+          maxAnimationFrameArea: CLOUDFLARE_MAX_ANIMATION_FRAME_AREA,
+          originalWidth: dimensions.width,
+          originalHeight: dimensions.height,
+          finalWidth: dimensions.width,
+          finalHeight: dimensions.height,
+          ...previous,
+          reasons: ['format-conversion', ...(previous?.reasons ?? [])],
+          originalBytes: input.buffer.byteLength,
+          finalBytes: result.data.bytesAfter,
+          originalType: DNG_MIME_TYPE,
+          originalFilename: input.fileName,
+          finalType: result.data.fileType,
+        },
+      },
+    };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : 'DNG conversion failed' };
+  }
+}
+
+async function prepareRasterImageForUpload({
   buffer,
   fileType,
   fileName,

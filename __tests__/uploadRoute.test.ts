@@ -45,6 +45,16 @@ const createRequest = (formData: FormData) =>
   );
 
 describe('POST /api/upload', () => {
+  it('includes DNG files in archive uploads', async () => {
+    const zip = new AdmZip();
+    zip.addFile('photos/Camera.DNG', Buffer.from('raw-bytes'));
+    const form = new FormData();
+    form.append('file', new File([zip.toBuffer()], 'photos.zip', { type: 'application/zip' }));
+    form.append('namespace', 'cf-test');
+    const response = await POST(createRequest(form));
+    expect(response.status).toBe(200);
+    expect(uploadImageBufferMock).toHaveBeenCalledWith(expect.objectContaining({ fileName: 'Camera.DNG', fileType: 'image/x-adobe-dng' }));
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     process.env = { ...ORIGINAL_ENV };

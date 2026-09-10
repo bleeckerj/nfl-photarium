@@ -1,8 +1,10 @@
 import JSZip from "jszip";
+import { isDngFile } from '@/utils/dng';
 
 export const MAX_UPLOAD_IMAGE_BYTES = 10 * 1024 * 1024;
-const KEYNOTE_IMAGE_EXTENSIONS = ['.jpeg', '.jpg', '.png', '.gif', '.webp', '.svg', '.avif'];
+const KEYNOTE_IMAGE_EXTENSIONS = ['.jpeg', '.jpg', '.png', '.gif', '.webp', '.svg', '.avif', '.dng'];
 const MIME_BY_EXTENSION: Record<string, string> = {
+  '.dng': 'image/x-adobe-dng',
   '.jpeg': 'image/jpeg',
   '.jpg': 'image/jpeg',
   '.png': 'image/png',
@@ -30,7 +32,8 @@ export const isZipFile = (file: File) => (
 
 export const isKeynoteFile = (file: File) => file.name.toLowerCase().endsWith('.key');
 export const isArchiveFile = (file: File) => isZipFile(file) || isKeynoteFile(file);
-export const isImageFile = (file: File) => file.type.startsWith('image/');
+export const isImageFile = (file: File) => file.type.startsWith('image/') || isDngFile(file.name, file.type);
+export const canPreviewImageFile = (file: File) => isImageFile(file) && !isDngFile(file.name, file.type);
 export const isVideoFile = (file: File) => file.type.startsWith('video/');
 export const inferAssetTypeFromFile = (file: File): "image" | "video" => (isVideoFile(file) ? 'video' : 'image');
 
