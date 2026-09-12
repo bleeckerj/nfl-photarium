@@ -38,6 +38,9 @@ export interface CloudflareImage {
   generatedBy?: string;
   comfyMetadataDetected?: boolean;
   comfyMetadataSource?: string;
+  aiCharacteristicsDetected?: boolean;
+  aiCharacteristicsSources?: Array<'ai-metadata' | 'c2pa-jumbf'>;
+  aiCharacteristicsScannerVersion?: 'v1';
   videoStatus?: 'pending' | 'ready' | 'error';
   videoDurationSeconds?: number;
   videoPlaybackUrl?: string;

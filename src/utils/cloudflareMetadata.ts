@@ -32,6 +32,9 @@ export type CloudflareMetadata = {
   generatedBy?: string;
   comfyMetadataDetected?: boolean;
   comfyMetadataSource?: string;
+  aiCharacteristicsDetected?: boolean;
+  aiCharacteristicsSources?: Array<'ai-metadata' | 'c2pa-jumbf'>;
+  aiCharacteristicsScannerVersion?: 'v1';
   uploadNormalization?: {
     reasons?: string[];
     originalBytes?: number;
@@ -77,6 +80,9 @@ export const CLOUDFLARE_METADATA_FIELDS = [
   'generatedBy',
   'comfyMetadataDetected',
   'comfyMetadataSource',
+  'aiCharacteristicsDetected',
+  'aiCharacteristicsSources',
+  'aiCharacteristicsScannerVersion',
   'uploadNormalization',
   'variationSort',
   'rotatedFromId',
@@ -239,7 +245,10 @@ export function enforceCloudflareMetadataLimit(
     'sourceUrl',
     'sourcePath',
     'namespace',
-    'folder'
+    'folder',
+    'aiCharacteristicsDetected',
+    'aiCharacteristicsSources',
+    'aiCharacteristicsScannerVersion'
   ];
 
   for (const key of dropOrder) {

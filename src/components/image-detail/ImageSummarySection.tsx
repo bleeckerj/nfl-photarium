@@ -1,5 +1,6 @@
 import { ChevronDown, Cpu } from 'lucide-react';
 import { ComfyIndicator } from '@/components/asset-detail/ComfyIndicator';
+import { AiCharacteristicsIndicator } from '@/components/asset-detail/AiCharacteristicsIndicator';
 import AntipodeSearch from '@/components/AntipodeSearch';
 import { ColorSwatches } from '@/components/ColorSwatches';
 import ConceptRadar from '@/components/ConceptRadar';
@@ -56,6 +57,7 @@ export const ImageSummarySection = ({
     <div className="flex items-center gap-2">
       <p className="text-xs mono font-semibold text-gray-900">{image.displayName || image.filename || 'Image'}</p>
       <ComfyIndicator asset={image} id={`image-detail-comfy-indicator-${image.id}`} />
+      <AiCharacteristicsIndicator asset={image} id={`image-detail-ai-indicator-${image.id}`} />
       <EmbeddingStatusIcon
         hasClipEmbedding={image.hasClipEmbedding}
         hasColorEmbedding={image.hasColorEmbedding}

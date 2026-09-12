@@ -14,6 +14,7 @@ import { Trash2, Copy, ExternalLink, Layers, AlertTriangle, Star } from 'lucide-
 import { getCloudflareImageUrl, getCloudflareDownloadUrl, getCloudflareSvgOriginalUrl } from '@/utils/imageUtils';
 import { formatBytes } from '@/utils/formatBytes';
 import { ComfyIndicator, isComfyDetected } from '@/components/asset-detail/ComfyIndicator';
+import { AiCharacteristicsIndicator } from '@/components/asset-detail/AiCharacteristicsIndicator';
 import { ColorSwatches } from '@/components/ColorSwatches';
 import { EmbeddingStatusDot } from '@/components/EmbeddingStatusIcon';
 import { SearchExclusionIcon } from './icons';
@@ -236,8 +237,9 @@ export const ImageCard: React.FC<ImageCardProps> = ({
             <SearchExclusionIcon className="h-4 w-4 text-white" title={getExclusionTooltip(image.tags)} />
           </div>
         )}
-        {isComfyOutput && (
-          <span className="absolute top-2 right-2">
+        {(isComfyOutput || image.aiCharacteristicsDetected) && (
+          <span className="absolute top-2 right-2 flex items-center gap-1">
+            <AiCharacteristicsIndicator asset={image} id={`image-card-ai-indicator-${image.id}`} showLabel={false} />
             <ComfyIndicator asset={image} id={`image-card-comfy-indicator-${image.id}`} showLabel={false} />
           </span>
         )}

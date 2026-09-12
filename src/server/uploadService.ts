@@ -29,6 +29,10 @@ import { enqueueSemanticTagJob } from '@/server/semanticTagQueue';
 import type { SemanticTagJob } from '@/types/semanticTagging';
 import type { InstagramSourceRecord } from '@/server/instagramSource';
 import { DNG_MIME_TYPE, DNG_MIME_TYPES, isDngFile } from '@/utils/dng';
+import {
+  combineAiCharacteristicScans,
+  scanAiCharacteristics,
+} from '@/utils/aiCharacteristics';
 
 // Re-export for backward compatibility
 export { sanitizeFilename, MAX_FILENAME_LENGTH } from '@/utils/filename';
@@ -266,6 +270,7 @@ export async function uploadImageBuffer({
   let workingOriginalBuffer = originalBuffer;
   let workingFileType = inputFileType;
   let workingFileSize = fileSize;
+  const sourceFileType = workingFileType;
 
   if (isSnagx) {
     try {
@@ -318,6 +323,18 @@ export async function uploadImageBuffer({
   }
 
   const finalBuffer = workingBuffer;
+  const sourceAiScan = await scanAiCharacteristics(workingOriginalBuffer, { mimeType: sourceFileType });
+  const persistedAiScan = await scanAiCharacteristics(finalBuffer, { mimeType: workingFileType });
+  const aiCharacteristics = combineAiCharacteristicScans([
+    { scan: sourceAiScan, evidenceBasis: 'uploaded-source' },
+    { scan: persistedAiScan, evidenceBasis: 'persisted-bytes' },
+  ]);
+  if (aiCharacteristics.status === 'error') {
+    logIssue('Embedded AI evidence scan failed; upload will continue', {
+      filename: normalizedName,
+      error: aiCharacteristics.error,
+    });
+  }
   const contentHash = createHash('sha256').update(finalBuffer).digest('hex');
   const deduplication = await evaluateUploadDeduplicationPolicy({
     contentHash,
@@ -394,6 +411,13 @@ export async function uploadImageBuffer({
     generatedBy: effectiveGeneratedBy,
     comfyMetadataDetected: effectiveComfyMetadataDetected,
     comfyMetadataSource: effectiveComfyMetadataSource,
+    ...(aiCharacteristics.status === 'detected'
+      ? {
+          aiCharacteristicsDetected: true,
+          aiCharacteristicsSources: aiCharacteristics.sources,
+          aiCharacteristicsScannerVersion: aiCharacteristics.scannerVersion,
+        }
+      : {}),
     ...(bufferedAspectMetadata ?? {}),
     rotatedFromId,
     rotatedAt,
@@ -407,6 +431,7 @@ export async function uploadImageBuffer({
     sourceUrlNormalized: normalizedSourceUrl,
     instagramSource: instagramSource || undefined,
     exif: exifSummary,
+    aiCharacteristics,
     ...(isDngFile(fileName, fileType) ? { uploadNormalization: prepared.data.uploadNormalization } : {}),
   };
   const cachedMetadataPayload = {

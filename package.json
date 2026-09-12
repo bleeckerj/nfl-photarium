@@ -30,6 +30,7 @@
     "embeddings:status": "curl -s http://localhost:3000/api/images/vectors/status | jq",
     "prompts:backfill": "node scripts/backfill-prompts.mjs",
     "discord:metadata:backfill": "node scripts/backfill-discord-image-metadata.mjs",
+    "ai-characteristics:backfill": "node --import tsx scripts/backfill-ai-characteristics.ts",
     "migrate:description-alt": "node scripts/migrate-description-alt-to-extras.mjs",
     "count:folder": "node scripts/count-folder-images.mjs",
     "folders:merge": "node scripts/merge-folders.mjs",

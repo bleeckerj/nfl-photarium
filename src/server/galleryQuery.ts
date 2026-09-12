@@ -29,6 +29,9 @@ export type GalleryQueryAsset = {
   generatedBy?: string;
   comfyMetadataDetected?: boolean;
   comfyMetadataSource?: string;
+  aiCharacteristicsDetected?: boolean;
+  aiCharacteristicsSources?: Array<'ai-metadata' | 'c2pa-jumbf'>;
+  aiCharacteristicsScannerVersion?: 'v1';
   hasClipEmbedding?: boolean;
   hasColorEmbedding?: boolean;
   aspectRatio?: string;

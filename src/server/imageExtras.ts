@@ -3,6 +3,7 @@ import { getExtrasStorage } from '@/server/extrasStorage';
 import type { InstagramSourceRecord } from '@/server/instagramSource';
 import { sanitizeImageExifRecord, sanitizeImageExtrasRecord } from './imageExtrasExif';
 import type { PromptThisDetailLevel } from './promptThisOptions';
+import type { AiCharacteristicsRecord } from '@/utils/aiCharacteristics';
 
 export type PromptThisProvider = 'openai' | 'manual';
 
@@ -129,6 +130,22 @@ export type SnagitSourceRecord = {
   extractedFilename?: string;
 };
 
+export type PixelWatermarkStatus =
+  | 'not-run'
+  | 'detected'
+  | 'not-detected'
+  | 'unsupported'
+  | 'error';
+
+/** Reserved for a future detector-specific asynchronous watermark workflow. */
+export type PixelWatermarkRecord = {
+  status: PixelWatermarkStatus;
+  detectorId?: string;
+  detectorVersion?: string;
+  confidence?: number;
+  checkedAt?: string;
+};
+
 export type ImageExtrasRecordV1 = {
   schemaVersion: 1;
   imageId: string;
@@ -159,6 +176,12 @@ export type ImageExtrasRecordV1 = {
 
   /** Provenance for generated artifacts created through Photarium image tools. */
   imageToolRun?: ImageToolRunRecord;
+
+  /** Bounded embedded AI/C2PA scan audit; the gallery reads the compact Cloudflare mirror. */
+  aiCharacteristics?: AiCharacteristicsRecord;
+
+  /** Reserved for future provider/model-specific pixel-watermark detectors. */
+  pixelWatermark?: PixelWatermarkRecord;
 
   /** Provenance for animated WebP artifacts generated or repaired in Photarium. */
   animatedWebp?: AnimatedWebpProvenanceRecord;

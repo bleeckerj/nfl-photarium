@@ -36,6 +36,9 @@ export interface CachedCloudflareImage {
   generatedBy?: string;
   comfyMetadataDetected?: boolean;
   comfyMetadataSource?: string;
+  aiCharacteristicsDetected?: boolean;
+  aiCharacteristicsSources?: Array<'ai-metadata' | 'c2pa-jumbf'>;
+  aiCharacteristicsScannerVersion?: 'v1';
   parentId?: string;
   duplicateFamilyOverride?: boolean;
   duplicateDetectionOverride?: boolean;
@@ -77,6 +80,9 @@ export const buildMetadataOverride = (
   assign('generatedBy', image.generatedBy);
   assign('comfyMetadataDetected', image.comfyMetadataDetected);
   assign('comfyMetadataSource', image.comfyMetadataSource);
+  assign('aiCharacteristicsDetected', image.aiCharacteristicsDetected);
+  assign('aiCharacteristicsSources', image.aiCharacteristicsSources);
+  assign('aiCharacteristicsScannerVersion', image.aiCharacteristicsScannerVersion);
   assign('variationParentId', options?.clearParentId ? '' : image.parentId);
   assign('duplicateFamilyOverride', image.duplicateFamilyOverride);
   assign('duplicateDetectionOverride', image.duplicateDetectionOverride);
@@ -178,6 +184,13 @@ export const transformImage = (
     mergedMeta.comfyMetadataSource && mergedMeta.comfyMetadataSource !== 'undefined'
       ? String(mergedMeta.comfyMetadataSource)
       : undefined;
+  const aiCharacteristicsDetected = mergedMeta.aiCharacteristicsDetected === true ? true : undefined;
+  const aiCharacteristicsSources = Array.isArray(mergedMeta.aiCharacteristicsSources)
+    ? mergedMeta.aiCharacteristicsSources.filter(
+        (source): source is 'ai-metadata' | 'c2pa-jumbf' => source === 'ai-metadata' || source === 'c2pa-jumbf'
+      )
+    : undefined;
+  const aiCharacteristicsScannerVersion = mergedMeta.aiCharacteristicsScannerVersion === 'v1' ? 'v1' : undefined;
   const duplicateFamilyOverride = mergedMeta.duplicateFamilyOverride === true;
   const duplicateDetectionOverride = mergedMeta.duplicateDetectionOverride === true;
   const cleanVariationSort = (() => {
@@ -274,6 +287,9 @@ export const transformImage = (
     generatedBy: cleanGeneratedBy,
     comfyMetadataDetected,
     comfyMetadataSource,
+    aiCharacteristicsDetected,
+    aiCharacteristicsSources: aiCharacteristicsSources?.length ? aiCharacteristicsSources : undefined,
+    aiCharacteristicsScannerVersion,
     duplicateFamilyOverride: duplicateFamilyOverride || undefined,
     duplicateDetectionOverride: duplicateDetectionOverride || undefined,
     variationSort: cleanVariationSort,

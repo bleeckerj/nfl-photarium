@@ -37,6 +37,9 @@ export type ListableImage = {
   generatedBy?: string;
   comfyMetadataDetected?: boolean;
   comfyMetadataSource?: string;
+  aiCharacteristicsDetected?: boolean;
+  aiCharacteristicsSources?: Array<'ai-metadata' | 'c2pa-jumbf'>;
+  aiCharacteristicsScannerVersion?: 'v1';
   videoStatus?: 'pending' | 'ready' | 'error';
   videoDurationSeconds?: number;
   videoPlaybackUrl?: string;
@@ -221,6 +224,13 @@ export function toListableImage(image: Record<string, unknown>): ListableImage {
     generatedBy: typeof image.generatedBy === 'string' ? image.generatedBy : undefined,
     comfyMetadataDetected: Boolean(image.comfyMetadataDetected),
     comfyMetadataSource: typeof image.comfyMetadataSource === 'string' ? image.comfyMetadataSource : undefined,
+    aiCharacteristicsDetected: image.aiCharacteristicsDetected === true ? true : undefined,
+    aiCharacteristicsSources: Array.isArray(image.aiCharacteristicsSources)
+      ? image.aiCharacteristicsSources.filter(
+          (source): source is 'ai-metadata' | 'c2pa-jumbf' => source === 'ai-metadata' || source === 'c2pa-jumbf'
+        )
+      : undefined,
+    aiCharacteristicsScannerVersion: image.aiCharacteristicsScannerVersion === 'v1' ? 'v1' : undefined,
     videoStatus: image.videoStatus as 'pending' | 'ready' | 'error' | undefined,
     videoDurationSeconds: typeof image.videoDurationSeconds === 'number' ? image.videoDurationSeconds : undefined,
     videoPlaybackUrl: typeof image.videoPlaybackUrl === 'string' ? image.videoPlaybackUrl : undefined,

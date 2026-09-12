@@ -17,6 +17,8 @@ import { AspectRatioDisplay } from './AspectRatioDisplay';
 import { formatShortAssetId, isSvgImage } from './utils';
 import type { CloudflareImage, ColorMetadata, GalleryFamilySummary } from './types';
 import { getUserVisibleTags, hasFavoriteTag } from '@/utils/systemTags';
+import { AiCharacteristicsIndicator } from '@/components/asset-detail/AiCharacteristicsIndicator';
+import { ComfyIndicator } from '@/components/asset-detail/ComfyIndicator';
 
 interface ImageListItemProps {
   image: CloudflareImage;
@@ -206,6 +208,12 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
             className="object-cover"
             sizes="64px"
           />
+        )}
+        {(image.aiCharacteristicsDetected || image.comfyMetadataDetected || image.generatedBy === 'comfyui') && (
+          <span className="absolute top-2 right-2 flex items-center gap-1">
+            <AiCharacteristicsIndicator asset={image} id={`image-list-ai-indicator-${image.id}`} showLabel={false} />
+            <ComfyIndicator asset={image} id={`image-list-comfy-indicator-${image.id}`} showLabel={false} />
+          </span>
         )}
       </Link>
       
