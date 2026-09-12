@@ -1,3 +1,15 @@
+export interface DemarkVerification {
+  format_valid: boolean;
+  dimensions_valid: boolean | null;
+  ai_metadata_present: boolean | null;
+  c2pa_present: boolean | null;
+  pixel_regeneration_applied: boolean;
+  pixel_watermark_detector: null;
+  pixel_watermark_present: null;
+  inspection_complete: boolean;
+  inspection_errors: string[];
+}
+
 export const DEMARK_MODES = ['demark', 'metadata'] as const;
 export type DemarkMode = (typeof DEMARK_MODES)[number];
 
@@ -29,7 +41,10 @@ export interface DemarkWorkerItemResult {
   error?: string;
   width?: number;
   height?: number;
-  aiMetadataPresent?: boolean;
+  aiMetadataPresent?: boolean | null;
+  verification?: DemarkVerification;
+  format?: string;
+  frames?: number;
 }
 
 export interface DemarkWorkerResponse {
@@ -50,7 +65,10 @@ export interface DemarkSuccessResult {
   namespace: string;
   dimensions?: { width: number; height: number };
   verification: {
-    aiMetadataPresent: false;
+    aiMetadataPresent: boolean | null;
+    file: DemarkVerification;
+    hostedOriginalSha256: string;
+    hostedOriginalMatches: true;
     parentLinked: true;
     dimensionsValid: true;
   };

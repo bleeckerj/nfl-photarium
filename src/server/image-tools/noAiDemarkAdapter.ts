@@ -1,3 +1,4 @@
+import { verifyDemarkHostedOriginal } from './noAiDemarkHostedVerification';
 import path from 'node:path';
 
 import { getCachedImage } from '@/server/cloudflareImageCache';
@@ -14,7 +15,6 @@ import {
 import type { ImageToolAdapter, ImageToolControl, ImageToolRunResult } from '@/server/image-tools/types';
 import { sanitizeFilename, uploadImageBuffer } from '@/server/uploadService';
 
-const SUPPORTED_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg']);
 const DEMARK_MODES = new Set<NoAiDemarkMode>(['demark', 'metadata']);
 const MODEL_PROFILES = new Set<NoAiDemarkModelProfile>(['default', 'ctrlregen']);
 const DEVICES = new Set<NoAiDemarkDevice>(['auto', 'cpu', 'mps', 'cuda']);
@@ -86,22 +86,22 @@ const DEMARK_CONTROLS: ImageToolControl[] = [
     defaultValue: false,
     group: 'general',
     advanced: true,
-    helpText: 'Also removes standard file metadata after the no-AI verification pass.',
+    helpText: 'Remove standard embedded metadata as well.',
   },
 ];
 
 const manifest: ImageToolAdapter['manifest'] = {
   id: 'no-ai-demarker',
   label: 'No-AI Demarker',
-  description: 'Create a verified no-AI child variant through the local noai-watermark processor.',
+  description: 'Clean AI metadata or regenerate pixels, with file and hosted-original verification.',
   adapterKind: 'noai-watermark',
-  inputAssetTypes: ['image'],
-  outputModes: ['still'],
+  inputAssetTypes: ['image', 'animatedImage'],
+  outputModes: ['still', 'animated'],
   supportsAsync: true,
   supportsPreview: false,
   presentation: {
     thumbnailUrl: '/image-tools/grainrad-preview.svg',
-    shortDescription: 'Local no-AI verification and demarking for PNG and JPEG originals.',
+    shortDescription: 'PNG, JPEG, and WebP originals; animated WebP supports metadata cleanup.',
   },
   controls: DEMARK_CONTROLS,
   defaultRequest: {
@@ -123,9 +123,6 @@ const manifest: ImageToolAdapter['manifest'] = {
 const buildDemarkedFilename = (sourceFilename: string) => {
   const cleaned = sanitizeFilename(sourceFilename);
   const extension = path.extname(cleaned).toLowerCase();
-  if (!SUPPORTED_EXTENSIONS.has(extension)) {
-    throw new Error(`No-AI Demarker supports PNG and JPEG sources; received ${sourceFilename}`);
-  }
   const stem = cleaned.slice(0, -extension.length).replace(/-demarked$/i, '') || 'Image';
   return `${stem}-demarked${extension}`;
 };
@@ -181,14 +178,6 @@ const settingsFromRequest = (effectId: string, params: Record<string, unknown>):
   };
 };
 
-const provenanceDescription = (settings: NoAiDemarkSettings, sourceFilename: string) => {
-  const process = settings.mode === 'demark'
-    ? `profile=${settings.modelProfile}, strength=${settings.strength}, steps=${settings.steps}, device=${settings.device}`
-    : 'AI metadata cleanup without pixel regeneration';
-  const metadata = settings.removeAllMetadata ? 'all metadata erased' : 'standard metadata preserved';
-  return `Demarked variant of ${sourceFilename} created with noai-watermark (${process}; ${metadata}).`;
-};
-
 const verifyUploadedChild = async (params: {
   childId: string;
   parentId: string;
@@ -218,12 +207,12 @@ export const noAiDemarkAdapter: ImageToolAdapter = {
     const settings = settingsFromRequest(request.effectId, request.params);
     addEvent({ phase: 'source.download', message: 'Downloading source image for no-AI processing' });
     updateRun({ message: 'Downloading source image', percent: 0.1 });
-    const source = await downloadSourceImage(imageId);
+    const source = await downloadSourceImage(imageId, { requireOriginal: true });
     const sourceRecord = await getCachedImage(imageId);
     if (!sourceRecord) throw new Error('Source image was not found in Photarium');
     if (!sourceRecord.namespace) throw new Error('Source image is missing namespace metadata');
 
-    const outputFilename = buildDemarkedFilename(sourceRecord.filename || source.filename);
+    let outputFilename = buildDemarkedFilename(sourceRecord.filename || source.filename);
     const displayName = buildDisplayName(sourceRecord.displayName, sourceRecord.filename || source.filename);
     const sourceExtras = await getImageExtrasRecord(imageId);
     const parentId = sourceRecord.parentId || imageId;
@@ -244,13 +233,14 @@ export const noAiDemarkAdapter: ImageToolAdapter = {
       settings,
     });
 
-    const description = provenanceDescription(settings, sourceRecord.filename || source.filename);
+    outputFilename = artifact.filename;
+    const description = sourceExtras?.description ?? sourceRecord.description;
     addEvent({
       phase: 'photarium.upload',
-      message: 'Uploading verified no-AI child variant to Photarium',
+      message: 'Uploading processed child variant to Photarium',
       details: { filename: outputFilename, width: artifact.width, height: artifact.height },
     });
-    updateRun({ message: 'Uploading verified no-AI child variant', percent: 0.82 });
+    updateRun({ message: 'Uploading processed child variant', percent: 0.82 });
     const { accountId, apiToken } = getCloudflareCredentials();
     const upload = await uploadImageBuffer({
       buffer: artifact.buffer,
@@ -264,18 +254,19 @@ export const noAiDemarkAdapter: ImageToolAdapter = {
         folder: sourceExtras?.folder ?? sourceRecord.folder,
         tags: mergeDemarkedTags(sourceRecord.tags),
         displayName,
-        altTag: sourceRecord.altTag ?? sourceExtras?.altText,
+        altTag: sourceExtras?.altText ?? sourceRecord.altTag,
         description,
         originalUrl: sourceRecord.originalUrl ?? sourceExtras?.originalUrl,
         sourceUrl: sourceRecord.sourceUrl ?? sourceExtras?.sourceUrl,
         namespace: sourceRecord.namespace,
         parentId,
-        duplicateAction: 'family',
+        // A requested run creates a new child even when cleanup produces identical bytes.
+        duplicateAction: 'override',
       },
     });
     if (!upload.ok) throw new Error(upload.error);
 
-    addEvent({ phase: 'photarium.verify', message: 'Verifying uploaded no-AI child metadata' });
+    addEvent({ phase: 'photarium.verify', message: 'Verifying uploaded child metadata and original bytes' });
     updateRun({ message: 'Verifying uploaded child metadata', percent: 0.91 });
     await verifyUploadedChild({
       childId: upload.data.id,
@@ -284,6 +275,9 @@ export const noAiDemarkAdapter: ImageToolAdapter = {
       folder: sourceExtras?.folder ?? sourceRecord.folder,
       dimensions: { width: artifact.width, height: artifact.height },
     });
+
+    const hostedOriginalSha256 = await verifyDemarkHostedOriginal(upload.data.id, artifact.buffer);
+    const output = { mode: artifact.frames > 1 ? 'animated' as const : 'still' as const, format: artifact.contentType.slice(6) };
 
     addEvent({ phase: 'extras.patch', message: 'Writing no-AI processing provenance', details: { generatedAssetId: upload.data.id } });
     updateRun({ message: 'Recording no-AI provenance', percent: 0.95 });
@@ -299,14 +293,17 @@ export const noAiDemarkAdapter: ImageToolAdapter = {
           modelProfile: settings.modelProfile,
           device: settings.device,
           removeAllMetadata: settings.removeAllMetadata,
-          aiMetadataPresent: false,
+          aiMetadataPresent: artifact.verification.ai_metadata_present,
+          verification: artifact.verification,
+          hostedOriginalSha256,
+          hostedOriginalMatches: true,
           dimensions: { width: artifact.width, height: artifact.height },
           parentId,
         },
-        output: request.output,
+        output,
         createdAt: new Date().toISOString(),
       },
-      altText: sourceRecord.altTag ?? sourceExtras?.altText,
+      altText: sourceExtras?.altText ?? sourceRecord.altTag,
     });
 
     return {
@@ -319,7 +316,10 @@ export const noAiDemarkAdapter: ImageToolAdapter = {
         steps: settings.steps,
         device: settings.device,
         removeAllMetadata: settings.removeAllMetadata,
-        aiMetadataPresent: false,
+        aiMetadataPresent: artifact.verification.ai_metadata_present,
+          verification: artifact.verification,
+          hostedOriginalSha256,
+          hostedOriginalMatches: true,
         dimensions: { width: artifact.width, height: artifact.height },
         parentId,
       },

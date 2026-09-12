@@ -4,7 +4,7 @@ export const demarkTools: Tool[] = [
   {
     name: 'photarium_demark_images',
     description:
-      'Process one or more Photarium PNG or JPEG images through noai-watermark and upload each result as a demarked child variant. The default CtrlRegen profile chunks images to reduce peak VRAM use, preserves standard metadata, removes AI metadata, and never overwrites the source.',
+      'Process one or more Photarium PNG, JPEG, or WebP images through noai-watermark and upload each result as a demarked child variant. Animated WebP supports metadata mode only. File inspection and hosted-original equality are reported separately from pixel regeneration; no pixel-watermark detector is available. The default CtrlRegen profile chunks images to reduce peak VRAM use, preserves standard metadata, removes AI metadata, and never overwrites the source.',
     inputSchema: {
       type: 'object',
       properties: {

@@ -214,6 +214,7 @@ export async function uploadFileBase64(
     sourcePath?: string;
     namespace?: string;
     parentId?: string;
+    duplicateAction?: 'family' | 'override';
     prompt?: string;
     generateSemanticTags?: boolean;
     semanticTagCount?: number;
@@ -234,6 +235,7 @@ export async function uploadFileBase64(
   if (payload.sourcePath) formData.append('sourcePath', payload.sourcePath);
   if (payload.namespace) formData.append('namespace', payload.namespace);
   if (payload.parentId) formData.append('parentId', payload.parentId);
+  if (payload.duplicateAction) formData.append('duplicateAction', payload.duplicateAction);
   if (payload.semanticTagCount !== undefined) formData.append('semanticTagCount', String(payload.semanticTagCount));
 
   const response = await fetch(`${BASE_URL}${endpoint}`, {

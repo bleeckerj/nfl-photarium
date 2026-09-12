@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cleanString } from '@/utils/cloudflareMetadata';
 import { requireValidFolderName } from '@/server/folderPolicy';
 import { getImageExtrasRecord, patchImageExtrasRecord } from '@/server/imageExtras';
-import type { DngIngestRecord, FlickrSourceRecord, ImageExifRecord, RawSourceReference, SnagitSourceRecord } from '@/server/imageExtras';
+import type { DngIngestRecord, FlickrSourceRecord, ImageExifRecord, ImageToolRunRecord, RawSourceReference, SnagitSourceRecord } from '@/server/imageExtras';
 import type { InstagramSourceRecord } from '@/server/instagramSource';
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -48,6 +48,7 @@ export async function PATCH(
     }
 
     const patch: {
+      imageToolRun?: ImageToolRunRecord;
       folder?: string;
       description?: string;
       altText?: string;
@@ -187,6 +188,15 @@ export async function PATCH(
       }
     }
 
+    if (Object.prototype.hasOwnProperty.call(body ?? {}, 'imageToolRun')) {
+      const raw = body?.imageToolRun;
+      if (!isPlainObject(raw) || typeof raw.toolId !== 'string' || typeof raw.sourceImageId !== 'string'
+        || typeof raw.effectId !== 'string' || typeof raw.createdAt !== 'string'
+        || !isPlainObject(raw.params) || !isPlainObject(raw.output)) {
+        return NextResponse.json({ error: 'Invalid image tool provenance' }, { status: 400 });
+      }
+      patch.imageToolRun = raw as ImageToolRunRecord;
+    }
     const record = await patchImageExtrasRecord(imageId, patch);
     return NextResponse.json({ imageId, record });
   } catch (error) {

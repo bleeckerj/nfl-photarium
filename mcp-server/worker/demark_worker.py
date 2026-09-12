@@ -33,14 +33,17 @@ def _load_noai(root: Path) -> dict[str, Any]:
 
     from __init__ import __version__
     from cleaner import remove_ai_metadata
-    from extractor import has_ai_metadata
+    from image_formats import inspect_image, validate_operation
+    from verification import verify_image
     from watermark_profiles import get_model_id_for_profile
     from watermark_remover import WatermarkRemover
 
     return {
         "version": __version__,
         "remove_ai_metadata": remove_ai_metadata,
-        "has_ai_metadata": has_ai_metadata,
+        "inspect_image": inspect_image,
+        "validate_operation": validate_operation,
+        "verify_image": verify_image,
         "get_model_id_for_profile": get_model_id_for_profile,
         "WatermarkRemover": WatermarkRemover,
     }
@@ -65,20 +68,22 @@ def process(payload: dict[str, Any]) -> dict[str, Any]:
     api = _load_noai(root)
 
     remover = None
-    if settings["mode"] == "demark":
-        model_id = api["get_model_id_for_profile"](settings["modelProfile"])
-        remover = api["WatermarkRemover"](
-            model_id=model_id,
-            device=settings["device"],
-        )
-
     results: list[dict[str, Any]] = []
     for item in items:
         source_path = Path(item["sourcePath"])
         output_path = Path(item["outputPath"])
         try:
+            source = api["inspect_image"](source_path)
+            api["validate_operation"](
+                source_path, "regenerate" if settings["mode"] == "demark" else "clean",
+                output=output_path,
+            )
             if settings["mode"] == "demark":
-                assert remover is not None
+                if remover is None:
+                    remover = api["WatermarkRemover"](
+                        model_id=api["get_model_id_for_profile"](settings["modelProfile"]),
+                        device=settings["device"],
+                    )
                 remover.remove_watermark(
                     image_path=source_path,
                     output_path=output_path,
@@ -100,16 +105,30 @@ def process(payload: dict[str, Any]) -> dict[str, Any]:
                 )
 
             width, height = _dimensions(output_path)
-            ai_metadata_present = bool(api["has_ai_metadata"](output_path))
-            if ai_metadata_present:
-                raise RuntimeError("AI metadata remains in the output")
+            verification = api["verify_image"](
+                output_path, expected_size=source.size,
+                pixel_regeneration_applied=settings["mode"] == "demark",
+            ).to_dict()
+            if not verification["format_valid"] or verification["dimensions_valid"] is not True:
+                raise RuntimeError("Output format or dimensions verification failed")
+            if verification["ai_metadata_present"] is True or verification["c2pa_present"] is True:
+                raise RuntimeError("AI metadata or C2PA remains in the output")
+            if source.format == "WEBP" and (
+                not verification["inspection_complete"]
+                or verification["ai_metadata_present"] is not False
+                or verification["c2pa_present"] is not False
+            ):
+                raise RuntimeError("WebP metadata inspection is incomplete")
             results.append(
                 {
                     "imageId": item["imageId"],
                     "ok": True,
                     "width": width,
                     "height": height,
-                    "aiMetadataPresent": False,
+                    "aiMetadataPresent": verification["ai_metadata_present"],
+                    "verification": verification,
+                    "format": source.format,
+                    "frames": source.frames,
                 }
             )
         except Exception as error:  # per-item continuation is part of the MCP contract

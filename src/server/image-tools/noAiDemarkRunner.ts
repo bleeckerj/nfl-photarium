@@ -1,3 +1,4 @@
+import type { DemarkVerification } from '../../../mcp-server/src/runtime/demark/types';
 import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -24,7 +25,9 @@ type NoAiWorkerItem = {
   error?: string;
   width?: number;
   height?: number;
-  aiMetadataPresent?: boolean;
+  aiMetadataPresent?: boolean | null;
+  verification?: DemarkVerification;
+  frames?: number;
 };
 
 type NoAiWorkerResponse = {
@@ -33,7 +36,10 @@ type NoAiWorkerResponse = {
 
 export type NoAiDemarkArtifact = {
   buffer: Buffer;
-  contentType: 'image/png' | 'image/jpeg';
+  contentType: 'image/png' | 'image/jpeg' | 'image/webp';
+  filename: string;
+  verification: DemarkVerification;
+  frames: number;
   width: number;
   height: number;
 };
@@ -127,7 +133,8 @@ const runWorker = async (params: {
 const contentTypeFromFormat = (format: string | undefined): NoAiDemarkArtifact['contentType'] => {
   if (format === 'png') return 'image/png';
   if (format === 'jpeg') return 'image/jpeg';
-  throw new Error('No-AI Demarker outputs must be PNG or JPEG');
+  if (format === 'webp') return 'image/webp';
+  throw new Error('No-AI Demarker outputs must be PNG, JPEG, or WebP');
 };
 
 /**
@@ -144,8 +151,12 @@ export const runNoAiDemark = async (params: {
 }): Promise<NoAiDemarkArtifact> => {
   const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'photarium-noai-demarker-'));
   try {
+    const sourceMetadata = await sharp(params.sourceBuffer).metadata();
+    contentTypeFromFormat(sourceMetadata.format);
+    const extension = sourceMetadata.format === 'jpeg' ? '.jpg' : `.${sourceMetadata.format}`;
+    const filename = path.basename(params.outputFilename, path.extname(params.outputFilename)) + extension;
     const sourcePath = path.join(temporaryDirectory, `source-${path.basename(params.sourceFilename)}`);
-    const outputPath = path.join(temporaryDirectory, path.basename(params.outputFilename));
+    const outputPath = path.join(temporaryDirectory, filename);
     await fs.writeFile(sourcePath, params.sourceBuffer);
 
     const workerResponse = await runWorker({
@@ -158,15 +169,19 @@ export const runNoAiDemark = async (params: {
     if (!workerItem?.ok) {
       throw new Error(workerItem?.error || 'noai-watermark did not return a result for this image');
     }
-    if (workerItem.aiMetadataPresent !== false) {
+    if (!workerItem.verification || workerItem.verification.format_valid !== true
+      || workerItem.verification.dimensions_valid !== true
+      || workerItem.aiMetadataPresent === true || workerItem.verification.c2pa_present === true) {
       throw new Error('No-AI verification failed: AI metadata remains in the output');
     }
 
     const output = await fs.readFile(outputPath);
-    const [sourceMetadata, outputMetadata] = await Promise.all([
-      sharp(params.sourceBuffer).metadata(),
-      sharp(output).metadata(),
-    ]);
+    const outputMetadata = await sharp(output).metadata();
+    if (outputMetadata.format !== sourceMetadata.format) throw new Error("Output format changed unexpectedly");
+    if (sourceMetadata.format === "webp" && (!workerItem.verification.inspection_complete
+      || workerItem.verification.ai_metadata_present !== false || workerItem.verification.c2pa_present !== false)) {
+      throw new Error("WebP metadata inspection is incomplete");
+    }
     if (!sourceMetadata.width || !sourceMetadata.height || !outputMetadata.width || !outputMetadata.height) {
       throw new Error('No-AI verification failed: image dimensions are unavailable');
     }
@@ -181,6 +196,9 @@ export const runNoAiDemark = async (params: {
 
     return {
       buffer: output,
+      filename,
+      verification: workerItem.verification,
+      frames: workerItem.frames ?? 1,
       contentType: contentTypeFromFormat(outputMetadata.format),
       width: outputMetadata.width,
       height: outputMetadata.height,

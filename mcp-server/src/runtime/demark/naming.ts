@@ -3,14 +3,14 @@ import {
   extensionFromFilename,
 } from '../upload/filenames.js';
 
-const SUPPORTED_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg']);
+const SUPPORTED_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 
 export function buildDemarkedFilename(sourceFilename: string): string {
   const cleaned = cleanUploadFilename(sourceFilename);
   const extension = extensionFromFilename(cleaned);
   if (!extension || !SUPPORTED_EXTENSIONS.has(extension)) {
     throw new Error(
-      `Unsupported source format for demarking: ${sourceFilename}. Supported formats are PNG and JPEG.`,
+      `Unsupported source format for demarking: ${sourceFilename}. Supported formats are PNG, JPEG, and WebP.`,
     );
   }
 

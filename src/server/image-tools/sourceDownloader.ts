@@ -67,7 +67,7 @@ const tryFetchFallbackVariant = async (source: CloudflareImageSource) => {
   }
 };
 
-export const downloadSourceImage = async (imageId: string): Promise<DownloadedSourceImage> => {
+export const downloadSourceImage = async (imageId: string, options: { requireOriginal?: boolean } = {}): Promise<DownloadedSourceImage> => {
   const { accountId, apiToken } = getCloudflareCredentials();
   let source = await fetchCloudflareImage(imageId, { accountId, apiToken });
 
@@ -79,7 +79,7 @@ export const downloadSourceImage = async (imageId: string): Promise<DownloadedSo
   const sourceIsSvg =
     (source.filename?.toLowerCase().endsWith('.svg') ?? false) ||
     meta.type === 'image/svg+xml';
-  if (sourceIsSvg && meta.linkedAssetId && meta.linkedAssetId !== imageId) {
+  if (!options.requireOriginal && sourceIsSvg && meta.linkedAssetId && meta.linkedAssetId !== imageId) {
     try {
       source = await fetchCloudflareImage(meta.linkedAssetId, { accountId, apiToken });
       effectiveImageId = meta.linkedAssetId;
@@ -94,7 +94,7 @@ export const downloadSourceImage = async (imageId: string): Promise<DownloadedSo
   try {
     blobResponse = await fetchOriginalBlob({ accountId, apiToken, imageId: effectiveImageId });
   } catch (error) {
-    const variantResponse = await tryFetchFallbackVariant(source);
+    const variantResponse = options.requireOriginal ? undefined : await tryFetchFallbackVariant(source);
     if (variantResponse?.ok) {
       return readSourceResponse(variantResponse, { imageId: effectiveImageId, filename });
     }
@@ -108,7 +108,7 @@ export const downloadSourceImage = async (imageId: string): Promise<DownloadedSo
   }
 
   if (blobResponse.status === 403) {
-    const variantResponse = await tryFetchFallbackVariant(source);
+    const variantResponse = options.requireOriginal ? undefined : await tryFetchFallbackVariant(source);
     if (variantResponse?.ok) {
       return readSourceResponse(variantResponse, { imageId: effectiveImageId, filename });
     }

@@ -15,12 +15,14 @@ const discoveryMocks = vi.hoisted(() => ({
 
 const organizationMocks = vi.hoisted(() => ({
   updateMetadata: vi.fn(),
+  getExtras: vi.fn(async () => ({ record: { description: 'Original description', altText: 'Original alt text' } })),
 }));
 
 const uploadMocks = vi.hoisted(() => ({
   uploadFileBase64: vi.fn(),
 }));
 
+vi.mock('../mcp-server/src/runtime/shared/api-client.js', () => ({ apiRequest: vi.fn(async (_url: string, options: { body: string }) => ({ record: JSON.parse(options.body) })) }));
 vi.mock('../mcp-server/src/runtime/demark/worker-runner.js', () => workerMocks);
 vi.mock('../mcp-server/src/runtime/discovery/client.js', () => discoveryMocks);
 vi.mock('../mcp-server/src/runtime/organization/client.js', () => organizationMocks);
@@ -30,6 +32,9 @@ import { buildDemarkedDisplayName, buildDemarkedFilename, mergeDemarkedTags } fr
 import { processDemarkImages } from '../mcp-server/src/runtime/demark/service.js';
 import { RUNTIME_TOOLS } from '../mcp-server/src/runtime/index.js';
 
+const verification = { format_valid: true, dimensions_valid: true, ai_metadata_present: false, c2pa_present: false,
+  pixel_regeneration_applied: false, pixel_watermark_detector: null, pixel_watermark_present: null,
+  inspection_complete: true, inspection_errors: [] };
 const TINY_PNG = Buffer.from(
   '89504e470d0a1a0a0000000d49484452',
   'hex',
@@ -49,6 +54,8 @@ function sourceImage(id: string) {
     dimensions: { width: 1, height: 1 },
   };
 }
+
+const settings = { mode: 'demark' as const, strength: 0.04, steps: 50, modelProfile: 'ctrlregen' as const, device: 'auto' as const, removeAllMetadata: false };
 
 describe('Photarium demarked MCP tool', () => {
   beforeEach(() => {
@@ -93,6 +100,7 @@ describe('Photarium demarked MCP tool', () => {
           width: 1,
           height: 1,
           aiMetadataPresent: false,
+          verification, frames: 1,
         })),
       };
     });
@@ -140,6 +148,7 @@ describe('Photarium demarked MCP tool', () => {
       namespace: 'studio',
       folder: 'references',
       parentId: 'source-a',
+      duplicateAction: 'override',
       tags: ['reference', 'demarked'],
       originalUrl: 'https://example.com/original.png',
       sourceUrl: 'https://example.com/page',
@@ -147,7 +156,7 @@ describe('Photarium demarked MCP tool', () => {
     }));
     expect(organizationMocks.updateMetadata).toHaveBeenCalledWith('child-a', expect.objectContaining({
       displayName: 'Source A — Demarked',
-      altTag: 'Source alt text',
+      altTag: 'Original alt text',
       parentId: 'source-a',
     }));
     expect(result.results[0]).toMatchObject({
@@ -276,4 +285,56 @@ describe('Photarium demarked MCP tool', () => {
       removeAllMetadata: true,
     });
   });
+  it('rejects delivery fallbacks before processing', async () => {
+    discoveryMocks.downloadOriginalImageById.mockResolvedValueOnce({ base64: TINY_PNG.toString('base64'),
+      fallbackUsed: true, variantUsed: 'default' });
+    const result = await processDemarkImages(['source-a'], settings);
+    expect(result.failed).toBe(1);
+    expect(workerMocks.runDemarkWorker).not.toHaveBeenCalled();
+    expect(uploadMocks.uploadFileBase64).not.toHaveBeenCalled();
+  });
+
+  it('returns the worker animation error without trying to read a missing output', async () => {
+    workerMocks.runDemarkWorker.mockResolvedValueOnce({ items: [{ imageId: 'source-a', ok: false,
+      error: 'Animated WebP is not supported for pixel regeneration' }] });
+    const result = await processDemarkImages(['source-a'], settings);
+    expect(result.results[0]).toMatchObject({ status: 'failed', stage: 'process',
+      error: 'Animated WebP is not supported for pixel regeneration' });
+    expect(uploadMocks.uploadFileBase64).not.toHaveBeenCalled();
+  });
+
+  it('reports the child ID when hosted original verification fails', async () => {
+    discoveryMocks.downloadOriginalImageById.mockImplementation(async (id: string) => ({
+      base64: (id === 'source-a' ? TINY_PNG : Buffer.from('changed')).toString('base64'),
+      filename: `${id}.png`, variantUsed: 'original', fallbackUsed: false }));
+    const result = await processDemarkImages(['source-a'], settings);
+    expect(result.results[0]).toMatchObject({ status: 'failed', stage: 'verify', childId: 'child-a' });
+  });
+
+  it('names a WebP from its bytes even when the catalog suffix is PNG', async () => {
+    const webp = Buffer.from('524946460c000000574542505650384c00000000', 'hex');
+    discoveryMocks.downloadOriginalImageById.mockResolvedValue({ base64: webp.toString('base64'),
+      filename: 'source-a.png', variantUsed: 'original', fallbackUsed: false });
+    workerMocks.runDemarkWorker.mockImplementation(async ({ items }) => {
+      for (const item of items) await fs.writeFile(item.outputPath, webp);
+      return { items: items.map((item: { imageId: string }) => ({ imageId: item.imageId,
+        ok: true, width: 1, height: 1, aiMetadataPresent: false, verification, frames: 1 })) };
+    });
+    const result = await processDemarkImages(['source-a'], { ...settings, mode: 'metadata' });
+    expect(result).toMatchObject({ succeeded: 1, failed: 0 });
+    expect(uploadMocks.uploadFileBase64).toHaveBeenCalledWith('/api/upload', expect.objectContaining({
+      filename: 'source-a-demarked.webp', contentType: 'image/webp', description: 'Original description' }));
+    expect(result.results[0]).toMatchObject({ verification: { file: verification, hostedOriginalMatches: true } });
+  });
+
+  it('forwards explicit child duplicate handling through the multipart upload client', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ id: 'child-a' })));
+    const client = await vi.importActual<typeof import('../mcp-server/src/runtime/upload/client.js')>('../mcp-server/src/runtime/upload/client.js');
+    await client.uploadFileBase64('/api/upload', { base64: TINY_PNG.toString('base64'),
+      filename: 'child.webp', contentType: 'image/webp', parentId: 'source-a', duplicateAction: 'override' });
+    const body = fetch.mock.calls[0]?.[1]?.body as FormData;
+    expect(body.get('duplicateAction')).toBe('override');
+    expect(body.get('parentId')).toBe('source-a');
+  });
+
 });
