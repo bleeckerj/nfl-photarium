@@ -127,6 +127,8 @@ describe('creative brief helpers', () => {
         imageId: 'source-run',
         prompt,
         provider: 'photarium_openai',
+        model: 'gpt-image-2.5-flare',
+        quality: 'xhigh',
       });
       return new Response(JSON.stringify({
         ok: true,
@@ -149,7 +151,13 @@ describe('creative brief helpers', () => {
       imageId: 'source-run',
       request: {
         effectId: 'creative-brief',
-        params: { prompt, provider: 'photarium_openai', sourceRelationship: 'brief_led' },
+        params: {
+          prompt,
+          provider: 'photarium_openai',
+          sourceRelationship: 'brief_led',
+          model: 'gpt-image-2.5-flare',
+          quality: 'xhigh',
+        },
         output: { mode: 'still', format: 'png' },
       },
       updateRun: vi.fn(),

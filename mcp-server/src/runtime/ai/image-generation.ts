@@ -1,5 +1,11 @@
 const OPENAI_API_BASE_URL = process.env.OPENAI_API_BASE_URL || 'https://api.openai.com/v1';
-const DEFAULT_OPENAI_IMAGE_MODEL = process.env.PHOTARIUM_OPENAI_IMAGE_MODEL || 'gpt-image-2';
+export const OPENAI_IMAGE_MODELS = ['gpt-image-2.5-sunburst', 'gpt-image-2.5-flare', 'gpt-image-2'] as const;
+export const OPENAI_IMAGE_QUALITIES = ['auto', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+
+export type OpenAiImageModel = (typeof OPENAI_IMAGE_MODELS)[number];
+export type OpenAiImageQuality = (typeof OPENAI_IMAGE_QUALITIES)[number];
+
+const DEFAULT_OPENAI_IMAGE_MODEL = process.env.PHOTARIUM_OPENAI_IMAGE_MODEL || 'gpt-image-2.5-sunburst';
 
 export type ImageReferenceRole =
   | 'style_reference'
@@ -95,6 +101,38 @@ interface OpenAiImageResult {
   b64Json?: string;
   url?: string;
   revisedPrompt?: string;
+}
+
+function normalizeOpenAiImageModel(value?: string): OpenAiImageModel {
+  const model = value?.trim() || DEFAULT_OPENAI_IMAGE_MODEL;
+  if (!OPENAI_IMAGE_MODELS.includes(model as OpenAiImageModel)) {
+    throw new Error(`Unsupported OpenAI image model "${model}". Use ${OPENAI_IMAGE_MODELS.join(' or ')}.`);
+  }
+  return model as OpenAiImageModel;
+}
+
+function normalizeOpenAiImageQuality(value?: string): OpenAiImageQuality {
+  const quality = value?.trim() || 'auto';
+  if (!OPENAI_IMAGE_QUALITIES.includes(quality as OpenAiImageQuality)) {
+    throw new Error(`Unsupported OpenAI image quality "${quality}". Use ${OPENAI_IMAGE_QUALITIES.join(', ')}.`);
+  }
+  return quality as OpenAiImageQuality;
+}
+
+function normalizeOpenAiImageSize(value?: string): string | undefined {
+  const size = value?.trim();
+  if (!size || size === 'auto') return size;
+  const match = size.match(/^(\d+)x(\d+)$/i);
+  if (!match) throw new Error(`Unsupported OpenAI image size "${size}". Use auto or WIDTHxHEIGHT.`);
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  const pixels = width * height;
+  const ratio = width / height;
+  if (width % 16 !== 0 || height % 16 !== 0) throw new Error('OpenAI image width and height must be multiples of 16.');
+  if (ratio < 1 / 3 || ratio > 3) throw new Error('OpenAI image aspect ratio must be between 1:3 and 3:1.');
+  if (width > 3840 || height > 3840) throw new Error('OpenAI image width and height cannot exceed 3840 pixels.');
+  if (pixels < 655_360 || pixels > 8_294_400) throw new Error('OpenAI image size must contain between 655,360 and 8,294,400 pixels.');
+  return `${width}x${height}`;
 }
 
 function normalizePrompt(value: unknown): string | undefined {
@@ -259,15 +297,16 @@ function readOpenAiApiKey(): string {
   return apiKey;
 }
 
-async function postOpenAiImageRequest(endpointPath: '/images/generations' | '/images/edits', body: Record<string, unknown>): Promise<OpenAiImageResult> {
+async function postOpenAiImageRequest(endpointPath: '/images/generations' | '/images/edits', body: Record<string, unknown> | FormData): Promise<OpenAiImageResult> {
   const endpoint = new URL(endpointPath.replace(/^\//, ''), `${OPENAI_API_BASE_URL.replace(/\/$/, '')}/`);
+  const multipart = body instanceof FormData;
   const response = await fetch(endpoint, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${readOpenAiApiKey()}`,
-      'Content-Type': 'application/json',
+      ...(!multipart ? { 'Content-Type': 'application/json' } : {}),
     },
-    body: JSON.stringify(body),
+    body: multipart ? body : JSON.stringify(body),
   });
   const rawText = await response.text();
   let parsed: unknown = rawText;
@@ -368,13 +407,36 @@ function buildReferencePrompt(prompt: string, references: Array<{ role: ImageRef
 }
 
 function buildImageRequestSettings(settings: ImageGenerationSettings) {
+  const model = normalizeOpenAiImageModel(settings.model);
+  const quality = normalizeOpenAiImageQuality(settings.quality);
+  if (model === 'gpt-image-2' && (quality === 'xhigh' || quality === 'max')) {
+    throw new Error(`${model} does not support ${quality} quality. Use auto, low, medium, or high.`);
+  }
   return {
-    model: settings.model || DEFAULT_OPENAI_IMAGE_MODEL,
-    size: settings.size,
-    quality: settings.quality,
+    model,
+    size: normalizeOpenAiImageSize(settings.size),
+    quality,
     background: settings.background,
     outputFormat: normalizeImageOutputFormat(settings.outputFormat),
   };
+}
+
+async function buildOpenAiEditFormData(
+  requestBody: Record<string, unknown>,
+  imageUrls: string[],
+): Promise<FormData> {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(requestBody)) {
+    if (key === 'images' || value === undefined) continue;
+    form.append(key, String(value));
+  }
+  for (const [index, imageUrl] of imageUrls.entries()) {
+    const response = await fetch(imageUrl);
+    if (!response.ok) throw new Error(`Failed to materialize OpenAI edit reference ${index + 1} (${response.status})`);
+    const contentType = response.headers.get('content-type')?.split(';')[0]?.trim() || 'image/png';
+    form.append('image[]', new Blob([await response.arrayBuffer()], { type: contentType }), `reference-${index + 1}.${contentType === 'image/jpeg' ? 'jpg' : contentType.split('/')[1] || 'png'}`);
+  }
+  return form;
 }
 
 function buildImagePromptProvenance(args: Record<string, unknown>): string {
@@ -485,7 +547,8 @@ export async function generatePhotariumImageFromReferences(
       upload: { filename: buildGeneratedFilename(settings, requestSettings.outputFormat), namespace: settings.namespace, folder: settings.folder, createFolder: settings.createFolder, tags: settings.tags, parentId: settings.parentId || singleParentId },
     };
   }
-  const openAiResult = await postOpenAiImageRequest('/images/edits', requestBody);
+  const editForm = await buildOpenAiEditFormData(requestBody, resolved.map((reference) => reference.imageUrl));
+  const openAiResult = await postOpenAiImageRequest('/images/edits', editForm);
   const materialized = await materializeOpenAiImageResult(openAiResult, imageMimeForOutputFormat(requestSettings.outputFormat));
   const upload = await uploadGeneratedImage(deps, {
     base64: materialized.base64,
