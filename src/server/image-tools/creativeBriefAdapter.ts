@@ -20,6 +20,20 @@ const providers = [
   { value: 'photarium_openai', label: 'Photarium OpenAI (run now)' },
 ];
 
+const openAiModels = [
+  { value: 'gpt-image-2.5-sunburst', label: 'Sunburst — precise generation and editing' },
+  { value: 'gpt-image-2.5-flare', label: 'Flare — faster generation' },
+];
+
+const openAiQualities = [
+  { value: 'auto', label: 'Auto' },
+  { value: 'low', label: 'Low — quick draft' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+  { value: 'xhigh', label: 'Extra high' },
+  { value: 'max', label: 'Maximum' },
+];
+
 const manifest = {
   id: 'creative-brief',
   label: 'Creative Brief',
@@ -67,6 +81,23 @@ const manifest = {
       defaultValue: 'photarium_openai',
       options: providers,
     },
+    {
+      id: 'params.model',
+      label: 'OpenAI image model',
+      type: 'select' as const,
+      group: 'provider',
+      defaultValue: 'gpt-image-2.5-sunburst',
+      options: openAiModels,
+      helpText: 'Sunburst favors precise edits. Flare favors speed.',
+    },
+    {
+      id: 'params.quality',
+      label: 'Quality',
+      type: 'select' as const,
+      group: 'output',
+      defaultValue: 'high',
+      options: openAiQualities,
+    },
   ],
   defaultRequest: {
     effectId: 'creative-brief',
@@ -75,6 +106,8 @@ const manifest = {
       sourceRelationship: 'brief_led',
       aspectRatio: '',
       provider: 'photarium_openai',
+      model: 'gpt-image-2.5-sunburst',
+      quality: 'high',
     },
     output: { mode: 'still' as const, format: 'png' },
   },
@@ -85,6 +118,8 @@ function readParams(request: ImageToolRequest): {
   sourceRelationship?: string;
   aspectRatio?: string;
   provider?: string;
+  model?: string;
+  quality?: string;
 } {
   const params = request.params;
   const promptValue = typeof params.prompt === 'string' ? params.prompt : params.creativeBrief;
@@ -95,6 +130,8 @@ function readParams(request: ImageToolRequest): {
     sourceRelationship: typeof params.sourceRelationship === 'string' ? params.sourceRelationship : undefined,
     aspectRatio: typeof params.aspectRatio === 'string' ? params.aspectRatio.trim() || undefined : undefined,
     provider: typeof params.provider === 'string' ? params.provider : undefined,
+    model: typeof params.model === 'string' ? params.model : undefined,
+    quality: typeof params.quality === 'string' ? params.quality : undefined,
   };
 }
 
@@ -114,6 +151,8 @@ async function prepare(imageId: string, request: ImageToolRequest): Promise<{
       sourceRelationship: params.sourceRelationship,
       aspectRatio: params.aspectRatio,
       provider: 'photarium_openai',
+      model: params.model,
+      quality: params.quality,
       outputFormat: request.output.format,
     });
     const plan = result.plan as CreativeBriefGenerationPlan | undefined;

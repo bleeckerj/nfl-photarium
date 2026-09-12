@@ -1,3 +1,7 @@
+export declare const OPENAI_IMAGE_MODELS: readonly ["gpt-image-2.5-sunburst", "gpt-image-2.5-flare", "gpt-image-2"];
+export declare const OPENAI_IMAGE_QUALITIES: readonly ["auto", "low", "medium", "high", "xhigh", "max"];
+export type OpenAiImageModel = (typeof OPENAI_IMAGE_MODELS)[number];
+export type OpenAiImageQuality = (typeof OPENAI_IMAGE_QUALITIES)[number];
 export type ImageReferenceRole = 'style_reference' | 'subject_reference' | 'composition_reference' | 'brand_reference' | 'logo_reference' | 'semantic_source';
 export interface ImageReferenceInput {
     imageId?: string;

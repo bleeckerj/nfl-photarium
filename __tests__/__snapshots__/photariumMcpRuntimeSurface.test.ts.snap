@@ -50,7 +50,12 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "type": "string",
       },
       "model": {
-        "description": "OpenAI image model. Defaults to PHOTARIUM_OPENAI_IMAGE_MODEL or gpt-image-2.",
+        "description": "OpenAI image model. Defaults to PHOTARIUM_OPENAI_IMAGE_MODEL or gpt-image-2.5-sunburst.",
+        "enum": [
+          "gpt-image-2.5-sunburst",
+          "gpt-image-2.5-flare",
+          "gpt-image-2",
+        ],
         "type": "string",
       },
       "namespace": {
@@ -80,7 +85,15 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "type": "string",
       },
       "quality": {
-        "description": "Image quality, e.g. low, medium, high, or auto.",
+        "description": "OpenAI image quality. Defaults to auto.",
+        "enum": [
+          "auto",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+        ],
         "type": "string",
       },
       "size": {
@@ -330,7 +343,12 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "type": "string",
       },
       "model": {
-        "description": "OpenAI image model. Defaults to PHOTARIUM_OPENAI_IMAGE_MODEL or gpt-image-2.",
+        "description": "OpenAI image model. Defaults to PHOTARIUM_OPENAI_IMAGE_MODEL or gpt-image-2.5-sunburst.",
+        "enum": [
+          "gpt-image-2.5-sunburst",
+          "gpt-image-2.5-flare",
+          "gpt-image-2",
+        ],
         "type": "string",
       },
       "namespace": {
@@ -352,7 +370,15 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "type": "string",
       },
       "quality": {
-        "description": "Image quality, e.g. low, medium, high, or auto.",
+        "description": "OpenAI image quality. Defaults to auto.",
+        "enum": [
+          "auto",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+        ],
         "type": "string",
       },
       "size": {
@@ -855,7 +881,12 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "type": "string",
       },
       "model": {
-        "description": "OpenAI image model. Defaults to PHOTARIUM_OPENAI_IMAGE_MODEL or gpt-image-2.",
+        "description": "OpenAI image model. Defaults to PHOTARIUM_OPENAI_IMAGE_MODEL or gpt-image-2.5-sunburst.",
+        "enum": [
+          "gpt-image-2.5-sunburst",
+          "gpt-image-2.5-flare",
+          "gpt-image-2",
+        ],
         "type": "string",
       },
       "namespace": {
@@ -877,7 +908,15 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "type": "string",
       },
       "quality": {
-        "description": "Image quality, e.g. low, medium, high, or auto.",
+        "description": "OpenAI image quality. Defaults to auto.",
+        "enum": [
+          "auto",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+        ],
         "type": "string",
       },
       "size": {

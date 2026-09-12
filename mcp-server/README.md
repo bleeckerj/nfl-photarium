@@ -168,7 +168,7 @@ export OPENAI_API_KEY=your_api_key_here
 Optional image generation settings:
 
 ```bash
-export PHOTARIUM_OPENAI_IMAGE_MODEL=gpt-image-2
+export PHOTARIUM_OPENAI_IMAGE_MODEL=gpt-image-2.5-sunburst
 export OPENAI_API_BASE_URL=https://api.openai.com/v1
 ```
 

@@ -6,6 +6,8 @@ type CreativeBriefMcpInput = {
   sourceRelationship?: string;
   aspectRatio?: string;
   provider: GenerationProvider;
+  model?: string;
+  quality?: string;
   outputFormat?: string;
 };
 
@@ -112,6 +114,8 @@ export async function generateCreativeBriefThroughMcp(
         sourceRelationship: input.sourceRelationship as SourceRelationship | undefined,
         aspectRatio: input.aspectRatio,
         provider: input.provider,
+        model: input.model,
+        quality: input.quality,
         outputFormat: input.outputFormat,
       }),
     });
