@@ -14,7 +14,6 @@ const {
   batchGetAspectMetadataMock,
   batchGetColorMetadataMock,
   isVectorSearchAvailableMock,
-  hydrateMissingAspectMetadataMock,
 } = vi.hoisted(() => ({
   getCachedImagesMock: vi.fn(),
   getCacheStatsMock: vi.fn(),
@@ -26,7 +25,6 @@ const {
   batchGetAspectMetadataMock: vi.fn(),
   batchGetColorMetadataMock: vi.fn(),
   isVectorSearchAvailableMock: vi.fn(),
-  hydrateMissingAspectMetadataMock: vi.fn(),
 }));
 
 vi.mock('@/server/cloudflareImageCache', () => ({
@@ -39,10 +37,6 @@ vi.mock('@/server/vectorSearch', () => ({
   batchGetAspectMetadata: batchGetAspectMetadataMock,
   batchGetColorMetadata: batchGetColorMetadataMock,
   isVectorSearchAvailable: isVectorSearchAvailableMock,
-}));
-
-vi.mock('@/server/aspectMetadataHydration', () => ({
-  hydrateMissingAspectMetadata: hydrateMissingAspectMetadataMock,
 }));
 
 vi.mock('@/server/videoCatalogStorage', () => ({
@@ -100,12 +94,6 @@ describe('GET /api/images video integration', () => {
     batchGetAspectMetadataMock.mockResolvedValue(new Map());
     batchGetColorMetadataMock.mockResolvedValue(new Map());
     isVectorSearchAvailableMock.mockResolvedValue(false);
-    hydrateMissingAspectMetadataMock.mockImplementation(async (images: unknown[]) => ({
-      images,
-      candidateCount: 0,
-      resolvedCount: images.length,
-      unresolvedCount: 0,
-    }));
   });
 it('applies extras description/altText to image list payload', async () => {
     getCachedImagesMock.mockResolvedValue([
@@ -439,7 +427,7 @@ it('applies extras description/altText to image list payload', async () => {
     );
   });
 
-  it('hydrates missing aspect metadata before counting a filtered corpus', async () => {
+  it('does not perform unbounded request-time hydration for missing aspect metadata', async () => {
     getCachedImagesMock.mockResolvedValue([
       {
         id: 'square-from-hydration',
@@ -459,30 +447,22 @@ it('applies extras description/altText to image list payload', async () => {
     listVideoAssetRecordsWithSyncMock.mockResolvedValue([]);
     isVectorSearchAvailableMock.mockResolvedValueOnce(true);
     batchGetAspectMetadataMock.mockResolvedValueOnce(new Map());
-    hydrateMissingAspectMetadataMock.mockImplementationOnce(async (images: Array<{ id: string }>) => ({
-      images: images.map((image) => ({
-        ...image,
-        aspectRatio: image.id === 'square-from-hydration' ? '1:1' : '16:9',
-        dimensions: image.id === 'square-from-hydration'
-          ? { width: 1000, height: 1000 }
-          : { width: 1600, height: 900 },
-      })),
-      candidateCount: images.length,
-      resolvedCount: images.length,
-      unresolvedCount: 0,
-    }));
-
     const response = await GET(
       new NextRequest('http://localhost/api/images?namespace=__all__&page=1&pageSize=60&aspectRatioClasses=square')
     );
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(hydrateMissingAspectMetadataMock).toHaveBeenCalledTimes(1);
-    expect(payload.images.map((image: { id: string }) => image.id)).toEqual(['square-from-hydration']);
+    expect(payload.images).toEqual([]);
+    expect(payload.diagnostics).toEqual(
+      expect.objectContaining({
+        aspect_metadata_known_count: 0,
+        aspect_metadata_missing_count: 2,
+      })
+    );
     expect(payload.pagination).toEqual(
       expect.objectContaining({
-        total: 1,
+        total: 0,
         scopeTotal: 2,
         totalPages: 1,
       })
@@ -703,5 +683,3 @@ it('applies extras description/altText to image list payload', async () => {
     );
   });
 });
-
-

@@ -177,4 +177,36 @@ describe('gallery hidden visibility persistence', () => {
     expect(latest?.hiddenFolders).toEqual([]);
     expect(latest?.hiddenNamespaces).toEqual(['cf-exports-for-mail']);
   });
+
+  it('resets pagination in the same update as an aspect filter change', async () => {
+    storage = installStorage();
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+
+    await act(async () => {
+      root?.render(
+        React.createElement(function Harness() {
+          latest = useGalleryFilters({
+            images: [image],
+            serverPagination: {
+              page: 4,
+              pageSize: 30,
+              total: 300,
+              totalPages: 10,
+            },
+            initialPreferences,
+            brokenImageIds: new Set(),
+          });
+          return null;
+        })
+      );
+    });
+
+    expect(latest?.currentPage).toBe(4);
+    await act(async () => latest?.setAspectRatioFilters(['vertical']));
+
+    expect(latest?.aspectRatioFilters).toEqual(['vertical']);
+    expect(latest?.currentPage).toBe(1);
+  });
 });

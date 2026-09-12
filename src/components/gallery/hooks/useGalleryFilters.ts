@@ -173,12 +173,18 @@ export function useGalleryFilters({
   const [embeddingFilter, setEmbeddingFilter] = useState<EmbeddingFilter>(
     initialPreferences.embeddingFilter ?? 'none'
   );
-  const [aspectRatioFilters, setAspectRatioFilters] = useState<AspectRatioClass[]>(
+  const [aspectRatioFilters, setAspectRatioFiltersState] = useState<AspectRatioClass[]>(
     initialPreferences.aspectRatioFilters ?? []
   );
   const [dateFilter, setDateFilter] = useState<DateFilter | null>(initialPreferences.dateFilter);
   const [currentPage, setCurrentPage] = useState(initialPreferences.currentPage ?? 1);
   const [pageSize, setPageSize] = useState(initialPreferences.pageSize ?? DEFAULT_PAGE_SIZE);
+  const setAspectRatioFilters = useCallback((filters: AspectRatioClass[]) => {
+    // Keep the filter and page transition in the same render. A deferred page
+    // reset would briefly request the previous page from the filtered corpus.
+    setAspectRatioFiltersState(filters);
+    setCurrentPage(1);
+  }, []);
   
   // Hidden folders/tags
   const initialHiddenFolders = initialPreferences.hiddenFolders ?? loadHiddenFolders();
@@ -483,7 +489,7 @@ export function useGalleryFilters({
     setEmbeddingFilter('none');
     setAspectRatioFilters([]);
     setDateFilter(null);
-  }, []);
+  }, [setAspectRatioFilters]);
 
   const scrollGalleryToTop = useCallback(() => {
     if (typeof window === 'undefined') return;
@@ -573,6 +579,7 @@ export function useGalleryFilters({
     showBrokenOnly,
     showComfyOnly,
     embeddingFilter,
+    aspectRatioFilters,
     pageSize,
     dateFilter,
     scrollGalleryToTop,

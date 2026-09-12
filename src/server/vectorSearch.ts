@@ -15,6 +15,7 @@
 
 import { CLIP_EMBEDDING_DIM } from './embeddingService';
 import { COLOR_HISTOGRAM_DIM } from './colorExtraction';
+import { batchReadRedisHashFields, type RedisHashBatchClient } from './redisHashBatch';
 
 // Redis client type
 export interface RedisClient {
@@ -455,33 +456,17 @@ export async function batchGetColorMetadata(imageIds: string[]): Promise<Map<str
 
   const client = await getRedisClient();
 
-  // Use Redis pipeline for efficient batch fetching
-  const pipeline = (client as unknown as { pipeline: () => {
-    hget: (key: string, field: string) => unknown;
-    exec: () => Promise<[Error | null, unknown][]>;
-  } }).pipeline();
-
-  // Queue up all the field requests
-  for (const imageId of missingIds) {
-    const key = `${KEY_PREFIX}${imageId}`;
-    pipeline.hget(key, 'dominant_colors');
-    pipeline.hget(key, 'average_color');
-    pipeline.hget(key, CLIP_FIELD);
-    pipeline.hget(key, COLOR_FIELD);
-  }
-
-  const responses = await pipeline.exec();
-  if (!responses) return results;
+  const valuesByKey = await batchReadRedisHashFields(
+    client as unknown as RedisHashBatchClient,
+    missingIds.map((imageId) => `${KEY_PREFIX}${imageId}`),
+    ['dominant_colors', 'average_color', CLIP_FIELD, COLOR_FIELD],
+  );
 
   // Process results (4 fields per image)
   for (let i = 0; i < missingIds.length; i++) {
     const imageId = missingIds[i];
-    const baseIdx = i * 4;
-
-    const [, dominantColorsRaw] = responses[baseIdx] || [];
-    const [, averageColorRaw] = responses[baseIdx + 1] || [];
-    const [, clipRaw] = responses[baseIdx + 2] || [];
-    const [, colorRaw] = responses[baseIdx + 3] || [];
+    const [dominantColorsRaw, averageColorRaw, clipRaw, colorRaw] =
+      valuesByKey.get(`${KEY_PREFIX}${imageId}`) ?? [];
 
     // Only include if we have any data
     if (dominantColorsRaw || averageColorRaw || clipRaw || colorRaw) {
@@ -530,30 +515,16 @@ export async function batchGetAspectMetadata(imageIds: string[]): Promise<Map<st
 
   const client = await getRedisClient();
 
-  const pipeline = (client as unknown as { pipeline: () => {
-    hget: (key: string, field: string) => unknown;
-    exec: () => Promise<[Error | null, unknown][]>;
-  } }).pipeline();
-
-  for (const imageId of missingIds) {
-    const key = `${KEY_PREFIX}${imageId}`;
-    pipeline.hget(key, ASPECT_RATIO_FIELD);
-    pipeline.hget(key, ASPECT_RATIO_CLASS_FIELD);
-    pipeline.hget(key, WIDTH_FIELD);
-    pipeline.hget(key, HEIGHT_FIELD);
-  }
-
-  const responses = await pipeline.exec();
-  if (!responses) return results;
+  const valuesByKey = await batchReadRedisHashFields(
+    client as unknown as RedisHashBatchClient,
+    missingIds.map((imageId) => `${KEY_PREFIX}${imageId}`),
+    [ASPECT_RATIO_FIELD, ASPECT_RATIO_CLASS_FIELD, WIDTH_FIELD, HEIGHT_FIELD],
+  );
 
   for (let i = 0; i < missingIds.length; i++) {
     const imageId = missingIds[i];
-    const baseIdx = i * 4;
-
-    const [, aspectRatioRaw] = responses[baseIdx] || [];
-    const [, aspectRatioClassRaw] = responses[baseIdx + 1] || [];
-    const [, widthRaw] = responses[baseIdx + 2] || [];
-    const [, heightRaw] = responses[baseIdx + 3] || [];
+    const [aspectRatioRaw, aspectRatioClassRaw, widthRaw, heightRaw] =
+      valuesByKey.get(`${KEY_PREFIX}${imageId}`) ?? [];
 
     if (aspectRatioRaw || aspectRatioClassRaw || widthRaw || heightRaw) {
       const width = typeof widthRaw === 'string' ? Number(widthRaw) : undefined;

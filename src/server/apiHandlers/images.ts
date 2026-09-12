@@ -16,7 +16,11 @@ import {
   toListableImage,
 } from '@/server/galleryQueryRoute';
 import { getScopedAssetAssembly } from '@/server/galleryScopeAssembly';
-import { matchesAspectRatioClass, normalizeAspectRatioClass } from '@/utils/aspectRatioClass';
+import {
+  matchesAspectRatioClass,
+  normalizeAspectRatioClass,
+  resolveAspectRatioClass,
+} from '@/utils/aspectRatioClass';
 import {
   applyGalleryOptionalMetadata,
   loadGalleryOptionalMetadata,
@@ -262,9 +266,13 @@ export async function GET(request: NextRequest) {
 
     imagesWithEmbeddings = applyGalleryOptionalMetadata(imagesWithEmbeddings, optionalMetadata);
 
-    if (aspectRatioClasses.length > 0 || normalizedAspectRatioClass || aspectRatio) {
-      const { hydrateMissingAspectMetadata } = await import('@/server/aspectMetadataHydration');
-      imagesWithEmbeddings = (await hydrateMissingAspectMetadata(imagesWithEmbeddings)).images;
+    if (needsAspectMetadata) {
+      const knownAspectCount = imagesWithEmbeddings.reduce(
+        (count, image) => count + (resolveAspectRatioClass(image) ? 1 : 0),
+        0,
+      );
+      diagnostics.aspect_metadata_known_count = knownAspectCount;
+      diagnostics.aspect_metadata_missing_count = imagesWithEmbeddings.length - knownAspectCount;
     }
 
     const enrichedImageMap = new Map(imagesWithEmbeddings.map((image) => [image.id, image]));
@@ -485,4 +493,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-
