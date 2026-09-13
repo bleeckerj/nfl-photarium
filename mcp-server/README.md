@@ -137,6 +137,9 @@ npm install
 npm run build
 ```
 
+`npm run build` removes the previous `dist/` directory before compiling. `dist/` is local
+generated output and is not committed; TypeScript under `src/` is the source of truth.
+
 ## Run the MCP Server
 
 Stdio (default):
@@ -144,6 +147,9 @@ Stdio (default):
 ```bash
 npm run dev
 ```
+
+For the compiled runtime, `npm start` performs a clean build before launching
+`dist/index.js`.
 
 HTTP proxy enabled:
 

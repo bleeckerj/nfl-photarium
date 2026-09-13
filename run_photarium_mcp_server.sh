@@ -85,11 +85,12 @@ load_env_file() {
 load_env_file "$ROOT_DIR/.env"
 load_env_file "$ROOT_DIR/.env.local"
 
-if [[ ! -f "$MCP_DIR/dist/index.js" ]]; then
-  echo "Build output missing. Running npm run build..." >&2
-  NPM_BIN="$(resolve_bin npm /usr/local/bin/npm /opt/homebrew/bin/npm /opt/local/bin/npm)"
-  (cd "$MCP_DIR" && "$NPM_BIN" run build)
-fi
+build_runtime() {
+  local npm_bin
+  npm_bin="$(resolve_bin npm /usr/local/bin/npm /opt/homebrew/bin/npm /opt/local/bin/npm)"
+  echo "Building Photarium MCP runtime from source..." >&2
+  (cd "$MCP_DIR" && "$npm_bin" run build)
+}
 
 export PHOTARIUM_BASE_URL="${PHOTARIUM_BASE_URL:-http://127.0.0.1:3000}"
 export PHOTARIUM_HTTP_ENABLED="${PHOTARIUM_HTTP_ENABLED:-true}"
@@ -153,6 +154,7 @@ case "$ACTION" in
     stop_listeners
     ;;
   restart)
+    build_runtime
     if [[ "$PHOTARIUM_HTTP_ENABLED" == "true" ]]; then
       stop_listeners
     fi
@@ -173,6 +175,7 @@ case "$ACTION" in
         fi
       fi
     fi
+    build_runtime
     prepare_runtime_env
     exec "$NODE_BIN" "$MCP_DIR/dist/index.js"
     ;;

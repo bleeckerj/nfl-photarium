@@ -66,4 +66,10 @@ KILL_IF_OCCUPIED=1 ./run_photarium_mcp_server.sh start
 
 ## Build behavior
 
-If `mcp-server/dist/index.js` is missing, the script runs `npm run build` in `mcp-server/` automatically.
+The TypeScript under `mcp-server/src/` is the source of truth. Compiled files under
+`mcp-server/dist/` are local build output and are excluded from Git.
+
+`start` and `restart` run a clean MCP build before launching the server. A failed build
+leaves the existing listener alone during `restart`; `status` and `stop` do not build.
+Running `npm start` directly inside `mcp-server/` also builds first through its `prestart`
+script.

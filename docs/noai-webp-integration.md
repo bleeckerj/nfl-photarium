@@ -38,43 +38,9 @@ These live runs used metadata cleanup. Real model inference was not exercised. T
 
 The existing Next.js middleware deprecation and size-audit maintenance warnings remain. Temporary logs and hosted-byte comparison records are in `/private/tmp/photarium-webp-*` and are not committed.
 
-## Uncommitted files outside this change
+## Local files outside this change
 
-The following files remain outside the source commit. Build outputs are deliberately unstaged; the other work was present before this task.
-
-MCP compiled artifacts (existing output plus the WebP rebuild):
-
-```text
-mcp-server/dist/contracts/index.js
-mcp-server/dist/runtime/ai/handlers.js
-mcp-server/dist/runtime/ai/image-generation.d.ts
-mcp-server/dist/runtime/ai/image-generation.js
-mcp-server/dist/runtime/index.js
-mcp-server/dist/runtime/instagram/commands.d.ts
-mcp-server/dist/runtime/instagram/commands.js
-mcp-server/dist/runtime/instagram/tools.js
-mcp-server/dist/runtime/upload/client.d.ts
-mcp-server/dist/runtime/upload/client.js
-mcp-server/dist/runtime/upload/handlers.js
-mcp-server/dist/runtime/upload/ingest-commands.js
-mcp-server/dist/runtime/upload/tools.js
-mcp-server/dist/contracts/demark.d.ts
-mcp-server/dist/contracts/demark.js
-mcp-server/dist/runtime/demark/handlers.d.ts
-mcp-server/dist/runtime/demark/handlers.js
-mcp-server/dist/runtime/demark/hosted-verification.d.ts
-mcp-server/dist/runtime/demark/hosted-verification.js
-mcp-server/dist/runtime/demark/naming.d.ts
-mcp-server/dist/runtime/demark/naming.js
-mcp-server/dist/runtime/demark/service.d.ts
-mcp-server/dist/runtime/demark/service.js
-mcp-server/dist/runtime/demark/tools.d.ts
-mcp-server/dist/runtime/demark/tools.js
-mcp-server/dist/runtime/demark/types.d.ts
-mcp-server/dist/runtime/demark/types.js
-mcp-server/dist/runtime/demark/worker-runner.d.ts
-mcp-server/dist/runtime/demark/worker-runner.js
-```
+MCP compiled artifacts under `mcp-server/dist/` are generated locally and ignored by Git.
 
 OMATA source ingest:
 
