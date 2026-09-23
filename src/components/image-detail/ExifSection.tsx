@@ -1,17 +1,30 @@
 import React from 'react';
+import {
+  Aperture,
+  CalendarClock,
+  Camera,
+  CircleDot,
+  Factory,
+  Focus,
+  Gauge,
+  Info,
+  MessageSquareText,
+  Timer,
+  type LucideIcon,
+} from 'lucide-react';
 import type { ExifPushMode } from '@/hooks/useExifPropagation';
 import { formatExifDisplayValue } from './exifPresentation';
 
-const exifLabels: Record<string, string> = {
-  make: 'Camera make',
-  model: 'Camera model',
-  lens: 'Lens',
-  dateTimeOriginal: 'Captured',
-  exposureTime: 'Exposure time',
-  fNumber: 'Aperture',
-  iso: 'ISO',
-  focalLength: 'Focal length',
-  userComment: 'Comment',
+const exifFields: Record<string, { label: string; icon: LucideIcon }> = {
+  make: { label: 'Camera make', icon: Factory },
+  model: { label: 'Camera model', icon: Camera },
+  lens: { label: 'Lens', icon: CircleDot },
+  dateTimeOriginal: { label: 'Captured', icon: CalendarClock },
+  exposureTime: { label: 'Exposure time', icon: Timer },
+  fNumber: { label: 'Aperture', icon: Aperture },
+  iso: { label: 'ISO', icon: Gauge },
+  focalLength: { label: 'Focal length', icon: Focus },
+  userComment: { label: 'Comment', icon: MessageSquareText },
 };
 
 export function ExifSection(props: {
@@ -55,12 +68,19 @@ export function ExifSection(props: {
       </div>
       {exifEntries.length > 0 ? (
         <dl className="mt-2 grid grid-cols-1 gap-x-6 sm:grid-cols-2">
-          {exifEntries.map(([key, value]) => (
-            <div key={key} className={`min-w-0 border-b border-gray-100 py-2 ${key === 'userComment' ? 'sm:col-span-2' : ''}`}>
-              <dt className="text-xs text-gray-600">{exifLabels[key] ?? key}</dt>
-              <dd className="mt-0.5 break-words text-sm text-gray-900">{formatExifDisplayValue(key, value)}</dd>
-            </div>
-          ))}
+          {exifEntries.map(([key, value]) => {
+            const field = exifFields[key];
+            const Icon = field?.icon ?? Info;
+            return (
+              <div key={key} className={`min-w-0 border-b border-gray-100 py-2 ${key === 'userComment' ? 'sm:col-span-2' : ''}`}>
+                <dt className="flex items-center gap-1.5 text-xs text-gray-600">
+                  <Icon aria-hidden="true" className="h-3.5 w-3.5 flex-none text-gray-400" />
+                  {field?.label ?? key}
+                </dt>
+                <dd className="mt-0.5 break-words pl-5 text-sm text-gray-900">{formatExifDisplayValue(key, value)}</dd>
+              </div>
+            );
+          })}
         </dl>
       ) : (
         <p className="mt-2 text-sm text-gray-600">No camera EXIF is stored for this image.</p>
