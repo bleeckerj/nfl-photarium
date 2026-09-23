@@ -1,5 +1,6 @@
 import sharp from 'sharp';
 import exifReader from 'exif-reader';
+import { formatExifCameraClock } from './exifDate';
 
 export type ExifSummary = Record<string, string | number>;
 
@@ -110,6 +111,9 @@ const formatExifValue = (value: unknown): string | number | undefined => {
   }
   if (typeof value === 'string' || typeof value === 'number') {
     return value;
+  }
+  if (value instanceof Date && Number.isFinite(value.getTime())) {
+    return formatExifCameraClock(value);
   }
   if (ArrayBuffer.isView(value)) {
     return decodeExifBytes(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));

@@ -207,6 +207,15 @@ export const ImageDetailMetadataPanel = ({
       <span className="text-gray-400">File size</span>
       <span className="text-gray-700">{detailFileSizeLabel}</span>
     </div>
+    {image.assetType !== 'video' && (
+      <ExifSection
+        exifEntries={exifEntries}
+        exifPushTargetLabel={exifPushTargetLabel}
+        exifPushTargetCount={exifPushTargetCount}
+        exifPushing={exifPushing}
+        onPushExif={onPushExif}
+      />
+    )}
     <NamespaceMoveSection
       currentNamespace={image.namespace}
       namespaceOptions={detailNamespaceOptions}
@@ -285,13 +294,6 @@ export const ImageDetailMetadataPanel = ({
       shareUrl={shareUrl}
       shareQrDataUrl={shareQrDataUrl}
       onCopyToClipboard={onCopyText}
-    />
-    <ExifSection
-      exifEntries={exifEntries}
-      exifPushTargetLabel={exifPushTargetLabel}
-      exifPushTargetCount={exifPushTargetCount}
-      exifPushing={exifPushing}
-      onPushExif={onPushExif}
     />
     <VariantLinksSection
       variants={variants}

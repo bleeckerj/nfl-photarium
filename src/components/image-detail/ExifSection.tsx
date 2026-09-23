@@ -1,5 +1,18 @@
 import React from 'react';
 import type { ExifPushMode } from '@/hooks/useExifPropagation';
+import { formatExifDisplayValue } from './exifPresentation';
+
+const exifLabels: Record<string, string> = {
+  make: 'Camera make',
+  model: 'Camera model',
+  lens: 'Lens',
+  dateTimeOriginal: 'Captured',
+  exposureTime: 'Exposure time',
+  fNumber: 'Aperture',
+  iso: 'ISO',
+  focalLength: 'Focal length',
+  userComment: 'Comment',
+};
 
 export function ExifSection(props: {
   exifEntries: Array<[string, string | number]>;
@@ -17,18 +30,14 @@ export function ExifSection(props: {
     onPushExif,
   } = props;
 
-  if (exifEntries.length === 0) {
-    return null;
-  }
-
-  const canPush = Boolean(onPushExif) && exifPushTargetCount > 0;
+  const canPush = exifEntries.length > 0 && Boolean(onPushExif) && exifPushTargetCount > 0;
 
   return (
-    <div id="exif-section">
+    <section id="exif-section" aria-labelledby="exif-heading" className="rounded-lg border border-gray-200 p-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <p className="text-xs font-mono font-medum text-gray-700">EXIF</p>
-          <p className="text-[10px] text-gray-500">{exifEntries.length} fields</p>
+          <h2 id="exif-heading" className="text-sm font-semibold text-gray-900">Camera &amp; capture</h2>
+          <span className="text-xs text-gray-500">EXIF · {exifEntries.length} fields</span>
         </div>
         {canPush && (
           <button
@@ -44,20 +53,21 @@ export function ExifSection(props: {
           </button>
         )}
       </div>
-      <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
-        {exifEntries.map(([key, value]) => (
-          <div
-            key={key}
-            className="flex items-start justify-between gap-3 border rounded px-2 py-1 text-[11px]"
-          >
-            <span className="text-gray-600 font-mono">{key}</span>
-            <span className="text-gray-900 font-mono break-all text-right">{value}</span>
-          </div>
-        ))}
-      </div>
-      {canPush && (
-        <p className="mt-1 text-[10px] text-gray-500">Tip: Shift+click Push overwrites existing EXIF.</p>
+      {exifEntries.length > 0 ? (
+        <dl className="mt-2 grid grid-cols-1 gap-x-6 sm:grid-cols-2">
+          {exifEntries.map(([key, value]) => (
+            <div key={key} className={`min-w-0 border-b border-gray-100 py-2 ${key === 'userComment' ? 'sm:col-span-2' : ''}`}>
+              <dt className="text-xs text-gray-600">{exifLabels[key] ?? key}</dt>
+              <dd className="mt-0.5 break-words text-sm text-gray-900">{formatExifDisplayValue(key, value)}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="mt-2 text-sm text-gray-600">No camera EXIF is stored for this image.</p>
       )}
-    </div>
+      {canPush && (
+        <p className="mt-2 text-xs text-gray-500">Shift+click Push to overwrite existing EXIF.</p>
+      )}
+    </section>
   );
 }
