@@ -1,7 +1,14 @@
 import JSZip from "jszip";
 import { isDngFile } from '@/utils/dng';
+import {
+  CLOUDFLARE_MAX_IMAGE_AREA,
+  CLOUDFLARE_MAX_IMAGE_DIMENSION,
+  MAX_IMAGE_BYTES,
+} from '@/utils/cloudflareImageLimits';
 
-export const MAX_UPLOAD_IMAGE_BYTES = 10 * 1024 * 1024;
+export const MAX_UPLOAD_IMAGE_BYTES = MAX_IMAGE_BYTES;
+export const IMAGE_REDUCTION_QUALITY_STEPS = [1, 0.98, 0.96, 0.94, 0.92, 0.9, 0.88, 0.86, 0.84, 0.82, 0.8, 0.76, 0.72, 0.68, 0.64, 0.6] as const;
+const IMAGE_REDUCTION_SCALE_SEARCH_STEPS = 8;
 const KEYNOTE_IMAGE_EXTENSIONS = ['.jpeg', '.jpg', '.png', '.gif', '.webp', '.svg', '.avif', '.dng'];
 const MIME_BY_EXTENSION: Record<string, string> = {
   '.dng': 'image/x-adobe-dng',
@@ -117,70 +124,115 @@ const renderBitmapToBlob = (bitmap: ImageBitmap, width: number, height: number, 
       return;
     }
     ctx.drawImage(bitmap, 0, 0, width, height);
-    canvas.toBlob((blob) => resolve(blob), type, quality);
+    canvas.toBlob((blob) => resolve(blob?.type === type ? blob : null), type, quality);
   });
 
+type ImageReductionCandidate = {
+  blob: Blob;
+  type: string;
+  quality: number;
+  width: number;
+  height: number;
+};
+
+const resolveReductionFormats = (fileType: string) => {
+  const normalizedType = fileType.toLowerCase();
+  if (normalizedType === 'image/jpeg' || normalizedType === 'image/jpg') {
+    return ['image/jpeg', 'image/webp'];
+  }
+  // WebP preserves alpha. Keep PNG, WebP, and AVIF sources in that family
+  // instead of risking a transparent source being flattened to JPEG.
+  return ['image/webp'];
+};
+
+const resolveCloudflareScale = (width: number, height: number) => Math.min(
+  1,
+  CLOUDFLARE_MAX_IMAGE_DIMENSION / Math.max(width, height),
+  Math.sqrt(CLOUDFLARE_MAX_IMAGE_AREA / (width * height)),
+);
+
+const resolveScaledDimensions = (width: number, height: number, scale: number) => ({
+  width: Math.max(1, Math.round(width * scale)),
+  height: Math.max(1, Math.round(height * scale)),
+});
+
+const selectLargestCandidate = (candidates: ImageReductionCandidate[]) =>
+  candidates.sort((left, right) => right.blob.size - left.blob.size)[0];
+
+const formatReductionNote = (candidate: ImageReductionCandidate, resized: boolean) => {
+  const format = candidate.type === 'image/webp' ? 'WebP' : 'JPEG';
+  const quality = Math.round(candidate.quality * 100);
+  const size = `${(candidate.blob.size / 1024 / 1024).toFixed(2)} MB`;
+  const action = resized ? 'reduced' : 'encoded';
+  return `${action} to ${size} as ${format} q${quality} at ${candidate.width}x${candidate.height}`;
+};
+
+export const shouldDelegateImageReductionToServer = (file: File) =>
+  isDngFile(file.name, file.type) || file.type === 'image/gif' || file.type === 'image/webp';
+
 export const reduceImageFileToLimit = async (file: File, maxBytes: number) => {
+  if (shouldDelegateImageReductionToServer(file)) {
+    return null;
+  }
+
   const bitmap = await createImageBitmap(file);
   const startWidth = bitmap.width;
   const startHeight = bitmap.height;
-  const candidates = ['image/webp', 'image/jpeg'];
-  const qualityByType: Record<string, number> = { 'image/webp': 0.85, 'image/jpeg': 0.85 };
-  let bestBlob: Blob | null = null;
-  let bestType = 'image/jpeg';
+  const formats = resolveReductionFormats(file.type);
+  const initialScale = resolveCloudflareScale(startWidth, startHeight);
 
-  for (const type of candidates) {
-    const blob = await renderBitmapToBlob(bitmap, startWidth, startHeight, type, qualityByType[type]);
-    if (!blob) continue;
-    if (!bestBlob || blob.size < bestBlob.size) {
-      bestBlob = blob;
-      bestType = type;
+  const encodeAtScale = async (scale: number, qualitySteps: readonly number[] = IMAGE_REDUCTION_QUALITY_STEPS) => {
+    const dimensions = resolveScaledDimensions(startWidth, startHeight, scale);
+    for (const quality of qualitySteps) {
+      const passing: ImageReductionCandidate[] = [];
+      for (const type of formats) {
+        const blob = await renderBitmapToBlob(bitmap, dimensions.width, dimensions.height, type, quality);
+        if (blob && blob.size <= maxBytes) {
+          passing.push({ blob, type, quality, ...dimensions });
+        }
+      }
+      if (passing.length > 0) {
+        return selectLargestCandidate(passing);
+      }
     }
-    if (blob.size <= maxBytes) {
-      bitmap.close();
+    return null;
+  };
+
+  try {
+    const fullSizeCandidate = await encodeAtScale(initialScale);
+    if (fullSizeCandidate) {
       return {
-        blob,
-        type,
-        width: startWidth,
-        height: startHeight,
-        note: `Converted to ${type === 'image/webp' ? 'WebP' : 'JPEG'}`
+        ...fullSizeCandidate,
+        note: formatReductionNote(fullSizeCandidate, initialScale < 1),
       };
     }
-  }
 
-  let width = startWidth;
-  let height = startHeight;
-  let resizedBlob = bestBlob;
-  let attempts = 0;
-  const minDimension = 320;
-  const targetType = bestBlob ? bestType : 'image/jpeg';
-  const targetQuality = targetType === 'image/webp' ? 0.82 : 0.8;
+    // The full-size quality ladder could not fit. Find the largest scale at
+    // maximum quality, then select the best quality that fits at that scale.
+    const minimumScale = 1 / Math.max(startWidth, startHeight);
+    let lowerScale = minimumScale;
+    let upperScale = initialScale;
+    let largestPassingScale: number | undefined;
+    for (let attempt = 0; attempt < IMAGE_REDUCTION_SCALE_SEARCH_STEPS; attempt += 1) {
+      const candidateScale = (lowerScale + upperScale) / 2;
+      const candidate = await encodeAtScale(candidateScale, [IMAGE_REDUCTION_QUALITY_STEPS[0]]);
+      if (candidate) {
+        largestPassingScale = candidateScale;
+        lowerScale = candidateScale;
+      } else {
+        upperScale = candidateScale;
+      }
+    }
 
-  while (
-    resizedBlob &&
-    resizedBlob.size > maxBytes &&
-    attempts < 8 &&
-    Math.max(width, height) > minDimension
-  ) {
-    width = Math.max(minDimension, Math.round(width * 0.85));
-    height = Math.max(minDimension, Math.round(height * 0.85));
-    resizedBlob = await renderBitmapToBlob(bitmap, width, height, targetType, targetQuality);
-    attempts += 1;
-  }
-
-  bitmap.close();
-
-  if (resizedBlob && resizedBlob.size <= maxBytes) {
+    const reducedCandidate = await encodeAtScale(largestPassingScale ?? minimumScale);
+    if (!reducedCandidate) return null;
     return {
-      blob: resizedBlob,
-      type: targetType,
-      width,
-      height,
-      note: `Converted to ${targetType === 'image/webp' ? 'WebP' : 'JPEG'} and resized`
+      ...reducedCandidate,
+      note: formatReductionNote(reducedCandidate, true),
     };
+  } finally {
+    bitmap.close();
   }
-
-  return null;
 };
 
 export const extractKeynoteImages = async (file: File) => {

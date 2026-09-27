@@ -3,6 +3,16 @@ import sharp from 'sharp';
 import { prepareImageForUpload, resolveUploadNormalizationDecodeLimit } from '@/server/uploadPreparation';
 
 describe('uploadPreparation', () => {
+  const createNoisyJpeg = async (width: number, height: number) => {
+    const raw = Buffer.alloc(width * height * 3);
+    for (let index = 0; index < raw.length; index += 1) {
+      raw[index] = (index * 17 + Math.floor(index / 3) * 29) % 256;
+    }
+    return sharp(raw, { raw: { width, height, channels: 3 } })
+      .jpeg({ quality: 100, chromaSubsampling: '4:4:4' })
+      .toBuffer();
+  };
+
   it('raises the Sharp decode limit for oversized animations that can be normalized safely', () => {
     const twilightBloomDecodedPixels = 1080 * 1350 * 361;
 
@@ -55,5 +65,25 @@ describe('uploadPreparation', () => {
     expect(result.data.fileName).not.toBe('source.avif');
     expect(result.data.transformed).toBe(true);
     expect(result.data.note).toContain('Cloudflare upload compatibility');
+  });
+
+  it('keeps dimensions while reducing byte-only oversized JPEGs', async () => {
+    const source = await createNoisyJpeg(640, 480);
+    const maxBytes = Math.max(1, source.byteLength - 1);
+    const result = await prepareImageForUpload({
+      buffer: source,
+      fileName: 'noisy.jpg',
+      fileType: 'image/jpeg',
+      maxBytes,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const output = await sharp(result.data.buffer).metadata();
+    expect(result.data.bytesAfter).toBeLessThanOrEqual(maxBytes);
+    expect(output.width).toBe(640);
+    expect(output.height).toBe(480);
+    expect(result.data.note).toMatch(/at 640x480 \(q\d+\)/);
+    expect(result.data.uploadNormalization?.reasons).toContain('max-bytes');
   });
 });

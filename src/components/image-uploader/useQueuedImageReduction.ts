@@ -5,6 +5,7 @@ import {
   MAX_UPLOAD_IMAGE_BYTES,
   isImageFile,
   reduceImageFileToLimit,
+  shouldDelegateImageReductionToServer,
 } from '@/components/image-uploader/fileHelpers';
 import {
   buildQueueReductionUpdate,
@@ -74,6 +75,14 @@ export function useQueuedImageReduction({
 
       if (!isImageFile(sourceFile)) {
         updateQueuedFile(id, { processingNote: 'Size reduction supports images only', processingNoteTone: 'error' });
+        return;
+      }
+
+      if (shouldDelegateImageReductionToServer(sourceFile)) {
+        updateQueuedFile(id, {
+          processingNote: 'This image format will be normalized during upload to preserve animation or source data.',
+          processingNoteTone: 'info',
+        });
         return;
       }
 

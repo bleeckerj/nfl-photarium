@@ -2,11 +2,19 @@ import sharp from 'sharp';
 import { sanitizeSvgBuffer } from '@/server/svgSanitizer';
 import { convertDngToPng } from '@/server/dngConversion';
 import { DNG_MIME_TYPE, isDngFile } from '@/utils/dng';
+import {
+  CLOUDFLARE_MAX_ANIMATION_FRAME_AREA,
+  CLOUDFLARE_MAX_IMAGE_AREA,
+  CLOUDFLARE_MAX_IMAGE_DIMENSION,
+  MAX_IMAGE_BYTES,
+} from '@/utils/cloudflareImageLimits';
 
-export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
-export const CLOUDFLARE_MAX_IMAGE_DIMENSION = 12_000;
-export const CLOUDFLARE_MAX_IMAGE_AREA = 100_000_000;
-export const CLOUDFLARE_MAX_ANIMATION_FRAME_AREA = 100_000_000;
+export {
+  CLOUDFLARE_MAX_ANIMATION_FRAME_AREA,
+  CLOUDFLARE_MAX_IMAGE_AREA,
+  CLOUDFLARE_MAX_IMAGE_DIMENSION,
+  MAX_IMAGE_BYTES,
+} from '@/utils/cloudflareImageLimits';
 
 const SHARP_DEFAULT_INPUT_PIXEL_LIMIT = 0x3fff ** 2;
 const MAX_UPLOAD_NORMALIZATION_INPUT_PIXELS = 1_000_000_000;
@@ -373,7 +381,7 @@ async function prepareRasterImageForUpload({
     return { ok: false, error: 'Unable to determine image dimensions for Cloudflare upload limits.' };
   }
 
-  const qualitySteps = [92, 88, 84, 80, 76, 72, 68, 64, 60];
+  const qualitySteps = [100, 98, 96, 94, 92, 90, 88, 86, 84, 82, 80, 76, 72, 68, 64, 60];
   const sourceArea = canResize ? sourceWidth * sourceHeight : 0;
   const sourceFrameArea = sourceArea * sourceFrameCount;
   const scaleToRespectDimension = canResize
@@ -386,28 +394,6 @@ async function prepareRasterImageForUpload({
     ? Math.min(1, Math.sqrt(CLOUDFLARE_MAX_ANIMATION_FRAME_AREA / sourceFrameArea))
     : 1;
   const requiredScale = Math.min(1, scaleToRespectDimension, scaleToRespectArea, scaleToRespectAnimationFrameArea);
-  const rawScaleSteps = canResize
-    ? Array.from(new Set([
-        1,
-        0.96,
-        0.92,
-        0.88,
-        0.84,
-        0.8,
-        0.75,
-        0.7,
-        0.65,
-        0.6,
-        0.55,
-        0.5,
-        0.45,
-        0.4,
-        0.35,
-        0.3,
-        Number(requiredScale.toFixed(4)),
-        Number((requiredScale * 0.98).toFixed(4)),
-      ].filter((scale) => scale > 0 && scale <= 1))).sort((a, b) => b - a)
-    : [1];
   const requiresDimensionOrAreaDownscale =
     sourceReasons.includes('max-dimension') ||
     sourceReasons.includes('max-area') ||
@@ -426,29 +412,29 @@ async function prepareRasterImageForUpload({
     animated: isAnimated,
     decodeLimit: normalizationDecodeLimit,
   });
-  const scaleSteps = requiresDimensionOrAreaDownscale
-    ? rawScaleSteps.filter((scale) => scale <= requiredScale + 0.0005)
-    : rawScaleSteps;
-  const minDimension = 320;
-  const minResizeDimension = requiresDimensionOrAreaDownscale ? 1 : minDimension;
-  const formatOrder = isAnimated ? ['image/webp'] : ['image/webp', 'image/jpeg'];
+  const initialScale = canResize ? requiredScale : 1;
+  const formatOrder = isAnimated
+    ? ['image/webp']
+    : normalizedFileType === 'image/jpeg'
+      ? ['image/jpeg', 'image/webp']
+      : ['image/webp'];
 
+  type EncodedCandidate = {
+    buffer: Buffer;
+    type: string;
+    quality: number;
+    width?: number;
+    height?: number;
+    frameCount: number;
+  };
   let smallestCandidate:
-    | {
-        buffer: Buffer;
-        type: string;
-        quality: number;
-        width?: number;
-        height?: number;
-        frameCount: number;
-        reasons: UploadNormalizationReason[];
-      }
+    | (EncodedCandidate & { reasons: UploadNormalizationReason[] })
     | null = null;
   let lastEncodeError: unknown;
 
-  for (const scale of scaleSteps) {
-    const requestedWidth = canResize ? Math.max(minResizeDimension, Math.round(sourceWidth * scale)) : 0;
-    const requestedHeight = canResize ? Math.max(minResizeDimension, Math.round(sourceHeight * scale)) : 0;
+  const encodeAtScale = async (scale: number, qualities = qualitySteps): Promise<EncodedCandidate | null> => {
+    const requestedWidth = canResize ? Math.max(1, Math.round(sourceWidth * scale)) : 0;
+    const requestedHeight = canResize ? Math.max(1, Math.round(sourceHeight * scale)) : 0;
     const needsResize = canResize && (requestedWidth !== sourceWidth || requestedHeight !== sourceHeight);
     const resizedDimensions = canResize
       ? (needsResize
@@ -456,14 +442,8 @@ async function prepareRasterImageForUpload({
           : { width: sourceWidth, height: sourceHeight })
       : undefined;
 
-    for (const quality of qualitySteps) {
-      const passing: Array<{
-        buffer: Buffer;
-        type: string;
-        width?: number;
-        height?: number;
-        frameCount: number;
-      }> = [];
+    for (const quality of qualities) {
+      const passing: EncodedCandidate[] = [];
       for (const nextType of formatOrder) {
         let pipeline = isAnimated ? sharp(buffer, sharpInputOptions) : sharp(buffer, sharpInputOptions).rotate();
         if (canResize && needsResize) {
@@ -479,7 +459,6 @@ async function prepareRasterImageForUpload({
             nextType === 'image/webp'
               ? await pipeline.webp({ quality, effort: 4 }).toBuffer()
               : await pipeline
-                  .flatten({ background: '#ffffff' })
                   .jpeg({ quality, mozjpeg: true, chromaSubsampling: '4:4:4' })
                   .toBuffer();
         } catch (error) {
@@ -494,7 +473,14 @@ async function prepareRasterImageForUpload({
           fallbackHeight: resizedDimensions?.height,
           fallbackFrameCount: sourceFrameCount,
         });
-
+        const encodedCandidate: EncodedCandidate = {
+          buffer: encoded,
+          type: nextType,
+          quality,
+          width: encodedMetrics.width,
+          height: encodedMetrics.height,
+          frameCount: encodedMetrics.frameCount,
+        };
         const encodedReasons = evaluateConstraintReasons({
           bytes: encoded.byteLength,
           width: encodedMetrics.width,
@@ -507,80 +493,94 @@ async function prepareRasterImageForUpload({
         });
 
         if (!smallestCandidate || encoded.byteLength < smallestCandidate.buffer.byteLength) {
-          smallestCandidate = {
-            buffer: encoded,
-            type: nextType,
-            quality,
-            width: encodedMetrics.width,
-            height: encodedMetrics.height,
-            frameCount: encodedMetrics.frameCount,
-            reasons: encodedReasons,
-          };
+          smallestCandidate = { ...encodedCandidate, reasons: encodedReasons };
         }
-
-        if (encodedReasons.length === 0) {
-          passing.push({
-            buffer: encoded,
-            type: nextType,
-            width: encodedMetrics.width,
-            height: encodedMetrics.height,
-            frameCount: encodedMetrics.frameCount,
-          });
-        }
+        if (encodedReasons.length === 0) passing.push(encodedCandidate);
       }
-
       if (passing.length > 0) {
-        const chosen = passing.sort((a, b) => b.buffer.byteLength - a.buffer.byteLength)[0];
-        const notePrefix = sourceReasons.length
-          ? `Adjusted for ${describeReasons(sourceReasons)}`
-          : 'Converted for Cloudflare upload compatibility';
-        const note = canResize && chosen.width && chosen.height && needsResize
-          ? `${notePrefix}: converted to ${chosen.type === 'image/webp' ? 'WebP' : 'JPEG'} and resized to ${chosen.width}x${chosen.height} (q${quality})`
-          : `${notePrefix}: converted to ${chosen.type === 'image/webp' ? 'WebP' : 'JPEG'} (q${quality})`;
-        return {
-          ok: true,
-          data: {
-            buffer: chosen.buffer,
-            fileType: chosen.type,
-            fileName: withExtensionForType(fileName, chosen.type),
-            transformed: true,
-            bytesBefore,
-            bytesAfter: chosen.buffer.byteLength,
-            note,
-            uploadNormalization: {
-              reasons: sourceReasons,
-              originalBytes: bytesBefore,
-              finalBytes: chosen.buffer.byteLength,
-              maxBytes,
-              maxDimension: CLOUDFLARE_MAX_IMAGE_DIMENSION,
-              maxArea: CLOUDFLARE_MAX_IMAGE_AREA,
-              maxAnimationFrameArea: CLOUDFLARE_MAX_ANIMATION_FRAME_AREA,
-              originalType: fileType,
-              finalType: chosen.type,
-              originalWidth: canResize ? sourceWidth : undefined,
-              originalHeight: canResize ? sourceHeight : undefined,
-              originalFrameCount: isAnimated ? sourceFrameCount : undefined,
-              originalFrameArea: isAnimated && canResize ? sourceFrameArea : undefined,
-              finalWidth: chosen.width,
-              finalHeight: chosen.height,
-              finalFrameCount: isAnimated ? chosen.frameCount : undefined,
-              finalFrameArea: isAnimated && chosen.width && chosen.height
-                ? chosen.width * chosen.height * chosen.frameCount
-                : undefined,
-            },
-          },
-        };
+        return passing.sort((left, right) => right.buffer.byteLength - left.buffer.byteLength)[0];
       }
     }
+    return null;
+  };
+
+  const initialCandidate = await encodeAtScale(initialScale);
+  let chosen = initialCandidate;
+  let chosenScale = initialScale;
+
+  if (!chosen && canResize) {
+    const minimumScale = 1 / Math.max(sourceWidth, sourceHeight);
+    let lowerScale = minimumScale;
+    let upperScale = initialScale;
+    let largestPassingScale: number | undefined;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const candidateScale = (lowerScale + upperScale) / 2;
+      const candidate = await encodeAtScale(candidateScale, [qualitySteps[0]]);
+      if (candidate) {
+        largestPassingScale = candidateScale;
+        lowerScale = candidateScale;
+      } else {
+        upperScale = candidateScale;
+      }
+    }
+    chosenScale = largestPassingScale ?? minimumScale;
+    chosen = await encodeAtScale(chosenScale);
   }
 
-  if (smallestCandidate) {
-    const unsatisfied = smallestCandidate.reasons.length
-      ? ` Remaining issues: ${describeReasons(smallestCandidate.reasons)}.`
+  if (chosen) {
+    const needsResize = canResize && (chosen.width !== sourceWidth || chosen.height !== sourceHeight);
+    const notePrefix = sourceReasons.length
+      ? `Adjusted for ${describeReasons(sourceReasons)}`
+      : 'Converted for Cloudflare upload compatibility';
+    const note = needsResize && chosen.width && chosen.height
+      ? `${notePrefix}: converted to ${chosen.type === 'image/webp' ? 'WebP' : 'JPEG'} and resized to ${chosen.width}x${chosen.height} (q${chosen.quality})`
+      : chosen.width && chosen.height
+        ? `${notePrefix}: converted to ${chosen.type === 'image/webp' ? 'WebP' : 'JPEG'} at ${chosen.width}x${chosen.height} (q${chosen.quality})`
+        : `${notePrefix}: converted to ${chosen.type === 'image/webp' ? 'WebP' : 'JPEG'} (q${chosen.quality})`;
+    return {
+      ok: true,
+      data: {
+        buffer: chosen.buffer,
+        fileType: chosen.type,
+        fileName: withExtensionForType(fileName, chosen.type),
+        transformed: true,
+        bytesBefore,
+        bytesAfter: chosen.buffer.byteLength,
+        note,
+        uploadNormalization: {
+          reasons: sourceReasons,
+          originalBytes: bytesBefore,
+          finalBytes: chosen.buffer.byteLength,
+          maxBytes,
+          maxDimension: CLOUDFLARE_MAX_IMAGE_DIMENSION,
+          maxArea: CLOUDFLARE_MAX_IMAGE_AREA,
+          maxAnimationFrameArea: CLOUDFLARE_MAX_ANIMATION_FRAME_AREA,
+          originalType: fileType,
+          finalType: chosen.type,
+          originalWidth: canResize ? sourceWidth : undefined,
+          originalHeight: canResize ? sourceHeight : undefined,
+          originalFrameCount: isAnimated ? sourceFrameCount : undefined,
+          originalFrameArea: isAnimated && canResize ? sourceFrameArea : undefined,
+          finalWidth: chosen.width,
+          finalHeight: chosen.height,
+          finalFrameCount: isAnimated ? chosen.frameCount : undefined,
+          finalFrameArea: isAnimated && chosen.width && chosen.height
+            ? chosen.width * chosen.height * chosen.frameCount
+            : undefined,
+        },
+      },
+    };
+  }
+
+  const smallestAttempt = (): (EncodedCandidate & { reasons: UploadNormalizationReason[] }) | null => smallestCandidate;
+  const finalSmallestCandidate = smallestAttempt();
+  if (finalSmallestCandidate) {
+    const unsatisfied = finalSmallestCandidate.reasons.length
+      ? ` Remaining issues: ${describeReasons(finalSmallestCandidate.reasons)}.`
       : '';
     return {
       ok: false,
-      error: `Unable to satisfy upload limits (smallest attempt: ${(smallestCandidate.buffer.byteLength / 1024 / 1024).toFixed(2)}MB).${unsatisfied}`,
+      error: `Unable to satisfy upload limits (smallest attempt: ${(finalSmallestCandidate.buffer.byteLength / 1024 / 1024).toFixed(2)}MB).${unsatisfied}`,
     };
   }
 
