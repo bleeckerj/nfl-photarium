@@ -54,7 +54,7 @@ export type MetadataSearchField =
   | 'sourceUrl'
   | 'originalUrl';
 
-export type MetadataMatchMode = 'contains' | 'exact' | 'prefix' | 'regex';
+export type MetadataMatchMode = 'word' | 'contains' | 'exact' | 'prefix' | 'regex';
 
 export const METADATA_SEARCH_FIELDS: MetadataSearchField[] = [
   'filename',
@@ -87,7 +87,7 @@ export async function metadataSearch(
     refresh?: boolean;
   } = {}
 ): Promise<MetadataSearchResult> {
-  const match = options.match ?? 'contains';
+  const match = options.match ?? 'word';
   const caseSensitive = options.caseSensitive ?? false;
   const requested = options.fields?.length ? options.fields : METADATA_SEARCH_FIELDS;
   // Preserve a stable field order and drop anything unrecognized; fall back to all fields.

@@ -1,3 +1,4 @@
+import { createGalleryTextMatcher } from '@/utils/galleryTextSearch';
 import { hasFavoriteTag, normalizeTagKey } from '@/utils/systemTags';
 
 export interface GalleryImage {
@@ -65,11 +66,6 @@ export function isLikelySourceSearchTerm(value: string): boolean {
   return /\d{10,}/.test(normalized);
 }
 
-const splitCamelCase = (value?: string) =>
-  (value ?? '')
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
-
 const matchesFolderFilter = (image: GalleryImage, selectedFolder: string) => {
   if (selectedFolder === 'all') return true;
   if (selectedFolder === 'no-folder') return !image.folder;
@@ -85,46 +81,6 @@ const matchesTagFilter = (image: GalleryImage, selectedTag: string, selectedTagK
   if (image.tags.includes(selectedTag)) return true;
   if (!selectedTagKey) return false;
   return image.tags.some((tag) => normalizeTagKey(tag) === selectedTagKey);
-};
-
-const stripQuery = (value: string) => value.split('?')[0];
-
-const matchesSearchFilter = (image: GalleryImage, searchTerm: string) => {
-  const normalizedSearch = normalize(searchTerm.trim());
-  const normalizedSearchNoQuery = normalizedSearch ? stripQuery(normalizedSearch) : '';
-  if (!normalizedSearch) return true;
-
-  // Extras-backed description / alt text / prompt text, already lowercased.
-  if (image.searchText?.includes(normalizedSearch)) return true;
-
-  const baseHaystacks = [
-    normalize(image.id),
-    normalize(image.filename),
-    normalize(image.displayName),
-    normalize(splitCamelCase(image.displayName)),
-    normalize(image.promptThis),
-    normalize(image.folder),
-    normalize(image.altTag),
-    normalize(image.altText),
-    normalize(image.description),
-    normalize(image.originalUrl),
-    normalize(image.originalUrlNormalized),
-    normalize(image.sourceUrl),
-    normalize(image.sourceUrlNormalized),
-    ...(image.tags?.map(normalize) ?? []),
-    ...(image.variants?.map(normalize) ?? [])
-  ].filter(Boolean);
-
-  const haystacks = new Set<string>();
-  baseHaystacks.forEach((value) => {
-    haystacks.add(value);
-    haystacks.add(stripQuery(value));
-  });
-
-  return Array.from(haystacks).some(
-    (candidate) =>
-      candidate.includes(normalizedSearch) || (normalizedSearchNoQuery && candidate.includes(normalizedSearchNoQuery))
-  );
 };
 
 const matchesHiddenFolderFilter = (image: GalleryImage, hiddenFolders?: string[]) => {
@@ -164,11 +120,12 @@ export const filterImagesForGallery = (
     showFavoritesOnly,
   } = options;
   const selectedTagKey = selectedTag ? normalizeTagKey(selectedTag) : '';
+  const matchesSearch = createGalleryTextMatcher(searchTerm);
   return images.filter((image) => {
     if (!matchesFolderFilter(image, selectedFolder)) return false;
     if (!matchesTagFilter(image, selectedTag, selectedTagKey)) return false;
     if (showFavoritesOnly && !hasFavoriteTag(image.tags)) return false;
-    if (!matchesSearchFilter(image, searchTerm)) return false;
+    if (!matchesSearch(image, image.searchText)) return false;
     if (onlyCanonical && image.parentId) return false;
     if (!matchesHiddenFolderFilter(image, hiddenFolders)) return false;
     if (!matchesHiddenTagFilter(image, hiddenTags)) return false;

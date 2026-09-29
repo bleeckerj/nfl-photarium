@@ -28,7 +28,7 @@ export const discoveryTools: Tool[] = [
   {
     name: 'photarium_search_text',
     description:
-      'Traditional text search that matches against image metadata: filename, folder name, tags, description, and alt text. Use this when looking for specific files by name or when you know the exact tags/folder.',
+      'Whole-word text search across image metadata: filename, folder name, tags, description, and alt text. Use this when looking for specific files by name or when you know the exact tags/folder.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -59,7 +59,7 @@ export const discoveryTools: Tool[] = [
   {
     name: 'photarium_search_metadata',
     description:
-      'Field-aware metadata search across image fields: filename, folder, tags, description, alt text, namespace, and source/original URLs. Unlike photarium_search_text (which substring-scans every field at once), this lets you target specific fields, pick a match mode (contains, exact, prefix, regex), toggle case sensitivity, and see which fields matched each result. Best for precise filename or field-scoped lookups (e.g., files whose filename starts with "hero-", or an exact tag).',
+      'Field-aware metadata search across image fields: filename, folder, tags, description, alt text, namespace, and source/original URLs. Unlike photarium_search_text (which searches whole words across every field), this lets you target specific fields, pick a match mode (word, contains, exact, prefix, regex), toggle case sensitivity, and see which fields matched each result. Best for precise filename or field-scoped lookups (e.g., files whose filename starts with "hero-", or an exact tag).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -77,8 +77,8 @@ export const discoveryTools: Tool[] = [
         },
         match: {
           type: 'string',
-          enum: ['contains', 'exact', 'prefix', 'regex'],
-          description: 'Match mode (default: contains). "contains" = substring, "exact" = whole-value equality, "prefix" = startsWith, "regex" = JavaScript RegExp.',
+          enum: ['word', 'contains', 'exact', 'prefix', 'regex'],
+          description: 'Match mode (default: word). "word" = whole-word or whole-phrase match, "contains" = substring, "exact" = whole-value equality, "prefix" = startsWith, "regex" = JavaScript RegExp.',
         },
         caseSensitive: {
           type: 'boolean',

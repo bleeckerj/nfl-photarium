@@ -1,3 +1,4 @@
+import { createWholeWordMatcher } from '@/utils/wholeWordSearch';
 import { getCachedImages, type CachedCloudflareImage } from '@/server/cloudflareImageCache';
 import { getImageExtrasRecords, type ImageExtrasRecord } from '@/server/imageExtras';
 import { queryMetadataIndex } from '@/server/metadataSearchIndex';
@@ -14,7 +15,7 @@ export const METADATA_SEARCH_FIELDS = [
 ] as const;
 
 export type MetadataSearchField = (typeof METADATA_SEARCH_FIELDS)[number];
-export type MetadataMatchMode = 'contains' | 'exact' | 'prefix' | 'regex';
+export type MetadataMatchMode = 'word' | 'contains' | 'exact' | 'prefix' | 'regex';
 
 export type MetadataSearchRequest = {
   query: string;
@@ -77,6 +78,7 @@ function fieldValues(image: CachedCloudflareImage & { altText?: string }, field:
 }
 
 function buildMatcher(query: string, match: MetadataMatchMode, caseSensitive: boolean): (value: string) => boolean {
+  if (match === 'word') return createWholeWordMatcher(query, caseSensitive);
   if (match === 'regex') {
     const regex = new RegExp(query, caseSensitive ? undefined : 'i');
     return (value) => regex.test(value);
@@ -99,7 +101,7 @@ export async function searchImageMetadata(request: MetadataSearchRequest): Promi
   const startedAt = performance.now();
   const query = request.query.trim();
   if (!query) throw new Error('query is required');
-  const match = request.match ?? 'contains';
+  const match = request.match ?? 'word';
   const fields = resolveFields(request.fields);
   const matcher = buildMatcher(query, match, request.caseSensitive ?? false);
   const images = (await getCachedImages()).filter((image) => {

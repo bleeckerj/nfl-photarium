@@ -21,7 +21,7 @@ MCP (Model Context Protocol) server that exposes the full Photarium API surface 
 
 - **`photarium_search_text`** (Text): Traditional search matching exact text in metadata. "hero" finds files named "hero.png" or tagged "hero".
 
-- **`photarium_search_metadata`** (Field-aware): Like text search but you choose which fields to scan (filename, folder, tags, description, alt text, namespace, source/original URLs), the match mode (`contains`, `exact`, `prefix`, `regex`), and case sensitivity. Each result reports which fields matched. Use for precise filename or field-scoped lookups, e.g. filename `prefix` "hero-" or an `exact` tag.
+- **`photarium_search_metadata`** (Field-aware): Like text search but you choose which fields to scan (filename, folder, tags, description, alt text, namespace, source/original URLs), the match mode (`word` by default, `contains`, `exact`, `prefix`, `regex`), and case sensitivity. Each result reports which fields matched. Use for precise filename or field-scoped lookups, e.g. filename `prefix` "hero-" or an `exact` tag.
 
 - **`photarium_search_color`** (Color): Finds images with matching dominant colors. "#FF5733" finds orange-toned images.
 

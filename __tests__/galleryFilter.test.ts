@@ -44,7 +44,7 @@ describe('filterImagesForGallery', () => {
     })
   ];
 
-  it('matches partial tag search (case insensitive)', () => {
+  it('matches whole words in tags and alt text (case insensitive)', () => {
     const result = filterImagesForGallery(images, {
       selectedFolder: 'all',
       selectedTag: '',
@@ -53,7 +53,7 @@ describe('filterImagesForGallery', () => {
     });
 
     const ids = result.map((img) => img.id);
-    expect(ids).toContain('1');
+    expect(ids).not.toContain('1');
     expect(ids).toContain('2'); // alt tag should match as well
   });
 

@@ -41,6 +41,33 @@ describe('POST /api/images/metadata-search', () => {
     expect(payload.diagnostics).toMatchObject({ backend: 'redis-index', candidateCount: 1, indexVersion: 'v1' });
   });
 
+  it.each(['server-scan', 'redis-index'])('rejects featuring when searching for Turing using %s', async (backend) => {
+    getCachedImagesMock.mockResolvedValue([
+      { id: 'other', filename: 'other.jpg', uploaded: '2026-07-10', variants: [] },
+      { id: 'source', filename: 'source.jpg', uploaded: '2026-07-11', variants: [] },
+    ]);
+    getImageExtrasRecordsMock.mockResolvedValue({
+      source: { description: 'Portrait of Alan Turing.' },
+      other: { description: 'An image featuring a computer.' },
+    });
+    if (backend === 'redis-index') {
+      queryMetadataIndexMock.mockResolvedValue({ imageIds: ['other', 'source'], version: 'v1' });
+    }
+    const response = await POST(request({ query: 'turing', fields: ['description'], limit: 1 }));
+    const payload = await response.json();
+    expect(payload.match).toBe('word');
+    expect(payload.results.map((result: { id: string }) => result.id)).toEqual(['source']);
+    expect(payload.diagnostics.backend).toBe(backend);
+  });
+
+  it('accepts explicit whole-word mode and keeps explicit substring mode available', async () => {
+    const whole = await POST(request({ query: 'Fouc', match: 'word' }));
+    expect(whole.status).toBe(200);
+    expect((await whole.json()).count).toBe(0);
+    const partial = await POST(request({ query: 'Fouc', match: 'contains' }));
+    expect((await partial.json()).count).toBe(2);
+  });
+
   it('finds an extras-only description inside the requested namespace', async () => {
     const response = await POST(request({ query: 'foucault', fields: ['description'], namespace: 'cf-grainrad' }));
     const payload = await response.json();

@@ -6,7 +6,7 @@ import {
   type MetadataSearchField,
 } from '@/server/metadataSearch';
 
-const MATCH_MODES = new Set<MetadataMatchMode>(['contains', 'exact', 'prefix', 'regex']);
+const MATCH_MODES = new Set<MetadataMatchMode>(['word', 'contains', 'exact', 'prefix', 'regex']);
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
     if (!query) return NextResponse.json({ error: 'query is required' }, { status: 400 });
     const match = body.match === undefined ? undefined : String(body.match) as MetadataMatchMode;
     if (match && !MATCH_MODES.has(match)) {
-      return NextResponse.json({ error: 'match must be contains, exact, prefix, or regex' }, { status: 400 });
+      return NextResponse.json({ error: 'match must be word, contains, exact, prefix, or regex' }, { status: 400 });
     }
     const requestedFields = Array.isArray(body.fields) ? body.fields.map(String) : undefined;
     if (requestedFields?.some((field) => !METADATA_SEARCH_FIELDS.includes(field as MetadataSearchField))) {

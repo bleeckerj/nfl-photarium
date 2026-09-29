@@ -1,3 +1,4 @@
+import { createGalleryTextMatcher } from '@/utils/galleryTextSearch';
 import { getUserVisibleTags, hasFavoriteTag, normalizeTagKey } from '@/utils/systemTags';
 import { clearGalleryScopeAssemblyMemo } from '@/server/galleryScopeAssembly';
 import { computeDuplicateGroups, buildFamilySummaryMap } from '@/components/gallery/utils';
@@ -99,52 +100,6 @@ export type GalleryQueryFocusResult = {
 };
 
 const normalize = (value?: string) => value?.toLowerCase() ?? '';
-const stripQuery = (value: string) => value.split('?')[0];
-
-const splitCamelCase = (value?: string) =>
-  (value ?? '')
-    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2');
-
-const matchesSearch = (asset: GalleryQueryAsset, search?: string, extrasSearchText?: string) => {
-  const normalizedSearch = normalize(search?.trim());
-  const normalizedSearchNoQuery = normalizedSearch ? stripQuery(normalizedSearch) : '';
-  if (!normalizedSearch) return true;
-
-  // Extras-backed description / alt text / prompt text, already lowercased.
-  if (extrasSearchText && extrasSearchText.includes(normalizedSearch)) return true;
-
-  const baseHaystacks = [
-    normalize(asset.id),
-    normalize(asset.filename),
-    normalize(asset.displayName),
-    normalize(splitCamelCase(asset.displayName)),
-    normalize(asset.promptThis),
-    normalize(asset.folder),
-    normalize(asset.altTag),
-    normalize(asset.altText),
-    normalize(asset.description),
-    normalize(asset.originalUrl),
-    normalize(asset.originalUrlNormalized),
-    normalize(asset.sourceUrl),
-    normalize(asset.sourceUrlNormalized),
-    ...(asset.tags?.map(normalize) ?? []),
-    ...(asset.variants?.map(normalize) ?? []),
-  ].filter(Boolean);
-
-  const haystacks = new Set<string>();
-  baseHaystacks.forEach((value) => {
-    haystacks.add(value);
-    haystacks.add(stripQuery(value));
-  });
-
-  return Array.from(haystacks).some(
-    (candidate) =>
-      candidate.includes(normalizedSearch) ||
-      (Boolean(normalizedSearchNoQuery) && candidate.includes(normalizedSearchNoQuery))
-  );
-};
-
 const matchesFolder = (asset: GalleryQueryAsset, folder?: string) => {
   if (!folder || folder === 'all') return true;
   if (folder === 'no-folder') return !asset.folder;
@@ -494,11 +449,12 @@ export const queryGalleryAssets = <T extends GalleryQueryAsset>(
   const buildProjection = (): ProjectionMemoEntry => {
     // Normalized once per projection, not once per asset.
     const tagKey = filters.tag ? normalizeTagKey(filters.tag) : '';
+    const matchesSearch = createGalleryTextMatcher(filters.search);
     const baseFiltered = facetBase.filter((asset) => {
       if (!matchesFolder(asset, filters.folder)) return false;
       if (!matchesTag(asset, filters.tag, tagKey)) return false;
       if (filters.favorites && !hasFavoriteTag(asset.tags)) return false;
-      if (!matchesSearch(asset, filters.search, options.extrasSearchTextById?.get(asset.id))) return false;
+      if (!matchesSearch(asset, options.extrasSearchTextById?.get(asset.id))) return false;
       if (filters.onlyCanonical && asset.parentId) return false;
       if (filters.comfy && !matchesComfy(asset)) return false;
       if (!matchesEmbedding(asset, filters.embedding)) return false;
