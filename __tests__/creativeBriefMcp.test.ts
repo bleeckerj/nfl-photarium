@@ -60,4 +60,37 @@ describe('generateCreativeBriefThroughMcp', () => {
     const ok: typeof fetch = async () => Response.json({ result: { content: [{ type: 'text', text: JSON.stringify({ plan: {}, result: { imageId: 'child' } }) }] } });
     await expect(generateCreativeBriefThroughMcp(input, ok)).resolves.toMatchObject({ result: { imageId: 'child' } });
   });
+
+  it('preserves the API error when an HTTP 200 response contains an MCP failure', async () => {
+    const failed: typeof fetch = async () => Response.json({
+      ok: false,
+      result: { isError: true, content: [{ type: 'text', text: 'Error: API error (503): Failed to download original image blob from Cloudflare' }] },
+    });
+    await expect(generateCreativeBriefThroughMcp(input, failed)).rejects.toThrow(
+      'Photarium MCP generation failed: Error: API error (503): Failed to download original image blob from Cloudflare',
+    );
+  });
+
+  it.each([
+    { result: { isError: true, content: [{ type: 'text', text: 'Provider unavailable' }] } },
+    { ok: false, result: { content: [{ type: 'text', text: 'Provider unavailable' }] } },
+  ])('recognizes either MCP or bridge failure flags', async (payload) => {
+    await expect(generateCreativeBriefThroughMcp(input, async () => Response.json(payload)))
+      .rejects.toThrow('Photarium MCP generation failed: Provider unavailable');
+  });
+
+  it('retains all error text blocks and handles errors without text', async () => {
+    const failed: typeof fetch = async () => Response.json({ result: { isError: true, content: [
+      { type: 'text', text: 'Source download failed.' },
+      { type: 'text', text: 'Both original and fallback failed.' },
+    ] } });
+    await expect(generateCreativeBriefThroughMcp(input, failed)).rejects.toThrow('Source download failed.\nBoth original and fallback failed.');
+    await expect(generateCreativeBriefThroughMcp(input, async () => Response.json({ ok: false })))
+      .rejects.toThrow('The tool returned an error without details');
+  });
+
+  it('still rejects malformed successful results', async () => {
+    const malformed: typeof fetch = async () => Response.json({ result: { content: [{ type: 'text', text: 'broken' }] } });
+    await expect(generateCreativeBriefThroughMcp(input, malformed)).rejects.toThrow('was not valid JSON');
+  });
 });

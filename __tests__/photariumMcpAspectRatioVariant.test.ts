@@ -71,7 +71,7 @@ describe('photarium_aspect_ratio_variant', () => {
       namespace: 'test-generated',
       tags: ['mcp', 'aspect-ratio'],
     });
-    expect(result.isError).not.toBe(true);
+    expect(result.isError, result.content[0]?.text).not.toBe(true);
     const payload = JSON.parse(result.content[0]?.text || '{}');
 
     expect(payload).toMatchObject({
@@ -110,6 +110,9 @@ describe('photarium_aspect_ratio_variant', () => {
 
     global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (url.startsWith('data:image/png;base64,')) {
+        return imageDownloadResponse(Buffer.from(url.split(',')[1], 'base64'), 'reference.png', 'image/png');
+      }
       const requestUrl = new URL(url);
 
       if (requestUrl.hostname === 'photarium.test' && requestUrl.pathname === '/api/images/source-image') {
@@ -135,7 +138,12 @@ describe('photarium_aspect_ratio_variant', () => {
 
       if (requestUrl.hostname === 'openai.test' && requestUrl.pathname === '/v1/images/edits') {
         expect(init?.method).toBe('POST');
-        openAiRequest = JSON.parse(String(init?.body || '{}')) as Record<string, unknown>;
+        expect(init?.body).toBeInstanceOf(FormData);
+        const form = init?.body as FormData;
+        openAiRequest = Object.fromEntries(form.entries());
+        const reference = form.get('image[]');
+        expect(reference).toBeInstanceOf(Blob);
+        expect(Buffer.from(await (reference as Blob).arrayBuffer())).toEqual(sourceBuffer);
         return jsonResponse({
           data: [
             {
@@ -170,13 +178,13 @@ describe('photarium_aspect_ratio_variant', () => {
       aspectRatio: '4:5',
       outputFormat: 'png',
     });
-    expect(result.isError).not.toBe(true);
+    expect(result.isError, result.content[0]?.text).not.toBe(true);
     const payload = JSON.parse(result.content[0]?.text || '{}');
 
     expect(payload.imageId).toBe('variant-image');
     expect(payload.aspectRatio).toBe('4:5');
     expect(openAiRequest).toMatchObject({
-      model: 'gpt-image-2',
+      model: 'gpt-image-2.5-sunburst',
       size: '1024x1280',
       output_format: 'png',
     });

@@ -12,7 +12,9 @@ type CreativeBriefMcpInput = {
 };
 
 type CreativeBriefMcpPayload = {
+  ok?: boolean;
   result?: {
+    isError?: boolean;
     content?: Array<{ type?: string; text?: string }>;
   };
   error?: string;
@@ -87,7 +89,14 @@ function describeHttpFailure(status: number, payload: CreativeBriefMcpPayload, b
 }
 
 function readMcpResult(payload: CreativeBriefMcpPayload): Record<string, unknown> {
-  const text = payload.result?.content?.find((content) => content.type === 'text' && typeof content.text === 'string')?.text;
+  const text = payload.result?.content
+    ?.filter((content) => content.type === 'text' && typeof content.text === 'string')
+    .map((content) => content.text)
+    .join('\n').trim();
+  // The HTTP bridge returns 200 even when the MCP tool reports a failure.
+  if (payload.result?.isError || payload.ok === false) {
+    throw new Error(`Photarium MCP generation failed: ${text || payload.error || 'The tool returned an error without details'}`);
+  }
   if (!text) throw new Error(payload.error || 'Photarium MCP returned no generation result');
   try {
     const parsed: unknown = JSON.parse(text);

@@ -1,4 +1,4 @@
-import { apiRequest, apiRequestRaw } from '../shared/api-client.js';
+import { apiRequest } from '../shared/api-client.js';
 import { formatImageResult } from '../shared/image-result.js';
 import { getPromptRecord } from '../ai/client.js';
 import { getExtras } from '../organization/client.js';
@@ -498,61 +498,4 @@ export async function searchByImage(imageId: string, limit: number = 20, namespa
   };
 }
 
-export async function downloadImageById(
-  imageId: string,
-  variant?: string
-): Promise<{
-  filename?: string;
-  contentType?: string;
-  size?: number;
-  base64: string;
-  requestedVariant?: string;
-  servedVariant?: string;
-}> {
-  const params = new URLSearchParams();
-  if (variant) params.set('variant', variant);
-  const response = await apiRequestRaw(`/api/images/${imageId}/download${params.toString() ? `?${params}` : ''}`, { method: 'GET' });
-  const contentType = response.headers.get('content-type') || undefined;
-  const disposition = response.headers.get('content-disposition') || undefined;
-  const sizeHeader = response.headers.get('content-length') || undefined;
-  const requestedVariant = response.headers.get('x-photarium-variant-requested') || undefined;
-  const servedVariant = response.headers.get('x-photarium-variant-served') || undefined;
-  const arrayBuffer = await response.arrayBuffer();
-  const base64 = Buffer.from(arrayBuffer).toString('base64');
-  const filenameMatch = disposition?.match(/filename="?([^";]+)"?/i);
-  return {
-    filename: filenameMatch?.[1],
-    contentType,
-    size: sizeHeader ? Number(sizeHeader) : undefined,
-    base64,
-    requestedVariant,
-    servedVariant,
-  };
-}
-
-export async function downloadOriginalImageById(imageId: string): Promise<{
-  filename?: string;
-  contentType?: string;
-  size?: number;
-  base64: string;
-  variantUsed: string;
-  fallbackUsed: boolean;
-  fallbackReason?: string;
-}> {
-  try {
-    const result = await downloadImageById(imageId, 'original');
-    return {
-      ...result,
-      variantUsed: 'original',
-      fallbackUsed: false,
-    };
-  } catch (error) {
-    const fallback = await downloadImageById(imageId);
-    return {
-      ...fallback,
-      variantUsed: 'default',
-      fallbackUsed: true,
-      fallbackReason: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
+export { downloadImageById, downloadOriginalImageById } from './downloads.js';
