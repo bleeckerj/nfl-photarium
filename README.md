@@ -701,6 +701,20 @@ npm run hygiene:targeted
 npm run hygiene
 ```
 
+`npm run dev` loads the development environment and verifies the Photarium MCP
+bridge before launching the web app. It reuses a healthy existing bridge or builds
+and starts one. The launcher stops only bridge processes it started.
+A health check runs every five seconds; an unavailable bridge is
+restarted up to three times per session. Failed startup or exhausted recovery
+stops Photarium with a nonzero exit code. Startup health checks allow up to four
+minutes per attempt for the bridge build.
+
+The bridge uses `PHOTARIUM_MCP_URL`, or the configured `PHOTARIUM_HTTP_HOST` and
+`PHOTARIUM_HTTP_PORT` (default `127.0.0.1:8787`). Setting
+`PHOTARIUM_MCP_BRIDGE=0` explicitly skips supervision and prints a warning that
+creative brief tools will be unavailable. `dev:server` is the internal web-only
+script; use `dev`, `dev:full`, or `dev:full:telegram` for supervised development.
+
 `npm run dev` also starts the configured CleanShotX folder watcher. The watcher
 uses `adjacent/photarium-folder-uploader/photarium-folder-uploader.cleanshot.json`
 and stops automatically when the Photarium development server stops.
