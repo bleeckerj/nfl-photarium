@@ -10,6 +10,7 @@ import {
   upsertCachedImage,
   type CachedCloudflareImage,
 } from '@/server/cloudflareImageCache';
+import { requestCloudflareImage } from '@/server/cloudflareImageRequests';
 
 type CloudflareImageResult = {
   id: string;
@@ -49,8 +50,8 @@ export const patchCloudflareImageMetadata = async (
 ): Promise<PatchCloudflareImageMetadataResult> => {
   const { accountId, apiToken } = requireCloudflareCredentials();
 
-  const fetchedImageResponse = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${imageId}`,
+  const fetchedImageResponse = await requestCloudflareImage(
+    `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${encodeURIComponent(imageId)}`,
     {
       headers: {
         Authorization: `Bearer ${apiToken}`,
@@ -83,8 +84,8 @@ export const patchCloudflareImageMetadata = async (
   }
   const finalMetadataPayload = metadataLimit.metadata;
 
-  const response = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${imageId}`,
+  const response = await requestCloudflareImage(
+    `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1/${encodeURIComponent(imageId)}`,
     {
       method: 'PATCH',
       headers: {

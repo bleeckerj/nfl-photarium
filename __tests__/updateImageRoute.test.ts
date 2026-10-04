@@ -84,6 +84,7 @@ describe('PATCH /api/images/:id/update', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
   });
 
@@ -460,5 +461,40 @@ describe('PATCH /api/images/:id/update', () => {
     const submittedBody = patchCall?.[1]?.body;
     const parsed = JSON.parse(String(submittedBody));
     expect(parsed.metadata.tags).toEqual(['hero', '_favorite_']);
+  });
+
+  it('recovers a throttled metadata read before moving the image', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 1000);
+    const mockFetch = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ errors: [{ message: 'Please wait and consider throttling your request speed' }] }), { status: 429, headers: { 'Retry-After': '1' } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: { id: 'child', meta: { namespace: 'source', tags: ['hero'] } } })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ result: {} })));
+    const operation = PATCH(createRequest({ namespace: 'destination' }), { params: Promise.resolve({ id: 'child' }) });
+    await vi.runAllTimersAsync();
+    const response = await operation;
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ success: true, namespace: 'destination', tags: ['hero'] });
+    expect(mockFetch.mock.calls.map(([, init]) => init?.method ?? 'GET')).toEqual(['GET', 'GET', 'PATCH']);
+    expect(upsertCachedImageMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns 429 and Retry-After when Cloudflare keeps throttling without claiming a move', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 2000);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const mockFetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(
+      JSON.stringify({ errors: [{ message: 'Please wait and consider throttling your request speed' }] }),
+      { status: 429, headers: { 'Retry-After': '1' } },
+    ));
+    const operation = PATCH(createRequest({ namespace: 'destination' }), { params: Promise.resolve({ id: 'child' }) });
+    await vi.runAllTimersAsync();
+    const response = await operation;
+    expect(response.status).toBe(429);
+    expect(response.headers.get('Retry-After')).toBe('1');
+    expect(await response.json()).toMatchObject({ error: 'Cloudflare is throttling image updates. Retry in 1 second.' });
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(mockFetch.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
+    expect(upsertCachedImageMock).not.toHaveBeenCalled();
   });
 });

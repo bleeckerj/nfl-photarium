@@ -5,6 +5,7 @@ import { requestSemanticTags } from '@/services/imageAltDescriptionService';
 import { deleteImage as requestDeleteImage } from '@/services/imageDeletionService';
 import { mergeUserTagsPreservingSystemTags } from '@/utils/systemTags';
 import { applyEmbeddingResultToImage } from '../embeddingResult';
+import { requestAssetMetadataUpdate } from '@/services/assetMetadataService';
 
 const BULK_UPDATE_CONCURRENCY = 4;
 
@@ -81,6 +82,7 @@ interface UseGalleryBulkActionsOptions {
   selectedCount: number;
   selectedImageIds: Set<string>;
   clearSelection: () => void;
+  removeFromSelection?: (imageIds: ReadonlySet<string>) => void;
   setBulkSelectionMode: (value: boolean) => void;
   setBulkEditOpen: (value: boolean) => void;
   setBulkAnimateFilename: (value: string) => void;
@@ -125,6 +127,7 @@ export const useGalleryBulkActions = ({
   selectedCount,
   selectedImageIds,
   clearSelection,
+  removeFromSelection,
   setBulkSelectionMode,
   setBulkEditOpen,
   setBulkAnimateFilename,
@@ -317,37 +320,33 @@ export const useGalleryBulkActions = ({
             return { id, ok: true, skipped: true };
           }
           const target = imageById.get(id);
-          const updateEndpoint = target?.assetType === 'video'
-            ? `/api/videos/${id}/update`
-            : `/api/images/${id}/update`;
-          const response = await fetch(updateEndpoint, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
-          return { id, ok: response.ok };
+          await requestAssetMetadataUpdate(id, target?.assetType === 'video' ? 'video' : 'image', payload);
+          return { id, ok: true };
         }
       );
       const successfulIds = new Set<string>();
       let failedCount = 0;
-      let effectiveTaskCount = 0;
-      for (const result of settled) {
+      let firstFailure = '';
+      for (const [index, result] of settled.entries()) {
         if (result.status === 'rejected') {
           failedCount += 1;
+          const id = selectedIds[index];
+          const message = result.reason instanceof Error ? result.reason.message : 'Metadata update failed';
+          firstFailure ||= `${imageById.get(id)?.filename || id}: ${message}`;
+          console.error('Bulk metadata update failed', { id, filename: imageById.get(id)?.filename, error: message });
           continue;
         }
         if (result.value.skipped) {
           continue;
         }
-        effectiveTaskCount += 1;
         if (!result.value.ok) {
           failedCount += 1;
           continue;
         }
         successfulIds.add(result.value.id);
       }
-      if (effectiveTaskCount > 0 && successfulIds.size === 0) {
-        toastPush('Bulk update failed');
+      if (failedCount > 0 && successfulIds.size === 0) {
+        toastPush(`Bulk update failed (${failedCount}/${selectedIds.length})${firstFailure ? `: ${firstFailure}` : ''}`);
         return;
       }
       const activeNamespaceScope = resolveGalleryNamespaceScope(namespace);
@@ -357,10 +356,7 @@ export const useGalleryBulkActions = ({
         effectiveBulkNamespace !== activeNamespaceScope;
       setImages(prev => {
         const updatedImages = prev.map(img => {
-          if (!selectedImageIds.has(img.id)) {
-            return img;
-          }
-          if (effectiveTaskCount > 0 && !successfulIds.has(img.id)) {
+          if (!successfulIds.has(img.id)) {
             return img;
           }
           const updatedFolder: string | undefined =
@@ -434,7 +430,9 @@ export const useGalleryBulkActions = ({
         }
       }
       if (failedCount > 0) {
-        toastPush(`Updated ${successfulIds.size}, failed ${failedCount}`);
+        toastPush(`Updated ${successfulIds.size}, failed ${failedCount}${firstFailure ? `: ${firstFailure}` : ''}`);
+        removeFromSelection?.(successfulIds);
+        return;
       } else {
         toastPush('Images updated');
       }
@@ -463,6 +461,7 @@ export const useGalleryBulkActions = ({
     bulkTagsInput,
     bulkTagsMode,
     clearSelection,
+    removeFromSelection,
     images,
     namespace,
     selectedCount,

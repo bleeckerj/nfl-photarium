@@ -14,6 +14,7 @@ import { patchImageExtrasRecord } from '@/server/imageExtras';
 import { mergeUserTagsPreservingSystemTags } from '@/utils/systemTags';
 import { patchCloudflareImageMetadata } from '@/server/cloudflareImageMetadata';
 import { requireValidFolderName } from '@/server/folderPolicy';
+import { CloudflareImageRateLimitError } from '@/server/cloudflareImageRequests';
 
 const MAX_CLOUDFLARE_TEXT_MIRROR_CHARS = 160;
 
@@ -391,6 +392,12 @@ export async function PATCH(
 
   } catch (error) {
     console.error('Update image error:', error);
+    if (error instanceof CloudflareImageRateLimitError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 429, headers: { 'Retry-After': String(error.retryAfterSeconds) } }
+      );
+    }
     const message = error instanceof Error ? error.message : 'Internal server error';
     if (
       message.includes('Cloudflare 1024-byte limit')

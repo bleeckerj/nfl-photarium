@@ -85,6 +85,20 @@ explicit UI controls).
   - `npm run namespace:scan`
   - Supports `--page-size=...` and `--output=...`
 
+## Bulk Move Failures
+
+Image metadata reads and writes share a server-side queue with at least 300 ms
+between request starts. On a Cloudflare HTTP 429 response, the queue pauses for
+the `Retry-After` interval and retries the same request up to three total
+attempts. Missing or invalid retry headers use delays of 30, 60, and 120 seconds.
+This queue covers metadata updates within one server process; other API callers
+and other processes can still consume the account's quota.
+
+If Cloudflare continues throttling, the image update endpoint returns HTTP 429
+with an error message and `Retry-After` header. The gallery reports the failed
+asset and keeps unsuccessful images selected. Successfully updated images are
+removed from the retry selection and leave the source namespace view.
+
 ## API and Docs
 
 - `namespace` is documented in:

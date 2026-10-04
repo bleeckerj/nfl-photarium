@@ -29,6 +29,7 @@ interface UseGallerySelectionReturn {
   selectedCount: number;
   toggleSelection: (imageId: string) => void;
   clearSelection: () => void;
+  removeFromSelection: (imageIds: ReadonlySet<string>) => void;
   selectAllOnPage: (pageItems: CloudflareImage[]) => void;
   selectDuplicateImages: () => boolean;
   selectDuplicatesKeepSingle: (strategy: 'newest' | 'oldest') => boolean;
@@ -95,6 +96,11 @@ export function useGallerySelection({
   const clearSelection = useCallback(() => {
     setSelectedImageIds(new Set());
     setSelectedImagesById(new Map());
+  }, []);
+
+  const removeFromSelection = useCallback((imageIds: ReadonlySet<string>) => {
+    setSelectedImageIds(prev => new Set([...prev].filter(id => !imageIds.has(id))));
+    setSelectedImagesById(prev => new Map([...prev].filter(([id]) => !imageIds.has(id))));
   }, []);
 
   const selectAllOnPage = useCallback((pageItems: CloudflareImage[]) => {
@@ -193,6 +199,7 @@ export function useGallerySelection({
     selectedCount,
     toggleSelection,
     clearSelection,
+    removeFromSelection,
     selectAllOnPage,
     selectDuplicateImages,
     selectDuplicatesKeepSingle,
