@@ -1,1 +1,1 @@
-export * from '@/server/apiHandlers/imagePrompt';
+export { GET, POST, PATCH } from '@/server/apiHandlers/imagePrompt';

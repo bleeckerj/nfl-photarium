@@ -64,7 +64,7 @@ export interface ImageGalleryRef {
   refreshImages: () => void;
 }
 
-export type ViewMode = 'grid' | 'list';
+export type ViewMode = 'grid' | 'list' | 'images';
 export type GridSize = 'small' | 'medium' | 'large' | 'xlarge';
 export type BulkFolderMode = 'existing' | 'new';
 export type BulkTagsMode = 'replace' | 'append' | 'ai';

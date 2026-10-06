@@ -3,6 +3,7 @@ import { AlertTriangle } from 'lucide-react';
 import FolderManagerButton from '@/components/FolderManagerButton';
 import MonoSelect from '@/components/MonoSelect';
 import { GalleryGridView } from '@/components/gallery/GalleryGridView';
+import { GalleryImageOnlyView } from './GalleryImageOnlyView';
 import { GalleryListView } from '@/components/gallery/GalleryListView';
 import type {
   AuditProgress,
@@ -11,6 +12,7 @@ import type {
   GalleryViewFilters,
   GridSize,
   SelectOption,
+  ViewMode,
 } from '@/components/gallery/types';
 
 interface GalleryResultsRegionProps {
@@ -18,7 +20,7 @@ interface GalleryResultsRegionProps {
   galleryTotalCount: number;
   colorSearchHex: string | null;
   hasActiveFilters: boolean;
-  viewMode: 'grid' | 'list';
+  viewMode: ViewMode;
   gridSize: GridSize;
   viewFilters: GalleryViewFilters;
   selectedVariant: string;
@@ -108,6 +110,13 @@ export default function GalleryResultsRegion({
             </button>
           )}
         </div>
+      ) : viewMode === 'images' ? (
+        <GalleryImageOnlyView
+          gridSize={gridSize}
+          filters={viewFilters}
+          onToggleSelection={onToggleSelection}
+          onBeforeNavigate={onBeforeNavigate}
+        />
       ) : viewMode === 'grid' ? (
         <GalleryGridView
           gridSize={gridSize}

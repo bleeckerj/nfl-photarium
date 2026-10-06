@@ -10,6 +10,7 @@ import React from 'react';
 import MonoSelect from '@/components/MonoSelect';
 import { VARIANT_OPTIONS, PAGE_SIZE_OPTIONS } from './constants';
 import type { ViewMode } from './types';
+import { GalleryViewModeToggle } from './GalleryViewModeToggle';
 
 interface GalleryToolbarProps {
   // View
@@ -259,30 +260,7 @@ export const GalleryToolbar: React.FC<GalleryToolbarProps> = ({
         />
 
         {/* View mode toggle */}
-        <div className="flex items-center border rounded overflow-hidden">
-          <button
-            onClick={() => onViewModeChange('grid')}
-            className={`px-2 py-1 text-[0.7em] font-mono transition ${
-              viewMode === 'grid'
-                ? 'bg-gray-200 text-gray-800'
-                : 'bg-white text-gray-500 hover:bg-gray-100'
-            }`}
-            title="Grid view"
-          >
-            ▦
-          </button>
-          <button
-            onClick={() => onViewModeChange('list')}
-            className={`px-2 py-1 text-[0.7em] font-mono transition ${
-              viewMode === 'list'
-                ? 'bg-gray-200 text-gray-800'
-                : 'bg-white text-gray-500 hover:bg-gray-100'
-            }`}
-            title="List view"
-          >
-            ≡
-          </button>
-        </div>
+        <GalleryViewModeToggle value={viewMode} onChange={onViewModeChange} />
       </div>
     </div>
   );

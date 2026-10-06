@@ -2,8 +2,9 @@ import { Cpu, RefreshCw, Settings } from 'lucide-react';
 import type { ReactNode } from 'react';
 import DateNavigator from '@/components/DateNavigator';
 import MonoSelect from '@/components/MonoSelect';
-import type { DateFilter, GridSize } from './types';
+import type { DateFilter, GridSize, ViewMode } from './types';
 import { GridSizeToggle } from './GridSizeToggle';
+import { GalleryViewModeToggle } from './GalleryViewModeToggle';
 
 export type LegacyTopBarImage = { id: string; uploaded: string };
 
@@ -25,7 +26,7 @@ interface LegacyTopBarProps {
   defaultPageSize: number;
   gridSize: GridSize;
   refreshingCache: boolean;
-  viewMode: 'grid' | 'list';
+  viewMode: ViewMode;
   selectedCount: number;
   bulkEmbeddingGenerating: boolean;
   bulkDeleting: boolean;
@@ -37,6 +38,7 @@ interface LegacyTopBarProps {
   onRefreshCache: () => void;
   onOpenNamespaceSettings: () => void;
   onToggleViewMode: () => void;
+  onViewModeChange?: (mode: ViewMode) => void;
   onSelectPage: () => void;
   onClearSelection: () => void;
   onOpenBulkEdit: () => void;
@@ -75,6 +77,7 @@ export default function LegacyTopBar({
   onRefreshCache,
   onOpenNamespaceSettings,
   onToggleViewMode,
+  onViewModeChange,
   onSelectPage,
   onClearSelection,
   onOpenBulkEdit,
@@ -169,12 +172,16 @@ export default function LegacyTopBar({
             <Settings className="h-3 w-3" />
             Namespace
           </button>
-          <button
-            onClick={onToggleViewMode}
-            className="shrink-0 whitespace-nowrap rounded-md bg-gray-100 px-3 py-1 font-mono text-[0.7em] hover:bg-gray-200"
-          >
-            {viewMode === 'grid' ? '📋 List' : '🔲 Grid'}
-          </button>
+          {onViewModeChange ? (
+            <GalleryViewModeToggle value={viewMode} onChange={onViewModeChange} />
+          ) : (
+            <button
+              onClick={onToggleViewMode}
+              className="shrink-0 whitespace-nowrap rounded-md bg-gray-100 px-3 py-1 font-mono text-[0.7em] hover:bg-gray-200"
+            >
+              {viewMode === 'grid' ? '📋 List' : '🔲 Grid'}
+            </button>
+          )}
         </div>
       </div>
 

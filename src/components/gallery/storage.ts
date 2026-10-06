@@ -13,6 +13,7 @@ import {
   DEFAULT_GRID_SIZE,
 } from './constants';
 import { normalizeGridSize } from './gridSizing';
+import { normalizeViewMode } from './viewMode';
 import { normalizeDateFilterValue } from './dateFilter';
 import type { GalleryPreferences, BrokenAudit } from './types';
 
@@ -213,7 +214,7 @@ export const loadPreferences = (): GalleryPreferences => {
       selectedFolder: parsed.selectedFolder ?? 'all',
       selectedTag: parsed.selectedTag ?? '',
       searchTerm: parsed.searchTerm ?? '',
-      viewMode: parsed.viewMode === 'list' ? 'list' : 'grid',
+      viewMode: normalizeViewMode(parsed.viewMode),
       gridSize: normalizedGridSize,
       filtersCollapsed: Boolean(parsed.filtersCollapsed),
       bulkFolderInput: typeof parsed.bulkFolderInput === 'string' ? parsed.bulkFolderInput : '',

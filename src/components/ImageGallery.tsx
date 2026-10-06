@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, forwardRef, useMemo, useRef, useCallback } from 'react';
-import { type CloudflareImage, type GalleryFamilySummary, type GridSize, type ImageGalleryProps, type ImageGalleryRef } from './gallery/types';
+import { type CloudflareImage, type GalleryFamilySummary, type GridSize, type ImageGalleryProps, type ImageGalleryRef, type ViewMode } from './gallery/types';
 import { setDragPayloadForImage } from '@/utils/imageDrag';
 import { copyToClipboard, formatCopyPayload } from '@/utils/clipboard';
 import { useToast } from './Toast';
@@ -86,7 +86,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
   const [loading, setLoading] = useState(initialLoading);
   const [selectedVariant, setSelectedVariant] = useState<string>(storedPreferencesRef.current.variant);
   const [openCopyMenu, setOpenCopyMenu] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>((storedPreferencesRef.current.viewMode ?? 'grid') as 'grid' | 'list');
+  const [viewMode, setViewMode] = useState<ViewMode>(storedPreferencesRef.current.viewMode);
   const [gridSize, setGridSize] = useState<GridSize>(
     normalizeGridSize(storedPreferencesRef.current.gridSize, DEFAULT_GRID_SIZE)
   );
@@ -913,6 +913,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           onPageSizeChange: handlePageSizeChange, onGridSizeChange: setGridSize, onRefreshCache: () => fetchImages({ forceRefresh: true }),
           onOpenNamespaceSettings: () => setNamespaceSettingsOpen(true),
           onToggleViewMode: () => setViewMode(viewMode === 'grid' ? 'list' : 'grid'),
+          onViewModeChange: setViewMode,
           onSelectPage: () => selectAllOnPage(pageImages), onClearSelection: clearSelection,
           onOpenBulkEdit: openBulkEditModal, onGenerateEmbeddings: generateEmbeddingsForSelected,
           onDeleteSelected: deleteSelectedImages,

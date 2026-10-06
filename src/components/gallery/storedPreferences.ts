@@ -7,8 +7,9 @@ import {
 import { normalizeDateFilterValue } from './dateFilter';
 import { normalizeColorSearchHex } from './colorSearch';
 import { normalizeGridSize } from './gridSizing';
+import { normalizeViewMode } from './viewMode';
 import { loadHiddenFolders, loadHiddenNamespaces, loadHiddenTags } from './storage';
-import type { AspectRatioClass, DateFilter, EmbeddingFilter, GridSize } from './types';
+import type { AspectRatioClass, DateFilter, EmbeddingFilter, GridSize, ViewMode } from './types';
 import type { NormalizedGalleryReturnState } from './returnState';
 
 export { DEFAULT_PAGE_SIZE, PAGE_SIZE_OPTIONS } from './constants';
@@ -26,7 +27,7 @@ export type StoredGalleryPreferences = {
   selectedTag: string;
   searchTerm: string;
   colorSearchHex?: string | null;
-  viewMode: 'grid' | 'list';
+  viewMode: ViewMode;
   gridSize: GridSize;
   filtersCollapsed: boolean;
   bulkFolderInput: string;
@@ -109,7 +110,7 @@ export const getStoredPreferences = (
         selectedTag?: string;
         searchTerm?: string;
         colorSearchHex?: string | null;
-        viewMode?: 'grid' | 'list';
+        viewMode?: ViewMode;
         gridSize?: GridSize;
         filtersCollapsed?: boolean;
         bulkFolderInput?: string;
@@ -152,7 +153,7 @@ export const getStoredPreferences = (
         typeof parsed.colorSearchHex === 'string' && parsed.colorSearchHex.trim()
           ? parsed.colorSearchHex.trim()
           : null;
-      next.viewMode = parsed.viewMode === 'list' ? 'list' : 'grid';
+      next.viewMode = normalizeViewMode(parsed.viewMode);
       next.gridSize = normalizeGridSize(parsed.gridSize, DEFAULT_GRID_SIZE);
       next.filtersCollapsed = Boolean(parsed.filtersCollapsed);
       next.bulkFolderInput = typeof parsed.bulkFolderInput === 'string' ? parsed.bulkFolderInput : '';

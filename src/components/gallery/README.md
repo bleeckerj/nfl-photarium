@@ -6,6 +6,10 @@
 - Files in this folder own gallery controls, result rendering, modals, bulk state, stored preferences, and gallery-specific view models.
 - Hooks in `hooks/` should own gallery state orchestration that is reusable across the gallery shell and related controls.
 
+## Gallery Views
+
+The view selector offers Grid, Images only, and List. Images only uses compact gaps and shows complete images without captions, badges, action bars, or hover overlays. Grid Zoom retains the same S, M, L, and XL column sizes, and Image Size still controls the delivery variant. The view choice persists across reloads and detail navigation. Select images enables tile selection with an outline; click an image outside selection mode to open its detail page.
+
 ## Bulk Selection IDs
 
 `GalleryBulkEditModal.tsx` exposes the current selection as both a comma-separated CSV string and a formatted JSON array. The copy actions delegate clipboard work and toast feedback to `useGalleryBulkUiState`, keeping the modal responsible for format selection and loading state.
