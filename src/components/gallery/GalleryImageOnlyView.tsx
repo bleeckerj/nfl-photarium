@@ -21,7 +21,7 @@ export function GalleryImageOnlyView({
   onToggleSelection,
   onBeforeNavigate,
 }: GalleryImageOnlyViewProps) {
-  const { images, selectedVariant, bulkSelectionMode, selectedImageIds, galleryReturnHrefSuffix, focusedGalleryAssetId } = filters;
+  const { images, selectedVariant, respectAspectRatio, bulkSelectionMode, selectedImageIds, galleryReturnHrefSuffix, focusedGalleryAssetId } = filters;
 
   return (
     <div id="gallery-results-images" className={getGridClassName(gridSize, true)}>
@@ -33,7 +33,13 @@ export function GalleryImageOnlyView({
         const label = image.altText || image.altTag || image.displayName || image.filename;
         const selected = selectedImageIds.has(image.id);
         const focused = focusedGalleryAssetId === image.id;
-        const className = `relative block aspect-square w-full min-w-0 bg-white focus-visible:outline-2 focus-visible:outline-blue-500 ${
+        const dimensions = image.dimensions;
+        const aspectRatio = respectAspectRatio
+          ? dimensions && Number.isFinite(dimensions.width) && Number.isFinite(dimensions.height) && dimensions.width > 0 && dimensions.height > 0
+            ? String(dimensions.width / dimensions.height)
+            : '4 / 3'
+          : undefined;
+        const className = `relative block self-start w-full min-w-0 bg-white ${respectAspectRatio ? '' : 'aspect-square'} focus-visible:outline-2 focus-visible:outline-blue-500 ${
           selected ? 'outline-2 -outline-offset-2 outline-blue-500' : focused ? 'outline-2 -outline-offset-2 outline-amber-400' : ''
         }`;
         const thumbnail = previewUrl ? (
@@ -41,7 +47,7 @@ export function GalleryImageOnlyView({
             src={previewUrl}
             alt={label}
             fill
-            className="object-contain"
+            className={respectAspectRatio ? 'object-contain' : 'object-cover'}
             sizes="(max-width: 640px) 100vw, (max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw"
             unoptimized={isVideo || (isSvgImage(image) && !image.linkedAssetId)}
             draggable={!isVideo}
@@ -54,7 +60,7 @@ export function GalleryImageOnlyView({
           id: `gallery-asset-${image.id}`,
           'data-gallery-asset-id': image.id,
           className,
-          style: focused ? { scrollMarginTop: '6rem' } : undefined,
+          style: { aspectRatio, scrollMarginTop: focused ? '6rem' : undefined },
         };
 
         return bulkSelectionMode ? (

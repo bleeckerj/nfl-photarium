@@ -8,7 +8,7 @@
 
 ## Gallery Views
 
-The view selector offers Grid, Images only, and List. Images only uses compact gaps and shows complete images without captions, badges, action bars, or hover overlays. Grid Zoom retains the same S, M, L, and XL column sizes, and Image Size still controls the delivery variant. The view choice persists across reloads and detail navigation. Select images enables tile selection with an outline; click an image outside selection mode to open its detail page.
+The view selector offers Grid, Images only, and List. Images only uses compact gaps without captions, badges, action bars, or hover overlays. Respect Aspect Ratio shows complete images at their original proportions; turning it off fills square thumbnails with a centered crop. Grid Zoom retains the same S, M, L, and XL column sizes, and Image Size still controls the delivery variant. The view choice persists across reloads and detail navigation. Select images enables tile selection with an outline; click an image outside selection mode to open its detail page.
 
 ## Bulk Selection IDs
 

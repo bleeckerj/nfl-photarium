@@ -81,15 +81,41 @@ const renderGallery = async (overrides: Partial<ComponentProps<typeof GalleryIma
 };
 
 describe('image-only gallery', () => {
-  it('renders complete images with accessible descriptions and no visible metadata or controls', async () => {
+  it('renders square crops with accessible descriptions and no visible metadata or controls', async () => {
     await renderGallery();
     expect(container.textContent).toBe('');
     expect(container.querySelectorAll('img')).toHaveLength(1);
     expect(container.querySelector('img')?.alt).toBe(image.altText);
-    expect(container.querySelector('img')?.className).toBe('object-contain');
+    expect(container.querySelector('img')?.className).toBe('object-cover');
+    expect(container.querySelector('a')?.className).toContain('aspect-square');
     expect(container.querySelectorAll('button,input,label,svg')).toHaveLength(0);
     expect(container.querySelector('a')?.href).toContain('/images/image-1?gns=studio&gpage=2');
     expect(container.querySelector('[data-gallery-asset-id]')?.id).toBe('gallery-asset-image-1');
+  });
+
+  it.each([
+    { name: 'portrait', dimensions: { width: 400, height: 800 }, ratio: '0.5 / 1' },
+    { name: 'landscape', dimensions: { width: 800, height: 400 }, ratio: '2 / 1' },
+    { name: 'missing dimensions', dimensions: undefined, ratio: '4 / 3' },
+    { name: 'invalid dimensions', dimensions: { width: 0, height: 400 }, ratio: '4 / 3' },
+  ])('preserves full images for $name when respecting aspect ratio', async ({ dimensions, ratio }) => {
+    await renderGallery({ filters: filters({ respectAspectRatio: true, images: [{ ...image, dimensions }] }) });
+    expect(container.querySelector('img')?.className).toBe('object-contain');
+    const tile = container.querySelector('a');
+    expect(tile?.className).not.toContain('aspect-square');
+    expect(tile?.className).toContain('self-start');
+    expect(tile?.style.aspectRatio).toBe(ratio);
+  });
+
+  it('switches between original proportions and square crops when the setting changes', async () => {
+    await renderGallery();
+    await renderGallery({ filters: filters({ respectAspectRatio: true }) });
+    expect(container.querySelector('img')?.className).toBe('object-contain');
+    expect(container.querySelector('a')?.style.aspectRatio).toBe('0.5 / 1');
+    await renderGallery();
+    expect(container.querySelector('img')?.className).toBe('object-cover');
+    expect(container.querySelector('a')?.className).toContain('aspect-square');
+    expect(container.querySelector('a')?.style.aspectRatio).toBe('');
   });
 
   it.each<GridSize>(['small', 'medium', 'large', 'xlarge'])('retains %s grid sizing with smaller gaps', async (gridSize) => {
@@ -112,12 +138,13 @@ describe('image-only gallery', () => {
     const onToggleSelection = vi.fn();
     const onBeforeNavigate = vi.fn();
     await renderGallery({
-      filters: filters({ bulkSelectionMode: true, selectedImageIds: new Set([image.id]) }),
+      filters: filters({ bulkSelectionMode: true, respectAspectRatio: true, selectedImageIds: new Set([image.id]) }),
       onToggleSelection, onBeforeNavigate,
     });
     const button = container.querySelector('button');
     expect(button?.getAttribute('aria-pressed')).toBe('true');
     expect(button?.className).toContain('outline-blue-500');
+    expect(button?.style.aspectRatio).toBe('0.5 / 1');
     expect(container.textContent).toBe('');
     expect(container.querySelectorAll('a,input,label')).toHaveLength(0);
     await act(async () => button?.click());
@@ -128,11 +155,12 @@ describe('image-only gallery', () => {
   it('preserves focus markers and SVG raster previews without adding badges', async () => {
     await renderGallery({ filters: filters({
       images: [{ ...image, filename: 'logo.svg', linkedAssetId: 'raster-1' }],
-      focusedGalleryAssetId: image.id,
+      focusedGalleryAssetId: image.id, respectAspectRatio: true,
     }) });
     expect(container.querySelector('img')?.src).toContain('/raster-1/w=600');
     expect(container.querySelector('a')?.getAttribute('aria-current')).toBe('true');
     expect(container.querySelector('a')?.style.scrollMarginTop).toBe('6rem');
+    expect(container.querySelector('a')?.style.aspectRatio).toBe('0.5 / 1');
     expect(container.textContent).toBe('');
   });
 
