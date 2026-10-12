@@ -64,6 +64,37 @@ describe('generation provenance', () => {
     expect(await getProvenanceRevision()).not.toBe('0');
   });
 
+  it('lists formatting copies once while retaining exact JSON for both IDs', async () => {
+    const json = receipt();
+    const compact = JSON.stringify(JSON.parse(json));
+    const uploaded = await attachReceipt({ imageId: 'child', receipt: json, uploadSource: bytes, persistedHash: sha256(bytes) });
+    const attached = await attachReceipt({ imageId: 'child', receipt: compact });
+    expect(attached.receiptId).not.toBe(uploaded.receiptId);
+    expect(await listReceiptBindings('child')).toEqual([attached]);
+    expect(await getReceiptJson('child', uploaded.receiptId)).toBe(json);
+    expect(await getReceiptJson('child', attached.receiptId)).toBe(compact);
+  });
+
+  it('groups reordered JSON keys and preserves receipts with different prompts', async () => {
+    const parsed: Record<string, unknown> = JSON.parse(receipt());
+    const reordered = JSON.stringify(Object.fromEntries(Object.entries(parsed).reverse()));
+    await attachReceipt({ imageId: 'child', receipt: receipt() });
+    await attachReceipt({ imageId: 'child', receipt: reordered });
+    expect(await listReceiptBindings('child')).toHaveLength(1);
+    const changed = receipt({ request: { prompt: 'A different generation prompt', quality: 'xhigh', size: '2048x1152' } });
+    await attachReceipt({ imageId: 'child', receipt: changed });
+    expect(await listReceiptBindings('child')).toHaveLength(2);
+  });
+
+  it('preserves distinct persisted hashes and declared sources for equivalent receipts', async () => {
+    const json = receipt();
+    await attachReceipt({ imageId: 'child', receipt: json, uploadSource: bytes, persistedHash: 'c'.repeat(64) });
+    await attachReceipt({ imageId: 'child', receipt: JSON.stringify(JSON.parse(json)) });
+    expect(await listReceiptBindings('child')).toHaveLength(2);
+    await attachReceipt({ imageId: 'child', receipt: `${json}\n`, sourceImageIds: ['other-source'] });
+    expect(await listReceiptBindings('child')).toHaveLength(3);
+  });
+
   it('rejects mismatched hashes and dimensions without creating availability', async () => {
     await expect(attachReceipt({ imageId: 'child', receipt: receipt({ outputs: [{ sha256: 'f'.repeat(64), bytes: bytes.length, dimensions: [2, 3] }] }) })).rejects.toThrow('does not match');
     await expect(attachReceipt({ imageId: 'child', receipt: receipt({ outputs: [{ sha256: sha256(bytes), bytes: bytes.length, dimensions: [3, 2] }] }) })).rejects.toThrow('dimensions conflict');
@@ -123,7 +154,14 @@ describe('generation provenance', () => {
     await expect(getReceiptJson('other', binding.receiptId)).rejects.toThrow('not attached');
     const download = await readProvenance(new Request(`http://localhost/api/images/child/provenance?receiptId=${binding.receiptId}`), 'child');
     expect(download.headers.get('Cache-Control')).toBe('private, no-store');
+    expect(download.headers.get('Content-Disposition')).toContain('attachment;');
     expect(await download.text()).toBe(receipt());
+    const inline = await readProvenance(new Request(`http://localhost/api/images/child/provenance?receiptId=${binding.receiptId}&view=inline`), 'child');
+    expect(inline.headers.get('Content-Disposition')).toContain('inline;');
+    expect(inline.headers.get('Cache-Control')).toBe('private, no-store');
+    expect(await inline.text()).toBe(receipt());
+    const unbound = await readProvenance(new Request(`http://localhost/api/images/other/provenance?receiptId=${binding.receiptId}&view=inline`), 'other');
+    expect(unbound.status).toBe(404);
   });
 
   it('rejects cross-origin and remote receipt access; permits configured operator bearer access', async () => {

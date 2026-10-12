@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { getExtrasStorage } from '@/server/extrasStorage';
 import type { ProvenanceBinding, ProvenanceSummary } from '@/types/generationProvenance';
 import { ProvenanceError } from './validation';
+import { receiptContentIdentity } from './identity';
 
 const receiptKey = (id: string) => `generation-receipt:${id}`;
 const bindingPrefix = (id: string) => `generation-binding:${id}:`;
@@ -40,8 +41,22 @@ export async function listReceiptBindings(imageId: string): Promise<ProvenanceBi
   const storage = getExtrasStorage();
   const keys = await storage.listKeysByPrefix(bindingPrefix(imageId));
   const records = await storage.getMany<ProvenanceBinding>(keys);
-  return keys.map((key) => records[key]).filter((record): record is ProvenanceBinding => Boolean(record))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const bindings = keys.map((key) => records[key]).filter((record): record is ProvenanceBinding => Boolean(record));
+  const receipts = await storage.getMany<{ json: string }>(bindings.map((binding) => receiptKey(binding.receiptId)));
+  const unique = new Map<string, ProvenanceBinding>();
+  for (const binding of bindings) {
+    const receipt = receipts[receiptKey(binding.receiptId)];
+    const identity = JSON.stringify([
+      receipt ? receiptContentIdentity(receipt.json) : binding.receiptId,
+      binding.outputIndex, binding.persistedSha256, [...binding.sourceImageIds].sort(),
+    ]);
+    const existing = unique.get(identity);
+    // Prefer verification against stored original bytes while retaining every exact record.
+    if (!existing || (existing.verification !== 'original-matched' && binding.verification === 'original-matched')) {
+      unique.set(identity, binding);
+    }
+  }
+  return [...unique.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export async function getReceiptJson(imageId: string, receiptId: string): Promise<string> {

@@ -2,6 +2,7 @@
 
 import { ProvenanceIndicator } from '@/components/asset-detail/ProvenanceIndicator';
 import { useProvenanceReceipts } from './useProvenanceReceipts';
+import { ProvenanceReceiptViewer } from './ProvenanceReceiptViewer';
 
 export function ProvenanceSection({ imageId, available }: { imageId: string; available?: boolean }) {
   const { receipts, loading, error } = useProvenanceReceipts(imageId, available);
@@ -25,10 +26,7 @@ export function ProvenanceSection({ imageId, available }: { imageId: string; ava
             <p className="break-all font-mono">Generated: {receipt.generatedSha256}</p>
             <p className="break-all font-mono">Stored: {receipt.persistedSha256}</p>
           </details>
-          <a
-            className="inline-block text-sky-700 underline"
-            href={`/api/images/${encodeURIComponent(imageId)}/provenance?receiptId=${receipt.receiptId}`}
-          >Download provenance receipt</a>
+          <ProvenanceReceiptViewer imageId={imageId} receiptId={receipt.receiptId} />
         </div>
       ))}
     </section>

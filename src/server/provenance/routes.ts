@@ -12,12 +12,13 @@ const privateHeaders = { 'Cache-Control': 'private, no-store', 'X-Content-Type-O
 export async function readProvenance(request: Request, imageId: string) {
   try {
     requireProvenanceAccess(request);
-    const receiptId = new URL(request.url).searchParams.get('receiptId');
+    const params = new URL(request.url).searchParams;
+    const receiptId = params.get('receiptId');
     if (receiptId) {
       const json = await getReceiptJson(imageId, receiptId);
       return new NextResponse(json, { headers: {
         ...privateHeaders, 'Content-Type': 'application/json',
-        'Content-Disposition': `attachment; filename="${receiptId}.provenance.json"`,
+        'Content-Disposition': `${params.get('view') === 'inline' ? 'inline' : 'attachment'}; filename="${receiptId}.provenance.json"`,
       } });
     }
     return NextResponse.json({ imageId, receipts: await listReceiptBindings(imageId) }, { headers: privateHeaders });
