@@ -2,6 +2,7 @@ import type { GalleryQueryAsset, GalleryQueryFilters } from '@/server/galleryQue
 import type { AspectRatioClass } from '@/utils/aspectRatioClass';
 
 export type ListableImage = {
+  provenanceAvailable?: boolean;
   id: string;
   assetType?: 'image' | 'video';
   filename: string;
@@ -189,6 +190,7 @@ export function toListableImage(image: Record<string, unknown>): ListableImage {
   // Intentionally omit heavy fields like EXIF from the gallery list payload.
   return {
     id: String(image.id ?? ''),
+    provenanceAvailable: image.provenanceAvailable === true,
     assetType: image.assetType === 'video' ? 'video' : 'image',
     filename: typeof image.filename === 'string' ? image.filename : '',
     displayName: typeof image.displayName === 'string' ? image.displayName : undefined,

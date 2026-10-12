@@ -12,6 +12,8 @@ If the profile-ingest MCP returns an error, stop the Instagram workflow and repo
 
 Every actual Codex-generated image must be uploaded to Photarium and verified before the workflow is complete. A local generated file or provider handoff is not a completed result. Completion requires a Photarium child ID and hosted URL, with the final prompt, provider, source relationship, dimensions/aspect ratio, parentage, and description/alt-text enrichment status retained. If upload, recording, or verification fails, report the workflow as incomplete.
 
+Every generation or edit must also retain a generation provenance receipt in Photarium Extras Storage. Upload with `generated: true` and `provenanceReceiptPath` or `provenanceReceipt`; verify `provenanceSave.saved`, then read the receipt back through `photarium_provenance_list` and `photarium_provenance_get`. Existing uploads use `photarium_provenance_attach`. Preserve the exact provider receipt when available. For providers with opaque metadata, create schema-version-1 evidence containing the final prompt, provider, creation time, output SHA-256, byte count, and dimensions; record unavailable model/request fields honestly. Never invent a model snapshot or include credentials, base64 image data, environment values, or signed URLs. Keep receipts in internal records, separate from public captions and alt text. A local receipt alone does not complete the workflow. See [Generation Provenance Policy](docs/generation-provenance.md).
+
 ### Photarium Upload Namespace
 
 Photarium uploads default to the `cf-default` namespace unless the active workflow explicitly specifies another namespace. Never infer, inherit, or propagate a source image's namespace.

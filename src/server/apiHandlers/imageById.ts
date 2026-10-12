@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { projectProvenance } from '@/server/provenance/projection';
 import {
   type CachedCloudflareImage,
   getCachedImage,
@@ -179,9 +180,10 @@ const enrichWithVideoAnimatedWebpComfyProvenance = async (
 
 const applyExtrasMetadata = async (image: CachedCloudflareImage) => {
   const extras = await getImageExtrasRecord(image.id);
-  if (!extras) return image;
+  const projected = (await projectProvenance([image]))[0];
+  if (!extras) return projected;
 
-  const next = { ...image };
+  const next = { ...projected };
   if (Object.prototype.hasOwnProperty.call(extras, 'folder')) {
     next.folder = extras.folder;
   }

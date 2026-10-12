@@ -1,4 +1,5 @@
 import { getSvgOriginalDownloadUrl } from '@/utils/assetUrls';
+import { ProvenanceSection } from './ProvenanceSection';
 import { AltTextEditor } from './AltTextEditor';
 import { CloudflareMetadataHeader } from './CloudflareMetadataHeader';
 import { ComfyWorkflowPanel, type ComfyWorkflowRecord } from './comfy';
@@ -167,6 +168,7 @@ export const ImageDetailMetadataPanel = ({
   ) => Promise<void>;
 }) => (
   <>
+    <ProvenanceSection imageId={image.id} available={image.provenanceAvailable} />
     {image.assetType !== 'video' && (
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs font-mono text-gray-600">Favorite status</p>

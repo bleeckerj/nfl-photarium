@@ -16,11 +16,13 @@
 import { promises as fs } from 'fs';
 import os from 'node:os';
 import path from 'path';
+import { randomUUID } from 'node:crypto';
 
 export interface IExtrasStorage {
   get<T>(key: string): Promise<T | null>;
   getMany<T>(keys: string[]): Promise<Record<string, T | null>>;
   set<T>(key: string, value: T): Promise<void>;
+  setIfAbsent<T>(key: string, value: T): Promise<boolean>;
   delete(key: string): Promise<void>;
   listKeysByPrefix(prefix: string): Promise<string[]>;
   exists(key: string): Promise<boolean>;
@@ -92,7 +94,7 @@ class FileExtrasStorage implements IExtrasStorage {
   private async doWrite<T>(key: string, value: T): Promise<void> {
     await this.ensureDir();
     const filePath = this.getFilePath(key);
-    const tmpPath = `${filePath}.tmp`;
+    const tmpPath = `${filePath}.${randomUUID()}.tmp`;
     await fs.writeFile(tmpPath, JSON.stringify(value), 'utf-8');
     await fs.rename(tmpPath, filePath);
   }
@@ -105,6 +107,23 @@ class FileExtrasStorage implements IExtrasStorage {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
         throw error;
       }
+    }
+  }
+
+  async setIfAbsent<T>(key: string, value: T): Promise<boolean> {
+    await this.ensureDir();
+    const target = this.getFilePath(key);
+    const temporary = `${target}.${randomUUID()}.tmp`;
+    await fs.writeFile(temporary, JSON.stringify(value), 'utf8');
+    try {
+      // Linking a complete temporary file gives readers atomic publication with no overwrite.
+      await fs.link(temporary, target);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
+      throw error;
+    } finally {
+      await fs.unlink(temporary);
     }
   }
 
@@ -138,7 +157,7 @@ class FileExtrasStorage implements IExtrasStorage {
 interface RedisClient {
   get(key: string): Promise<string | null>;
   mget(...keys: string[]): Promise<Array<string | null>>;
-  set(key: string, value: string): Promise<unknown>;
+  set(key: string, value: string, mode?: 'NX'): Promise<unknown>;
   del(key: string): Promise<number>;
   scan(cursor: string, ...args: string[]): Promise<[string, string[]]>;
   exists(key: string): Promise<number>;
@@ -244,6 +263,11 @@ class RedisExtrasStorage implements IExtrasStorage {
   async set<T>(key: string, value: T): Promise<void> {
     const client = await this.getClient();
     await client.set(this.fullKey(key), JSON.stringify(value));
+  }
+
+  async setIfAbsent<T>(key: string, value: T): Promise<boolean> {
+    const client = await this.getClient();
+    return await client.set(this.fullKey(key), JSON.stringify(value), 'NX') === 'OK';
   }
 
   async delete(key: string): Promise<void> {

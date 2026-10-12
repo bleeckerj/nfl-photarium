@@ -10,6 +10,7 @@ import type { AspectRatioClass } from '@/utils/aspectRatioClass';
 
 export interface CloudflareImage {
   id: string;
+  provenanceAvailable?: boolean;
   assetType?: 'image' | 'video';
   filename: string;
   displayName?: string;

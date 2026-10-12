@@ -16,6 +16,7 @@ export async function apiRequest<T>(
     ...options,
     headers: {
       ...JSON_REQUEST_HEADERS,
+      ...(endpoint.includes('/provenance') && process.env.PHOTARIUM_PROVENANCE_TOKEN ? { Authorization: `Bearer ${process.env.PHOTARIUM_PROVENANCE_TOKEN}` } : {}),
       ...options.headers,
     },
   });
@@ -37,6 +38,7 @@ export async function apiRequestRaw(
     ...options,
     headers: {
       ...RAW_REQUEST_HEADERS,
+      ...(endpoint.includes('/provenance') && process.env.PHOTARIUM_PROVENANCE_TOKEN ? { Authorization: `Bearer ${process.env.PHOTARIUM_PROVENANCE_TOKEN}` } : {}),
       ...options.headers,
     },
   });

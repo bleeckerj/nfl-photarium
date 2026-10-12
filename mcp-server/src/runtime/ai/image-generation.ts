@@ -1,3 +1,4 @@
+import { createGenerationReceipt, safeImageResponse } from '../provenance/generation-receipt.js';
 const OPENAI_API_BASE_URL = process.env.OPENAI_API_BASE_URL || 'https://api.openai.com/v1';
 export const OPENAI_IMAGE_MODELS = ['gpt-image-2.5-sunburst', 'gpt-image-2.5-flare', 'gpt-image-2'] as const;
 export const OPENAI_IMAGE_QUALITIES = ['auto', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
@@ -86,6 +87,8 @@ interface UploadPayload {
   namespace?: string;
   parentId?: string;
   prompt?: string;
+  provenanceReceipt?: string;
+  generated?: boolean;
 }
 
 export interface ImageGenerationDeps {
@@ -101,6 +104,8 @@ interface OpenAiImageResult {
   b64Json?: string;
   url?: string;
   revisedPrompt?: string;
+  requestId?: string;
+  response?: Record<string, unknown>;
 }
 
 function normalizeOpenAiImageModel(value?: string): OpenAiImageModel {
@@ -325,7 +330,7 @@ async function postOpenAiImageRequest(endpointPath: '/images/generations' | '/im
   const url = typeof first?.url === 'string' ? first.url : undefined;
   const revisedPrompt = typeof first?.revised_prompt === 'string' ? first.revised_prompt : undefined;
   if (!b64Json && !url) throw new Error('OpenAI image generation returned no image data');
-  return { b64Json, url, revisedPrompt };
+  return { b64Json, url, revisedPrompt, requestId: response.headers.get('x-request-id') ?? undefined, response: safeImageResponse(record) };
 }
 
 async function fetchImageUrlAsBase64(url: string): Promise<{ base64: string; contentType: string }> {
@@ -424,8 +429,9 @@ function buildImageRequestSettings(settings: ImageGenerationSettings) {
 async function buildOpenAiEditFormData(
   requestBody: Record<string, unknown>,
   imageUrls: string[],
-): Promise<FormData> {
+): Promise<{ form: FormData; sourceBytes: Buffer[] }> {
   const form = new FormData();
+  const sourceBytes: Buffer[] = [];
   for (const [key, value] of Object.entries(requestBody)) {
     if (key === 'images' || value === undefined) continue;
     form.append(key, String(value));
@@ -434,9 +440,11 @@ async function buildOpenAiEditFormData(
     const response = await fetch(imageUrl);
     if (!response.ok) throw new Error(`Failed to materialize OpenAI edit reference ${index + 1} (${response.status})`);
     const contentType = response.headers.get('content-type')?.split(';')[0]?.trim() || 'image/png';
-    form.append('image[]', new Blob([await response.arrayBuffer()], { type: contentType }), `reference-${index + 1}.${contentType === 'image/jpeg' ? 'jpg' : contentType.split('/')[1] || 'png'}`);
+    const bytes = await response.arrayBuffer();
+    sourceBytes.push(Buffer.from(bytes));
+    form.append('image[]', new Blob([bytes], { type: contentType }), `reference-${index + 1}.${contentType === 'image/jpeg' ? 'jpg' : contentType.split('/')[1] || 'png'}`);
   }
-  return form;
+  return { form, sourceBytes };
 }
 
 function buildImagePromptProvenance(args: Record<string, unknown>): string {
@@ -460,9 +468,10 @@ async function uploadGeneratedImage(deps: ImageGenerationDeps, options: {
   contentType: string;
   settings: ImageGenerationSettings;
   provenancePrompt: string;
+  provenanceReceipt: string;
   parentId?: string;
 }): Promise<Record<string, unknown>> {
-  return deps.uploadFileBase64('/api/upload', {
+  const upload = await deps.uploadFileBase64('/api/upload', {
     base64: options.base64,
     filename: buildGeneratedFilename(options.settings, normalizeImageOutputFormat(options.settings.outputFormat)),
     contentType: options.contentType,
@@ -474,8 +483,13 @@ async function uploadGeneratedImage(deps: ImageGenerationDeps, options: {
     namespace: options.settings.namespace,
     parentId: options.parentId || options.settings.parentId,
     prompt: options.provenancePrompt,
+    provenanceReceipt: options.provenanceReceipt,
+    generated: true,
     sourceUrl: options.settings.sourceUrl || 'https://platform.openai.com/docs/guides/image-generation',
   });
+  const receiptSave = upload.provenanceSave;
+  const complete = receiptSave !== null && typeof receiptSave === 'object' && 'saved' in receiptSave && receiptSave.saved === true;
+  return { ...upload, complete, ...(complete ? {} : { error: 'Image uploaded but provenance retention is incomplete; retry receipt attachment using the uploaded image ID.' }) };
 }
 
 export async function generatePhotariumImage(deps: ImageGenerationDeps, settings: ImageGenerationSettings): Promise<Record<string, unknown>> {
@@ -503,6 +517,7 @@ export async function generatePhotariumImage(deps: ImageGenerationDeps, settings
     contentType: materialized.contentType,
     settings,
     provenancePrompt: buildImagePromptProvenance({ mode: 'text_to_image', prompt: settings.prompt, revisedPrompt: openAiResult.revisedPrompt, ...requestSettings }),
+    provenanceReceipt: await createGenerationReceipt({ base64: materialized.base64, request: requestBody, response: openAiResult.response, requestId: openAiResult.requestId, apiBase: OPENAI_API_BASE_URL }),
   });
   return { mode: 'text_to_image', imageId: upload.id || upload.imageId || null, url: upload.url || upload.cloudflareUrl || null, upload, revisedPrompt: openAiResult.revisedPrompt || null, model: requestSettings.model, settings: requestSettings };
 }
@@ -548,13 +563,14 @@ export async function generatePhotariumImageFromReferences(
     };
   }
   const editForm = await buildOpenAiEditFormData(requestBody, resolved.map((reference) => reference.imageUrl));
-  const openAiResult = await postOpenAiImageRequest('/images/edits', editForm);
+  const openAiResult = await postOpenAiImageRequest('/images/edits', editForm.form);
   const materialized = await materializeOpenAiImageResult(openAiResult, imageMimeForOutputFormat(requestSettings.outputFormat));
   const upload = await uploadGeneratedImage(deps, {
     base64: materialized.base64,
     contentType: materialized.contentType,
     settings,
     provenancePrompt: buildImagePromptProvenance({ mode, prompt: settings.prompt, revisedPrompt: openAiResult.revisedPrompt, ...requestSettings, sources }),
+    provenanceReceipt: await createGenerationReceipt({ base64: materialized.base64, request: requestBody, response: openAiResult.response, requestId: openAiResult.requestId, apiBase: OPENAI_API_BASE_URL, sourceImages: resolved.map((source, index) => ({ bytes: editForm.sourceBytes[index], provenance: source.provenance })) }),
     parentId: settings.parentId || singleParentId,
   });
   return { mode, imageId: upload.id || upload.imageId || null, url: upload.url || upload.cloudflareUrl || null, upload, revisedPrompt: openAiResult.revisedPrompt || null, model: requestSettings.model, settings: requestSettings, sources, warnings };

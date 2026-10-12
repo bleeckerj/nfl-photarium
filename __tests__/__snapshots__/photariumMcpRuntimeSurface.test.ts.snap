@@ -996,6 +996,10 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "description": "Legacy compatibility field. Semantic tagging is queued for every successful upload; this field is ignored.",
         "type": "boolean",
       },
+      "generated": {
+        "description": "Set true for generated or edited images; requires receipt storage and verification.",
+        "type": "boolean",
+      },
       "namespace": {
         "description": "Namespace to store the image in",
         "type": "string",
@@ -1010,6 +1014,14 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
       },
       "prompt": {
         "description": "Optional manual prompt text to save to the image PromptThis record after upload",
+        "type": "string",
+      },
+      "provenanceReceipt": {
+        "description": "Generation provenance receipt JSON, as an alternative to a local receipt path.",
+        "type": "string",
+      },
+      "provenanceReceiptPath": {
+        "description": "Absolute path to the generation provenance JSON receipt. Required for generated images unless receipt JSON is supplied.",
         "type": "string",
       },
       "semanticTagCount": {
@@ -1055,6 +1067,10 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
         "description": "Legacy compatibility field. Semantic tagging is queued for every successful upload; this field is ignored.",
         "type": "boolean",
       },
+      "generated": {
+        "description": "Set true for generated or edited images; requires receipt storage and verification.",
+        "type": "boolean",
+      },
       "namespace": {
         "description": "Namespace to store the image in",
         "type": "string",
@@ -1069,6 +1085,14 @@ exports[`Photarium MCP runtime surface > snapshots representative high-risk tool
       },
       "prompt": {
         "description": "Optional manual prompt text to save to the image PromptThis record after upload",
+        "type": "string",
+      },
+      "provenanceReceipt": {
+        "description": "Generation provenance receipt JSON, as an alternative to a local receipt path.",
+        "type": "string",
+      },
+      "provenanceReceiptPath": {
+        "description": "Absolute path to the generation provenance JSON receipt. Required for generated images unless receipt JSON is supplied.",
         "type": "string",
       },
       "semanticTagCount": {

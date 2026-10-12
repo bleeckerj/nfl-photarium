@@ -1,5 +1,6 @@
 import { removeCachedImage } from '@/server/cloudflareImageCache';
 import { deleteImageExtrasRecord } from '@/server/imageExtras';
+import { markProvenanceImageDeleted } from '@/server/provenance/storage';
 import { deleteImageVectors, isVectorSearchAvailable } from '@/server/vectorSearch';
 import {
   deleteWorkflowIntentEmbedding,
@@ -105,6 +106,7 @@ export async function cleanupImageArtifacts(
   if (includeExtras) {
     steps.push(
       await runStep('imageExtras', async () => {
+        await markProvenanceImageDeleted(imageId);
         await deleteImageExtrasRecord(imageId);
       })
     );

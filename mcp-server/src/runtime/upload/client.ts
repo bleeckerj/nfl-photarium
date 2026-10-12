@@ -1,4 +1,5 @@
 import { BASE_URL } from '../shared/config.js';
+import { appendReceiptFields, type ReceiptUploadOptions } from '../provenance/upload.js';
 import { apiRequest, apiRequestRaw } from '../shared/api-client.js';
 import { decodeBase64 } from '../shared/base64.js';
 import { normalizeManualPrompt } from '../shared/prompts.js';
@@ -53,8 +54,8 @@ export async function uploadFromUrl(
     prompt?: string;
     generateSemanticTags?: boolean;
     semanticTagCount?: number;
-  } = {}
-): Promise<{ success: boolean; imageId?: string; error?: string; promptSave?: Record<string, unknown> }> {
+  } & ReceiptUploadOptions = {}
+): Promise<{ success: boolean; imageId?: string; error?: string; promptSave?: Record<string, unknown>; provenanceSave?: unknown }> {
   try {
     // Fetch the image
     const imageResponse = await fetch(url);
@@ -95,6 +96,7 @@ export async function uploadFromUrl(
 
     // Create form data
     const formData = new FormData();
+    appendReceiptFields(formData, options);
     formData.append('file', new Blob([new Uint8Array(imageBytes)], { type: inferredMime }), filename);
     formData.append('displayName', semanticDisplayName || filename.replace(/\.[^.]+$/, ''));
     if (options.folder) formData.append('folder', options.folder);
@@ -138,6 +140,7 @@ export async function uploadFromUrl(
     return {
       success: true,
       imageId,
+      ...('provenanceSave' in result ? { provenanceSave: result.provenanceSave } : {}),
       ...(promptSave !== undefined ? { promptSave: promptSave as Record<string, unknown> } : {}),
     };
   } catch (error) {
@@ -218,11 +221,12 @@ export async function uploadFileBase64(
     prompt?: string;
     generateSemanticTags?: boolean;
     semanticTagCount?: number;
-  }
+  } & ReceiptUploadOptions
 ): Promise<Record<string, unknown>> {
   const { buffer, mimeType } = decodeBase64(payload.base64);
   const contentType = payload.contentType || mimeType || 'application/octet-stream';
   const formData = new FormData();
+  appendReceiptFields(formData, payload);
   formData.append('file', new Blob([new Uint8Array(buffer)], { type: contentType }), payload.filename);
   if (payload.folder) formData.append('folder', payload.folder);
   if (payload.createFolder) formData.append('createFolder', 'true');

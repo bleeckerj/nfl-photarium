@@ -17,6 +17,9 @@ import { systemTools } from './system/tools.js';
 import type { RuntimeToolHandler, RuntimeToolModule, RuntimeToolResult } from './types.js';
 import { uploadHandlers } from './upload/handlers.js';
 import { uploadTools } from './upload/tools.js';
+import { provenanceTools } from './provenance/tools.js';
+import { provenanceHandlers } from './provenance/handlers.js';
+import { augmentUploadTools } from './provenance/upload.js';
 
 const LIST_TOOLS_TOOL: Tool = {
   name: 'list_tools',
@@ -28,10 +31,11 @@ const LIST_TOOLS_TOOL: Tool = {
 };
 
 const runtimeModules: RuntimeToolModule[] = [
+  { tools: provenanceTools, handlers: provenanceHandlers },
   { tools: discoveryTools, handlers: discoveryHandlers },
   { tools: demarkTools, handlers: demarkHandlers },
   { tools: organizationTools, handlers: organizationHandlers },
-  { tools: uploadTools, handlers: uploadHandlers },
+  { tools: augmentUploadTools(uploadTools), handlers: uploadHandlers },
   { tools: instagramTools, handlers: instagramHandlers },
   { tools: imageToolTools, handlers: imageToolHandlers },
   { tools: aiTools, handlers: aiHandlers },

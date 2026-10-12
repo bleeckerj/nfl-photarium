@@ -1,5 +1,6 @@
 export interface CloudflareImage {
   id: string;
+  provenanceAvailable?: boolean;
   assetType?: 'image' | 'video';
   filename: string;
   displayName?: string;

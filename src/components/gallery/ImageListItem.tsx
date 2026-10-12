@@ -7,6 +7,7 @@
 'use client';
 
 import React from 'react';
+import { ProvenanceIndicator } from '@/components/asset-detail/ProvenanceIndicator';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Trash2, Copy, ExternalLink, Sparkles, Layers, AlertTriangle, Star } from 'lucide-react';
@@ -209,9 +210,10 @@ export const ImageListItem: React.FC<ImageListItemProps> = ({
             sizes="64px"
           />
         )}
-        {(image.aiCharacteristicsDetected || image.comfyMetadataDetected || image.generatedBy === 'comfyui') && (
+        {(image.provenanceAvailable || image.aiCharacteristicsDetected || image.comfyMetadataDetected || image.generatedBy === 'comfyui') && (
           <span className="absolute top-2 right-2 flex items-center gap-1">
             <AiCharacteristicsIndicator asset={image} id={`image-list-ai-indicator-${image.id}`} showLabel={false} />
+            <ProvenanceIndicator available={image.provenanceAvailable} showLabel={false} />
             <ComfyIndicator asset={image} id={`image-list-comfy-indicator-${image.id}`} showLabel={false} />
           </span>
         )}

@@ -19,6 +19,7 @@ These fields can be larger, change frequently, or are derived. They are stored i
 - `altText` (long-form)
 - Prompt This (generated prompt text)
 - creative-brief derivation history (briefs, derived prompts, provider handoffs, and generated-child provenance)
+- immutable generation receipt JSON and verified image associations (see [Generation Provenance Policy](generation-provenance.md))
 - future fields: captions/OCR, annotations, notes, etc.
 
 `POST /api/images/:id/alt` persists generated text as `altText` through the

@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { toDuplicateSummary } from '@/server/duplicateDetector';
 import { upsertRegistryNamespace } from '@/server/namespaceRegistry';
 import { uploadImageBuffer } from '@/server/uploadService';
+import { persistUploadedReceipt, verifyUploadReceipt } from '@/server/provenance/upload';
+import { ProvenanceError } from '@/server/provenance/validation';
 import type { UploadDuplicateAction } from '@/server/uploadDuplicatePolicy';
 import {
   parseExternalUploadFormFields,
@@ -104,6 +106,7 @@ export async function POST(request: NextRequest) {
     }
 
     const fileBuffer = Buffer.from(await fileValue.arrayBuffer());
+    const receipt = verifyUploadReceipt(formData, fileBuffer);
     const outcome = await uploadImageBuffer({
       buffer: fileBuffer,
       originalBuffer: fileBuffer,
@@ -144,9 +147,11 @@ export async function POST(request: NextRequest) {
 
     return withCors(NextResponse.json({
       ...outcome.data,
+      ...(receipt ? { provenanceSave: await persistUploadedReceipt(outcome.data.id, receipt.json, fileBuffer, fields.cleanParentId ? [fields.cleanParentId] : undefined) } : {}),
       ...(promptSave ? { promptSave } : {}),
     }));
   } catch (error) {
+    if (error instanceof ProvenanceError) return withCors(NextResponse.json({ error: error.message }, { status: error.status }));
     console.error('[upload/external] External upload error', error);
     return withCors(NextResponse.json({ error: 'Internal server error' }, { status: 500 }));
   }

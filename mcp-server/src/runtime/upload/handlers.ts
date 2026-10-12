@@ -1,4 +1,5 @@
 import { BASE_URL } from '../shared/config.js';
+import { appendReceiptFields, resolveReceiptUpload } from '../provenance/upload.js';
 import { apiRequest } from '../shared/api-client.js';
 import { normalizeManualPrompt } from '../shared/prompts.js';
 import type { RuntimeToolHandler } from '../types.js';
@@ -50,7 +51,7 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
       generateSemanticTags?: boolean;
       semanticTagCount?: number;
     };
-    const result = await uploadFromUrl(url, { folder, createFolder, tags, namespace, description, prompt, displayName, originalUrl, sourceUrl, parentId, generateSemanticTags, semanticTagCount });
+    const result = await uploadFromUrl(url, { ...await resolveReceiptUpload(args), folder, createFolder, tags, namespace, description, prompt, displayName, originalUrl, sourceUrl, parentId, generateSemanticTags, semanticTagCount });
     return {
       content: [
         {
@@ -101,6 +102,7 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
       semanticTagCount?: number;
     };
     const result = await uploadFileBase64('/api/upload', {
+      ...await resolveReceiptUpload(args),
       base64,
       filename,
       contentType,
@@ -147,6 +149,7 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
     };
     const endpoint = useExternalApi === true ? '/api/upload/external' : '/api/upload';
     const result = await uploadFileBase64(endpoint, {
+      ...await resolveReceiptUpload(args),
       base64,
       filename,
       contentType,
@@ -190,6 +193,7 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
       semanticTagCount?: number;
     };
     const result = await uploadFileBase64('/api/upload/external', {
+      ...await resolveReceiptUpload(args),
       base64,
       filename,
       contentType,
@@ -257,6 +261,7 @@ export const uploadHandlers: Record<string, RuntimeToolHandler> = {
       const mimeType = detectedMime;
 
       const form = new FormData();
+      appendReceiptFields(form, await resolveReceiptUpload(args));
       form.append('file', new Blob([new Uint8Array(fileBuffer)], { type: mimeType }), finalFilename);
       form.append('displayName', displayName);
       if (folder) form.append('folder', folder);

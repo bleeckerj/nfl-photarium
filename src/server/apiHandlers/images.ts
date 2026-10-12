@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getProvenanceRevision } from '@/server/provenance/storage';
+import { projectProvenance } from '@/server/provenance/projection';
 import { getCachedImageCatalog } from '@/server/cloudflareImageCache';
 import { getVideoAssetCatalogVersion, listVideoAssetRecordsWithSync } from '@/server/videoCatalogStorage';
 import {
@@ -146,6 +148,7 @@ export async function GET(request: NextRequest) {
           getImageFolderOverridesVersion(),
           getVideoAssetCatalogVersion(),
           request.nextUrl.search,
+          await getProvenanceRevision(),
         ]);
     if (requestEtag && !forceRefresh && request.headers.get('if-none-match') === requestEtag) {
       timings.total = mark(performance.now() - startedAt);
@@ -436,8 +439,9 @@ export async function GET(request: NextRequest) {
 
     const cache = cacheStats;
     timings.persistent_read = cache.source === 'persistent' ? timings.cache_load ?? 0 : 0;
+    const withProvenance = await projectProvenance(withSearchText);
     const serializedImages = await markStage('serialization', () =>
-      withSearchText.map((image) => toListableImage(image as Record<string, unknown>))
+      withProvenance.map((image) => toListableImage(image as Record<string, unknown>))
     );
     diagnostics.response_image_count = serializedImages.length;
     timings.total = mark(performance.now() - startedAt);

@@ -8,6 +8,7 @@
 'use client';
 
 import React from 'react';
+import { ProvenanceIndicator } from '@/components/asset-detail/ProvenanceIndicator';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Trash2, Copy, ExternalLink, Layers, AlertTriangle, Star } from 'lucide-react';
@@ -237,9 +238,10 @@ export const ImageCard: React.FC<ImageCardProps> = ({
             <SearchExclusionIcon className="h-4 w-4 text-white" title={getExclusionTooltip(image.tags)} />
           </div>
         )}
-        {(isComfyOutput || image.aiCharacteristicsDetected) && (
+        {(isComfyOutput || image.aiCharacteristicsDetected || image.provenanceAvailable) && (
           <span className="absolute top-2 right-2 flex items-center gap-1">
             <AiCharacteristicsIndicator asset={image} id={`image-card-ai-indicator-${image.id}`} showLabel={false} />
+            <ProvenanceIndicator available={image.provenanceAvailable} showLabel={false} />
             <ComfyIndicator asset={image} id={`image-card-comfy-indicator-${image.id}`} showLabel={false} />
           </span>
         )}

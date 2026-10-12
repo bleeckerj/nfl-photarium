@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import sharp from 'sharp';
 import {
   generatePhotariumImage,
   generatePhotariumImageFromReferences,
@@ -13,6 +14,17 @@ afterEach(() => {
 });
 
 describe('Photarium OpenAI image generation', () => {
+  it('keeps the uploaded image ID and reports incomplete retention when receipt storage fails', async () => {
+    process.env.OPENAI_API_KEY = 'test-key';
+    const image = await sharp({ create: { width: 2, height: 3, channels: 3, background: '#00aaff' } }).png().toBuffer();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ data: [{ b64_json: image.toString('base64') }] }), { status: 200 })));
+    const result = await generatePhotariumImage({
+      downloadOriginalImageById: vi.fn(),
+      uploadFileBase64: vi.fn(async () => ({ id: 'uploaded-child', provenanceSave: { saved: false } })),
+    }, { prompt: 'A palm billboard at dusk' });
+    expect(result.imageId).toBe('uploaded-child');
+    expect(result.upload).toMatchObject({ complete: false, error: expect.stringContaining('retention is incomplete') });
+  });
   it('defaults to Sunburst and auto quality', async () => {
     const result = await generatePhotariumImage(
       {
@@ -49,10 +61,11 @@ describe('Photarium OpenAI image generation', () => {
   });
 
   it('sends source edits as multipart image files', async () => {
+    const imageBytes = await sharp({ create: { width: 2, height: 3, channels: 3, background: '#00aaff' } }).png().toBuffer();
     process.env.OPENAI_API_KEY = 'test-key';
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input).startsWith('data:image/png;base64,')) {
-        return new Response(Buffer.from('source-image'), { status: 200, headers: { 'content-type': 'image/png' } });
+        return new Response(new Uint8Array(imageBytes), { status: 200, headers: { 'content-type': 'image/png' } });
       }
       expect(String(input)).toBe('https://api.openai.com/v1/images/edits');
       expect(init?.body).toBeInstanceOf(FormData);
@@ -61,18 +74,22 @@ describe('Photarium OpenAI image generation', () => {
       expect(form.get('quality')).toBe('max');
       expect(form.getAll('image[]')).toHaveLength(1);
       expect(form.get('image[]')).toBeInstanceOf(Blob);
-      return new Response(JSON.stringify({ data: [{ b64_json: Buffer.from('generated-image').toString('base64') }] }), {
+      return new Response(JSON.stringify({ data: [{ b64_json: imageBytes.toString('base64') }] }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
     });
     vi.stubGlobal('fetch', fetchMock);
-    const uploadFileBase64 = vi.fn(async () => ({ id: 'child-1', url: 'https://example.test/child-1' }));
+    const uploadFileBase64 = vi.fn(async (endpoint: string, payload: { provenanceReceipt?: string; generated?: boolean }) => {
+      expect(endpoint).toBe('/api/upload');
+      expect(payload.generated).toBe(true);
+      return { id: 'child-1', url: 'https://example.test/child-1', provenanceSave: { saved: true } };
+    });
 
     const result = await generatePhotariumImageFromReferences(
       {
         downloadOriginalImageById: vi.fn(async () => ({
-          base64: Buffer.from('source-image').toString('base64'),
+          base64: imageBytes.toString('base64'),
           contentType: 'image/png',
           filename: 'source.png',
           variantUsed: 'original',
@@ -91,5 +108,11 @@ describe('Photarium OpenAI image generation', () => {
 
     expect(result).toMatchObject({ imageId: 'child-1', model: 'gpt-image-2.5-flare' });
     expect(uploadFileBase64).toHaveBeenCalledOnce();
+    const payload = uploadFileBase64.mock.calls[0][1];
+    expect(payload.generated).toBe(true);
+    const receipt = JSON.parse(String(payload.provenanceReceipt));
+    expect(receipt).toMatchObject({ model: 'gpt-image-2.5-flare', outputs: [{ dimensions: [2, 3] }], source_images: [{ imageId: 'source-1' }] });
+    expect(receipt.api_response.data[0]).not.toHaveProperty('b64_json');
+    expect(result.upload).toMatchObject({ complete: true });
   });
 });

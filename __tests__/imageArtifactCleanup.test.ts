@@ -24,6 +24,8 @@ vi.mock('@/server/imageExtras', () => ({
   deleteImageExtrasRecord: deleteImageExtrasRecordMock,
 }));
 
+vi.mock('@/server/provenance/storage', () => ({ markProvenanceImageDeleted: vi.fn() }));
+
 vi.mock('@/server/vectorSearch', () => ({
   isVectorSearchAvailable: isVectorSearchAvailableMock,
   deleteImageVectors: deleteImageVectorsMock,
@@ -35,6 +37,7 @@ vi.mock('@/server/comfy/workflowIntentSearch', () => ({
 }));
 
 import { cleanupImageArtifacts } from '@/server/imageArtifactCleanup';
+import { markProvenanceImageDeleted } from '@/server/provenance/storage';
 
 describe('cleanupImageArtifacts', () => {
   beforeEach(() => {
@@ -49,6 +52,7 @@ describe('cleanupImageArtifacts', () => {
     expect(removeCachedImageMock).toHaveBeenCalledWith('img-123');
     expect(deleteImageVectorsMock).toHaveBeenCalledWith('img-123');
     expect(deleteImageExtrasRecordMock).toHaveBeenCalledWith('img-123');
+    expect(markProvenanceImageDeleted).toHaveBeenCalledWith('img-123');
     expect(deleteWorkflowIntentEmbeddingMock).toHaveBeenCalledWith('img-123');
     expect(result.success).toBe(true);
     expect(result.steps.map((step) => [step.step, step.status])).toEqual([

@@ -10,6 +10,8 @@ import { resolveUploadNamespace, SPECIFIC_NAMESPACE_REQUIRED_ERROR } from '@/ser
 import { SUPPORTED_IMAGE_TYPES, uploadImageBuffer } from '@/server/uploadService';
 import type { UploadFailure, UploadSuccess } from '@/server/uploadService';
 import type { UploadDuplicateAction } from '@/server/uploadDuplicatePolicy';
+import { parseUploadReceipt, persistUploadedReceipt, verifyUploadReceipt } from '@/server/provenance/upload';
+import { ProvenanceError } from '@/server/provenance/validation';
 
 const logIssue = (message: string, details?: Record<string, unknown>) => {
   console.warn('[upload] ' + message, details);
@@ -205,6 +207,8 @@ export async function POST(request: NextRequest) {
       );
     }
     const cleanPrompt = promptField.prompt;
+    const declaredReceipt = parseUploadReceipt(formData);
+    if (declaredReceipt && isArchiveFile(file)) throw new ProvenanceError('Attach receipts to individual images, not archives');
     
     // Clean up values - handle empty strings and "undefined" strings
     const rawFolder = folder && folder.trim() && folder !== 'undefined' ? folder.trim() : undefined;
@@ -395,6 +399,7 @@ export async function POST(request: NextRequest) {
 
     const fileType = file.type || getMimeTypeFromFilename(file.name) || '';
     const fileBuffer = Buffer.from(await file.arrayBuffer());
+    const receipt = verifyUploadReceipt(formData, fileBuffer);
     const outcome = await uploadImageBuffer({
       buffer: fileBuffer,
       originalBuffer: fileBuffer,
@@ -427,12 +432,17 @@ export async function POST(request: NextRequest) {
       cleanPrompt
     );
 
+    const provenanceSave = receipt
+      ? await persistUploadedReceipt(outcome.data.id, receipt.json, fileBuffer, cleanParentId ? [cleanParentId] : undefined)
+      : undefined;
     return NextResponse.json({
       ...outcome.data,
+      ...(provenanceSave ? { provenanceSave } : {}),
       ...(promptSave ? { promptSave } : {})
     });
 
   } catch (error) {
+    if (error instanceof ProvenanceError) return NextResponse.json({ error: error.message }, { status: error.status });
     console.error('Upload error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
