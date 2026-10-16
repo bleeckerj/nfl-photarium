@@ -1,6 +1,6 @@
-import { APP_ID } from "./cli.mjs";
-import { extractShortcodeFromInstagramUrl } from "./cloudflare-upload.mjs";
-import { mapItemToRecord } from "./records.mjs";
+export { igGet, fetchSingleUrlRecordFromApiByShortcode, fetchSingleUrlRecordFromUserFeedByShortcode } from "./media-api.mjs";
+import { extractShortcodeFromInstagramUrl, parseInstagramMediaUrl } from "./cloudflare-upload.mjs";
+import { captureInstagramMediaResponses, readInstagramPageMedia } from "./page-media.mjs";
 
 function decodePossiblyEscapedUrl(rawUrl) {
   if (typeof rawUrl !== "string") return "";
@@ -67,9 +67,9 @@ export function rankInstagramImageUrls(imageUrls) {
 }
 
 export function selectInstagramImageUrls(imageUrls, mediaInfo = {}) {
-  const rankedImageUrls = rankInstagramImageUrls(imageUrls);
   const isCarousel = mediaInfo.mediaType === 8 || mediaInfo.productType === "carousel_container";
-  return isCarousel ? rankedImageUrls : rankedImageUrls.slice(0, 1);
+  if (isCarousel) return [...new Set(imageUrls.map(decodePossiblyEscapedUrl).filter(isLikelyImageUrl))];
+  return rankInstagramImageUrls(imageUrls).slice(0, 1);
 }
 
 function cleanInstagramUsername(value) {
@@ -115,33 +115,10 @@ export function inferInstagramOwnerUsername(candidates = {}) {
   return { username: null, source: "unresolved" };
 }
 
-export async function igGet(page, apiPath) {
-  const result = await page.evaluate(
-    async ({ apiPath, appId }) => {
-      const res = await fetch(apiPath, {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          "x-ig-app-id": appId,
-          "x-requested-with": "XMLHttpRequest",
-        },
-      });
-      const text = await res.text();
-      return { status: res.status, text };
-    },
-    { apiPath, appId: APP_ID },
-  );
-
-  let json = null;
-  try {
-    json = JSON.parse(result.text);
-  } catch {
-    json = null;
-  }
-  return { status: result.status, json, text: result.text };
-}
-
 export async function extractSingleUrlRecord(page, instagramUrl, fallbackUsername, log) {
+  const shortcode = extractShortcodeFromInstagramUrl(instagramUrl);
+  const imgIndex = parseInstagramMediaUrl(instagramUrl)?.imgIndex ?? null;
+  const mediaCapture = captureInstagramMediaResponses(page, shortcode, fallbackUsername, imgIndex);
   const networkVideoUrls = new Set();
   const responseHandler = (response) => {
     try {
@@ -163,7 +140,7 @@ export async function extractSingleUrlRecord(page, instagramUrl, fallbackUsernam
     await page.goto(instagramUrl, { waitUntil: "domcontentloaded" });
     await page.waitForNetworkIdle({ idleTime: 750, timeout: 3000 }).catch(() => {});
 
-    const extracted = await page.evaluate(({ fallbackUsername }) => {
+    let extracted = await page.evaluate(({ fallbackUsername }) => {
     const decodePossiblyEscapedUrl = (rawUrl) =>
       typeof rawUrl === "string"
         ? rawUrl.replace(/\\\//g, "/").replace(/\\u0026/gi, "&").replace(/&amp;/gi, "&").trim()
@@ -543,11 +520,22 @@ export async function extractSingleUrlRecord(page, instagramUrl, fallbackUsernam
     };
     }, { fallbackUsername });
 
+    const pageRecord = await readInstagramPageMedia(page, shortcode, fallbackUsername, imgIndex);
+    const structured = await mediaCapture.read(pageRecord);
+    if (structured) {
+      extracted = {
+        ...extracted, ...structured,
+        usernameSource: "page_json",
+        likelyVideo: structured.mediaType === 2,
+      };
+      log.info(`single_url_structured_media shortcode=${shortcode} images=${structured.imageUrls.length} videos=${structured.videoUrls.length}`);
+    }
     const username = extracted.username || fallbackUsername;
     const takenAtIso = extracted.takenAtUnix ? new Date(extracted.takenAtUnix * 1000).toISOString() : null;
+    const useNetworkVideos = !structured || (structured.mediaType === 2 && structured.videoUrls.length === 0);
     const mergedVideoUrls = [
       ...(Array.isArray(extracted.videoUrls) ? extracted.videoUrls : []),
-      ...networkVideoUrls,
+      ...(useNetworkVideos ? networkVideoUrls : []),
     ];
 
     const imageUrls = selectInstagramImageUrls(extracted.imageUrls, {
@@ -566,6 +554,8 @@ export async function extractSingleUrlRecord(page, instagramUrl, fallbackUsernam
       permalink: extracted.permalink || instagramUrl,
       mediaType: extracted.mediaType ?? null,
       productType: extracted.productType ?? null,
+      carouselMediaCount: extracted.carouselMediaCount ?? null,
+      extractedMediaCount: extracted.extractedMediaCount ?? null,
       takenAtUnix: extracted.takenAtUnix ?? null,
       takenAtIso,
       likeCount: extracted.likeCount ?? null,
@@ -579,7 +569,7 @@ export async function extractSingleUrlRecord(page, instagramUrl, fallbackUsernam
       video_source:
         (Array.isArray(extracted.videoUrls) && extracted.videoUrls.length > 0)
           ? "page_extract"
-          : networkVideoUrls.size > 0
+          : useNetworkVideos && networkVideoUrls.size > 0
             ? "network_capture"
             : "none",
     };
@@ -608,78 +598,7 @@ export async function extractSingleUrlRecord(page, instagramUrl, fallbackUsernam
 
     return record;
   } finally {
+    mediaCapture.dispose();
     page.off("response", responseHandler);
   }
-}
-
-export async function fetchSingleUrlRecordFromApiByShortcode(page, shortcode, fallbackUsername, fallbackUserId, log) {
-  if (!shortcode) return null;
-  const apiPath = `/api/v1/media/${encodeURIComponent(shortcode)}/info/`;
-  log.debug(`single_url_api_fallback_fetch shortcode=${shortcode} api_path=${apiPath}`);
-  const resp = await igGet(page, apiPath);
-  if (resp.status !== 200) {
-    log.warn(`single_url_api_fallback_failed shortcode=${shortcode} status=${resp.status}`);
-    return null;
-  }
-
-  const item = Array.isArray(resp.json?.items) ? resp.json.items[0] : null;
-  if (!item || typeof item !== "object") {
-    log.warn(`single_url_api_fallback_empty shortcode=${shortcode}`);
-    return null;
-  }
-
-  const username = item?.user?.username || fallbackUsername;
-  const userId = item?.user?.pk || item?.user?.id || fallbackUserId || null;
-  const mapped = mapItemToRecord(item, username, userId);
-  mapped.shortcode = mapped.shortcode || shortcode;
-  mapped.permalink = mapped.permalink || `https://www.instagram.com/reel/${shortcode}/`;
-  return mapped;
-}
-
-export async function fetchSingleUrlRecordFromUserFeedByShortcode(page, username, shortcode, log) {
-  if (!username || !shortcode) return null;
-
-  const profileResp = await igGet(
-    page,
-    `/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`,
-  );
-  if (profileResp.status !== 200 || !profileResp.json?.data?.user?.id) {
-    log.warn(
-      `single_url_feed_fallback_profile_failed username=${username} status=${profileResp.status}`,
-    );
-    return null;
-  }
-
-  const userId = profileResp.json.data.user.id;
-  let maxId = "";
-  const maxPages = 8;
-  const perPage = 12;
-
-  for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
-    const apiPath =
-      `/api/v1/feed/user/${encodeURIComponent(userId)}/?count=${encodeURIComponent(perPage)}` +
-      (maxId ? `&max_id=${encodeURIComponent(maxId)}` : "");
-    const feedResp = await igGet(page, apiPath);
-    if (feedResp.status !== 200 || !feedResp.json) {
-      log.warn(
-        `single_url_feed_fallback_page_failed username=${username} status=${feedResp.status} page=${pageIndex + 1}`,
-      );
-      return null;
-    }
-
-    const items = Array.isArray(feedResp.json.items) ? feedResp.json.items : [];
-    const found = items.find((item) => item?.code === shortcode);
-    if (found) {
-      const mapped = mapItemToRecord(found, username, userId);
-      mapped.shortcode = mapped.shortcode || shortcode;
-      return mapped;
-    }
-
-    const nextMaxId = feedResp.json.next_max_id ?? "";
-    if (!nextMaxId) break;
-    maxId = nextMaxId;
-  }
-
-  log.warn(`single_url_feed_fallback_not_found username=${username} shortcode=${shortcode}`);
-  return null;
 }
