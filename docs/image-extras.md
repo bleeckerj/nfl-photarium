@@ -57,7 +57,7 @@ Example shape:
   "altText": "...optional...",
   "promptThis": {
     "prompt": "...",
-    "model": "gpt-4.1-nano",
+    "model": "gpt-5.6-luna",
     "provider": "openai",
     "createdAt": "2026-01-28T00:00:00.000Z",
     "updatedAt": "2026-01-28T00:00:00.000Z"

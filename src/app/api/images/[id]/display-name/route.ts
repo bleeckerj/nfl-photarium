@@ -1,3 +1,4 @@
+import { getOpenAiCompletionOptions } from '@/server/openAiCompletionOptions';
 import { NextResponse } from 'next/server';
 import { cleanString, parseCloudflareMetadata } from '@/utils/cloudflareMetadata';
 import {
@@ -86,9 +87,7 @@ export async function POST(
         Authorization: `Bearer ${openAiKey}`,
       },
       body: JSON.stringify({
-        model,
-        temperature: 0.2,
-        max_tokens: 80,
+        ...getOpenAiCompletionOptions({ model, maxTokens: 80, temperature: 0.2 }),
         messages: [
           {
             role: 'system',

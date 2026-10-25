@@ -257,13 +257,13 @@ OPENAI_API_KEY=your_openai_api_key_here
 Optional model overrides:
 
 ```env
-OPENAI_IMAGE_METADATA_MODEL=gpt-4.1-nano
-OPENAI_ALT_MODEL=gpt-4.1-nano
-OPENAI_DESCRIPTION_MODEL=gpt-4.1-nano
-OPENAI_DISPLAY_NAME_MODEL=gpt-4.1-nano
-OPENAI_PROMPT_MODEL=gpt-4.1-nano
-OPENAI_TAGS_MODEL=gpt-4.1-nano
-OPENAI_HAIKU_MODEL=gpt-4.1-nano
+OPENAI_IMAGE_METADATA_MODEL=gpt-5.6-luna
+OPENAI_ALT_MODEL=gpt-5.6-luna
+OPENAI_DESCRIPTION_MODEL=gpt-5.6-luna
+OPENAI_DISPLAY_NAME_MODEL=gpt-5.6-luna
+OPENAI_PROMPT_MODEL=gpt-5.6-luna
+OPENAI_TAGS_MODEL=gpt-5.6-luna
+OPENAI_HAIKU_MODEL=gpt-5.6-luna
 ```
 
 Upload-time semantic tags run through a Redis-backed durable worker queue. The
@@ -287,7 +287,9 @@ disabled enrichment state.
 The status endpoint is `/api/images/tag-enrichment/<jobId>`. Failed jobs can be
 retried with `POST /api/images/tag-enrichment/<jobId>/retry`.
 
-All image metadata generators default to `gpt-4.1-nano` unless a shared or per-generator override is set.
+All image metadata generators default to `gpt-5.6-luna` unless a shared or per-generator override is set. Luna requests use Chat Completions with `max_completion_tokens`, `reasoning_effort: "none"`, and no temperature. Explicit overrides for other models keep their existing request parameters.
+
+When migrating an existing installation, replace any `gpt-4.1-nano` metadata overrides in local or deployment configuration and restart the managed runtime. The CleanShot watcher retains uploaded image IDs and resumes incomplete description/tag stages from its existing checkpoint. Retry failed tag jobs through the endpoint above before resuming the watcher.
 
 AI-assisted routes can generate or refine:
 

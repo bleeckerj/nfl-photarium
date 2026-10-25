@@ -1,3 +1,4 @@
+import { getOpenAiCompletionOptions } from '@/server/openAiCompletionOptions';
 import { NextRequest, NextResponse } from 'next/server';
 import { fallbackDisplayNameFromFilename, sanitizeSuggestedDisplayName } from '@/utils/displayName';
 import { sanitizeGeneratedSemanticTags } from '@/server/aiTagParsing';
@@ -177,9 +178,7 @@ export async function POST(request: NextRequest) {
         Authorization: `Bearer ${openAiKey}`,
       },
       body: JSON.stringify({
-        model,
-        temperature: 0.2,
-        max_tokens: 80,
+        ...getOpenAiCompletionOptions({ model, maxTokens: 80, temperature: 0.2 }),
         messages: [
           { role: 'system', content: 'You create compact semantic short word phrases for image names.' },
           {

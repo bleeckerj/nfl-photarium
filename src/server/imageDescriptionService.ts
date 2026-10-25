@@ -1,3 +1,4 @@
+import { getOpenAiCompletionOptions } from '@/server/openAiCompletionOptions';
 import { fetchCloudflareImage, getCloudflareCredentials } from '@/server/cloudflareClient';
 import { resolveVisionImageUrl } from '@/server/visionImageSource';
 import { getImageExtrasRecord, patchImageExtrasRecord } from '@/server/imageExtras';
@@ -70,9 +71,7 @@ export async function generateAndPersistImageDescription(params: {
       Authorization: `Bearer ${openAiKey}`,
     },
     body: JSON.stringify({
-      model: getOpenAiDescriptionModel(),
-      temperature: 0.5,
-      max_tokens: 400,
+      ...getOpenAiCompletionOptions({ model: getOpenAiDescriptionModel(), maxTokens: 400, temperature: 0.5 }),
       messages: [
         {
           role: 'system',

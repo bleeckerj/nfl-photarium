@@ -978,7 +978,7 @@ For a transformation request, send a non-empty `creativeBrief`. The prompt gener
 {
   "imageId": "abc123",
   "prompt": "A minimalist product photograph of a ceramic vase, soft natural lighting from the left, neutral beige background, shallow depth of field, clean composition, modern aesthetic...",
-  "model": "gpt-4.1-nano",
+  "model": "gpt-5.6-luna",
   "generatedAt": "2025-12-05T21:59:41.036Z"
 }
 ```

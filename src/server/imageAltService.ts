@@ -1,3 +1,4 @@
+import { getOpenAiCompletionOptions } from '@/server/openAiCompletionOptions';
 import { patchImageExtrasRecord } from '@/server/imageExtras';
 import { getOpenAiAltModel, OPENAI_CHAT_COMPLETIONS_URL } from '@/server/openAiGeneratorModels';
 import { resolveVisionImageUrl } from '@/server/visionImageSource';
@@ -75,9 +76,7 @@ export async function generateAndPersistImageAlt(imageId: string): Promise<{ alt
       Authorization: `Bearer ${openAiKey}`,
     },
     body: JSON.stringify({
-      model: altModel,
-      temperature: 0.2,
-      max_tokens: 150,
+      ...getOpenAiCompletionOptions({ model: altModel, maxTokens: 150, temperature: 0.2 }),
       messages: [
         { role: 'system', content: prompt },
         {

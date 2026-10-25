@@ -100,9 +100,10 @@ describe('POST /api/images/:id/tags', () => {
     expect(payload.tags).toEqual(['apple', 'logo', 'rainbow', 'colors', 'fruit', 'technology']);
   });
 
-  it('defaults to gpt-4.1-nano when no tag model overrides are set', async () => {
+  it('defaults to gpt-5.6-luna when no tag model overrides are set', async () => {
     delete process.env.OPENAI_TAGS_MODEL;
     delete process.env.OPENAI_DISPLAY_NAME_MODEL;
+    delete process.env.OPENAI_IMAGE_METADATA_MODEL;
 
     const fetchMock = vi.spyOn(globalThis, 'fetch');
     fetchMock
@@ -115,15 +116,18 @@ describe('POST /api/images/:id/tags', () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(payload.model).toBe('gpt-4.1-nano');
+    expect(payload.model).toBe('gpt-5.6-luna');
 
     const openAiCall = fetchMock.mock.calls[1];
     const openAiBody = JSON.parse(String(openAiCall?.[1]?.body));
-    expect(openAiBody.model).toBe('gpt-4.1-nano');
+    expect(openAiBody.model).toBe('gpt-5.6-luna');
+    expect(openAiBody).toMatchObject({ max_completion_tokens: 120, reasoning_effort: 'none' });
+    expect(openAiBody).not.toHaveProperty('max_tokens');
+    expect(openAiBody).not.toHaveProperty('temperature');
   });
 
   it('prefers OPENAI_TAGS_MODEL over OPENAI_DISPLAY_NAME_MODEL', async () => {
-    process.env.OPENAI_TAGS_MODEL = 'gpt-4.1-nano';
+    process.env.OPENAI_TAGS_MODEL = 'gpt-5.6-luna';
     process.env.OPENAI_DISPLAY_NAME_MODEL = 'gpt-5-mini';
 
     const fetchMock = vi.spyOn(globalThis, 'fetch');
@@ -137,10 +141,13 @@ describe('POST /api/images/:id/tags', () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(payload.model).toBe('gpt-4.1-nano');
+    expect(payload.model).toBe('gpt-5.6-luna');
 
     const openAiCall = fetchMock.mock.calls[1];
     const openAiBody = JSON.parse(String(openAiCall?.[1]?.body));
-    expect(openAiBody.model).toBe('gpt-4.1-nano');
+    expect(openAiBody.model).toBe('gpt-5.6-luna');
+    expect(openAiBody).toMatchObject({ max_completion_tokens: 120, reasoning_effort: 'none' });
+    expect(openAiBody).not.toHaveProperty('max_tokens');
+    expect(openAiBody).not.toHaveProperty('temperature');
   });
 });

@@ -1,3 +1,4 @@
+import { getOpenAiCompletionOptions } from '@/server/openAiCompletionOptions';
 import { fetchCloudflareImage, getCloudflareCredentials } from '@/server/cloudflareClient';
 import { patchCloudflareImageMetadata } from '@/server/cloudflareImageMetadata';
 import { syncMetadataImageById } from '@/server/metadataSearchIndex';
@@ -102,9 +103,7 @@ export async function generateSemanticTags(params: {
       Authorization: `Bearer ${openAiKey}`,
     },
     body: JSON.stringify({
-      model,
-      temperature: 0.2,
-      max_tokens: 120,
+      ...getOpenAiCompletionOptions({ model, maxTokens: 120, temperature: 0.2 }),
       messages: [
         {
           role: 'system',

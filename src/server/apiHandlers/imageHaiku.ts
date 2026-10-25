@@ -1,3 +1,4 @@
+import { getOpenAiCompletionOptions } from '@/server/openAiCompletionOptions';
 /**
  * Haiku Generation API Route
  * 
@@ -230,9 +231,7 @@ export async function POST(
         Authorization: `Bearer ${openAiKey}`,
       },
       body: JSON.stringify({
-        model: getOpenAiHaikuModel(),
-        temperature: 0.9, // Higher temperature for more creative output
-        max_tokens: 100,
+        ...getOpenAiCompletionOptions({ model: getOpenAiHaikuModel(), maxTokens: 100, temperature: 0.9 }),
         messages: [
           { role: 'user', content: prompt }
         ],

@@ -1,6 +1,6 @@
 export const OPENAI_CHAT_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/completions';
 
-export const DEFAULT_OPENAI_IMAGE_METADATA_MODEL = 'gpt-4.1-nano';
+export const DEFAULT_OPENAI_IMAGE_METADATA_MODEL = 'gpt-5.6-luna';
 
 const getEnvModel = (name: string) => {
   const value = process.env[name]?.trim();

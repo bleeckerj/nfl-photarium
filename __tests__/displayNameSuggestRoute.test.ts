@@ -55,7 +55,7 @@ describe('POST /api/display-name/suggest', () => {
 
     expect(response.status).toBe(200);
     expect(payload.tags).toEqual(['apple', 'logo', 'rainbow', 'colors', 'fruit', 'technology']);
-    expect(payload.model).toBe('gpt-4.1-nano');
+    expect(payload.model).toBe('gpt-5.6-luna');
   });
 
   it('prompts the model for the requested tag count instead of the legacy 4-tag range', async () => {

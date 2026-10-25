@@ -177,4 +177,20 @@ describe('POST /api/images/:id/description', () => {
     expect(response.status).toBe(500);
     expect(payload.error).toBe('Internal server error');
   });
+  it('uses Luna options and does not persist an upstream failure', async () => {
+    delete process.env.OPENAI_DESCRIPTION_MODEL;
+    delete process.env.OPENAI_IMAGE_METADATA_MODEL;
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(mockImageResponse())
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'model unavailable' } }), { status: 404 }));
+    const response = await POST(createRequest(), { params: Promise.resolve({ id: 'img-123' }) });
+    const body = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+    expect(body).toMatchObject({ model: 'gpt-5.6-luna', max_completion_tokens: 400, reasoning_effort: 'none' });
+    expect(body).not.toHaveProperty('max_tokens');
+    expect(body).not.toHaveProperty('temperature');
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'model unavailable' });
+    expect(patchImageExtrasRecordMock).not.toHaveBeenCalled();
+  });
+
 });

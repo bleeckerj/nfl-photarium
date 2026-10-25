@@ -1,3 +1,4 @@
+import { getOpenAiCompletionOptions } from '@/server/openAiCompletionOptions';
 import { NextRequest, NextResponse } from 'next/server';
 import { cleanString, parseCloudflareMetadata } from '@/utils/cloudflareMetadata';
 import { getPromptThisRecord, setPromptThisRecord, type PromptThisRecord } from '@/server/promptThis';
@@ -146,8 +147,7 @@ async function generatePromptFromOpenAI(
       Authorization: `Bearer ${openAiKey}`
     },
     body: JSON.stringify({
-      model: promptModel,
-      max_tokens: detailLevel === 'high' ? 4000 : 2600,
+      ...getOpenAiCompletionOptions({ model: promptModel, maxTokens: detailLevel === 'high' ? 4000 : 2600 }),
       messages: [
         {
           role: 'system',

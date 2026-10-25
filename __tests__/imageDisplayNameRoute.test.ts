@@ -21,7 +21,7 @@ describe('POST /api/images/[id]/display-name', () => {
     process.env = ORIGINAL_ENV;
   });
 
-  it('defaults to gpt-4.1-nano when no override is set', async () => {
+  it('defaults to gpt-5.6-luna when no override is set', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(
         new Response(
@@ -51,7 +51,7 @@ describe('POST /api/images/[id]/display-name', () => {
 
     expect(response.status).toBe(200);
     expect(payload.displayName).toBe('SunsetSeaCliffs');
-    expect(payload.model).toBe('gpt-4.1-nano');
+    expect(payload.model).toBe('gpt-5.6-luna');
   });
 
   it('uses OPENAI_DISPLAY_NAME_MODEL when provided', async () => {
