@@ -1016,7 +1016,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         onBulkAnimateLoopChange: setBulkAnimateLoop, bulkAnimateFilename, onBulkAnimateFilenameChange: setBulkAnimateFilename,
         bulkAnimateNamespaceInput, onBulkAnimateNamespaceInputChange: setBulkAnimateNamespaceInput,
         bulkAnimateLoading, bulkAnimateError, bulkUpdating, onBulkApply: applyBulkUpdates,
-        onBulkCreateAnimation: createBulkAnimation, onBulkClose: closeBulkEditModal,
+        onBulkCreateAnimation: () => createBulkAnimation(selectedAnimationPreview), onBulkClose: closeBulkEditModal,
       }}
       hoverPreviewProps={
         hoveredImage && showPreview

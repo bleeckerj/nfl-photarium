@@ -12,7 +12,6 @@ import {
   getFreshGalleryReturnState,
   saveGalleryReturnState,
 } from '@/components/gallery/returnState';
-import { resolveBulkAnimationIds } from '@/components/gallery/hooks/useGalleryBulkActions';
 
 type StorageLike = {
   getItem: (key: string) => string | null;
@@ -51,36 +50,6 @@ afterEach(() => {
 });
 
 describe('ImageGallery motion assets helpers', () => {
-  it('resolves animation ids in visible gallery order', () => {
-    const images = [
-      { id: 'newest' },
-      { id: 'middle' },
-      { id: 'oldest' },
-    ];
-    const clickedOrder = new Set(['oldest', 'newest', 'middle']);
-
-    expect(resolveBulkAnimationIds(images, clickedOrder, 'gallery')).toEqual([
-      'newest',
-      'middle',
-      'oldest',
-    ]);
-  });
-
-  it('resolves animation ids in reverse visible gallery order', () => {
-    const images = [
-      { id: 'newest' },
-      { id: 'middle' },
-      { id: 'oldest' },
-    ];
-    const selected = new Set(['oldest', 'newest', 'middle']);
-
-    expect(resolveBulkAnimationIds(images, selected, 'reverse-gallery')).toEqual([
-      'oldest',
-      'middle',
-      'newest',
-    ]);
-  });
-
   it('adds mediaFilter=animated only when motion assets are enabled', () => {
     expect(
       buildGalleryImagesUrl({

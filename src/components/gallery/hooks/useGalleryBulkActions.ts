@@ -56,24 +56,6 @@ const resolveGalleryNamespaceScope = (namespace?: string): string | null => {
   return trimmed || process.env.NEXT_PUBLIC_IMAGE_NAMESPACE || 'cf-default';
 };
 
-export const resolveBulkAnimationIds = (
-  images: Pick<CloudflareImage, 'id'>[],
-  selectedImageIds: Set<string>,
-  orderMode: 'gallery' | 'reverse-gallery',
-  additionalImages: Pick<CloudflareImage, 'id'>[] = [],
-) => {
-  const seenIds = new Set<string>();
-  const selectedIds = [...images, ...additionalImages]
-    .filter((image) => selectedImageIds.has(image.id))
-    .map((image) => image.id)
-    .filter((id) => {
-      if (seenIds.has(id)) return false;
-      seenIds.add(id);
-      return true;
-    });
-  return orderMode === 'reverse-gallery' ? [...selectedIds].reverse() : selectedIds;
-};
-
 interface UseGalleryBulkActionsOptions {
   images: CloudflareImage[];
   selectedImages: CloudflareImage[];
@@ -475,8 +457,8 @@ export const useGalleryBulkActions = ({
     mergeUniqueTags
   ]);
 
-  const createBulkAnimation = useCallback(async () => {
-    if (selectedCount < 2) {
+  const createBulkAnimation = useCallback(async (previewFrames: ReadonlyArray<Pick<CloudflareImage, 'id'>>) => {
+    if (previewFrames.length < 2) {
       toastPush('Select at least two images');
       return;
     }
@@ -488,12 +470,11 @@ export const useGalleryBulkActions = ({
     setBulkAnimateLoading(true);
     setBulkAnimateError(null);
     try {
-      const orderedIds = resolveBulkAnimationIds(images, selectedImageIds, bulkAnimateOrderMode, selectedImages);
       const response = await fetch('/api/animate/selection', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ids: orderedIds,
+          ids: previewFrames.map((frame) => frame.id),
           fps: fpsValue,
           loop: bulkAnimateLoop,
           filename: bulkAnimateFilename.trim() || undefined,
@@ -527,11 +508,7 @@ export const useGalleryBulkActions = ({
     bulkAnimateNamespaceInput,
     bulkAnimateOrderMode,
     fetchImages,
-    images,
     namespace,
-    selectedCount,
-    selectedImageIds,
-    selectedImages,
     setBulkAnimateFilename,
     setBulkAnimateFps,
     setBulkAnimateLoop,
