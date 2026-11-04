@@ -11,7 +11,7 @@ type ParentInfoImage = {
 };
 
 type VariantLockedStateProps = {
-  parentImage: ParentInfoImage;
+  parentImage: ParentInfoImage | null;
   parentActionLoading: boolean;
   reassignParentId: string;
   setReassignParentId: (value: string) => void;
@@ -47,7 +47,7 @@ export function VariantLockedState({
           </p>
         </div>
 
-        <Link
+        {parentImage ? <Link
           href={`/images/${parentImage.id}`}
           className="flex items-center gap-3 text-left group"
           onMouseMove={(event) =>
@@ -77,7 +77,12 @@ export function VariantLockedState({
             </p>
             <p className="text-xs text-gray-600 truncate max-w-[12rem]">{parentImage.filename || parentImage.id}</p>
           </div>
-        </Link>
+        </Link> : (
+          <div className="text-xs text-yellow-800">
+            <p>Parent image is unavailable.</p>
+            <p className="font-mono break-all">{currentParentId}</p>
+          </div>
+        )}
 
         <button
           onClick={onDetach}
@@ -97,7 +102,10 @@ export function VariantLockedState({
             id="reassign-parent"
             value={reassignParentId}
             onChange={setReassignParentId}
-            options={reassignParentOptions}
+            options={parentImage ? reassignParentOptions : [
+              { value: currentParentId, label: `Unavailable parent · ${currentParentId}` },
+              ...reassignParentOptions,
+            ]}
             className="flex-1"
             placeholder="Select parent"
           />

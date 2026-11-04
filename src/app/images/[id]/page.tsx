@@ -2516,7 +2516,7 @@ export default function ImageDetailPage() {
                     onImportFromUrl={handleImportFromUrl}
                   />
                 </>
-              ) : resolvedParentImage ? (
+              ) : (
                 <VariantLockedState
                   parentImage={resolvedParentImage}
                   parentActionLoading={parentActionLoading}
@@ -2530,7 +2530,7 @@ export default function ImageDetailPage() {
                   onThumbMouseMove={handleThumbMouseMove}
                   onThumbMouseLeave={handleThumbLeave}
                 />
-              ) : null}
+              )}
 
               <ImageToolsPanel
                 imageId={image.id}
