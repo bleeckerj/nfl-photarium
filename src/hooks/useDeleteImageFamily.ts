@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { deleteImage, fetchDeleteFamilyStatus, startDeleteFamilyJob, type DeleteFamilyJobStatus } from '@/services/imageDeletionService';
+import { deleteImage, fetchImageDeletePlan, fetchDeleteFamilyStatus, startDeleteFamilyJob, type DeleteFamilyJobStatus } from '@/services/imageDeletionService';
 
 type Toast = { push: (message: string) => void };
 
@@ -23,27 +23,16 @@ export function useDeleteImageFamily({ image, isChildImage, toast }: UseDeleteIm
     setDeleteFamilyOpen(false);
   }, []);
 
-  const handleDeleteParent = useCallback(async () => {
-    if (!image) return;
-    if (!confirm('Delete this image permanently? Variations will remain (and may need reassignment).')) return;
-    try {
-      await deleteImage(image.id);
-      toast.push('Image deleted');
-      window.location.href = '/';
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to delete image';
-      toast.push(message);
-    }
-  }, [image, toast]);
-
   const handleDeleteCurrent = useCallback(async () => {
     if (!image) return;
-    const prompt = isChildImage
-      ? 'Delete this image variation permanently?'
-      : 'Delete this image permanently? Variations will remain (and may need reassignment).';
-    if (!confirm(prompt)) return;
     try {
-      await deleteImage(image.id);
+      const plan = await fetchImageDeletePlan(image.id);
+      const consequence = plan.newParent
+        ? `\n\n${plan.newParent.filename || plan.newParent.id} will become the new parent of the remaining variants.`
+        : plan.childIds.length ? '\n\nThe remaining variants will become independent assets.' : '';
+      const subject = isChildImage ? 'this image variation' : 'this image';
+      if (!confirm(`Delete ${subject} permanently?${consequence}`)) return;
+      await deleteImage(image.id, plan.signature);
       toast.push('Image deleted');
       window.location.href = '/';
     } catch (error) {
@@ -51,6 +40,7 @@ export function useDeleteImageFamily({ image, isChildImage, toast }: UseDeleteIm
       toast.push(message);
     }
   }, [image, isChildImage, toast]);
+  const handleDeleteParent = handleDeleteCurrent;
 
   const handleDeleteFamily = useCallback(async () => {
     if (!image) return;

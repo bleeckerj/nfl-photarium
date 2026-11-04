@@ -167,8 +167,8 @@ const sizeBackfill = createSizeBackfill({
   recordMutation: recordCloudflareImageMutation,
 });
 
-const fetchAllImages = async (): Promise<CachedCloudflareImage[]> => {
-  const collected = await fetchAllCloudflareImagePages();
+const fetchAllImages = async (strict = false): Promise<CachedCloudflareImage[]> => {
+  const collected = await fetchAllCloudflareImagePages(strict);
   return collected.map((image) => transformImage(image, metadataOverrides.get(image.id)));
 };
 
@@ -212,10 +212,10 @@ const rebuildState = (
 /**
  * Fetch fresh data from Cloudflare and update both caches
  */
-const fetchAndUpdateCaches = async (): Promise<CachedCloudflareImage[]> => {
+const fetchAndUpdateCaches = async (strict = false): Promise<CachedCloudflareImage[]> => {
   const startedAt = Date.now();
   const previousMap = new Map(cacheState.map);
-  const fetchedImages = (await fetchAllImages()).map((image) =>
+  const fetchedImages = (await fetchAllImages(strict)).map((image) =>
     mergeCachedImageRecord(previousMap.get(image.id), image)
   );
   const fetchedMap = new Map(fetchedImages.map((image) => [image.id, image]));
@@ -430,6 +430,13 @@ export const getCachedImages = async (forceRefresh = false): Promise<CachedCloud
   await flushPersistentCacheSave();
   triggerSizeBackfill();
   return images;
+};
+
+// Destructive family operations must fail closed instead of using a stale snapshot.
+export const getFreshImagesForFamilyMutation = async (): Promise<CachedCloudflareImage[]> => {
+  if (!CLOUDFLARE_CACHE_DISABLED) await loadMetadataOverrides();
+  if (cacheState.inflight) await cacheState.inflight;
+  return CLOUDFLARE_CACHE_DISABLED ? fetchAllImages(true) : fetchAndUpdateCaches(true);
 };
 
 /**

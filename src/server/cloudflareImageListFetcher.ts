@@ -26,7 +26,8 @@ export const getCloudflareImageListPageSize = () => PAGE_SIZE;
 export const fetchCloudflareImagePage = async (
   accountId: string,
   apiToken: string,
-  page: number
+  page: number,
+  strict = false
 ): Promise<CloudflareImageApiResponse[]> => {
   const params = new URLSearchParams({
     per_page: String(PAGE_SIZE),
@@ -50,6 +51,9 @@ export const fetchCloudflareImagePage = async (
     throw new Error(errorMessage);
   }
 
+  if (strict && !Array.isArray(json?.result?.images)) {
+    throw new Error('Cloudflare returned an invalid image catalog page.');
+  }
   return Array.isArray(json?.result?.images) ? json.result.images : [];
 };
 
@@ -62,7 +66,7 @@ export const fetchCloudflareImagePage = async (
  * contains a short page. A strictly sequential walk cost ~65 round-trips at
  * ~6.5k images.
  */
-export const fetchAllCloudflareImagePages = async (): Promise<CloudflareImageApiResponse[]> => {
+export const fetchAllCloudflareImagePages = async (strict = false): Promise<CloudflareImageApiResponse[]> => {
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
   const apiToken = process.env.CLOUDFLARE_API_TOKEN;
 
@@ -71,13 +75,14 @@ export const fetchAllCloudflareImagePages = async (): Promise<CloudflareImageApi
   }
 
   const warnTruncated = () => {
+    if (strict) throw new Error(`Image catalog exceeds CLOUDFLARE_CACHE_MAX_PAGES (${MAX_PAGES}).`);
     console.warn(
       `Reached CLOUDFLARE_CACHE_MAX_PAGES (${MAX_PAGES}). Results may be incomplete.`
     );
   };
 
   const collected: CloudflareImageApiResponse[] = [];
-  const firstPage = await fetchCloudflareImagePage(accountId, apiToken, 1);
+  const firstPage = await fetchCloudflareImagePage(accountId, apiToken, 1, strict);
   collected.push(...firstPage);
   if (firstPage.length < PAGE_SIZE) {
     return collected;
@@ -99,7 +104,7 @@ export const fetchAllCloudflareImagePages = async (): Promise<CloudflareImageApi
     }
 
     const results = await Promise.all(
-      wave.map((wavePage) => fetchCloudflareImagePage(accountId, apiToken, wavePage))
+      wave.map((wavePage) => fetchCloudflareImagePage(accountId, apiToken, wavePage, strict))
     );
     for (const images of results) {
       collected.push(...images);

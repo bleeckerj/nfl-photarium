@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
 const {
-  detachAssetChildrenMock,
+  loadImageDeletePlanMock,
+  applyImageDeletePlanMock,
   getVideoAssetRecordMock,
   deleteVideoAssetRecordMock,
   listVideoAssetRecordsMock,
@@ -10,7 +11,8 @@ const {
   cleanupImageArtifactsMock,
   getCloudflareCredentialsMock,
 } = vi.hoisted(() => ({
-  detachAssetChildrenMock: vi.fn(),
+  loadImageDeletePlanMock: vi.fn(),
+  applyImageDeletePlanMock: vi.fn(),
   getVideoAssetRecordMock: vi.fn(),
   deleteVideoAssetRecordMock: vi.fn(),
   listVideoAssetRecordsMock: vi.fn(),
@@ -19,16 +21,10 @@ const {
   getCloudflareCredentialsMock: vi.fn(),
 }));
 
-vi.mock('@/server/assetParentService', () => ({
-  detachAssetChildren: detachAssetChildrenMock,
-  ParentAssignmentError: class ParentAssignmentError extends Error {
-    status: number;
-
-    constructor(status: number, message: string) {
-      super(message);
-      this.status = status;
-    }
-  },
+vi.mock('@/server/imageDeleteFamilyPlan', () => ({
+  loadImageDeletePlan: loadImageDeletePlanMock,
+  applyImageDeletePlan: applyImageDeletePlanMock,
+  ImageDeleteFamilyUpdateError: class ImageDeleteFamilyUpdateError extends Error {},
 }));
 
 vi.mock('@/server/videoCatalogStorage', () => ({
@@ -83,59 +79,41 @@ describe('DELETE /api/images/:id', () => {
     getVideoAssetRecordMock.mockResolvedValue(null);
     getCloudflareCredentialsMock.mockReturnValue({ accountId: 'acct', apiToken: 'token' });
     cleanupImageArtifactsMock.mockResolvedValue({ success: true, steps: [] });
-    detachAssetChildrenMock.mockResolvedValue({
-      parentId: 'parent-1',
-      childIds: ['child-1'],
-      detachedIds: ['child-1'],
-      failed: [],
+    loadImageDeletePlanMock.mockResolvedValue({
+      plan: { parentId: 'parent-1', newParent: { id: 'child-1', filename: 'child.jpg' }, childIds: ['child-1'], signature: 'plan' },
+      assets: [],
     });
+    applyImageDeletePlanMock.mockResolvedValue(undefined);
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ result: {} }), { status: 200 })
     );
   });
 
-  it('detaches child variants before deleting the parent Cloudflare image', async () => {
+  it('promotes variants before deleting the parent', async () => {
     const events: string[] = [];
-    detachAssetChildrenMock.mockImplementation(async () => {
-      events.push('detach');
-      return {
-        parentId: 'parent-1',
-        childIds: ['child-1'],
-        detachedIds: ['child-1'],
-        failed: [],
-      };
-    });
+    applyImageDeletePlanMock.mockImplementation(async () => { events.push('promote'); });
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
       events.push('delete');
       return new Response(JSON.stringify({ result: {} }), { status: 200 });
     });
-
     const response = await DELETE(createRequest(), createParams('parent-1'));
-    const payload = await response.json();
-
     expect(response.status).toBe(200);
-    expect(events).toEqual(['detach', 'delete']);
-    expect(detachAssetChildrenMock).toHaveBeenCalledWith('parent-1', {
-      forceRefreshImages: false,
-      includeVideos: false,
-    });
-    expect(payload.detachedChildIds).toEqual(['child-1']);
+    expect(events).toEqual(['promote', 'delete']);
+    expect((await response.json()).newParentId).toBe('child-1');
   });
 
-  it('does not delete the parent when child detach fails', async () => {
-    detachAssetChildrenMock.mockResolvedValueOnce({
-      parentId: 'parent-1',
-      childIds: ['child-1'],
-      detachedIds: [],
-      failed: [{ id: 'child-1', status: 502, message: 'patch failed' }],
-    });
-
+  it('does not delete the parent if an update fails', async () => {
+    applyImageDeletePlanMock.mockRejectedValueOnce(new Error('patch failed'));
     const response = await DELETE(createRequest(), createParams('parent-1'));
-    const payload = await response.json();
-
     expect(response.status).toBe(502);
-    expect(payload.error).toMatch(/detach/i);
     expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects a stale confirmed plan before changing links', async () => {
+    const request = new NextRequest('http://localhost/api/images/parent-1?familyPlan=old', { method: 'DELETE' });
+    const response = await DELETE(request, createParams('parent-1'));
+    expect(response.status).toBe(409);
+    expect(applyImageDeletePlanMock).not.toHaveBeenCalled();
   });
 
   it('returns a timeout response when the Cloudflare delete aborts', async () => {

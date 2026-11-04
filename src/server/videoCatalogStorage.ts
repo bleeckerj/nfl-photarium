@@ -153,7 +153,7 @@ const commitVideoCacheRecords = (sorted: VideoAssetRecord[]) => {
   videoCacheState.map = new Map(sorted.map((record) => [record.id, record]));
 };
 
-const populateVideoCacheFromStorage = async (): Promise<VideoAssetRecord[]> => {
+const populateVideoCacheFromStorage = async (strict = false): Promise<VideoAssetRecord[]> => {
   const storage = getCacheStorage();
   const index = await storage.get<string[]>(VIDEO_RECORD_INDEX_KEY);
   const ids = index?.data ?? [];
@@ -174,6 +174,9 @@ const populateVideoCacheFromStorage = async (): Promise<VideoAssetRecord[]> => {
         )
       );
   const valid = records.filter((r): r is VideoAssetRecord => Boolean(r));
+  if (strict && valid.length !== ids.length) {
+    throw new Error('Video catalog contains missing entries; family deletion cannot proceed.');
+  }
   const sorted = sortVideoRecordsByUploadedDesc(valid);
   commitVideoCacheRecords(sorted);
   videoCacheState.lastFetched = Date.now();
@@ -357,6 +360,9 @@ export const listVideoAssetRecords = async (): Promise<VideoAssetRecord[]> => {
   // Return a shallow copy so callers cannot accidentally mutate our cache.
   return records.slice();
 };
+
+export const listFreshVideoAssetRecords = async (): Promise<VideoAssetRecord[]> =>
+  (await populateVideoCacheFromStorage(true)).slice();
 
 export const findVideoAssetDuplicatesBySourceUrl = async (
   sourceUrl: string,

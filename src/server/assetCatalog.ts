@@ -1,6 +1,7 @@
-import { getCachedImages } from '@/server/cloudflareImageCache';
+import { getCachedImages, getFreshImagesForFamilyMutation } from '@/server/cloudflareImageCache';
 import {
   listVideoAssetRecords,
+  listFreshVideoAssetRecords,
   listVideoAssetRecordsWithSync,
   type VideoAssetRecord,
 } from '@/server/videoCatalogStorage';
@@ -50,18 +51,24 @@ export async function listCatalogAssets(options?: {
   forceRefreshImages?: boolean;
   syncVideos?: boolean;
   includeVideos?: boolean;
+  strictFamilyMutation?: boolean;
 }): Promise<CatalogAsset[]> {
-  const images = await getCachedImages(options?.forceRefreshImages === true);
-  const includeVideos = options?.includeVideos !== false && process.env.ENABLE_VIDEO_ASSETS === '1';
+  const images = options?.strictFamilyMutation
+    ? await getFreshImagesForFamilyMutation()
+    : await getCachedImages(options?.forceRefreshImages === true);
+  const includeVideos = options?.strictFamilyMutation === true ||
+    (options?.includeVideos !== false && process.env.ENABLE_VIDEO_ASSETS === '1');
   let videos: VideoAssetRecord[] = [];
   if (includeVideos) {
     try {
       videos = await withTimeout(
-        options?.syncVideos ? listVideoAssetRecordsWithSync() : listVideoAssetRecords(),
+        options?.strictFamilyMutation ? listFreshVideoAssetRecords()
+          : options?.syncVideos ? listVideoAssetRecordsWithSync() : listVideoAssetRecords(),
         VIDEO_LIST_TIMEOUT_MS,
         'Video asset catalog load'
       );
     } catch (error) {
+      if (options?.strictFamilyMutation) throw error;
       console.warn('[assetCatalog] Falling back to image-only catalog due to video load failure', {
         error: error instanceof Error ? error.message : String(error),
       });

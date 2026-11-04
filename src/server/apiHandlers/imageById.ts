@@ -23,7 +23,7 @@ import {
   buildVideoAnimatedWebpComfyProvenanceMap,
 } from '@/server/videoAnimatedWebpComfyProvenance';
 import { mapVideoToGalleryAsset } from '@/server/galleryScopeAssembly';
-import { detachAssetChildren, ParentAssignmentError } from '@/server/assetParentService';
+import { applyImageDeletePlan, ImageDeleteFamilyUpdateError, loadImageDeletePlan } from '@/server/imageDeleteFamilyPlan';
 import {
   CloudflareImageDeleteError,
   deleteCloudflareImageAsset,
@@ -244,31 +244,24 @@ export async function DELETE(
       return NextResponse.json({ success: true, assetType: 'video' });
     }
 
-    let detachedChildIds: string[] = [];
+    let plan;
     try {
-      // Single-image delete must not block on a full Cloudflare catalog refresh.
-      // The delete call below is authoritative; this warm-catalog pass only detaches known children.
-      const detachResult = await detachAssetChildren(imageId, {
-        forceRefreshImages: false,
-        includeVideos: process.env.ENABLE_VIDEO_ASSETS === '1',
-      });
-      detachedChildIds = detachResult.detachedIds;
-      if (detachResult.failed.length > 0) {
+      const loaded = await loadImageDeletePlan(imageId);
+      plan = loaded.plan;
+      const expected = request.nextUrl.searchParams.get('familyPlan');
+      if (expected !== null && expected !== plan.signature) {
         return NextResponse.json(
-          {
-            error: 'Failed to detach one or more child variants before deleting parent image',
-            failed: detachResult.failed,
-            detachedIds: detachResult.detachedIds,
-          },
-          { status: 502 }
+          { error: 'The family changed. Review the deletion again.' },
+          { status: 409 }
         );
       }
+      await applyImageDeletePlan(plan, loaded.assets);
     } catch (error) {
-      const parentError = error instanceof ParentAssignmentError ? error : null;
-      console.error('[ImageDelete] Failed to detach child variants before parent delete:', error);
+      console.error('[ImageDelete] Failed to prepare child variants:', error);
       return NextResponse.json(
-        { error: error instanceof Error ? error.message : 'Failed to detach child variants before delete' },
-        { status: parentError?.status ?? 500 }
+        { error: error instanceof Error ? error.message : 'Failed to prepare child variants before delete',
+          ...(error instanceof ImageDeleteFamilyUpdateError ? { failedId: error.failedId, rollbackFailedIds: error.rollbackFailedIds } : {}) },
+        { status: 502 }
       );
     }
 
@@ -279,7 +272,7 @@ export async function DELETE(
       console.error('Cloudflare API error:', error);
       return NextResponse.json(
         {
-          error: error instanceof Error ? error.message : 'Failed to delete image from Cloudflare',
+          error: `${error instanceof Error ? error.message : 'Failed to delete image from Cloudflare'}${plan.childIds.length ? ' Family relationships were already updated.' : ''}`,
         },
         { status: cloudflareError?.status ?? 502 }
       );
@@ -293,7 +286,7 @@ export async function DELETE(
       });
     }
 
-    return NextResponse.json({ success: true, detachedChildIds });
+    return NextResponse.json({ success: true, detachedChildIds: plan.newParent ? [] : plan.childIds, newParentId: plan.newParent?.id ?? null });
 
   } catch (error) {
     console.error('Delete image error:', error);

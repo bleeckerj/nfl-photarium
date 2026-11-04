@@ -199,10 +199,14 @@ PATCH /api/images/{id}/update
 DELETE /api/images/{id}
 ```
 
+Deleting an image with variants promotes the first image variant in the saved family order and attaches the other variants to it. If no image variant is available, the remaining variants are detached. The operation reads the image and video catalogs first and stops if a relationship update fails. If restoration also fails, the error identifies the affected assets. If the image deletion fails after relationships change, the response reports that change.
+
+Existing clients may delete without a signature. To show the planned replacement before deleting, call `GET /api/images/{id}/delete-plan`. Its response includes `newParent`, `childIds`, and `signature`. Pass that signature as the URL-encoded `familyPlan` query parameter on the delete request; a changed plan returns HTTP 409 without changing relationships.
+
 **Response:**
 
 ```json
-{ "success": true }
+{ "success": true, "newParentId": "variant-id", "detachedChildIds": [] }
 ```
 
 ---

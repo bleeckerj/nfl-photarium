@@ -21,6 +21,19 @@ type DeleteImagePayload = {
   error?: string;
 };
 
+export type ImageDeletePlan = {
+  newParent: { id: string; filename: string } | null;
+  childIds: string[];
+  signature: string;
+};
+
+export const fetchImageDeletePlan = async (imageId: string): Promise<ImageDeletePlan> => {
+  const response = await fetch(`/api/images/${encodeURIComponent(imageId)}/delete-plan`, { cache: 'no-store' });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error || 'Failed to inspect variants');
+  return payload as ImageDeletePlan;
+};
+
 type DeleteFamilyPayload = {
   jobId?: string;
   error?: string;
@@ -34,8 +47,9 @@ const buildDeleteFamilyUrl = (imageId: string) => {
   return `/api/images/${encodeURIComponent(imageId)}/delete-family`;
 };
 
-export const deleteImage = async (imageId: string) => {
-  const response = await fetch(buildImageDeleteUrl(imageId), { method: 'DELETE' });
+export const deleteImage = async (imageId: string, familyPlan?: string) => {
+  const query = familyPlan === undefined ? '' : `?${new URLSearchParams({ familyPlan })}`;
+  const response = await fetch(`${buildImageDeleteUrl(imageId)}${query}`, { method: 'DELETE' });
   const payload = (await response.json().catch(() => ({}))) as DeleteImagePayload;
   if (!response.ok) {
     throw new Error(payload.error || 'Failed to delete image');
