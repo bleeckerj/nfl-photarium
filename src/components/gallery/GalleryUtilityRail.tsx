@@ -28,6 +28,8 @@ interface GalleryUtilityRailProps {
   onLoadMoreVideos: () => void;
   onSelectPage: () => void;
   onOpenBulkEdit: () => void;
+  selectionDownloading: boolean;
+  onDownloadSelection: () => void;
   onClearSelection: () => void;
   onScrollTop: () => void;
   onScrollToUploader: () => void;
@@ -55,6 +57,8 @@ export default function GalleryUtilityRail({
   onLoadMoreVideos,
   onSelectPage,
   onOpenBulkEdit,
+  selectionDownloading,
+  onDownloadSelection,
   onClearSelection,
   onScrollTop,
   onScrollToUploader,
@@ -154,6 +158,9 @@ export default function GalleryUtilityRail({
                   </button>
                   <button onClick={onOpenBulkEdit} className={`${utilityButtonClasses} bg-blue-600 hover:bg-blue-500`}>
                     Bulk edit
+                  </button>
+                  <button onClick={onDownloadSelection} disabled={selectionDownloading} className={`${utilityButtonClasses} border border-white/20 disabled:opacity-40`}>
+                    {selectionDownloading ? 'Preparing…' : 'Download originals'}
                   </button>
                   <button onClick={onClearSelection} className={`${utilityButtonClasses} border border-white/20`}>
                     Clear

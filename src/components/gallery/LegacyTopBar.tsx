@@ -30,6 +30,8 @@ interface LegacyTopBarProps {
   selectedCount: number;
   bulkEmbeddingGenerating: boolean;
   bulkDeleting: boolean;
+  selectionDownloading: boolean;
+  onDownloadSelection: () => void;
   onToggleBulkSelection: () => void;
   onToggleFilters: () => void;
   onClearFilters: () => void;
@@ -69,6 +71,8 @@ export default function LegacyTopBar({
   selectedCount,
   bulkEmbeddingGenerating,
   bulkDeleting,
+  selectionDownloading,
+  onDownloadSelection,
   onToggleBulkSelection,
   onToggleFilters,
   onClearFilters,
@@ -206,6 +210,9 @@ export default function LegacyTopBar({
             disabled={!selectedCount}
           >
             Bulk edit
+          </button>
+          <button onClick={onDownloadSelection} disabled={!selectedCount || selectionDownloading} className="px-2 py-1 border rounded-md hover:bg-gray-100 disabled:opacity-40">
+            {selectionDownloading ? 'Preparing download…' : 'Download originals'}
           </button>
           <button
             onClick={onGenerateEmbeddings}

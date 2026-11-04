@@ -64,6 +64,8 @@ interface GalleryModalsProps {
   onDeleteCancel: () => void;
 
   bulkEditOpen: boolean;
+  selectionDownloading: boolean;
+  onDownloadSelection: () => void;
   selectedCount: number;
   selectedImagesForPayload: Array<{
     id: string;
@@ -168,6 +170,8 @@ export const GalleryModals: React.FC<GalleryModalsProps> = ({
   onDeleteConfirm,
   onDeleteCancel,
   bulkEditOpen,
+  selectionDownloading,
+  onDownloadSelection,
   selectedCount,
   selectedImagesForPayload,
   selectedAnimationPreview,
@@ -289,6 +293,8 @@ export const GalleryModals: React.FC<GalleryModalsProps> = ({
 
       {bulkEditOpen && (
         <GalleryBulkEditModal
+          selectionDownloading={selectionDownloading}
+          onDownloadSelection={onDownloadSelection}
           selectedCount={selectedCount}
           selectedImages={selectedImagesForPayload}
           animationPreviewImages={selectedAnimationPreview}

@@ -8,6 +8,7 @@ import { useToast } from './Toast';
 import { downloadImageToFile, formatDownloadFileName } from '@/utils/downloadUtils';
 import { useGalleryReturnNavigation } from './gallery/hooks/useGalleryReturnNavigation';
 import { useGallerySelection } from './gallery/hooks/useGallerySelection';
+import { useSelectionDownload } from './gallery/hooks/useSelectionDownload';
 import { useGalleryControlsVisibility } from './gallery/hooks/useGalleryControlsVisibility';
 import { useGalleryFilters } from './gallery/hooks/useGalleryFilters';
 import { useGalleryItemActions } from './gallery/hooks/useGalleryItemActions';
@@ -665,6 +666,8 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
     bulkSelectionMode, setBulkSelectionMode,
   });
 
+  const { downloading: selectionDownloading, download: downloadSelection } = useSelectionDownload(selectedImages, toast.push);
+
   const selectDuplicateImages = useCallback(() => {
     const selected = selectDuplicateImagesBase();
     toast.push(selected ? 'Duplicate images selected' : 'No duplicates detected');
@@ -907,7 +910,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
           showPagination, currentPageRangeLabel, sortedImages, dateFilter, onDateFilterChange: setDateFilter,
           bulkSelectionMode, filtersCollapsed, hasActiveFilters, pageSize, pageSizeOptions: PAGE_SIZE_OPTIONS,
           defaultPageSize: DEFAULT_PAGE_SIZE, gridSize, refreshingCache, viewMode, selectedCount,
-          bulkEmbeddingGenerating, bulkDeleting,
+          bulkEmbeddingGenerating, bulkDeleting, selectionDownloading, onDownloadSelection: downloadSelection,
           onToggleBulkSelection: () => setBulkSelectionMode(!bulkSelectionMode),
           onToggleFilters: () => setFiltersCollapsed((prev) => !prev), onClearFilters: handleClearFilters,
           onPageSizeChange: handlePageSizeChange, onGridSizeChange: setGridSize, onRefreshCache: () => fetchImages({ forceRefresh: true }),
@@ -966,6 +969,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         onExpandChange: setUtilityExpanded, onToggleFilters: () => setFiltersCollapsed((prev) => !prev),
         onToggleCli: () => setShowCli((prev) => !prev), onLoadMoreVideos: loadMoreVideos,
         onSelectPage: () => selectAllOnPage(pageImages), onOpenBulkEdit: openBulkEditModal,
+        selectionDownloading, onDownloadSelection: downloadSelection,
         onClearSelection: clearSelection, onScrollTop: scrollGalleryToTop, onScrollToUploader: scrollToUploader,
       }}
       resultsRegionProps={{
@@ -999,6 +1003,7 @@ const ImageGallery = forwardRef<ImageGalleryRef, ImageGalleryProps>(
         deleteConfirmImageId: deleteConfirmId, deleteConfirmDeleting,
         onDeleteConfirm: confirmDeleteImage, onDeleteCancel: cancelDeleteImage,
         bulkEditOpen, selectedCount, selectedImagesForPayload, selectedAnimationPreview, bulkAnimateOrderMode,
+        selectionDownloading, onDownloadSelection: downloadSelection,
         onBulkAnimateOrderModeChange: setBulkAnimateOrderMode, bulkAnimateSelectionOrderDiffers,
         onCopySelectionPayload: handleCopySelectionPayload, bulkApplyFolder, onBulkApplyFolderChange: setBulkApplyFolder,
         bulkFolderMode, bulkFolderInput, onBulkFolderInputChange: setBulkFolderInput, bulkFolderOptions,

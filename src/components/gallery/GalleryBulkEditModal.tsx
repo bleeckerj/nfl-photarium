@@ -8,6 +8,7 @@
 
 import React, { useMemo, useState } from 'react';
 import MonoSelect from '../MonoSelect';
+import { BulkEditHeader } from './BulkEditHeader';
 import { getCloudflareImageUrl } from '@/utils/imageUtils';
 import { BulkEditMetadataSections } from '@/features/gallery/BulkEditMetadataSections';
 import { BulkAnimateSection } from '@/features/gallery/BulkAnimateSection';
@@ -19,6 +20,7 @@ interface SelectOption {
 
 interface GalleryBulkEditModalProps {
   selectedCount: number;
+  selectionDownloading: boolean; onDownloadSelection: () => void;
   selectedImages: Array<{
     id: string;
     filename: string;
@@ -86,6 +88,7 @@ interface GalleryBulkEditModalProps {
 
 export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
   selectedCount,
+  selectionDownloading, onDownloadSelection,
   selectedImages,
   animationPreviewImages,
   bulkAnimateOrderMode,
@@ -276,12 +279,7 @@ export const GalleryBulkEditModal: React.FC<GalleryBulkEditModalProps> = ({
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] px-4">
       <div className="bg-white rounded-lg w-full max-w-2xl p-6 space-y-4 text-[0.7em] font-mono max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between">
-          <p className="text-gray-900 font-semibold">Bulk edit ({selectedCount} images)</p>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
-            ×
-          </button>
-        </div>
+        <BulkEditHeader selectedCount={selectedCount} onClose={onClose} downloading={selectionDownloading} onDownload={onDownloadSelection} />
         <BulkEditMetadataSections
           bulkApplyDescription={bulkApplyDescription}
           onBulkApplyDescriptionChange={onBulkApplyDescriptionChange}
