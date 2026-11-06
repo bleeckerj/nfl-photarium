@@ -34,17 +34,22 @@ export const fetchCloudflareImagePage = async (
     page: String(page),
   });
 
-  const response = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1?${params.toString()}`,
-    {
-      headers: {
-        Authorization: `Bearer ${apiToken}`,
-      },
+  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v1?${params.toString()}`;
+  let response: Response;
+  let json: { errors?: Array<{ message?: string }>; result?: { images?: CloudflareImageApiResponse[] } };
+  for (let attempt = 0; ; attempt += 1) {
+    response = await fetch(url, {
+      headers: { Authorization: `Bearer ${apiToken}` },
       cache: 'no-store',
+    });
+    try {
+      json = await response.json();
+      break;
+    } catch {
+      if (attempt === 0) continue;
+      throw new Error(`Cloudflare returned invalid JSON for image catalog page ${page} (HTTP ${response.status}).`);
     }
-  );
-
-  const json = await response.json();
+  }
   if (!response.ok) {
     const errorMessage =
       json?.errors?.[0]?.message || 'Failed to fetch Cloudflare Images page.';

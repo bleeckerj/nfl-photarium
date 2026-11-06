@@ -538,11 +538,11 @@ export const useGalleryBulkActions = ({
     setBulkDeleting(true);
     try {
       const ids = Array.from(selectedImageIds);
-      const settled = await Promise.allSettled(
-        ids.map(async (id) => {
+      const settled = await runWithConcurrency(
+        ids, 1, async (id) => {
           await requestDeleteImage(id);
           return id;
-        })
+        }
       );
 
       const deletedIds = settled
