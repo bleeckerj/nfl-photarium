@@ -1,3 +1,4 @@
+import { getCloudflareCredentials } from './cloudflareClient';
 import type { CloudflareImageApiResponse } from './cloudflareImageCacheMapper';
 
 /**
@@ -128,3 +129,36 @@ export const fetchAllCloudflareImagePages = async (strict = false): Promise<Clou
 
   return collected;
 };
+
+/** Query the upstream parent field directly so delete planning does not scan unrelated images. */
+export async function fetchCloudflareImageChildren(parentId: string): Promise<CloudflareImageApiResponse[]> {
+  const { accountId, apiToken } = getCloudflareCredentials();
+  const url = new URL(`https://api.cloudflare.com/client/v4/accounts/${accountId}/images/v2`);
+  url.searchParams.set('meta.variationParentId[eq:string]', parentId);
+  url.searchParams.set('per_page', '1000');
+  const children: CloudflareImageApiResponse[] = [];
+  const seenTokens = new Set<string>();
+
+  while (true) {
+    const response = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${apiToken}` },
+      cache: 'no-store',
+    });
+    if (!response.ok) {
+      throw new Error(`Cloudflare image variant lookup failed (HTTP ${response.status}).`);
+    }
+    const body = await response.json();
+    const result = body?.result;
+    if (body?.success !== true || !Array.isArray(result?.images)) {
+      throw new Error('Cloudflare returned an invalid image variant list.');
+    }
+    children.push(...result.images);
+    const token = result.continuation_token;
+    if (token == null || token === '') return children;
+    if (typeof token !== 'string' || seenTokens.has(token)) {
+      throw new Error('Cloudflare returned an invalid image variant continuation token.');
+    }
+    seenTokens.add(token);
+    url.searchParams.set('continuation_token', token);
+  }
+}

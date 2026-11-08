@@ -1,4 +1,4 @@
-import { listCatalogAssets, type CatalogAsset } from '@/server/assetCatalog';
+import { listImageDeleteFamily, type CatalogAsset } from '@/server/assetCatalog';
 import { setAssetParentDirectlyWithAssets } from '@/server/assetParentService';
 import { sortFamilyMembers } from '@/utils/familyOrder';
 
@@ -10,9 +10,7 @@ export type ImageDeletePlan = {
 };
 
 export async function loadImageDeletePlan(parentId: string): Promise<{ plan: ImageDeletePlan; assets: CatalogAsset[] }> {
-  const assets = await listCatalogAssets({
-    strictFamilyMutation: true,
-  });
+  const assets = await listImageDeleteFamily(parentId);
   const children = sortFamilyMembers(assets.filter((asset) => asset.parentId === parentId));
   const candidate = children.find((asset) => asset.assetType === 'image');
   const newParent = candidate ? { id: candidate.id, filename: candidate.filename } : null;

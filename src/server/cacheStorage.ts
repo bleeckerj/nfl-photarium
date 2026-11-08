@@ -20,10 +20,12 @@ export interface CacheData<T> {
   version: number;
 }
 
+type CacheReadOptions = { strict?: boolean };
+
 export interface ICacheStorage {
-  get<T>(key: string): Promise<CacheData<T> | null>;
+  get<T>(key: string, options?: CacheReadOptions): Promise<CacheData<T> | null>;
   // Optional batch read; callers must fall back to per-key get() when absent.
-  getMany?<T>(keys: string[]): Promise<Array<CacheData<T> | null>>;
+  getMany?<T>(keys: string[], options?: CacheReadOptions): Promise<Array<CacheData<T> | null>>;
   set<T>(key: string, data: T, timestamp?: number): Promise<void>;
   delete(key: string): Promise<void>;
   exists(key: string): Promise<boolean>;
@@ -65,7 +67,7 @@ class FileCacheStorage implements ICacheStorage {
     }
   }
 
-  async get<T>(key: string): Promise<CacheData<T> | null> {
+  async get<T>(key: string, options?: CacheReadOptions): Promise<CacheData<T> | null> {
     const filePath = this.getFilePath(key);
     try {
       const content = await fs.readFile(filePath, 'utf-8');
@@ -73,6 +75,7 @@ class FileCacheStorage implements ICacheStorage {
       
       // Validate cache version
       if (parsed.version !== CACHE_VERSION) {
+        if (options?.strict) throw new Error('Unsupported cache entry version');
         console.log(`Cache version mismatch for ${key}: expected ${CACHE_VERSION}, got ${parsed.version}`);
         return null;
       }
@@ -82,6 +85,7 @@ class FileCacheStorage implements ICacheStorage {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         return null;
       }
+      if (options?.strict) throw error;
       console.warn(`Failed to read cache file ${filePath}:`, error);
       return null;
     }
@@ -230,7 +234,7 @@ class RedisCacheStorage implements ICacheStorage {
     }
   }
 
-  async get<T>(key: string): Promise<CacheData<T> | null> {
+  async get<T>(key: string, options?: CacheReadOptions): Promise<CacheData<T> | null> {
     try {
       const client = await this.getClient();
       const data = await client.get(`${this.keyPrefix}${key}`);
@@ -243,18 +247,20 @@ class RedisCacheStorage implements ICacheStorage {
       
       // Validate cache version
       if (parsed.version !== CACHE_VERSION) {
+        if (options?.strict) throw new Error('Unsupported cache entry version');
         console.log(`[Redis] Cache version mismatch for ${key}: expected ${CACHE_VERSION}, got ${parsed.version}`);
         return null;
       }
       
       return parsed;
     } catch (error) {
+      if (options?.strict) throw error;
       console.warn(`[Redis] Failed to get key ${key}:`, error);
       return null;
     }
   }
 
-  async getMany<T>(keys: string[]): Promise<Array<CacheData<T> | null>> {
+  async getMany<T>(keys: string[], options?: CacheReadOptions): Promise<Array<CacheData<T> | null>> {
     if (keys.length === 0) return [];
     try {
       const client = await this.getClient();
@@ -264,15 +270,18 @@ class RedisCacheStorage implements ICacheStorage {
         try {
           const parsed = JSON.parse(data) as CacheData<T>;
           if (parsed.version !== CACHE_VERSION) {
+            if (options?.strict) throw new Error('Unsupported cache entry version');
             console.log(`[Redis] Cache version mismatch for ${keys[index]}: expected ${CACHE_VERSION}, got ${parsed.version}`);
             return null;
           }
           return parsed;
-        } catch {
+        } catch (error) {
+          if (options?.strict) throw error;
           return null;
         }
       });
     } catch (error) {
+      if (options?.strict) throw error;
       console.warn('[Redis] Failed to mget keys:', error);
       return keys.map(() => null);
     }

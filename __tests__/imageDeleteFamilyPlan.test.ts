@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { list, assign } = vi.hoisted(() => ({ list: vi.fn(), assign: vi.fn() }));
-vi.mock('@/server/assetCatalog', () => ({ listCatalogAssets: list }));
+vi.mock('@/server/assetCatalog', () => ({ listImageDeleteFamily: list }));
 vi.mock('@/server/assetParentService', () => ({ setAssetParentDirectlyWithAssets: assign }));
 
 import { applyImageDeletePlan, loadImageDeletePlan } from '@/server/imageDeleteFamilyPlan';
@@ -20,7 +20,7 @@ describe('single-image deletion family plan', () => {
     const { plan, assets: catalog } = await loadImageDeletePlan('root');
     expect(plan.newParent?.id).toBe('first');
     expect(plan.childIds).toEqual(['video', 'first', 'later']);
-    expect(list).toHaveBeenCalledWith(expect.objectContaining({ strictFamilyMutation: true }));
+    expect(list).toHaveBeenCalledWith('root');
     await applyImageDeletePlan(plan, catalog);
     expect(assign.mock.calls.map(([id, parent]) => [id, parent])).toEqual([
       ['first', ''], ['video', 'first'], ['later', 'first'],

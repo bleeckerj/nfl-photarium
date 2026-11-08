@@ -155,7 +155,7 @@ const commitVideoCacheRecords = (sorted: VideoAssetRecord[]) => {
 
 const populateVideoCacheFromStorage = async (strict = false): Promise<VideoAssetRecord[]> => {
   const storage = getCacheStorage();
-  const index = await storage.get<string[]>(VIDEO_RECORD_INDEX_KEY);
+  const index = await storage.get<string[]>(VIDEO_RECORD_INDEX_KEY, { strict });
   const ids = index?.data ?? [];
   if (!ids.length) {
     commitVideoCacheRecords([]);
@@ -166,17 +166,15 @@ const populateVideoCacheFromStorage = async (strict = false): Promise<VideoAsset
   // One MGET instead of N gets when the backend supports it (~523 round-trips
   // at the time the per-id fan-out was written).
   const records = storage.getMany
-    ? (await storage.getMany<VideoAssetRecord>(ids.map(getRecordKey)))
+    ? (await storage.getMany<VideoAssetRecord>(ids.map(getRecordKey), { strict }))
         .map((cached) => cached?.data ?? null)
     : await Promise.all(
         ids.map((id) =>
-          storage.get<VideoAssetRecord>(getRecordKey(id)).then((cached) => cached?.data ?? null)
+          storage.get<VideoAssetRecord>(getRecordKey(id), { strict }).then((cached) => cached?.data ?? null)
         )
       );
+  // A confirmed missing entry can remain in the index after its video is removed.
   const valid = records.filter((r): r is VideoAssetRecord => Boolean(r));
-  if (strict && valid.length !== ids.length) {
-    throw new Error('Video catalog contains missing entries; family deletion cannot proceed.');
-  }
   const sorted = sortVideoRecordsByUploadedDesc(valid);
   commitVideoCacheRecords(sorted);
   videoCacheState.lastFetched = Date.now();

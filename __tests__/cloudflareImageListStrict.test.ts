@@ -36,3 +36,32 @@ describe('strict image catalog reads', () => {
     await expect(fetchAllCloudflareImagePages(true)).rejects.toThrow('CLOUDFLARE_CACHE_MAX_PAGES');
   });
 });
+
+describe('targeted image variant lookup', () => {
+  it('requests only the affected family and follows the continuation token', async () => {
+    vi.stubEnv('CLOUDFLARE_ACCOUNT_ID', 'account');
+    vi.stubEnv('CLOUDFLARE_API_TOKEN', 'token');
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(Response.json({ success: true, result: { images: [{ id: 'one' }], continuation_token: 'next+page' } }))
+      .mockResolvedValueOnce(Response.json({ success: true, result: { images: [{ id: 'two' }] } }));
+    const { fetchCloudflareImageChildren } = await import('@/server/cloudflareImageListFetcher');
+    await expect(fetchCloudflareImageChildren('parent/id')).resolves.toEqual([{ id: 'one' }, { id: 'two' }]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const first = new URL(String(fetchMock.mock.calls[0][0]));
+    const second = new URL(String(fetchMock.mock.calls[1][0]));
+    expect(first.pathname).toBe('/client/v4/accounts/account/images/v2');
+    expect(first.searchParams.get('meta.variationParentId[eq:string]')).toBe('parent/id');
+    expect(second.searchParams.get('continuation_token')).toBe('next+page');
+  });
+
+  it('rejects a partial family when Cloudflare rate limits the next page', async () => {
+    vi.stubEnv('CLOUDFLARE_ACCOUNT_ID', 'account');
+    vi.stubEnv('CLOUDFLARE_API_TOKEN', 'token');
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(Response.json({ success: true, result: { images: [{ id: 'one' }], continuation_token: 'next' } }))
+      .mockResolvedValueOnce(new Response('Too Many Requests', { status: 429 }));
+    const { fetchCloudflareImageChildren } = await import('@/server/cloudflareImageListFetcher');
+    await expect(fetchCloudflareImageChildren('parent')).rejects.toThrow('HTTP 429');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});

@@ -1,3 +1,6 @@
+import { fetchCloudflareImage } from '@/server/cloudflareClient';
+import { fetchCloudflareImageChildren } from '@/server/cloudflareImageListFetcher';
+import { transformImage } from '@/server/cloudflareImageCacheMapper';
 import { getCachedImages, getFreshImagesForFamilyMutation } from '@/server/cloudflareImageCache';
 import {
   listVideoAssetRecords,
@@ -97,4 +100,25 @@ export async function getCatalogAssetById(
 ): Promise<CatalogAsset | null> {
   const assets = await listCatalogAssets(options);
   return assets.find((asset) => asset.id === id) || null;
+}
+
+export async function listImageDeleteFamily(parentId: string): Promise<CatalogAsset[]> {
+  const [images, videos] = await Promise.all([
+    fetchCloudflareImageChildren(parentId),
+    withTimeout(listFreshVideoAssetRecords(), VIDEO_LIST_TIMEOUT_MS, 'Video asset catalog load'),
+  ]);
+  const children = images.map((image) => {
+    const { id, filename, uploaded, parentId, variationSort } = transformImage(image);
+    return { id, assetType: 'image' as const, filename, uploaded, parentId, variationSort };
+  }).filter((image) => image.parentId === parentId);
+  const assets: CatalogAsset[] = [
+    ...children,
+    ...videos.filter((video) => video.parentId === parentId).map(toCatalogVideo),
+  ];
+  if (assets.length > 0) {
+    // The parent must be available to restore links if moving a child fails.
+    const { id, filename, uploaded } = await fetchCloudflareImage(parentId);
+    assets.push({ id, filename, uploaded, assetType: 'image' });
+  }
+  return assets;
 }
